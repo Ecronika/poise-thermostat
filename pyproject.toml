@@ -34,3 +34,17 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = ["custom_components.poise", "custom_components.poise.coordinator", "custom_components.poise.actuator", "custom_components.poise.storage"]
 ignore_errors = true
+
+# Coverage measures the pure, HA-free core. The thin HA glue is exercised by
+# Home Assistant integration tests in the full dev environment (ADR-0011/0022).
+[tool.coverage.run]
+source = ["custom_components/poise"]
+omit = [
+    "custom_components/poise/__init__.py",
+    "custom_components/poise/coordinator.py",
+    "custom_components/poise/actuator.py",
+    "custom_components/poise/storage.py",
+]
+
+[tool.coverage.report]
+exclude_lines = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\."]
