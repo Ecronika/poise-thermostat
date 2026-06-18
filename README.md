@@ -5,7 +5,7 @@
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
-[![License MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **Poise** is a self-learning **thermostat** for Home Assistant that controls **TRVs, climate entities and heating/cooling** with engineering rigor. It unites norm-based comfort, a real building-physics model and direct valve control in a single, fully local integration — no cloud, no heavy dependencies.
 
