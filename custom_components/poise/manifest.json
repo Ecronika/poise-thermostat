@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/Ecronika/poise-thermostat/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

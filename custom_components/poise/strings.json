@@ -1,0 +1,7 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Poise is already set up; only one instance is supported."
+    }
+  }
+}
