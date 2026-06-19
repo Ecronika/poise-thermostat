@@ -32,6 +32,11 @@ _ATTRS = (
     "binding_lower_cause",
     "category",
     "source",
+    "tau_hours",
+    "confidence",
+    "learning_phase",
+    "window_open",
+    "heating_failure",
 )
 
 

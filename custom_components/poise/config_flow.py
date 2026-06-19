@@ -22,6 +22,7 @@ from .const import (
     CONF_OUTDOOR_SENSOR,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
+    CONF_WINDOW_SENSOR,
     DOMAIN,
 )
 
@@ -60,6 +61,12 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):
                     )
                 ),
                 vol.Optional(CONF_MRT_SENSOR): _temp(),
+                vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="binary_sensor",
+                        device_class=["window", "opening", "door"],
+                    )
+                ),
                 vol.Required(CONF_CATEGORY, default="II"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=["I", "II", "III"],

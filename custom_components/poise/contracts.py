@@ -89,6 +89,8 @@ class ThermalState:
     maturity: Maturity
     dewpoint: float | None = None
     surface_rh: float | None = None
+    t_out: float | None = None
+    prediction_std: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
