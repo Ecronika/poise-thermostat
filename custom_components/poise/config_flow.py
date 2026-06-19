@@ -29,6 +29,7 @@ from .const import (
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
+    CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
@@ -107,6 +108,9 @@ def _schema() -> vol.Schema:
                 )
             ),
             vol.Required(CONF_OPTIMAL_START, default=True): selector.BooleanSelector(),
+            vol.Optional(CONF_WEATHER): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="weather")
+            ),
         }
     )
 

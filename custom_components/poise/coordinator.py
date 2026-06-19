@@ -43,6 +43,7 @@ from .const import (
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
+    CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
@@ -50,11 +51,17 @@ from .const import (
     DEVICE_MAX_C,
     DOMAIN,
     EKF_SAVE_EVERY_TICKS,
+    FORECAST_TTL_S,
     FROST_FLOOR_C,
     TICK_INTERVAL_S,
 )
 from .contracts import ActuatorCommand, ActuatorPath
-from .control.optimal_start import advise as optimal_start_advise
+from .control.optimal_start import (
+    advise as optimal_start_advise,
+)
+from .control.optimal_start import (
+    mean_forecast_outdoor,
+)
 from .devices.capability import climate_capability
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.thermal_ekf import ThermalEKF
@@ -124,6 +131,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._schedule = ComfortSchedule.always_comfort()
         self._optimal_start: bool = bool(data.get(CONF_OPTIMAL_START, True))
+        self._weather: str | None = data.get(CONF_WEATHER)
+        self._forecast: list[tuple[float, float]] = []
+        self._forecast_at: float | None = None
 
     @property
     def enabled(self) -> bool:
@@ -173,6 +183,46 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(mx, (int, float)):
                 return float(mx)
         return DEVICE_MAX_C
+
+    async def _forecast_outdoor(self, horizon_min: float, fallback: float) -> float:
+        """Mean forecast outdoor temp over the preheat window (ADR-0025).
+
+        Refreshes the cached hourly forecast at most every FORECAST_TTL_S. A
+        missing weather entity or any failure degrades to ``fallback`` (the
+        constant current outdoor), so optimal-start never depends on a forecast.
+        """
+        if not self._weather:
+            return fallback
+        now = self._clock.monotonic()
+        if self._forecast_at is None or (now - self._forecast_at) >= FORECAST_TTL_S:
+            try:
+                resp = await self.hass.services.async_call(
+                    "weather",
+                    "get_forecasts",
+                    {"type": "hourly", "entity_id": self._weather},
+                    blocking=True,
+                    return_response=True,
+                )
+                entries = (resp or {}).get(self._weather, {}).get("forecast", [])
+                base = dt_util.utcnow()
+                samples: list[tuple[float, float]] = []
+                for e in entries:
+                    temp = e.get("temperature")
+                    when = e.get("datetime")
+                    if temp is None or when is None:
+                        continue
+                    ts = dt_util.parse_datetime(when) if isinstance(when, str) else when
+                    if ts is None:
+                        continue
+                    offset = (dt_util.as_utc(ts) - base).total_seconds() / 60.0
+                    if offset >= 0.0:
+                        samples.append((offset, float(temp)))
+                self._forecast = samples
+                self._forecast_at = now
+            except Exception:  # noqa: BLE001 - forecast must never break the tick
+                _LOGGER.debug("Poise: weather forecast unavailable; constant outdoor")
+                return fallback
+        return mean_forecast_outdoor(self._forecast, horizon_min, fallback)
 
     def _learn(self, room: float, t_out: float) -> None:
         """Passive EKF observer; paused on open window (ADR-0002/0024)."""
@@ -260,16 +310,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         sched = self._schedule.state_at(self._local_minute())
         base = self._comfort_base
         preheating = False
+        preheat_outdoor: float | None = None
         if not sched.is_comfort:
             base = self._comfort_base + sched.setback_offset
             if self._optimal_start and can_heat and self._ekf.identified:
                 lo, hi = HEATING_LOWER[self._category], HEATING_UPPER[self._category]
                 preheat_target = min(max(self._comfort_base, lo), hi)
+                t_out_lead = await self._forecast_outdoor(
+                    float(sched.minutes_to_comfort), t_out_eff
+                )
+                preheat_outdoor = round(t_out_lead, 1)
                 advice = optimal_start_advise(
                     self._ekf.get_model(),
                     room=room,
                     target=preheat_target,
-                    t_out=t_out_eff,
+                    t_out=t_out_lead,
                     minutes_to_comfort=float(sched.minutes_to_comfort),
                 )
                 if advice.start_now:
@@ -351,4 +406,5 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "schedule_state": "comfort" if sched.is_comfort else "setback",
             "minutes_to_comfort": sched.minutes_to_comfort,
             "preheating": preheating,
+            "preheat_outdoor": preheat_outdoor,
         }

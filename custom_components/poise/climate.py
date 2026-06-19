@@ -45,6 +45,7 @@ _ATTRS = (
     "schedule_state",
     "minutes_to_comfort",
     "preheating",
+    "preheat_outdoor",
 )
 
 
