@@ -8,13 +8,7 @@ ControlRequest; the actuator path (TPI duty vs setpoint) is resolved later.
 
 from __future__ import annotations
 
-from ..contracts import (
-    ActuatorPath,
-    ComfortCorridor,
-    ControlRequest,
-    Maturity,
-    ThermalState,
-)
+from ..contracts import ActuatorPath, ComfortCorridor, ControlRequest, ThermalState
 from ..estimation.thermal_ekf import ThermalModel
 from .gate import blend, mpc_weight
 from .mpc import MpcParams, optimize_power
@@ -50,10 +44,8 @@ class MpcController:
         weight = 0.0
 
         model = self._model(state)
-        mature = (
-            state.maturity >= Maturity.LEARNING and state.prediction_std is not None
-        )
-        if model is not None and mature:
+        identified = bool(state.identified) and state.prediction_std is not None
+        if model is not None and identified:
             t_out = state.t_out if state.t_out is not None else state.t_rm
             u_mpc = optimize_power(model, t0, target, lower, upper, t_out, self._params)
             assert state.prediction_std is not None  # narrowed by `mature`
