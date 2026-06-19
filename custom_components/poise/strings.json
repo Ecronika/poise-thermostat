@@ -13,7 +13,10 @@
           "humidity_sensor": "Room humidity (optional — enables mould protection)",
           "mrt_sensor": "Mean radiant temperature (optional)",
           "category": "EN 16798 comfort category",
-          "window_sensor": "Window / contact sensor (optional — pauses heating when open)"
+          "window_sensor": "Window / contact sensor (optional — pauses heating when open)",
+          "comfort_base": "Comfort base temperature (°C)",
+          "climate_mode": "Climate mode (auto / heat only / cool only)",
+          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)"
         }
       }
     },

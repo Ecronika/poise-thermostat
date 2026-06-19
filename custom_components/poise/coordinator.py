@@ -1,10 +1,11 @@
-"""Home Assistant coordinator — wires the pure pipeline to HA (ADR-0006/0013).
+"""Home Assistant coordinator — wires the pure pipeline to HA (ADR-0006/0013/0023).
 
-Reads the zone's entities each tick, runs the pure tested pipeline, and writes
-exactly one command to the actuator (single writer). The EKF (ADR-0002) learns
-in the background and is persisted per room (ADR-0007). Live safety: window-open
-pause and heating-failure notification (ADR-0012). Control output remains the
-norm-comfort setpoint; direct valve modulation is enabled after live validation.
+Each tick reads the zone's entities, builds the capability-aware dual-setpoint
+comfort decision (ADR-0023), and writes exactly one capability-correct command
+to the actuator (single writer). The EKF (ADR-0002/0024) learns in the
+background and is persisted per room (ADR-0007). Live safety: window-open pause
+and heating-failure notification (ADR-0012). Control output is the norm-comfort
+setpoint; direct valve modulation is enabled after live validation.
 """
 
 from __future__ import annotations
@@ -20,11 +21,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from . import actuator as actuator_mod
 from .clock import MonotonicClock
+from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import Category
+from .comfort.mold import mold_min_air_temperature
 from .comfort.operative import operative_temperature
 from .const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,
+    CONF_CLIMATE_MODE,
+    CONF_COMFORT_BASE,
+    CONF_COMFORT_WEIGHT,
     CONF_HUMIDITY_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
@@ -32,18 +38,19 @@ from .const import (
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
     CONF_WINDOW_SENSOR,
-    DEFAULT_TARGET_C,
+    DEFAULT_COMFORT_BASE,
+    DEFAULT_COMFORT_WEIGHT,
     DEVICE_MAX_C,
     DOMAIN,
     EKF_SAVE_EVERY_TICKS,
     FROST_FLOOR_C,
     TICK_INTERVAL_S,
 )
-from .contracts import ActuatorCommand
-from .controller import BangBangController
+from .contracts import ActuatorCommand, ActuatorPath
+from .devices.capability import climate_capability
+from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
-from .pipeline import ZoneInputs, corridor_for, run_tick
 from .safety.heating_failure import HeatingFailureDetector
 from .storage import PoiseStore
 
@@ -72,7 +79,7 @@ def _maturity(n: int) -> str:
 
 
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """One coordinator per room; runs the pure pipeline each tick."""
+    """One coordinator per room; capability-aware dual-setpoint each tick."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(
@@ -82,7 +89,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=TICK_INTERVAL_S),
         )
         self._clock = MonotonicClock()
-        self._controller = BangBangController()
         self._ekf = ThermalEKF()
         self._store = PoiseStore(hass, entry.entry_id)
         self._failure = HeatingFailureDetector()
@@ -104,6 +110,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._mrt: str | None = data.get(CONF_MRT_SENSOR)
         self._window: str | None = data.get(CONF_WINDOW_SENSOR)
         self._category = Category(data.get(CONF_CATEGORY, "II"))
+        self._comfort_base: float = float(
+            data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
+        )
+        self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
+        weight = float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT))
+        self._priority: float = weight / 100.0
 
     @property
     def enabled(self) -> bool:
@@ -121,7 +133,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data = await self._store.load()
             if data is not None:
                 self._ekf = ThermalEKF.from_dict(data)
-                _LOGGER.debug("Poise: restored learned model for %s", self.zone_name)
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
             _LOGGER.exception("Poise: failed to restore learned model; starting fresh")
 
@@ -136,49 +147,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state = self.hass.states.get(self._window)
         return state is not None and state.state == "on"
 
-    def _build_zone(self) -> ZoneInputs | None:
-        air = self._read(self._temp)
-        if air is None:
-            return None
-        now = self._clock.monotonic()
-        reading = ingest_temperature([RawSample(air, now)], now=now)
-        t_out = self._read(self._outdoor)
-        t_rm = self._read(self._trm)
-        if t_rm is None:
-            t_rm = t_out
-        device_max = DEVICE_MAX_C
+    def _capability(self) -> tuple[bool, bool]:
+        act = self.hass.states.get(self._actuator)
+        modes = act.attributes.get("hvac_modes") if act else None
+        if modes:
+            return climate_capability([str(m) for m in modes])
+        return True, False  # default: assume a heat-only TRV
+
+    def _device_max(self) -> float:
         act = self.hass.states.get(self._actuator)
         if act is not None:
             mx = act.attributes.get("max_temp")
             if isinstance(mx, (int, float)):
-                device_max = float(mx)
-        return ZoneInputs(
-            actuator_id=self._actuator,
-            t_air=reading,
-            target=DEFAULT_TARGET_C,
-            frost_floor=FROST_FLOOR_C,
-            device_max=device_max,
-            t_rm=t_rm,
-            rh_percent=self._read(self._humidity),
-            t_out=t_out,
-            t_mrt=self._read(self._mrt),
-            category=self._category,
-        )
+                return float(mx)
+        return DEVICE_MAX_C
 
-    def _learn(self, zone: ZoneInputs) -> None:
-        """Passive EKF observer; paused when a window is open (ADR-0002/0012)."""
+    def _learn(self, room: float, t_out: float) -> None:
+        """Passive EKF observer; paused on open window (ADR-0002/0024)."""
         now = self._clock.monotonic()
-        t_out = (
-            zone.t_out
-            if zone.t_out is not None
-            else (zone.t_rm if zone.t_rm is not None else 5.0)
-        )
         try:
             if self._last_mono is not None:
                 dt_h = (now - self._last_mono) / 3600.0
                 if 0.0 < dt_h < 1.0:
                     self._ekf.predict(dt_h, t_out=t_out, u_h=self._last_u_h)
-                    self._ekf.update(zone.t_air.value)
+                    self._ekf.update(room)
         except Exception:  # noqa: BLE001 - learning must never break control
             _LOGGER.exception("Poise: EKF observer step failed")
         finally:
@@ -223,73 +215,104 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return await self._run_once()
 
     async def _run_once(self) -> dict[str, Any]:
-        zone = self._build_zone()
-        if zone is None:
+        air = self._read(self._temp)
+        if air is None:
             return {"available": False}
-
+        now = self._clock.monotonic()
+        reading = ingest_temperature([RawSample(air, now)], now=now)
+        room = reading.value
+        t_out = self._read(self._outdoor)
+        t_rm = self._read(self._trm)
+        if t_rm is None:
+            t_rm = t_out
+        t_out_eff = t_out if t_out is not None else (t_rm if t_rm is not None else 5.0)
+        t_rm_eff = t_rm if t_rm is not None else t_out_eff
+        t_mrt = self._read(self._mrt)
+        rh = self._read(self._humidity)
         window_open = self._window_open()
-        if not window_open:
-            self._learn(zone)
+        can_heat, can_cool = self._capability()
+        device_max = self._device_max()
 
-        corridor = corridor_for(zone)
-        commands = run_tick({"z": zone}, clock=self._clock, controller=self._controller)
-        command = commands.get("z")
+        if not window_open:
+            self._learn(room, t_out_eff)
+
+        # mould floor + dewpoint cap from humidity
+        mold_min = None
+        dewpoint = None
+        if rh is not None:
+            dewpoint = psychro_dewpoint(room, rh)
+            if t_out is not None:
+                mold_min = mold_min_air_temperature(t_out, rh, room)
+
+        decision = comfort_decide(
+            t_rm=t_rm_eff,
+            room=room,
+            category=self._category,
+            comfort_base=self._comfort_base,
+            can_heat=can_heat,
+            can_cool=can_cool,
+            climate_mode=self._climate_mode,
+            t_out=t_out_eff,
+            t_mrt=t_mrt,
+            frost_floor=FROST_FLOOR_C,
+            mold_min=mold_min,
+            dewpoint=dewpoint,
+            priority=self._priority,
+        )
 
         if window_open:
-            target = round(corridor.binding_lower().value, 1)  # close down the TRV
+            target = round(max(FROST_FLOOR_C, mold_min or FROST_FLOOR_C), 1)
+            mode = "off"
         elif self._override is not None:
-            clamped, _ = corridor.clamp(self._override)
-            target = round(clamped, 1)
-        elif command is not None:
-            target = command.value
+            clamped = min(max(self._override, decision.heat_sp), decision.cool_sp)
+            target, mode = round(clamped, 1), "manual"
         else:
-            target = round(corridor.target, 1)
+            target, mode = round(decision.write_setpoint, 1), decision.mode
 
-        heating = self._enabled and not window_open and zone.t_air.value < target - 0.1
+        target = min(target, device_max)
+        heating = self._enabled and not window_open and mode == "heat"
         self._last_u_h = 1.0 if heating else 0.0
 
         failed = self._failure.update(
-            now_h=self._clock.monotonic() / 3600.0,
-            room=zone.t_air.value,
+            now_h=now / 3600.0,
+            room=room,
             setpoint=target,
             heating=heating,
         )
         await self._notify_failure(failed)
 
-        if self._enabled and command is not None:
-            final = ActuatorCommand(
-                self._actuator, command.path, target, "heat", command.reason, None
+        if self._enabled:
+            cmd = ActuatorCommand(
+                self._actuator, ActuatorPath.SETPOINT, target, "heat", mode, None
             )
             try:
-                await actuator_mod.write(self.hass, final)
+                await actuator_mod.write(self.hass, cmd)
             except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                 _LOGGER.exception("Poise: actuator write failed for %s", self._actuator)
 
         await self._maybe_save()
 
-        lower = corridor.binding_lower()
-        upper = corridor.binding_upper()
-        t_mrt = self._read(self._mrt)
-        operative = (
-            operative_temperature(zone.t_air.value, t_mrt)
-            if t_mrt is not None
-            else zone.t_air.value
-        )
+        operative = operative_temperature(room, t_mrt) if t_mrt is not None else room
+        binding = "mold" if mold_min and mold_min >= decision.heat_sp else "en16798"
         return {
             "available": True,
-            "current_temperature": round(zone.t_air.value, 1),
+            "current_temperature": round(room, 1),
             "target_temperature": target,
             "operative_temperature": round(operative, 1),
-            "t_rm": round(zone.t_rm, 1) if zone.t_rm is not None else None,
-            "comfort_low": round(lower.value, 1),
-            "comfort_high": round(upper.value, 1),
-            "binding_lower_cause": lower.cause,
+            "t_rm": round(t_rm_eff, 1),
+            "heat_sp": decision.heat_sp,
+            "cool_sp": decision.cool_sp,
+            "mode": mode,
+            "comfort_low": decision.heat_sp,
+            "comfort_high": decision.cool_sp,
+            "binding_lower_cause": binding,
             "category": self._category.value,
             "heating": heating,
             "window_open": window_open,
             "heating_failure": failed,
-            "source": zone.t_air.source.value,
+            "source": reading.source.value,
             "tau_hours": round(self._ekf.tau_hours, 1),
             "confidence": round(self._ekf.confidence, 2),
+            "identified": self._ekf.identified,
             "learning_phase": _maturity(self._ekf.n_updates),
         }

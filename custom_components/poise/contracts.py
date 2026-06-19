@@ -91,6 +91,7 @@ class ThermalState:
     surface_rh: float | None = None
     t_out: float | None = None
     prediction_std: float | None = None
+    identified: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)

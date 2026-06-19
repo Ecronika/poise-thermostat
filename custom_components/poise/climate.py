@@ -37,6 +37,10 @@ _ATTRS = (
     "learning_phase",
     "window_open",
     "heating_failure",
+    "heat_sp",
+    "cool_sp",
+    "mode",
+    "identified",
 )
 
 

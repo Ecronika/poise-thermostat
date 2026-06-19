@@ -16,6 +16,9 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,
+    CONF_CLIMATE_MODE,
+    CONF_COMFORT_BASE,
+    CONF_COMFORT_WEIGHT,
     CONF_HUMIDITY_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
@@ -23,6 +26,8 @@ from .const import (
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
     CONF_WINDOW_SENSOR,
+    DEFAULT_COMFORT_BASE,
+    DEFAULT_COMFORT_WEIGHT,
     DOMAIN,
 )
 
@@ -71,6 +76,35 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):
                     selector.SelectSelectorConfig(
                         options=["I", "II", "III"],
                         mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(
+                    CONF_COMFORT_BASE, default=DEFAULT_COMFORT_BASE
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=16.0,
+                        max=26.0,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_CLIMATE_MODE, default="auto"
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=["auto", "heat_only", "cool_only"],
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(
+                    CONF_COMFORT_WEIGHT, default=DEFAULT_COMFORT_WEIGHT
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=5,
+                        mode=selector.NumberSelectorMode.SLIDER,
                     )
                 ),
             }
