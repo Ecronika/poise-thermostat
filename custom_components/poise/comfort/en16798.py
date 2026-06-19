@@ -50,3 +50,30 @@ def adaptive_band(t_rm: float, category: Category = Category.II) -> ComfortBand:
         upper=comfort + _UPPER[category],
         extrapolated=clamped != t_rm,
     )
+
+
+# Fixed design operative-temperature ranges for *mechanically conditioned*
+# buildings (EN 16798-1: heating = winter, cooling = summer). The adaptive band
+# above applies only to free-running buildings; when actively heating/cooling
+# these fixed category ranges govern. Values consistent with the Smart Setpoint
+# blueprint (Cat. II heating 20-24, cooling 23-26).
+HEATING_LOWER: dict[Category, float] = {
+    Category.I: 21.0,
+    Category.II: 20.0,
+    Category.III: 19.0,
+}
+HEATING_UPPER: dict[Category, float] = {
+    Category.I: 23.0,
+    Category.II: 24.0,
+    Category.III: 25.0,
+}
+COOLING_LOWER: dict[Category, float] = {
+    Category.I: 23.0,
+    Category.II: 23.0,
+    Category.III: 22.0,
+}
+COOLING_UPPER: dict[Category, float] = {
+    Category.I: 25.0,
+    Category.II: 26.0,
+    Category.III: 27.0,
+}
