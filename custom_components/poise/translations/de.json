@@ -1,7 +1,23 @@
 {
   "config": {
+    "step": {
+      "user": {
+        "title": "Poise — Raum hinzufügen",
+        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
+        "data": {
+          "name": "Raumname",
+          "temp_sensor": "Raumtemperatur-Sensor",
+          "actuator": "Zu steuerndes Thermostat / TRV",
+          "trm_sensor": "Gleitendes Außentemperatur-Mittel (optional)",
+          "outdoor_sensor": "Außentemperatur (optional)",
+          "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
+          "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
+          "category": "EN-16798-Komfortkategorie"
+        }
+      }
+    },
     "abort": {
-      "single_instance_allowed": "Poise ist bereits eingerichtet; nur eine Instanz wird unterstützt."
+      "already_configured": "Dieses Thermostat ist bereits konfiguriert."
     }
   }
 }
