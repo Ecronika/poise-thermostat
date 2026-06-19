@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from custom_components.poise.clock import ManualClock
 from custom_components.poise.contracts import Reading, Source
 from custom_components.poise.controller import BangBangController
@@ -40,3 +42,16 @@ def test_one_command_per_zone() -> None:
     zones = {"a": _zone(18.0), "b": _zone(19.0), "c": _zone(25.0)}
     commands = run_tick(zones, clock=ManualClock(), controller=BangBangController())
     assert set(commands) == {"a", "b", "c"}
+
+
+def test_en16798_corridor_drives_target_end_to_end() -> None:
+    # With T_rm provided the pipeline builds the EN 16798 corridor; a cold room
+    # is driven toward the EN comfort temperature (no MRT -> air == operative).
+    reading = Reading(19.0, "°C", Source.MEASURED, 0.9, 0.0)
+    zone = ZoneInputs(
+        "trv", reading, target=21.0, frost_floor=7.0, device_max=30.0, t_rm=15.0
+    )
+    command = run_tick(
+        {"z": zone}, clock=ManualClock(), controller=BangBangController()
+    )["z"]
+    assert command.value == pytest.approx(23.75, abs=0.1)  # 0.33*15 + 18.8
