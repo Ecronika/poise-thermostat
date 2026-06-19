@@ -12,7 +12,8 @@
           "outdoor_sensor": "Außentemperatur (optional)",
           "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
           "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
-          "category": "EN-16798-Komfortkategorie"
+          "category": "EN-16798-Komfortkategorie",
+          "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)"
         }
       }
     },

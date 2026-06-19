@@ -12,7 +12,8 @@
           "outdoor_sensor": "Outdoor temperature (optional)",
           "humidity_sensor": "Room humidity (optional — enables mould protection)",
           "mrt_sensor": "Mean radiant temperature (optional)",
-          "category": "EN 16798 comfort category"
+          "category": "EN 16798 comfort category",
+          "window_sensor": "Window / contact sensor (optional — pauses heating when open)"
         }
       }
     },
