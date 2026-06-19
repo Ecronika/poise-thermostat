@@ -284,6 +284,17 @@ class ThermalEKF:
             and self.temperature_std < 0.5
         )
 
+    @property
+    def learning_phase(self) -> str:
+        """Phase consistent with identifiability (not just update count, ADR-0024)."""
+        if self.identified:
+            return "identified"
+        if self.data_factor >= 0.5:
+            return "learning"
+        if self.n_idle >= 5 or self.n_heating >= 1 or self.n_cooling >= 1:
+            return "early"
+        return "cold"
+
     # -- persistence (ADR-0007) ---------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         return {
