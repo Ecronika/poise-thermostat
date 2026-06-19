@@ -35,6 +35,12 @@ _ANOMALY_SIGMA: float = 4.0
 _ANOMALY_INFLATE: float = 100.0
 _PSD_FLOOR: float = 1e-10
 
+# Identifiability (ADR-0024)
+_ALPHA_REF: float = 0.15  # reference alpha for drift damping
+_IDLE_GATE: int = 60  # idle observations before the model is trusted
+_ACTIVE_GATE: int = 20  # heating/cooling observations before trusted
+_RECOVERY_PEG_COUNT: int = 50  # consecutive pegged updates -> runtime reset
+
 # defaults & bounds
 _DEFAULTS = (21.0, 0.15, 3.0, 4.0, 0.5, 0.3)
 _LOWER = (-50.0, 0.005, 0.1, 0.1, 0.0, 0.0)
@@ -111,8 +117,11 @@ class ThermalEKF:
             [(_P0[i] if i == j else 0.0) for j in range(_N)] for i in range(_N)
         ]
         self.n_updates: int = 0
+        self.n_idle: int = 0
         self.n_heating: int = 0
         self.n_cooling: int = 0
+        self._last_mode: str = "idle"
+        self._alpha_pegged_count: int = 0
 
     # -- prediction ----------------------------------------------------------
     def predict(
@@ -133,6 +142,12 @@ class ThermalEKF:
             + self.x[_BO] * q_occ
         )
         t_eq = t_out + drive / alpha
+        if u_h > 0.0:
+            self._last_mode = "heating"
+        elif u_c > 0.0:
+            self._last_mode = "cooling"
+        else:
+            self._last_mode = "idle"
 
         # Jacobian F (identity for the random-walk parameters)
         f = _identity()
@@ -149,7 +164,9 @@ class ThermalEKF:
         # covariance: P = F P F^T + Q (Q mode-gated to observable params)
         self.p = _matmul(_matmul(f, self.p), _transpose(f))
         self.p[_T][_T] += _Q[_T]
-        self.p[_A][_A] += _Q[_A]
+        # damp alpha process noise near low excitation so it is not pulled
+        # to its bound when the loss is poorly observable (ADR-0024)
+        self.p[_A][_A] += _Q[_A] * min(1.0, (alpha / _ALPHA_REF) ** 2)
         if u_h > 0.0:
             self.p[_BH][_BH] += _Q[_BH]
         if u_c > 0.0:
@@ -192,6 +209,13 @@ class ThermalEKF:
         self._clamp()
         self._enforce_psd()
         self.n_updates += 1
+        if self._last_mode == "heating":
+            self.n_heating += 1
+        elif self._last_mode == "cooling":
+            self.n_cooling += 1
+        else:
+            self.n_idle += 1
+        self._runtime_recovery()
 
     # -- helpers -------------------------------------------------------------
     def _clamp(self) -> None:
@@ -205,6 +229,18 @@ class ThermalEKF:
                 self.p[i][j] = self.p[j][i] = avg
             if self.p[i][i] < _PSD_FLOOR:
                 self.p[i][i] = _PSD_FLOOR
+
+    def _runtime_recovery(self) -> None:
+        """Reset alpha if it stays pegged at a bound (low excitation, ADR-0024)."""
+        alpha = self.x[_A]
+        if alpha <= _LOWER[_A] * 1.01 or alpha >= _UPPER[_A] * 0.99:
+            self._alpha_pegged_count += 1
+            if self._alpha_pegged_count >= _RECOVERY_PEG_COUNT:
+                self.x[_A] = _DEFAULTS[_A]
+                self.p[_A][_A] = _P0[_A]
+                self._alpha_pegged_count = 0
+        else:
+            self._alpha_pegged_count = 0
 
     # -- outputs -------------------------------------------------------------
     def get_model(self) -> ThermalModel:
@@ -225,8 +261,28 @@ class ThermalEKF:
         return math.sqrt(self.p[_T][_T])
 
     @property
-    def confidence(self) -> float:
+    def data_factor(self) -> float:
+        idle = min(1.0, self.n_idle / _IDLE_GATE)
+        active = min(1.0, max(self.n_heating, self.n_cooling) / _ACTIVE_GATE)
+        return min(idle, active)
+
+    @property
+    def accuracy_factor(self) -> float:
         return min(1.0, max(0.0, 1.0 - self.temperature_std))
+
+    @property
+    def confidence(self) -> float:
+        # identifiability (data) blended with covariance accuracy (ADR-0024)
+        data = self.data_factor
+        return 0.3 * data + 0.7 * data * self.accuracy_factor
+
+    @property
+    def identified(self) -> bool:
+        return (
+            self.n_idle >= _IDLE_GATE
+            and (self.n_heating >= _ACTIVE_GATE or self.n_cooling >= _ACTIVE_GATE)
+            and self.temperature_std < 0.5
+        )
 
     # -- persistence (ADR-0007) ---------------------------------------------
     def to_dict(self) -> dict[str, Any]:
@@ -235,6 +291,7 @@ class ThermalEKF:
             "x": list(self.x),
             "p": [row[:] for row in self.p],
             "n_updates": self.n_updates,
+            "n_idle": self.n_idle,
             "n_heating": self.n_heating,
             "n_cooling": self.n_cooling,
         }
@@ -244,6 +301,7 @@ class ThermalEKF:
         ekf = cls(list(data["x"]))
         ekf.p = [list(row) for row in data["p"]]
         ekf.n_updates = int(data.get("n_updates", 0))
+        ekf.n_idle = int(data.get("n_idle", 0))
         ekf.n_heating = int(data.get("n_heating", 0))
         ekf.n_cooling = int(data.get("n_cooling", 0))
         # recovery: a parameter pegged at its bound on load is unreliable ->
