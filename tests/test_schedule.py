@@ -43,9 +43,7 @@ def test_empty_schedule_is_always_comfort() -> None:
 
 
 def test_overlapping_windows_merge() -> None:
-    s = ComfortSchedule.from_windows(
-        [ComfortWindow(360, 480), ComfortWindow(450, 600)]
-    )
+    s = ComfortSchedule.from_windows([ComfortWindow(360, 480), ComfortWindow(450, 600)])
     assert s.windows == (ComfortWindow(360, 600),)
 
 

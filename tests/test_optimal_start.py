@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from custom_components.poise.control.optimal_start import (
     advise,
     heatup_minutes,
+    mean_forecast_outdoor,
 )
 from custom_components.poise.estimation.thermal_ekf import ThermalModel
 
@@ -40,9 +43,7 @@ def test_weak_heater_cannot_reach_target() -> None:
 
 
 def test_beyond_horizon_is_unreachable() -> None:
-    out = heatup_minutes(
-        _STRONG, room=18.0, target=21.0, t_out=5.0, max_lead_h=0.1
-    )
+    out = heatup_minutes(_STRONG, room=18.0, target=21.0, t_out=5.0, max_lead_h=0.1)
     assert out is None
 
 
@@ -63,3 +64,33 @@ def test_advise_unreachable_does_best_effort() -> None:
     a = advise(_WEAK, room=18.0, target=21.0, t_out=5.0, minutes_to_comfort=10.0)
     assert not a.reachable
     assert a.start_now  # heat early so we arrive as warm as possible
+
+
+def test_forecast_mean_constant_returns_constant() -> None:
+    samples = [(0.0, 4.0), (60.0, 4.0), (120.0, 4.0)]
+    assert mean_forecast_outdoor(samples, 120.0, fallback=99.0) == 4.0
+
+
+def test_forecast_mean_linear_ramp_is_midpoint() -> None:
+    # 0 C now rising to 10 C at 100 min -> mean over [0,100] is 5 C
+    samples = [(0.0, 0.0), (100.0, 10.0)]
+    assert mean_forecast_outdoor(samples, 100.0, fallback=99.0) == pytest.approx(5.0)
+
+
+def test_forecast_mean_holds_flat_before_first_sample() -> None:
+    # horizon ends before the first sample offset -> hold first value
+    samples = [(60.0, 8.0), (120.0, 2.0)]
+    assert mean_forecast_outdoor(samples, 30.0, fallback=99.0) == 8.0
+
+
+def test_forecast_mean_empty_or_zero_horizon_falls_back() -> None:
+    assert mean_forecast_outdoor([], 60.0, fallback=7.5) == 7.5
+    assert mean_forecast_outdoor([(0.0, 3.0)], 0.0, fallback=7.5) == 7.5
+
+
+def test_forecast_mean_partial_window_weights_by_time() -> None:
+    # 0 C for first 30 min, then 12 C; mean over 60 min = (0*30 + ramp...).
+    # samples: 0->0C, 30->0C, 30->12C approximated by 0@0, 30@0, 60@12
+    samples = [(0.0, 0.0), (30.0, 0.0), (60.0, 12.0)]
+    # area = 0 over [0,30] + trapezoid 0->12 over [30,60] = 0.5*12*30 = 180; /60 = 3
+    assert mean_forecast_outdoor(samples, 60.0, fallback=99.0) == pytest.approx(3.0)
