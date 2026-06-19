@@ -131,3 +131,13 @@ def test_runtime_recovery_resets_pegged_alpha() -> None:
     for _ in range(60):
         ekf.update(ekf.x[0])  # near-zero innovation keeps it pegged
     assert ekf.x[1] > 0.005  # runtime recovery reset it toward the default
+
+
+def test_learning_phase_tracks_identifiability() -> None:
+    ekf = ThermalEKF()
+    assert ekf.learning_phase == "cold"
+    ekf.predict(1.0 / 30.0, t_out=5.0, u_h=1.0)
+    ekf.update(18.1)
+    assert ekf.learning_phase in ("early", "learning")
+    _drive_ekf(ekf, alpha_true=0.1, beta_h_true=2.0, steps=4000)
+    assert ekf.learning_phase == "identified"
