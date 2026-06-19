@@ -1,1 +1,7 @@
-
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Poise ist bereits eingerichtet; nur eine Instanz wird unterstützt."
+    }
+  }
+}
