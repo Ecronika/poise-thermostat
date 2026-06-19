@@ -17,6 +17,7 @@ bug class K5). Pure, unit-tested.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..estimation.thermal_ekf import ThermalModel
@@ -84,3 +85,40 @@ def advise(
         horizon_min = max_lead_h * 60.0
         return PreheatAdvice(False, horizon_min, minutes_to_comfort <= horizon_min)
     return PreheatAdvice(True, lead, minutes_to_comfort <= lead)
+
+
+def mean_forecast_outdoor(
+    samples: Sequence[tuple[float, float]],
+    horizon_min: float,
+    fallback: float,
+) -> float:
+    """Time-weighted mean forecast outdoor temp over [0, horizon_min] minutes.
+
+    ``samples`` are ``(minutes_from_now, temperature_c)`` points (any order). The
+    curve is piecewise-linear between samples and held flat outside their range
+    (matches ha-preheat's forecast integration). Returns ``fallback`` when there
+    is no usable horizon or no samples — so a missing/short forecast degrades to
+    the caller's constant-outdoor estimate rather than failing.
+    """
+    if horizon_min <= 0.0 or not samples:
+        return fallback
+    pts = sorted(samples)
+
+    def temp_at(m: float) -> float:
+        if m <= pts[0][0]:
+            return pts[0][1]
+        if m >= pts[-1][0]:
+            return pts[-1][1]
+        for (a_m, a_t), (b_m, b_t) in zip(pts, pts[1:], strict=False):
+            if a_m <= m <= b_m:
+                if b_m == a_m:
+                    return a_t
+                frac = (m - a_m) / (b_m - a_m)
+                return a_t + frac * (b_t - a_t)
+        return pts[-1][1]
+
+    breaks = sorted({0.0, horizon_min, *(m for m, _ in pts if 0.0 < m < horizon_min)})
+    integral = 0.0
+    for x0, x1 in zip(breaks, breaks[1:], strict=False):
+        integral += 0.5 * (temp_at(x0) + temp_at(x1)) * (x1 - x0)
+    return integral / horizon_min
