@@ -62,3 +62,11 @@ def select_path(caps: DeviceCapabilities) -> ActuatorPath:
     if caps.writable_calibration and caps.reliable_heat_mode:
         return ActuatorPath.CALIBRATION
     return ActuatorPath.PI_SETPOINT
+
+
+def climate_capability(hvac_modes: list[str]) -> tuple[bool, bool]:
+    """(can_heat, can_cool) from a climate entity's hvac_modes (ADR-0023)."""
+    modes = {m.lower() for m in hvac_modes}
+    can_heat = bool(modes & {"heat", "heat_cool", "auto"})
+    can_cool = bool(modes & {"cool", "heat_cool", "auto"})
+    return can_heat, can_cool
