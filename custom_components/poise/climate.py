@@ -41,6 +41,10 @@ _ATTRS = (
     "cool_sp",
     "mode",
     "identified",
+    "identification_progress",
+    "schedule_state",
+    "minutes_to_comfort",
+    "preheating",
 )
 
 

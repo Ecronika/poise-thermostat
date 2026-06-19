@@ -1,11 +1,11 @@
 """Home Assistant coordinator — wires the pure pipeline to HA (ADR-0006/0013/0023).
 
 Each tick reads the zone's entities, builds the capability-aware dual-setpoint
-comfort decision (ADR-0023), and writes exactly one capability-correct command
-to the actuator (single writer). The EKF (ADR-0002/0024) learns in the
+comfort decision (ADR-0023), applies the comfort schedule / night setback and
+optimal-start preheat (ADR-0025), and writes exactly one capability-correct
+command to the actuator (single writer). The EKF (ADR-0002/0024) learns in the
 background and is persisted per room (ADR-0007). Live safety: window-open pause
-and heating-failure notification (ADR-0012). Control output is the norm-comfort
-setpoint; direct valve modulation is enabled after live validation.
+and heating-failure notification (ADR-0012).
 """
 
 from __future__ import annotations
@@ -18,28 +18,35 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from . import actuator as actuator_mod
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
-from .comfort.en16798 import Category
+from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.mold import mold_min_air_temperature
 from .comfort.operative import operative_temperature
+from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_END,
+    CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_HUMIDITY_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_SETBACK_DELTA,
     DEVICE_MAX_C,
     DOMAIN,
     EKF_SAVE_EVERY_TICKS,
@@ -47,6 +54,7 @@ from .const import (
     TICK_INTERVAL_S,
 )
 from .contracts import ActuatorCommand, ActuatorPath
+from .control.optimal_start import advise as optimal_start_advise
 from .devices.capability import climate_capability
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.thermal_ekf import ThermalEKF
@@ -66,16 +74,6 @@ def _num(state: State | None) -> float | None:
         return float(state.state)
     except (ValueError, TypeError):
         return None
-
-
-def _maturity(n: int) -> str:
-    if n < 5:
-        return "cold"
-    if n < 50:
-        return "early"
-    if n < 150:
-        return "learning"
-    return "mature"
 
 
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -116,6 +114,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         weight = float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT))
         self._priority: float = weight / 100.0
+        delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
+        start = parse_hhmm(data.get(CONF_COMFORT_START))
+        end = parse_hhmm(data.get(CONF_COMFORT_END))
+        if start is not None and end is not None and delta > 0.0:
+            self._schedule = ComfortSchedule.from_windows(
+                [ComfortWindow(start, end)], delta
+            )
+        else:
+            self._schedule = ComfortSchedule.always_comfort()
+        self._optimal_start: bool = bool(data.get(CONF_OPTIMAL_START, True))
 
     @property
     def enabled(self) -> bool:
@@ -140,6 +148,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not entity_id:
             return None
         return _num(self.hass.states.get(entity_id))
+
+    def _local_minute(self) -> int:
+        now = dt_util.now()
+        return now.hour * 60 + now.minute
 
     def _window_open(self) -> bool:
         if not self._window:
@@ -244,11 +256,31 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if t_out is not None:
                 mold_min = mold_min_air_temperature(t_out, rh, room)
 
+        # schedule: night setback + optimal-start preheat (ADR-0025)
+        sched = self._schedule.state_at(self._local_minute())
+        base = self._comfort_base
+        preheating = False
+        if not sched.is_comfort:
+            base = self._comfort_base + sched.setback_offset
+            if self._optimal_start and can_heat and self._ekf.identified:
+                lo, hi = HEATING_LOWER[self._category], HEATING_UPPER[self._category]
+                preheat_target = min(max(self._comfort_base, lo), hi)
+                advice = optimal_start_advise(
+                    self._ekf.get_model(),
+                    room=room,
+                    target=preheat_target,
+                    t_out=t_out_eff,
+                    minutes_to_comfort=float(sched.minutes_to_comfort),
+                )
+                if advice.start_now:
+                    base = self._comfort_base  # cancel setback: preheat to comfort
+                    preheating = True
+
         decision = comfort_decide(
             t_rm=t_rm_eff,
             room=room,
             category=self._category,
-            comfort_base=self._comfort_base,
+            comfort_base=base,
             can_heat=can_heat,
             can_cool=can_cool,
             climate_mode=self._climate_mode,
@@ -314,5 +346,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "tau_hours": round(self._ekf.tau_hours, 1),
             "confidence": round(self._ekf.confidence, 2),
             "identified": self._ekf.identified,
-            "learning_phase": _maturity(self._ekf.n_updates),
+            "learning_phase": self._ekf.learning_phase,
+            "identification_progress": round(self._ekf.data_factor, 2),
+            "schedule_state": "comfort" if sched.is_comfort else "setback",
+            "minutes_to_comfort": sched.minutes_to_comfort,
+            "preheating": preheating,
         }

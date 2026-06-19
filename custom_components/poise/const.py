@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.7.1"
+VERSION: Final = "0.8.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -38,8 +38,13 @@ CONF_WINDOW_SENSOR: Final = "window_sensor"
 CONF_COMFORT_BASE: Final = "comfort_base"
 CONF_CLIMATE_MODE: Final = "climate_mode"
 CONF_COMFORT_WEIGHT: Final = "comfort_weight"
+CONF_COMFORT_START: Final = "comfort_start"
+CONF_COMFORT_END: Final = "comfort_end"
+CONF_SETBACK_DELTA: Final = "setback_delta"
+CONF_OPTIMAL_START: Final = "optimal_start"
 DEFAULT_COMFORT_BASE: Final = 21.0
 DEFAULT_COMFORT_WEIGHT: Final = 70
+DEFAULT_SETBACK_DELTA: Final = 3.0
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30

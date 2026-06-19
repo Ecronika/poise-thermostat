@@ -18,16 +18,21 @@ from .const import (
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_END,
+    CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_HUMIDITY_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_SETBACK_DELTA,
     DOMAIN,
 )
 
@@ -88,6 +93,20 @@ def _schema() -> vol.Schema:
                     min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER
                 )
             ),
+            vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
+            vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
+            vol.Required(
+                CONF_SETBACK_DELTA, default=DEFAULT_SETBACK_DELTA
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0,
+                    max=8.0,
+                    step=0.5,
+                    unit_of_measurement="K",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(CONF_OPTIMAL_START, default=True): selector.BooleanSelector(),
         }
     )
 
