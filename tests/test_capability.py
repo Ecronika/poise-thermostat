@@ -45,3 +45,12 @@ def test_calibration_path_needs_heat_mode() -> None:
         writable_calibration=True, reliable_heat_mode=False
     )
     assert select_path(caps_no_heat) is ActuatorPath.PI_SETPOINT
+
+
+def test_climate_capability_from_hvac_modes() -> None:
+    from custom_components.poise.devices.capability import climate_capability
+
+    assert climate_capability(["heat", "off"]) == (True, False)
+    assert climate_capability(["cool", "off"]) == (False, True)
+    assert climate_capability(["heat_cool", "heat", "cool", "off"]) == (True, True)
+    assert climate_capability(["off"]) == (False, False)

@@ -11,6 +11,7 @@ def _state(
     tau: float = 10.0,
     maturity: Maturity = Maturity.MATURE,
     prediction_std: float | None = 0.2,
+    identified: bool = True,
 ) -> ThermalState:
     return ThermalState(
         t_air=t_air,
@@ -26,6 +27,7 @@ def _state(
         maturity=maturity,
         t_out=5.0,
         prediction_std=prediction_std,
+        identified=identified,
     )
 
 
