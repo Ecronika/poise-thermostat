@@ -1,7 +1,23 @@
 {
   "config": {
+    "step": {
+      "user": {
+        "title": "Poise — add a room",
+        "description": "Pick the room sensor and the thermostat/TRV to control. Optional inputs improve accuracy.",
+        "data": {
+          "name": "Room name",
+          "temp_sensor": "Room temperature sensor",
+          "actuator": "Thermostat / TRV to control",
+          "trm_sensor": "Running-mean outdoor temperature (optional)",
+          "outdoor_sensor": "Outdoor temperature (optional)",
+          "humidity_sensor": "Room humidity (optional — enables mould protection)",
+          "mrt_sensor": "Mean radiant temperature (optional)",
+          "category": "EN 16798 comfort category"
+        }
+      }
+    },
     "abort": {
-      "single_instance_allowed": "Poise is already set up; only one instance is supported."
+      "already_configured": "This thermostat is already configured."
     }
   }
 }

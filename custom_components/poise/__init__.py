@@ -1,9 +1,7 @@
 """Poise — Setpoint Thermostat (Home Assistant integration entry point).
 
-HA-specific imports are kept inside the functions so the pure core modules
-(contracts, clock, ingestion, arbitration, controller, pipeline) stay
-importable without a Home Assistant runtime for fast, deterministic tests
-(ADR-0005 dependency direction, ADR-0011 testability).
+Home Assistant imports stay inside the functions so the pure core modules
+remain importable without a HA runtime for fast tests (ADR-0005/0011).
 """
 
 from __future__ import annotations
@@ -16,14 +14,18 @@ if TYPE_CHECKING:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    from homeassistant.const import Platform
+
     from .coordinator import PoiseCoordinator
 
     coordinator = PoiseCoordinator(hass, entry)
-    await coordinator.async_bootstrap()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    await hass.config_entries.async_forward_entry_setups(entry, [Platform.CLIMATE])
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    return True
+    from homeassistant.const import Platform
+
+    return await hass.config_entries.async_unload_platforms(entry, [Platform.CLIMATE])
