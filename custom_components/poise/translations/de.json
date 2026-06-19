@@ -18,10 +18,29 @@
           "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
           "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
         }
+      },
+      "reconfigure": {
+        "title": "Poise — Raum neu konfigurieren",
+        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
+        "data": {
+          "name": "Raumname",
+          "temp_sensor": "Raumtemperatur-Sensor",
+          "actuator": "Zu steuerndes Thermostat / TRV",
+          "trm_sensor": "Gleitendes Außentemperatur-Mittel (optional)",
+          "outdoor_sensor": "Außentemperatur (optional)",
+          "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
+          "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
+          "category": "EN-16798-Komfortkategorie",
+          "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
+          "comfort_base": "Komfort-Basistemperatur (°C)",
+          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
+          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+        }
       }
     },
     "abort": {
-      "already_configured": "Dieses Thermostat ist bereits konfiguriert."
+      "already_configured": "Dieses Thermostat ist bereits konfiguriert.",
+      "reconfigure_successful": "Poise wurde aktualisiert."
     }
   }
 }
