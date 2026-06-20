@@ -22,6 +22,7 @@ from .const import (
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_HUMIDITY_SENSOR,
+    CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
     CONF_NAME,
     CONF_OPTIMAL_START,
@@ -110,6 +111,11 @@ def _schema() -> vol.Schema:
             vol.Required(CONF_OPTIMAL_START, default=True): selector.BooleanSelector(),
             vol.Optional(CONF_WEATHER): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="weather")
+            ),
+            vol.Optional(CONF_IRRADIANCE): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor", device_class="irradiance"
+                )
             ),
         }
     )

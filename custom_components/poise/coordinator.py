@@ -27,6 +27,7 @@ from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.mold import mold_min_air_temperature
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
+from .comfort.virtual_mrt import virtual_mrt
 from .const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,
@@ -36,6 +37,7 @@ from .const import (
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_HUMIDITY_SENSOR,
+    CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
     CONF_NAME,
     CONF_OPTIMAL_START,
@@ -64,6 +66,7 @@ from .control.optimal_start import (
 from .devices.capability import climate_capability
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.running_mean import RunningMeanTracker
+from .estimation.solar import clear_sky_normalized, normalize_irradiance
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
 from .safety.heating_failure import HeatingFailureDetector
@@ -100,6 +103,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._failure = HeatingFailureDetector()
         self._last_mono: float | None = None
         self._last_u_h: float = 0.0
+        self._last_q_solar: float = 0.0
         self._save_counter = 0
         self._failure_notified = False
         self._notif_id = f"poise_heating_failure_{entry.entry_id}"
@@ -133,6 +137,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._schedule = ComfortSchedule.always_comfort()
         self._optimal_start: bool = bool(data.get(CONF_OPTIMAL_START, True))
         self._weather: str | None = data.get(CONF_WEATHER)
+        self._irradiance: str | None = data.get(CONF_IRRADIANCE)
         self._forecast: list[tuple[float, float]] = []
         self._forecast_at: float | None = None
 
@@ -189,6 +194,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return float(mx)
         return DEVICE_MAX_C
 
+    def _sun_elevation(self) -> float | None:
+        sun = self.hass.states.get("sun.sun")
+        if sun is None:
+            return None
+        elev = sun.attributes.get("elevation")
+        return float(elev) if isinstance(elev, (int, float)) else None
+
     async def _forecast_outdoor(self, horizon_min: float, fallback: float) -> float:
         """Mean forecast outdoor temp over the preheat window (ADR-0025).
 
@@ -224,7 +236,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self._last_mono is not None:
                 dt_h = (now - self._last_mono) / 3600.0
                 if 0.0 < dt_h < 1.0:
-                    self._ekf.predict(dt_h, t_out=t_out, u_h=self._last_u_h)
+                    self._ekf.predict(
+                        dt_h,
+                        t_out=t_out,
+                        u_h=self._last_u_h,
+                        q_solar=self._last_q_solar,
+                    )
                     self._ekf.update(room)
         except Exception:  # noqa: BLE001 - learning must never break control
             _LOGGER.exception("Poise: EKF observer step failed")
@@ -292,8 +309,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             t_rm_source = "outdoor" if t_out is not None else None
         t_out_eff = t_out if t_out is not None else (t_rm if t_rm is not None else 5.0)
         t_rm_eff = t_rm if t_rm is not None else t_out_eff
-        t_mrt = self._read(self._mrt)
         rh = self._read(self._humidity)
+        # solar disturbance q_solar (normalised, ADR-0010): internal clear-sky
+        # estimate always runs; a measured irradiance sensor overrides the value
+        # used (shadow-estimator principle, ADR-0026).
+        elev = self._sun_elevation()
+        q_solar_internal = clear_sky_normalized(elev) if elev is not None else 0.0
+        ghi = self._read(self._irradiance)
+        if ghi is not None:
+            q_solar, q_solar_source = normalize_irradiance(ghi), "sensor"
+        elif elev is not None:
+            q_solar, q_solar_source = q_solar_internal, "internal"
+        else:
+            q_solar, q_solar_source = 0.0, "none"
+        # virtual MRT (shadow, ADR-0017/0026): exterior envelope pulls MRT toward
+        # outdoor + a solar radiant bump; a measured globe/MRT sensor overrides.
+        mrt_internal = virtual_mrt(room, t_out_eff, q_solar)
+        mrt_sensor = self._read(self._mrt)
+        if mrt_sensor is not None:
+            t_mrt, mrt_source = mrt_sensor, "sensor"
+        else:
+            t_mrt, mrt_source = mrt_internal, "internal"
         window_open = self._window_open()
         can_heat, can_cool = self._capability()
         device_max = self._device_max()
@@ -373,6 +409,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         target = min(target, device_max)
         heating = self._enabled and not window_open and mode == "heat"
         self._last_u_h = 1.0 if heating else 0.0
+        self._last_q_solar = q_solar
 
         failed = self._failure.update(
             now_h=now / 3600.0,
@@ -393,7 +430,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         await self._maybe_save()
 
-        operative = operative_temperature(room, t_mrt) if t_mrt is not None else room
+        operative = operative_temperature(room, t_mrt)
         binding = "mold" if mold_min and mold_min >= decision.heat_sp else "en16798"
         return {
             "available": True,
@@ -407,6 +444,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if self._trm_tracker.current is not None
                 else None
             ),
+            "q_solar": round(q_solar, 3),
+            "q_solar_source": q_solar_source,
+            "q_solar_internal": round(q_solar_internal, 3),
+            "beta_s": round(self._ekf.get_model().beta_s, 3),
+            "mrt": round(t_mrt, 1),
+            "mrt_source": mrt_source,
+            "mrt_internal": round(mrt_internal, 1),
             "heat_sp": decision.heat_sp,
             "cool_sp": decision.cool_sp,
             "mode": mode,
