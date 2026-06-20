@@ -27,6 +27,8 @@ from .coordinator import PoiseCoordinator
 _ATTRS = (
     "operative_temperature",
     "t_rm",
+    "t_rm_source",
+    "t_rm_internal",
     "comfort_low",
     "comfort_high",
     "binding_lower_cause",

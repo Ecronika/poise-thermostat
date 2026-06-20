@@ -63,6 +63,7 @@ from .control.optimal_start import (
 )
 from .devices.capability import climate_capability
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
+from .estimation.running_mean import RunningMeanTracker
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
 from .safety.heating_failure import HeatingFailureDetector
@@ -94,6 +95,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._clock = MonotonicClock()
         self._ekf = ThermalEKF()
+        self._trm_tracker = RunningMeanTracker()
         self._store = PoiseStore(hass, entry.entry_id)
         self._failure = HeatingFailureDetector()
         self._last_mono: float | None = None
@@ -148,8 +150,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Restore the learned EKF before the first control tick (ADR-0007)."""
         try:
             data = await self._store.load()
-            if data is not None:
-                self._ekf = ThermalEKF.from_dict(data)
+            if isinstance(data, dict) and "ekf" in data:
+                self._ekf = ThermalEKF.from_dict(data["ekf"])
+                if isinstance(data.get("trm"), dict):
+                    self._trm_tracker = RunningMeanTracker.from_dict(data["trm"])
+            elif data is not None:
+                self._ekf = ThermalEKF.from_dict(data)  # legacy: bare EKF dict
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
             _LOGGER.exception("Poise: failed to restore learned model; starting fresh")
 
@@ -255,7 +261,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._save_counter >= EKF_SAVE_EVERY_TICKS:
             self._save_counter = 0
             try:
-                await self._store.save(self._ekf.to_dict())
+                await self._store.save(
+                    {"ekf": self._ekf.to_dict(), "trm": self._trm_tracker.to_dict()}
+                )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Poise: failed to persist learned model")
 
@@ -271,9 +279,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         reading = ingest_temperature([RawSample(air, now)], now=now)
         room = reading.value
         t_out = self._read(self._outdoor)
-        t_rm = self._read(self._trm)
-        if t_rm is None:
+        # internal EN 16798-1 running mean, used when no external T_rm sensor.
+        if t_out is not None:
+            self._trm_tracker.observe(t_out, dt_util.now().toordinal())
+        t_rm_sensor = self._read(self._trm)
+        if t_rm_sensor is not None:
+            t_rm, t_rm_source = t_rm_sensor, "sensor"
+        elif self._trm_tracker.current is not None:
+            t_rm, t_rm_source = self._trm_tracker.current, "internal"
+        else:
             t_rm = t_out
+            t_rm_source = "outdoor" if t_out is not None else None
         t_out_eff = t_out if t_out is not None else (t_rm if t_rm is not None else 5.0)
         t_rm_eff = t_rm if t_rm is not None else t_out_eff
         t_mrt = self._read(self._mrt)
@@ -385,6 +401,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "target_temperature": target,
             "operative_temperature": round(operative, 1),
             "t_rm": round(t_rm_eff, 1),
+            "t_rm_source": t_rm_source,
+            "t_rm_internal": (
+                round(self._trm_tracker.current, 1)
+                if self._trm_tracker.current is not None
+                else None
+            ),
             "heat_sp": decision.heat_sp,
             "cool_sp": decision.cool_sp,
             "mode": mode,
