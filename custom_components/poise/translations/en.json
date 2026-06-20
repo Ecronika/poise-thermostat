@@ -17,6 +17,9 @@
           "comfort_base": "Comfort base temperature (°C)",
           "climate_mode": "Climate mode (auto / heat only / cool only)",
           "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)"
+        },
+        "data_description": {
+          "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
         }
       },
       "reconfigure": {
@@ -35,6 +38,9 @@
           "comfort_base": "Comfort base temperature (°C)",
           "climate_mode": "Climate mode (auto / heat only / cool only)",
           "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)"
+        },
+        "data_description": {
+          "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
         }
       }
     },
@@ -108,6 +114,10 @@
     "operative_unsupported": {
       "title": "Poise: operative input not available",
       "description": "Operative TRV input is enabled, but no usable external-temperature input (`{entity}`) is available for this thermostat. Poise fell back to air-side control. Configure a valid external-temperature number, or turn off operative input."
+    },
+    "sensor_at_heat_source": {
+      "title": "Poise: room sensor may be at the heat source",
+      "description": "The learned thermal time constant for `{entity}` is implausibly short — typical of a sensor mounted on or near the radiator (e.g. a TRV's built-in sensor). Poise needs a free-standing room sensor away from the heater; otherwise the room model and comfort control degrade."
     }
   }
 }

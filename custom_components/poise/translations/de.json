@@ -17,6 +17,9 @@
           "comfort_base": "Komfort-Basistemperatur (°C)",
           "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
           "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+        },
+        "data_description": {
+          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
         }
       },
       "reconfigure": {
@@ -35,6 +38,9 @@
           "comfort_base": "Komfort-Basistemperatur (°C)",
           "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
           "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+        },
+        "data_description": {
+          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
         }
       }
     },
@@ -108,6 +114,10 @@
     "operative_unsupported": {
       "title": "Poise: Operativ-Eingang nicht verfügbar",
       "description": "Der operative TRV-Eingang ist aktiviert, aber für dieses Thermostat ist kein nutzbarer externer Temperatureingang (`{entity}`) verfügbar. Poise hat auf luftseitige Regelung zurückgeschaltet. Konfiguriere eine gültige externe Temperatur-Number oder schalte den Operativ-Eingang ab."
+    },
+    "sensor_at_heat_source": {
+      "title": "Poise: Raumsensor evtl. an der Wärmequelle",
+      "description": "Die gelernte thermische Zeitkonstante für `{entity}` ist unplausibel kurz — typisch für einen Sensor am oder nahe dem Heizkörper (z. B. der eingebaute TRV-Sensor). Poise braucht einen **freistehenden** Raumsensor abseits der Heizung; sonst verschlechtern sich Raummodell und Komfortregelung."
     }
   }
 }
