@@ -17,8 +17,10 @@ bug class K5). Pure, unit-tested.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
 
 from ..estimation.thermal_ekf import ThermalModel
 
@@ -122,3 +124,106 @@ def mean_forecast_outdoor(
     for x0, x1 in zip(breaks, breaks[1:], strict=False):
         integral += 0.5 * (temp_at(x0) + temp_at(x1)) * (x1 - x0)
     return integral / horizon_min
+
+
+@dataclass(frozen=True, slots=True)
+class PreheatPlan:
+    """Result of the schedule -> setback -> optimal-start orchestration."""
+
+    base: float  # effective comfort base for this tick (setback applied / cancelled)
+    preheating: bool  # optimal-start cancelled the setback to preheat now
+    preheat_outdoor: float | None  # outdoor temp used for the lead estimate, if any
+
+
+def plan_preheat(
+    *,
+    comfort_base: float,
+    is_comfort: bool,
+    setback_offset: float,
+    minutes_to_comfort: float,
+    optimal_start_enabled: bool,
+    can_heat: bool,
+    identified: bool,
+    model: ThermalModel | None,
+    room: float,
+    t_out_lead: float,
+    heat_lower: float,
+    heat_upper: float,
+) -> PreheatPlan:
+    """Decide the effective comfort base, applying night setback + optimal start.
+
+    Pure mirror of the coordinator tick: in a comfort window the full base is
+    used; in setback the base is lowered by ``setback_offset``; optimal-start
+    only runs when enabled AND the device can heat AND the model is identified,
+    and only then may it cancel the setback (``preheating``). ``t_out_lead`` is
+    the already-resolved outdoor temperature (forecast mean or constant).
+    """
+    if is_comfort:
+        return PreheatPlan(comfort_base, False, None)
+    base = comfort_base + setback_offset
+    if not (optimal_start_enabled and can_heat and identified and model is not None):
+        return PreheatPlan(base, False, None)
+    target = min(max(comfort_base, heat_lower), heat_upper)
+    advice = advise(
+        model,
+        room=room,
+        target=target,
+        t_out=t_out_lead,
+        minutes_to_comfort=minutes_to_comfort,
+    )
+    used_outdoor = round(t_out_lead, 1)
+    if advice.start_now:
+        return PreheatPlan(comfort_base, True, used_outdoor)
+    return PreheatPlan(base, False, used_outdoor)
+
+
+def _to_dt(value: Any, tz: Any) -> datetime | None:
+    """Coerce a forecast 'datetime' (ISO string or datetime) to a tz-aware value.
+
+    Naive timestamps inherit ``tz`` (the timezone of ``base_utc``), so the
+    result is always comparable to the reference without a hard UTC literal.
+    """
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    return dt
+
+
+def forecast_samples_from_response(
+    resp: Mapping[str, Any] | None,
+    weather_entity: str,
+    base_utc: datetime,
+) -> list[tuple[float, float]]:
+    """Parse a weather.get_forecasts response into (minutes_from_now, temp_c).
+
+    Tolerant of missing keys / bad timestamps (skips them) and drops past
+    entries. Pure so the forecast plumbing can be unit-tested without HA.
+    """
+    if not resp:
+        return []
+    block = resp.get(weather_entity) or {}
+    entries = block.get("forecast") or []
+    out: list[tuple[float, float]] = []
+    for e in entries:
+        temp = e.get("temperature")
+        when = e.get("datetime")
+        if temp is None or when is None:
+            continue
+        ts = _to_dt(when, base_utc.tzinfo)
+        if ts is None:
+            continue
+        offset = (ts - base_utc).total_seconds() / 60.0
+        if offset >= 0.0:
+            try:
+                out.append((offset, float(temp)))
+            except (TypeError, ValueError):
+                continue
+    return out
