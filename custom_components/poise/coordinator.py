@@ -17,6 +17,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -55,6 +56,7 @@ from .const import (
     EKF_SAVE_EVERY_TICKS,
     FORECAST_TTL_S,
     FROST_FLOOR_C,
+    SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
 )
 from .contracts import ActuatorCommand, ActuatorPath
@@ -70,6 +72,7 @@ from .estimation.solar import clear_sky_normalized, normalize_irradiance
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
 from .safety.heating_failure import HeatingFailureDetector
+from .safety.sensor_watchdog import is_frozen
 from .storage import PoiseStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,6 +110,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._save_counter = 0
         self._failure_notified = False
         self._notif_id = f"poise_heating_failure_{entry.entry_id}"
+        self._entry_id = entry.entry_id
+        self._active_issues: set[str] = set()
         self._lock = asyncio.Lock()
         self._enabled = True
         self._override: float | None = None
@@ -164,10 +169,40 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
             _LOGGER.exception("Poise: failed to restore learned model; starting fresh")
 
+    def _issue(
+        self,
+        issue_id: str,
+        active: bool,
+        *,
+        translation_key: str,
+        placeholders: dict[str, str] | None = None,
+    ) -> None:
+        """Raise/clear a Home Assistant repair issue on transitions (ADR-0012)."""
+        if active and issue_id not in self._active_issues:
+            self._active_issues.add(issue_id)
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=translation_key,
+                translation_placeholders=placeholders or {},
+            )
+        elif not active and issue_id in self._active_issues:
+            self._active_issues.discard(issue_id)
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
     def _read(self, entity_id: str | None) -> float | None:
         if not entity_id:
             return None
         return _num(self.hass.states.get(entity_id))
+
+    def _sensor_age(self, entity_id: str) -> float | None:
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return None
+        return (dt_util.utcnow() - state.last_changed).total_seconds()
 
     def _local_minute(self) -> int:
         now = dt_util.now()
@@ -290,8 +325,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _run_once(self) -> dict[str, Any]:
         air = self._read(self._temp)
+        self._issue(
+            f"sensor_unavailable_{self._entry_id}",
+            air is None,
+            translation_key="sensor_unavailable",
+            placeholders={"entity": self._temp},
+        )
         if air is None:
             return {"available": False}
+        self._issue(
+            f"actuator_unavailable_{self._entry_id}",
+            self.hass.states.get(self._actuator) is None,
+            translation_key="actuator_unavailable",
+            placeholders={"entity": self._actuator},
+        )
+        frozen = is_frozen(self._sensor_age(self._temp), SENSOR_FREEZE_AFTER_S)
+        self._issue(
+            f"sensor_frozen_{self._entry_id}",
+            frozen,
+            translation_key="sensor_frozen",
+            placeholders={"entity": self._temp},
+        )
         now = self._clock.monotonic()
         reading = ingest_temperature([RawSample(air, now)], now=now)
         room = reading.value
@@ -334,7 +388,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         can_heat, can_cool = self._capability()
         device_max = self._device_max()
 
-        if not window_open:
+        if not window_open and not frozen:
             self._learn(room, t_out_eff)
 
         # mould floor + dewpoint cap from humidity
@@ -471,4 +525,5 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "minutes_to_comfort": sched.minutes_to_comfort,
             "preheating": preheating,
             "preheat_outdoor": preheat_outdoor,
+            "sensor_frozen": frozen,
         }

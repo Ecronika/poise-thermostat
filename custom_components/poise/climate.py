@@ -55,6 +55,7 @@ _ATTRS = (
     "mrt",
     "mrt_source",
     "mrt_internal",
+    "sensor_frozen",
 )
 
 
