@@ -26,6 +26,7 @@ from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.mold import mold_min_air_temperature
+from .comfort.norm_compliance import clamp_to_norm
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.virtual_mrt import virtual_mrt
@@ -460,6 +461,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             target, mode = round(decision.write_setpoint, 1), decision.mode
 
+        # unconditional norm envelope (ASR A3.5 cap + frost/mould floor); the
+        # final hard clamp comfort/efficiency can never violate (K4/K7, G18).
+        norm_floor = max(FROST_FLOOR_C, mold_min or FROST_FLOOR_C)
+        if mode == "cool":
+            norm_binding: str | None = None
+        else:
+            nc = clamp_to_norm(target, floor=norm_floor)
+            target, norm_binding = nc.value, nc.binding
+
         target = min(target, device_max)
         heating = self._enabled and not window_open and mode == "heat"
         self._last_u_h = 1.0 if heating else 0.0
@@ -526,4 +536,5 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "preheating": preheating,
             "preheat_outdoor": preheat_outdoor,
             "sensor_frozen": frozen,
+            "norm_binding": norm_binding,
         }
