@@ -42,5 +42,56 @@
       "already_configured": "Dieses Thermostat ist bereits konfiguriert.",
       "reconfigure_successful": "Poise wurde aktualisiert."
     }
+  },
+  "entity": {
+    "sensor": {
+      "t_rm": {
+        "name": "Außenluft-Laufmittel (T_rm)"
+      },
+      "mrt": {
+        "name": "Mittlere Strahlungstemperatur"
+      },
+      "operative_temperature": {
+        "name": "Operativtemperatur"
+      },
+      "q_solar": {
+        "name": "Solareintrag (normiert)"
+      },
+      "beta_s": {
+        "name": "Solar-Responsivität β_s"
+      },
+      "tau_hours": {
+        "name": "Zeitkonstante τ"
+      },
+      "confidence": {
+        "name": "Modell-Konfidenz"
+      },
+      "identification_progress": {
+        "name": "Identifikations-Fortschritt"
+      },
+      "learning_phase": {
+        "name": "Lernphase",
+        "state": {
+          "cold": "Kaltstart",
+          "early": "Früh",
+          "learning": "Lernt",
+          "identified": "Identifiziert"
+        }
+      }
+    }
+  },
+  "issues": {
+    "sensor_unavailable": {
+      "title": "Poise: Raumsensor nicht verfügbar",
+      "description": "Der Raumtemperatur-Sensor `{entity}` ist nicht verfügbar, daher kann Poise diesen Raum nicht regeln. Prüfe Sensor bzw. Gerät — der Hinweis verschwindet danach automatisch."
+    },
+    "actuator_unavailable": {
+      "title": "Poise: Thermostat nicht verfügbar",
+      "description": "Das gesteuerte Thermostat/TRV `{entity}` ist nicht verfügbar. Poise kann keinen Sollwert schreiben, bis es zurückkehrt; der Hinweis verschwindet dann automatisch."
+    },
+    "sensor_frozen": {
+      "title": "Poise: Raumsensor eingefroren",
+      "description": "Der Raumtemperatur-Sensor `{entity}` hat sich lange nicht verändert und steckt möglicherweise fest (leere Batterie, hängende Integration). Poise hat das Lernen für diesen Raum pausiert; die Regelung läuft mit dem letzten Wert weiter. Der Hinweis verschwindet, sobald der Sensor wieder aktualisiert."
+    }
   }
 }

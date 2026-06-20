@@ -42,5 +42,56 @@
       "already_configured": "This thermostat is already configured.",
       "reconfigure_successful": "Poise was updated."
     }
+  },
+  "entity": {
+    "sensor": {
+      "t_rm": {
+        "name": "Running-mean outdoor (T_rm)"
+      },
+      "mrt": {
+        "name": "Mean radiant temperature"
+      },
+      "operative_temperature": {
+        "name": "Operative temperature"
+      },
+      "q_solar": {
+        "name": "Solar input (normalised)"
+      },
+      "beta_s": {
+        "name": "Solar responsivity β_s"
+      },
+      "tau_hours": {
+        "name": "Time constant τ"
+      },
+      "confidence": {
+        "name": "Model confidence"
+      },
+      "identification_progress": {
+        "name": "Identification progress"
+      },
+      "learning_phase": {
+        "name": "Learning phase",
+        "state": {
+          "cold": "Cold start",
+          "early": "Early",
+          "learning": "Learning",
+          "identified": "Identified"
+        }
+      }
+    }
+  },
+  "issues": {
+    "sensor_unavailable": {
+      "title": "Poise: room sensor unavailable",
+      "description": "The room temperature sensor `{entity}` is unavailable, so Poise cannot control this room. Check the sensor or device, then this issue clears automatically."
+    },
+    "actuator_unavailable": {
+      "title": "Poise: thermostat unavailable",
+      "description": "The controlled thermostat/TRV `{entity}` is unavailable. Poise cannot write a setpoint until it returns; this issue clears automatically once it is back."
+    },
+    "sensor_frozen": {
+      "title": "Poise: room sensor frozen",
+      "description": "The room temperature sensor `{entity}` has not changed for a long time and may be stuck (dead battery, stalled integration). Poise paused learning for this room; control continues on the last value. The issue clears once the sensor updates again."
+    }
   }
 }
