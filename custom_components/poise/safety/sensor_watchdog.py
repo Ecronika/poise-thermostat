@@ -19,3 +19,17 @@ def is_frozen(age_s: float | None, threshold_s: float) -> bool:
     if age_s is None or threshold_s <= 0.0:
         return False
     return age_s >= threshold_s
+
+
+def sensor_at_heat_source(
+    tau_hours: float, identified: bool, *, min_plausible_tau_h: float
+) -> bool:
+    """True if an *identified* model has an implausibly short time constant.
+
+    A temperature sensor mounted on or near the radiator (e.g. a TRV's internal
+    sensor) reacts almost immediately to heating, so the learned 1R1C model gets
+    an implausibly small time constant ``tau = 1/alpha`` — a real room is hours,
+    a heat-source sensor is minutes. Gated on ``identified`` so we only judge a
+    trusted estimate (charter G17, anti-"garbage in").
+    """
+    return identified and tau_hours < min_plausible_tau_h
