@@ -243,6 +243,15 @@ class ThermalEKF:
             self._alpha_pegged_count = 0
 
     # -- outputs -------------------------------------------------------------
+    def seed_beta_h(self, value: float) -> None:
+        """Cold-start prior: set the heating responsivity beta_h (clamped).
+
+        Used once at bootstrap from the seasonless prior when no learned model
+        was restored; never during live learning, so it cannot run in parallel
+        with the filter (charter G6).
+        """
+        self.x[_BH] = min(max(value, _LOWER[_BH]), _UPPER[_BH])
+
     def get_model(self) -> ThermalModel:
         return ThermalModel(
             alpha=self.x[_A],
