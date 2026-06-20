@@ -57,10 +57,9 @@ from .const import (
 )
 from .contracts import ActuatorCommand, ActuatorPath
 from .control.optimal_start import (
-    advise as optimal_start_advise,
-)
-from .control.optimal_start import (
+    forecast_samples_from_response,
     mean_forecast_outdoor,
+    plan_preheat,
 )
 from .devices.capability import climate_capability
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
@@ -203,21 +202,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     blocking=True,
                     return_response=True,
                 )
-                entries = (resp or {}).get(self._weather, {}).get("forecast", [])
-                base = dt_util.utcnow()
-                samples: list[tuple[float, float]] = []
-                for e in entries:
-                    temp = e.get("temperature")
-                    when = e.get("datetime")
-                    if temp is None or when is None:
-                        continue
-                    ts = dt_util.parse_datetime(when) if isinstance(when, str) else when
-                    if ts is None:
-                        continue
-                    offset = (dt_util.as_utc(ts) - base).total_seconds() / 60.0
-                    if offset >= 0.0:
-                        samples.append((offset, float(temp)))
-                self._forecast = samples
+                self._forecast = forecast_samples_from_response(
+                    resp, self._weather, dt_util.utcnow()
+                )
                 self._forecast_at = now
             except Exception:  # noqa: BLE001 - forecast must never break the tick
                 _LOGGER.debug("Poise: weather forecast unavailable; constant outdoor")
@@ -306,30 +293,41 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if t_out is not None:
                 mold_min = mold_min_air_temperature(t_out, rh, room)
 
-        # schedule: night setback + optimal-start preheat (ADR-0025)
+        # schedule: night setback + optimal-start preheat (ADR-0025).
+        # Resolve the forecast outdoor (I/O) here, then let the pure planner
+        # decide the effective base — the decision is unit-tested without HA.
         sched = self._schedule.state_at(self._local_minute())
-        base = self._comfort_base
-        preheating = False
-        preheat_outdoor: float | None = None
-        if not sched.is_comfort:
-            base = self._comfort_base + sched.setback_offset
-            if self._optimal_start and can_heat and self._ekf.identified:
-                lo, hi = HEATING_LOWER[self._category], HEATING_UPPER[self._category]
-                preheat_target = min(max(self._comfort_base, lo), hi)
-                t_out_lead = await self._forecast_outdoor(
-                    float(sched.minutes_to_comfort), t_out_eff
-                )
-                preheat_outdoor = round(t_out_lead, 1)
-                advice = optimal_start_advise(
-                    self._ekf.get_model(),
-                    room=room,
-                    target=preheat_target,
-                    t_out=t_out_lead,
-                    minutes_to_comfort=float(sched.minutes_to_comfort),
-                )
-                if advice.start_now:
-                    base = self._comfort_base  # cancel setback: preheat to comfort
-                    preheating = True
+        do_eval = (
+            not sched.is_comfort
+            and self._optimal_start
+            and can_heat
+            and self._ekf.identified
+        )
+        if do_eval:
+            t_out_lead = await self._forecast_outdoor(
+                float(sched.minutes_to_comfort), t_out_eff
+            )
+            model = self._ekf.get_model()
+        else:
+            t_out_lead, model = t_out_eff, None
+        lo, hi = HEATING_LOWER[self._category], HEATING_UPPER[self._category]
+        plan = plan_preheat(
+            comfort_base=self._comfort_base,
+            is_comfort=sched.is_comfort,
+            setback_offset=sched.setback_offset,
+            minutes_to_comfort=float(sched.minutes_to_comfort),
+            optimal_start_enabled=self._optimal_start,
+            can_heat=can_heat,
+            identified=self._ekf.identified,
+            model=model,
+            room=room,
+            t_out_lead=t_out_lead,
+            heat_lower=lo,
+            heat_upper=hi,
+        )
+        base = plan.base
+        preheating = plan.preheating
+        preheat_outdoor = plan.preheat_outdoor
 
         decision = comfort_decide(
             t_rm=t_rm_eff,
