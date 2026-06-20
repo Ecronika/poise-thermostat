@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.19.0"
+VERSION: Final = "0.21.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -25,6 +25,8 @@ TEMP_PLAUSIBLE_MIN_C: Final = -50.0
 TEMP_PLAUSIBLE_MAX_C: Final = 60.0
 SENSOR_FREEZE_AFTER_S: Final = 1800.0
 LOW_BATTERY_PCT: Final = 15.0
+# Below this learned time constant a sensor is likely on/near the heat source
+MIN_PLAUSIBLE_TAU_H: Final = 1.0
 
 # Config-flow keys (ADR-0008)
 CONF_NAME: Final = "name"

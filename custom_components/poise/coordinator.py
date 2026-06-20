@@ -26,7 +26,6 @@ from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.mold import mold_min_air_temperature
-from .comfort.norm_compliance import clamp_to_norm
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.virtual_mrt import virtual_mrt
@@ -60,6 +59,7 @@ from .const import (
     FORECAST_TTL_S,
     FROST_FLOOR_C,
     LOW_BATTERY_PCT,
+    MIN_PLAUSIBLE_TAU_H,
     SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
 )
@@ -68,6 +68,12 @@ from .control.optimal_start import (
     forecast_samples_from_response,
     mean_forecast_outdoor,
     plan_preheat,
+)
+from .control.tick_resolve import (
+    resolve_write_target,
+    select_mrt,
+    select_q_solar,
+    select_t_rm,
 )
 from .devices.capability import climate_capability
 from .devices.model_fixes import (
@@ -80,11 +86,10 @@ from .devices.model_fixes import (
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
-from .estimation.solar import clear_sky_normalized, normalize_irradiance
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
 from .safety.heating_failure import HeatingFailureDetector
-from .safety.sensor_watchdog import is_frozen
+from .safety.sensor_watchdog import is_frozen, sensor_at_heat_source
 from .storage import PoiseStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -425,16 +430,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async with self._lock:
             return await self._run_once()
 
-    async def _run_once(self) -> dict[str, Any]:
-        air = self._read(self._temp)
-        self._issue(
-            f"sensor_unavailable_{self._entry_id}",
-            air is None,
-            translation_key="sensor_unavailable",
-            placeholders={"entity": self._temp},
-        )
-        if air is None:
-            return {"available": False}
+    def _emit_health_issues(self) -> tuple[bool, bool, bool, bool]:
+        """Raise/clear device-health repair issues; return the status flags."""
         self._issue(
             f"actuator_unavailable_{self._entry_id}",
             self.hass.states.get(self._actuator) is None,
@@ -475,6 +472,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 translation_key="low_battery",
                 placeholders={"entity": self._battery_entity},
             )
+        heat_source_suspect = sensor_at_heat_source(
+            self._ekf.tau_hours,
+            self._ekf.identified,
+            min_plausible_tau_h=MIN_PLAUSIBLE_TAU_H,
+        )
+        self._issue(
+            f"sensor_at_heat_source_{self._entry_id}",
+            heat_source_suspect,
+            translation_key="sensor_at_heat_source",
+            placeholders={"entity": self._temp},
+        )
+        return frozen, sched_active, fault_active, heat_source_suspect
+
+    async def _run_once(self) -> dict[str, Any]:
+        air = self._read(self._temp)
+        self._issue(
+            f"sensor_unavailable_{self._entry_id}",
+            air is None,
+            translation_key="sensor_unavailable",
+            placeholders={"entity": self._temp},
+        )
+        if air is None:
+            return {"available": False}
+        frozen, sched_active, fault_active, heat_source_suspect = (
+            self._emit_health_issues()
+        )
         now = self._clock.monotonic()
         reading = ingest_temperature([RawSample(air, now)], now=now)
         room = reading.value
@@ -482,37 +505,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # internal EN 16798-1 running mean, used when no external T_rm sensor.
         if t_out is not None:
             self._trm_tracker.observe(t_out, dt_util.now().toordinal())
-        t_rm_sensor = self._read(self._trm)
-        if t_rm_sensor is not None:
-            t_rm, t_rm_source = t_rm_sensor, "sensor"
-        elif self._trm_tracker.current is not None:
-            t_rm, t_rm_source = self._trm_tracker.current, "internal"
-        else:
-            t_rm = t_out
-            t_rm_source = "outdoor" if t_out is not None else None
+        t_rm, t_rm_source = select_t_rm(
+            self._read(self._trm), self._trm_tracker.current, t_out
+        )
         t_out_eff = t_out if t_out is not None else (t_rm if t_rm is not None else 5.0)
         t_rm_eff = t_rm if t_rm is not None else t_out_eff
         rh = self._read(self._humidity)
         # solar disturbance q_solar (normalised, ADR-0010): internal clear-sky
         # estimate always runs; a measured irradiance sensor overrides the value
         # used (shadow-estimator principle, ADR-0026).
-        elev = self._sun_elevation()
-        q_solar_internal = clear_sky_normalized(elev) if elev is not None else 0.0
-        ghi = self._read(self._irradiance)
-        if ghi is not None:
-            q_solar, q_solar_source = normalize_irradiance(ghi), "sensor"
-        elif elev is not None:
-            q_solar, q_solar_source = q_solar_internal, "internal"
-        else:
-            q_solar, q_solar_source = 0.0, "none"
+        q_solar, q_solar_source, q_solar_internal = select_q_solar(
+            self._sun_elevation(), self._read(self._irradiance)
+        )
         # virtual MRT (shadow, ADR-0017/0026): exterior envelope pulls MRT toward
         # outdoor + a solar radiant bump; a measured globe/MRT sensor overrides.
         mrt_internal = virtual_mrt(room, t_out_eff, q_solar)
-        mrt_sensor = self._read(self._mrt)
-        if mrt_sensor is not None:
-            t_mrt, mrt_source = mrt_sensor, "sensor"
-        else:
-            t_mrt, mrt_source = mrt_internal, "internal"
+        t_mrt, mrt_source = select_mrt(self._read(self._mrt), mrt_internal)
         window_open = self._window_open()
         can_heat, can_cool = self._capability()
         device_max = self._device_max()
@@ -606,25 +614,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             priority=self._priority,
         )
 
-        if window_open:
-            target = round(max(FROST_FLOOR_C, mold_min or FROST_FLOOR_C), 1)
-            mode = "off"
-        elif self._override is not None:
-            clamped = min(max(self._override, decision.heat_sp), decision.cool_sp)
-            target, mode = round(clamped, 1), "manual"
-        else:
-            target, mode = round(decision.write_setpoint, 1), decision.mode
-
-        # unconditional norm envelope (ASR A3.5 cap + frost/mould floor); the
-        # final hard clamp comfort/efficiency can never violate (K4/K7, G18).
-        norm_floor = max(FROST_FLOOR_C, mold_min or FROST_FLOOR_C)
-        if mode == "cool":
-            norm_binding: str | None = None
-        else:
-            nc = clamp_to_norm(target, floor=norm_floor)
-            target, norm_binding = nc.value, nc.binding
-
-        target = min(target, device_max)
+        wt = resolve_write_target(
+            window_open=window_open,
+            override=self._override,
+            heat_sp=decision.heat_sp,
+            cool_sp=decision.cool_sp,
+            write_setpoint=decision.write_setpoint,
+            comfort_mode=decision.mode,
+            frost_floor=FROST_FLOOR_C,
+            mold_min=mold_min,
+            device_max=device_max,
+        )
+        target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         heating = self._enabled and not window_open and mode == "heat"
         self._last_u_h = 1.0 if heating else 0.0
         self._last_q_solar = q_solar
@@ -734,6 +735,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "norm_binding": norm_binding,
             "device_schedule_active": sched_active,
             "device_alarm": fault_active,
+            "sensor_placement_suspect": heat_source_suspect,
             "trv_input_mode": (
                 "operative" if operative_active else ("air" if ext_num else "none")
             ),

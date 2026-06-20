@@ -62,6 +62,7 @@ _ATTRS = (
     "device_schedule_active",
     "device_alarm",
     "trv_input_mode",
+    "sensor_placement_suspect",
 )
 
 
