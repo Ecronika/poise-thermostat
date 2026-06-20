@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.15.0"
+VERSION: Final = "0.19.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -24,6 +24,7 @@ DEFAULT_FULL_POWER_RISE_C: Final = 20.0
 TEMP_PLAUSIBLE_MIN_C: Final = -50.0
 TEMP_PLAUSIBLE_MAX_C: Final = 60.0
 SENSOR_FREEZE_AFTER_S: Final = 1800.0
+LOW_BATTERY_PCT: Final = 15.0
 
 # Config-flow keys (ADR-0008)
 CONF_NAME: Final = "name"
@@ -44,6 +45,8 @@ CONF_SETBACK_DELTA: Final = "setback_delta"
 CONF_OPTIMAL_START: Final = "optimal_start"
 CONF_WEATHER: Final = "weather_entity"
 CONF_IRRADIANCE: Final = "irradiance_sensor"
+CONF_TRV_EXTERNAL_TEMP: Final = "trv_external_temp_input"
+CONF_OPERATIVE_INPUT: Final = "operative_input"
 DEFAULT_COMFORT_BASE: Final = 21.0
 DEFAULT_COMFORT_WEIGHT: Final = 70
 DEFAULT_SETBACK_DELTA: Final = 3.0

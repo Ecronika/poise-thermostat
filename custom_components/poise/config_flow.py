@@ -25,11 +25,13 @@ from .const import (
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
+    CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
@@ -117,6 +119,12 @@ def _schema() -> vol.Schema:
                     domain="sensor", device_class="irradiance"
                 )
             ),
+            vol.Optional(CONF_TRV_EXTERNAL_TEMP): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="number")
+            ),
+            vol.Required(
+                CONF_OPERATIVE_INPUT, default=False
+            ): selector.BooleanSelector(),
         }
     )
 

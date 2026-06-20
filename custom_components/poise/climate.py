@@ -57,6 +57,11 @@ _ATTRS = (
     "mrt_internal",
     "sensor_frozen",
     "norm_binding",
+    "seasonless_phase",
+    "seasonless_rate",
+    "device_schedule_active",
+    "device_alarm",
+    "trv_input_mode",
 )
 
 

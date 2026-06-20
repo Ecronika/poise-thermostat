@@ -42,11 +42,13 @@ from .const import (
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
+    CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
@@ -57,6 +59,7 @@ from .const import (
     EKF_SAVE_EVERY_TICKS,
     FORECAST_TTL_S,
     FROST_FLOOR_C,
+    LOW_BATTERY_PCT,
     SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
 )
@@ -67,8 +70,16 @@ from .control.optimal_start import (
     plan_preheat,
 )
 from .devices.capability import climate_capability
+from .devices.model_fixes import (
+    is_external_sensor_select,
+    is_low_battery,
+    looks_like_external_temp_number,
+    looks_like_fault_alarm,
+    looks_like_internal_schedule,
+)
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.running_mean import RunningMeanTracker
+from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.solar import clear_sky_normalized, normalize_irradiance
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
@@ -103,6 +114,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._clock = MonotonicClock()
         self._ekf = ThermalEKF()
         self._trm_tracker = RunningMeanTracker()
+        self._seasonless = SeasonlessRate()
+        self._prev_room: float | None = None
+        self._prev_room_mono: float | None = None
+        self._last_target: float | None = None
         self._store = PoiseStore(hass, entry.entry_id)
         self._failure = HeatingFailureDetector()
         self._last_mono: float | None = None
@@ -144,6 +159,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._optimal_start: bool = bool(data.get(CONF_OPTIMAL_START, True))
         self._weather: str | None = data.get(CONF_WEATHER)
         self._irradiance: str | None = data.get(CONF_IRRADIANCE)
+        self._trv_ext_temp: str | None = data.get(CONF_TRV_EXTERNAL_TEMP)
+        self._operative_input: bool = bool(data.get(CONF_OPERATIVE_INPUT, False))
+        self._guards_resolved = False
+        self._sched_entity: str | None = None
+        self._fault_entity: str | None = None
+        self._battery_entity: str | None = None
+        self._ext_temp_auto: str | None = None
+        self._sensor_select: str | None = None
         self._forecast: list[tuple[float, float]] = []
         self._forecast_at: float | None = None
 
@@ -165,10 +188,65 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._ekf = ThermalEKF.from_dict(data["ekf"])
                 if isinstance(data.get("trm"), dict):
                     self._trm_tracker = RunningMeanTracker.from_dict(data["trm"])
+                if isinstance(data.get("seasonless"), dict):
+                    self._seasonless = SeasonlessRate.from_dict(data["seasonless"])
             elif data is not None:
                 self._ekf = ThermalEKF.from_dict(data)  # legacy: bare EKF dict
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
             _LOGGER.exception("Poise: failed to restore learned model; starting fresh")
+        # cold-start prior (ADR-0004): seed beta_h from the seasonless estimate
+        # only while the EKF has never observed heating (e.g. new season); once it
+        # learns from real heating it owns the parameter (never parallel, G6).
+        if self._ekf.n_heating == 0 and self._seasonless.phase in (
+            "learning",
+            "mature",
+        ):
+            t_out = self._seasonless.mean_outdoor
+            if t_out is not None:
+                prior = self._seasonless.heat_rate_prior(
+                    self._comfort_base, t_out, dt_util.now().toordinal()
+                )
+                if prior is not None:
+                    self._ekf.seed_beta_h(prior)
+
+    def _resolve_device_guards(self) -> None:
+        """Find schedule/fault/battery entities on the actuator's device (once)."""
+        if self._guards_resolved:
+            return
+        self._guards_resolved = True
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            reg = er.async_get(self.hass)
+            ent = reg.async_get(self._actuator)
+            if ent is None or ent.device_id is None:
+                return
+            for e in er.async_entries_for_device(
+                reg, ent.device_id, include_disabled_entities=False
+            ):
+                eid = e.entity_id
+                if self._sched_entity is None and looks_like_internal_schedule(eid):
+                    self._sched_entity = eid
+                elif self._fault_entity is None and looks_like_fault_alarm(eid):
+                    self._fault_entity = eid
+                elif (
+                    self._battery_entity is None
+                    and eid.startswith("sensor.")
+                    and e.original_device_class == "battery"
+                ):
+                    self._battery_entity = eid
+                elif self._ext_temp_auto is None and looks_like_external_temp_number(
+                    eid, e.original_device_class
+                ):
+                    self._ext_temp_auto = eid
+                elif self._sensor_select is None and eid.startswith("select."):
+                    sel = self.hass.states.get(eid)
+                    if is_external_sensor_select(
+                        eid, sel.attributes.get("options") if sel else None
+                    ):
+                        self._sensor_select = eid
+        except Exception:  # noqa: BLE001 - guard resolution must never break setup
+            _LOGGER.debug("Poise: device-guard resolution failed", exc_info=True)
 
     def _issue(
         self,
@@ -284,6 +362,25 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._last_mono = now
 
+    def _observe_seasonless(self, room: float, t_out: float) -> None:
+        """Record a normalised heat-up rate while heating (shadow, ADR-0004/0026)."""
+        now = self._clock.monotonic()
+        if (
+            self._prev_room is not None
+            and self._prev_room_mono is not None
+            and self._last_target is not None
+            and self._last_u_h > 0.5  # heating drove the just-elapsed interval
+        ):
+            dt_h = (now - self._prev_room_mono) / 3600.0
+            if 0.0 < dt_h < 1.0:
+                rate = (room - self._prev_room) / dt_h
+                if rate > 0.0:
+                    self._seasonless.observe(
+                        rate, self._last_target, t_out, dt_util.now().toordinal()
+                    )
+        self._prev_room = room
+        self._prev_room_mono = now
+
     async def _notify_failure(self, failed: bool) -> None:
         if failed and not self._failure_notified:
             self._failure_notified = True
@@ -315,7 +412,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._save_counter = 0
             try:
                 await self._store.save(
-                    {"ekf": self._ekf.to_dict(), "trm": self._trm_tracker.to_dict()}
+                    {
+                        "ekf": self._ekf.to_dict(),
+                        "trm": self._trm_tracker.to_dict(),
+                        "seasonless": self._seasonless.to_dict(),
+                    }
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Poise: failed to persist learned model")
@@ -347,6 +448,33 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             translation_key="sensor_frozen",
             placeholders={"entity": self._temp},
         )
+        self._resolve_device_guards()
+        sched_active = fault_active = False
+        if self._sched_entity:
+            st = self.hass.states.get(self._sched_entity)
+            sched_active = st is not None and st.state == "on"
+            self._issue(
+                f"device_schedule_{self._entry_id}",
+                sched_active,
+                translation_key="device_schedule",
+                placeholders={"entity": self._sched_entity},
+            )
+        if self._fault_entity:
+            st = self.hass.states.get(self._fault_entity)
+            fault_active = st is not None and st.state == "on"
+            self._issue(
+                f"device_alarm_{self._entry_id}",
+                fault_active,
+                translation_key="device_alarm",
+                placeholders={"entity": self._fault_entity},
+            )
+        if self._battery_entity:
+            self._issue(
+                f"low_battery_{self._entry_id}",
+                is_low_battery(self._read(self._battery_entity), LOW_BATTERY_PCT),
+                translation_key="low_battery",
+                placeholders={"entity": self._battery_entity},
+            )
         now = self._clock.monotonic()
         reading = ingest_temperature([RawSample(air, now)], now=now)
         room = reading.value
@@ -391,6 +519,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not window_open and not frozen:
             self._learn(room, t_out_eff)
+        self._observe_seasonless(room, t_out_eff)
 
         # mould floor + dewpoint cap from humidity
         mold_min = None
@@ -436,16 +565,41 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         preheating = plan.preheating
         preheat_outdoor = plan.preheat_outdoor
 
+        # operative TRV-input mode (ADR-0029): write the operative target and feed
+        # the operative temperature, IF the thermostat can be calibrated to an
+        # external sensor (i.e. a valid external-temperature input). Otherwise fall
+        # back to air-side control and flag a repair issue (fault tolerance).
+        # external-temp input: explicit config, else auto-detected on the device
+        # (pavax-verified). The number is write-only, so a "unknown" state is fine;
+        # only "unavailable" means the device is offline (ADR-0029).
+        ext_num = self._trv_ext_temp or (
+            self._ext_temp_auto if self._operative_input else None
+        )
+        ext_state = self.hass.states.get(ext_num) if ext_num else None
+        ext_ok = ext_state is not None and ext_state.state != "unavailable"
+        operative_active = self._operative_input and ext_ok
+        self._issue(
+            f"operative_unsupported_{self._entry_id}",
+            self._operative_input and not ext_ok,
+            translation_key="operative_unsupported",
+            placeholders={"entity": ext_num or "—"},
+        )
+        if operative_active:
+            room_decide = operative_temperature(room, t_mrt)
+            t_mrt_decide: float | None = None  # MRT lives in the fed/written values
+        else:
+            room_decide = room
+            t_mrt_decide = t_mrt
         decision = comfort_decide(
             t_rm=t_rm_eff,
-            room=room,
+            room=room_decide,
             category=self._category,
             comfort_base=base,
             can_heat=can_heat,
             can_cool=can_cool,
             climate_mode=self._climate_mode,
             t_out=t_out_eff,
-            t_mrt=t_mrt,
+            t_mrt=t_mrt_decide,
             frost_floor=FROST_FLOOR_C,
             mold_min=mold_min,
             dewpoint=dewpoint,
@@ -474,12 +628,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         heating = self._enabled and not window_open and mode == "heat"
         self._last_u_h = 1.0 if heating else 0.0
         self._last_q_solar = q_solar
+        self._last_target = target
 
-        failed = self._failure.update(
-            now_h=now / 3600.0,
-            room=room,
-            setpoint=target,
-            heating=heating,
+        failed = (
+            self._failure.update(
+                now_h=now / 3600.0,
+                room=room,
+                setpoint=target,
+                heating=heating,
+            )
+            or fault_active
         )
         await self._notify_failure(failed)
 
@@ -491,6 +649,43 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 await actuator_mod.write(self.hass, cmd)
             except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                 _LOGGER.exception("Poise: actuator write failed for %s", self._actuator)
+            # feed the true room temperature to a TRV external-temperature input
+            # (ADR-0029): the thermostat then modulates against the real sensor.
+            if ext_num and ext_ok:
+                # ensure the TRV uses its external sensor (pavax-verified); on the
+                # tick we switch it, skip the write so the device can settle.
+                switched = False
+                if self._sensor_select:
+                    sel = self.hass.states.get(self._sensor_select)
+                    if sel is not None and sel.state not in ("external", "unavailable"):
+                        try:
+                            await self.hass.services.async_call(
+                                "select",
+                                "select_option",
+                                {
+                                    "entity_id": self._sensor_select,
+                                    "option": "external",
+                                },
+                                blocking=False,
+                            )
+                            switched = True
+                        except Exception:  # noqa: BLE001
+                            _LOGGER.exception("Poise: sensor-select switch failed")
+                if not switched:
+                    fed = (
+                        operative_temperature(room, t_mrt) if operative_active else room
+                    )
+                    try:
+                        await self.hass.services.async_call(
+                            "number",
+                            "set_value",
+                            {"entity_id": ext_num, "value": round(fed, 1)},
+                            blocking=False,
+                        )
+                    except Exception:  # noqa: BLE001 - feed is best-effort
+                        _LOGGER.exception(
+                            "Poise: external-temp write failed for %s", ext_num
+                        )
 
         await self._maybe_save()
 
@@ -537,4 +732,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "preheat_outdoor": preheat_outdoor,
             "sensor_frozen": frozen,
             "norm_binding": norm_binding,
+            "device_schedule_active": sched_active,
+            "device_alarm": fault_active,
+            "trv_input_mode": (
+                "operative" if operative_active else ("air" if ext_num else "none")
+            ),
+            "seasonless_phase": self._seasonless.phase,
+            "seasonless_rate": (
+                round(p, 3)
+                if (
+                    p := self._seasonless.heat_rate_prior(
+                        decision.heat_sp, t_out_eff, dt_util.now().toordinal()
+                    )
+                )
+                is not None
+                else None
+            ),
         }
