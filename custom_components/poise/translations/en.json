@@ -92,6 +92,22 @@
     "sensor_frozen": {
       "title": "Poise: room sensor frozen",
       "description": "The room temperature sensor `{entity}` has not changed for a long time and may be stuck (dead battery, stalled integration). Poise paused learning for this room; control continues on the last value. The issue clears once the sensor updates again."
+    },
+    "device_schedule": {
+      "title": "Poise: thermostat's own schedule is active",
+      "description": "The controlled thermostat `{entity}` has its built-in weekly schedule switched on. It will fight Poise's control. Turn the device schedule off; Poise then owns the setpoint."
+    },
+    "device_alarm": {
+      "title": "Poise: thermostat reports a fault",
+      "description": "The thermostat `{entity}` reports a valve/installation fault (e.g. not mounted correctly, valve failure, wrong calibration, or a broken link to the external sensor). Heating may not work; check the device."
+    },
+    "low_battery": {
+      "title": "Poise: thermostat battery low",
+      "description": "The battery of `{entity}` is low. Sensing and valve actuation may degrade — replace the battery soon."
+    },
+    "operative_unsupported": {
+      "title": "Poise: operative input not available",
+      "description": "Operative TRV input is enabled, but no usable external-temperature input (`{entity}`) is available for this thermostat. Poise fell back to air-side control. Configure a valid external-temperature number, or turn off operative input."
     }
   }
 }

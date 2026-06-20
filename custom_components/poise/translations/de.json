@@ -92,6 +92,22 @@
     "sensor_frozen": {
       "title": "Poise: Raumsensor eingefroren",
       "description": "Der Raumtemperatur-Sensor `{entity}` hat sich lange nicht verändert und steckt möglicherweise fest (leere Batterie, hängende Integration). Poise hat das Lernen für diesen Raum pausiert; die Regelung läuft mit dem letzten Wert weiter. Der Hinweis verschwindet, sobald der Sensor wieder aktualisiert."
+    },
+    "device_schedule": {
+      "title": "Poise: Eigener Zeitplan des Thermostats aktiv",
+      "description": "Das gesteuerte Thermostat `{entity}` hat seinen internen Wochenplan eingeschaltet. Der kämpft gegen die Poise-Regelung. Schalte den Geräte-Zeitplan aus; Poise übernimmt dann den Sollwert."
+    },
+    "device_alarm": {
+      "title": "Poise: Thermostat meldet einen Fehler",
+      "description": "Das Thermostat `{entity}` meldet einen Ventil-/Installationsfehler (z. B. falsch montiert, Ventildefekt, falsche Kalibrierung oder gestörte Verknüpfung zum externen Sensor). Heizen funktioniert evtl. nicht — Gerät prüfen."
+    },
+    "low_battery": {
+      "title": "Poise: Thermostat-Batterie schwach",
+      "description": "Die Batterie von `{entity}` ist schwach. Messung und Ventilansteuerung können nachlassen — Batterie bald wechseln."
+    },
+    "operative_unsupported": {
+      "title": "Poise: Operativ-Eingang nicht verfügbar",
+      "description": "Der operative TRV-Eingang ist aktiviert, aber für dieses Thermostat ist kein nutzbarer externer Temperatureingang (`{entity}`) verfügbar. Poise hat auf luftseitige Regelung zurückgeschaltet. Konfiguriere eine gültige externe Temperatur-Number oder schalte den Operativ-Eingang ab."
     }
   }
 }
