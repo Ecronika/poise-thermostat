@@ -62,6 +62,7 @@ from .const import (
     MIN_PLAUSIBLE_TAU_H,
     SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
+    WRITE_DEADBAND_C,
 )
 from .contracts import ActuatorCommand, ActuatorPath
 from .control.mpc_shadow import evaluate_shadow
@@ -75,6 +76,7 @@ from .control.tick_resolve import (
     select_mrt,
     select_q_solar,
     select_t_rm,
+    should_write,
 )
 from .devices.capability import climate_capability
 from .devices.model_fixes import (
@@ -116,6 +118,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=DOMAIN,
             update_interval=timedelta(seconds=TICK_INTERVAL_S),
+            # skip redundant entity notifications when a tick's data is unchanged
+            always_update=False,
         )
         self._clock = MonotonicClock()
         self._ekf = ThermalEKF()
@@ -124,6 +128,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._prev_room: float | None = None
         self._prev_room_mono: float | None = None
         self._last_target: float | None = None
+        self._last_written: float | None = None
+        self._last_written_mode: str | None = None
+        self._last_fed: float | None = None
+        self._dirty = False  # override/enabled/mode changed -> persist next save
         self._store = PoiseStore(hass, entry.entry_id)
         self._failure = HeatingFailureDetector()
         self._last_mono: float | None = None
@@ -185,9 +193,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def set_enabled(self, value: bool) -> None:
         self._enabled = value
+        self._dirty = True
 
     def set_override(self, target: float | None) -> None:
         self._override = target
+        self._dirty = True
+
+    def set_climate_mode(self, mode: str) -> None:
+        self._climate_mode = mode
+        self._dirty = True
+
+    @property
+    def capability(self) -> tuple[bool, bool]:
+        """(can_heat, can_cool) of the actuator (review P2 cooling modes)."""
+        return self._capability()
+
+    @property
+    def climate_mode(self) -> str:
+        return self._climate_mode
 
     async def async_bootstrap(self) -> None:
         """Restore the learned EKF before the first control tick (ADR-0007)."""
@@ -199,6 +222,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._trm_tracker = RunningMeanTracker.from_dict(data["trm"])
                 if isinstance(data.get("seasonless"), dict):
                     self._seasonless = SeasonlessRate.from_dict(data["seasonless"])
+                self._enabled = bool(data.get("enabled", True))
+                ov = data.get("override")
+                self._override = float(ov) if isinstance(ov, (int, float)) else None
+                cm = data.get("climate_mode")
+                if isinstance(cm, str):
+                    self._climate_mode = cm
             elif data is not None:
                 self._ekf = ThermalEKF.from_dict(data)  # legacy: bare EKF dict
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
@@ -290,7 +319,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state = self.hass.states.get(entity_id)
         if state is None:
             return None
-        return (dt_util.utcnow() - state.last_changed).total_seconds()
+        # last_updated (not last_changed): a healthy sensor reporting a stable
+        # value still updates, so we only flag a truly stalled feed (review P1).
+        return (dt_util.utcnow() - state.last_updated).total_seconds()
 
     def _local_minute(self) -> int:
         now = dt_util.now()
@@ -415,20 +446,46 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 blocking=False,
             )
 
+    def _save_payload(self) -> dict[str, Any]:
+        return {
+            "ekf": self._ekf.to_dict(),
+            "trm": self._trm_tracker.to_dict(),
+            "seasonless": self._seasonless.to_dict(),
+            "enabled": self._enabled,
+            "override": self._override,
+            "climate_mode": self._climate_mode,
+        }
+
     async def _maybe_save(self) -> None:
         self._save_counter += 1
-        if self._save_counter >= EKF_SAVE_EVERY_TICKS:
+        if self._save_counter >= EKF_SAVE_EVERY_TICKS or self._dirty:
             self._save_counter = 0
+            self._dirty = False
             try:
-                await self._store.save(
-                    {
-                        "ekf": self._ekf.to_dict(),
-                        "trm": self._trm_tracker.to_dict(),
-                        "seasonless": self._seasonless.to_dict(),
-                    }
-                )
+                await self._store.save(self._save_payload())
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Poise: failed to persist learned model")
+
+    async def async_persist_and_cleanup(self) -> None:
+        """Final save + repair-issue/notification cleanup on unload (review P1.3)."""
+        try:
+            await self._store.save(self._save_payload())
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Poise: final save on unload failed")
+        for issue_id in list(self._active_issues):
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+        self._active_issues.clear()
+        if self._failure_notified:
+            self._failure_notified = False
+            try:
+                await self.hass.services.async_call(
+                    "persistent_notification",
+                    "dismiss",
+                    {"notification_id": self._notif_id},
+                    blocking=False,
+                )
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Poise: notification dismiss on unload failed")
 
     async def _async_update_data(self) -> dict[str, Any]:
         async with self._lock:
@@ -634,6 +691,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             device_max=device_max,
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
+        binding_precedence = wt.binding_precedence
         heating = self._enabled and not window_open and mode == "heat"
         self._last_u_h = 1.0 if heating else 0.0
         self._last_q_solar = q_solar
@@ -651,13 +709,23 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._notify_failure(failed)
 
         if self._enabled:
-            cmd = ActuatorCommand(
-                self._actuator, ActuatorPath.SETPOINT, target, "heat", mode, None
-            )
-            try:
-                await actuator_mod.write(self.hass, cmd)
-            except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
-                _LOGGER.exception("Poise: actuator write failed for %s", self._actuator)
+            mode_changed = mode != self._last_written_mode
+            if should_write(
+                self._last_written,
+                target,
+                mode_changed=mode_changed,
+                deadband=WRITE_DEADBAND_C,
+            ):
+                cmd = ActuatorCommand(
+                    self._actuator, ActuatorPath.SETPOINT, target, "heat", mode, None
+                )
+                try:
+                    await actuator_mod.write(self.hass, cmd)
+                    self._last_written, self._last_written_mode = target, mode
+                except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
+                    _LOGGER.exception(
+                        "Poise: actuator write failed for %s", self._actuator
+                    )
             # feed the true room temperature to a TRV external-temperature input
             # (ADR-0029): the thermostat then modulates against the real sensor.
             if ext_num and ext_ok:
@@ -681,20 +749,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         except Exception:  # noqa: BLE001
                             _LOGGER.exception("Poise: sensor-select switch failed")
                 if not switched:
-                    fed = (
-                        operative_temperature(room, t_mrt) if operative_active else room
+                    fed = round(
+                        operative_temperature(room, t_mrt)
+                        if operative_active
+                        else room,
+                        1,
                     )
-                    try:
-                        await self.hass.services.async_call(
-                            "number",
-                            "set_value",
-                            {"entity_id": ext_num, "value": round(fed, 1)},
-                            blocking=False,
-                        )
-                    except Exception:  # noqa: BLE001 - feed is best-effort
-                        _LOGGER.exception(
-                            "Poise: external-temp write failed for %s", ext_num
-                        )
+                    if should_write(
+                        self._last_fed, fed, mode_changed=False, deadband=0.1
+                    ):
+                        try:
+                            await self.hass.services.async_call(
+                                "number",
+                                "set_value",
+                                {"entity_id": ext_num, "value": fed},
+                                blocking=False,
+                            )
+                            self._last_fed = fed
+                        except Exception:  # noqa: BLE001 - feed is best-effort
+                            _LOGGER.exception(
+                                "Poise: external-temp write failed for %s", ext_num
+                            )
 
         await self._maybe_save()
 
@@ -760,6 +835,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "minutes_to_setback": sched.minutes_to_setback,
             "sensor_frozen": frozen,
             "norm_binding": norm_binding,
+            "binding_precedence": binding_precedence,
             "device_schedule_active": sched_active,
             "device_alarm": fault_active,
             "sensor_placement_suspect": heat_source_suspect,

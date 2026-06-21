@@ -8,7 +8,8 @@ arrives in Phase 4; the seam (requests in, one command out) is fixed now.
 
 from __future__ import annotations
 
-from .contracts import ActuatorCommand, ComfortCorridor, ControlRequest
+from .constraints import Constraint, ConstraintKind, resolve_constraints
+from .contracts import ActuatorCommand, ComfortCorridor, ControlRequest, Precedence
 
 
 def resolve(
@@ -24,14 +25,23 @@ def resolve(
         if request.target_setpoint is not None
         else corridor.target
     )
-    value, clamped_by = corridor.clamp(desired)
-    if value > device_max:
-        value, clamped_by = device_max, "device_max"
+    constraints = [
+        *(
+            Constraint(b.value, b.cause, ConstraintKind.FLOOR, Precedence.HEALTH)
+            for b in corridor.lower
+        ),
+        *(
+            Constraint(b.value, b.cause, ConstraintKind.CAP, Precedence.COMFORT)
+            for b in corridor.upper
+        ),
+        Constraint(device_max, "device_max", ConstraintKind.CAP, Precedence.SAFETY),
+    ]
+    res = resolve_constraints(desired, constraints)
     return ActuatorCommand(
         actuator_id=request.actuator_id,
         path=request.path,
-        value=round(value, 1),
+        value=round(res.value, 1),
         hvac_mode=hvac_mode,
         reason=request.reason,
-        clamped_by=clamped_by,
+        clamped_by=res.binding.cause if res.binding else None,
     )

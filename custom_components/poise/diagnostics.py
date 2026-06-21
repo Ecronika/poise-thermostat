@@ -1,35 +1,24 @@
-"""Config-entry diagnostics with redaction (ADR-0012/0022)."""
+"""Config-entry diagnostics with redaction (ADR-0012/0022).
+
+The assembly + redaction live in the HA-free ``diagnostics_data`` module so they
+are unit-tested directly; this thin wrapper only pulls the runtime objects.
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.diagnostics import async_redact_data
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from .diagnostics_data import build_diagnostics
 
-from .coordinator import PoiseCoordinator
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
 
-# Entity ids are not secrets, but redact them so shared diagnostics do not leak
-# a user's naming / setup details.
-_REDACT = {
-    "temp_sensor",
-    "actuator",
-    "trm_sensor",
-    "outdoor_sensor",
-    "humidity_sensor",
-    "mrt_sensor",
-    "window_sensor",
-    "weather_entity",
-    "irradiance_sensor",
-}
+    from .coordinator import PoiseCoordinator
 
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     coordinator: PoiseCoordinator = entry.runtime_data
-    return {
-        "config": async_redact_data(dict(entry.data), _REDACT),
-        "data": coordinator.data,
-    }
+    return build_diagnostics(entry.data, coordinator.data)

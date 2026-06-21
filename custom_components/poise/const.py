@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.23.0"
+VERSION: Final = "0.27.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -15,6 +15,9 @@ DEFAULT_TARGET_C: Final = 21.0
 FROST_FLOOR_C: Final = 7.0
 DEVICE_MAX_C: Final = 30.0
 BANGBANG_HYSTERESIS_C: Final = 0.3
+# Only (re)write the actuator setpoint on a change of at least this much, or a
+# mode change — spares battery/Zigbee TRVs from per-tick traffic (ADR-0012).
+WRITE_DEADBAND_C: Final = 0.2
 
 # Thermal model defaults (ADR-0009; ~6.7 h time constant, moderate residential room)
 DEFAULT_ALPHA_PER_S: Final = 0.15 / 3600.0

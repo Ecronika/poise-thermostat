@@ -23,6 +23,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DEVICE_MAX_C, DOMAIN, FROST_FLOOR_C
 from .coordinator import PoiseCoordinator
+from .devices.hvac_modes import (
+    available_hvac_modes,
+    climate_mode_for_hvac,
+    current_hvac_mode,
+)
 
 _ATTRS = (
     "operative_temperature",
@@ -59,6 +64,7 @@ _ATTRS = (
     "mrt_internal",
     "sensor_frozen",
     "norm_binding",
+    "binding_precedence",
     "seasonless_phase",
     "seasonless_rate",
     "device_schedule_active",
@@ -86,7 +92,6 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
     _attr_has_entity_name = True
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
-    _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_ON
@@ -124,14 +129,31 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
         return self._d.get("target_temperature")
 
     @property
+    def hvac_modes(self) -> list[HVACMode]:
+        can_heat, can_cool = self.coordinator.capability
+        return [HVACMode(m) for m in available_hvac_modes(can_heat, can_cool)]
+
+    @property
     def hvac_mode(self) -> HVACMode:
-        return HVACMode.HEAT if self.coordinator.enabled else HVACMode.OFF
+        can_heat, can_cool = self.coordinator.capability
+        return HVACMode(
+            current_hvac_mode(
+                self.coordinator.enabled,
+                self.coordinator.climate_mode,
+                can_heat,
+                can_cool,
+            )
+        )
 
     @property
     def hvac_action(self) -> HVACAction:
         if not self.coordinator.enabled:
             return HVACAction.OFF
-        return HVACAction.HEATING if self._d.get("heating") else HVACAction.IDLE
+        if self._d.get("heating"):
+            return HVACAction.HEATING
+        if self._d.get("mode") == "cool":
+            return HVACAction.COOLING
+        return HVACAction.IDLE
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -144,7 +166,11 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
             await self.coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        self.coordinator.set_enabled(hvac_mode == HVACMode.HEAT)
+        if hvac_mode == HVACMode.OFF:
+            self.coordinator.set_enabled(False)
+        else:
+            self.coordinator.set_enabled(True)
+            self.coordinator.set_climate_mode(climate_mode_for_hvac(hvac_mode.value))
         await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:

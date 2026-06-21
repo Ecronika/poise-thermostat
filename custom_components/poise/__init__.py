@@ -31,6 +31,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.const import Platform
 
-    return await hass.config_entries.async_unload_platforms(
+    unloaded = await hass.config_entries.async_unload_platforms(
         entry, [Platform.CLIMATE, Platform.SENSOR]
     )
+    if unloaded:
+        # final save + repair-issue/notification cleanup (no learning loss)
+        await entry.runtime_data.async_persist_and_cleanup()
+    return unloaded

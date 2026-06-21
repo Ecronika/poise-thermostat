@@ -7,7 +7,7 @@ else. Phase 0 implements only the setpoint path; the capability-matrix paths
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .contracts import ActuatorCommand, ActuatorPath
 
@@ -15,14 +15,22 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 
-async def write(hass: HomeAssistant, command: ActuatorCommand) -> None:
-    """Translate one arbitrated command into exactly one HA service call."""
+def service_call_for(command: ActuatorCommand) -> tuple[str, str, dict[str, Any]]:
+    """The (domain, service, data) for one command — pure, HA-free, testable.
+
+    Phase 0 implements only the setpoint path; other capability-matrix paths
+    (tpi_valve / calibration / pi_setpoint) are not wired yet (ADR-0015).
+    """
     if command.path is ActuatorPath.SETPOINT:
-        await hass.services.async_call(
+        return (
             "climate",
             "set_temperature",
             {"entity_id": command.actuator_id, "temperature": command.value},
-            blocking=False,
         )
-        return
     raise NotImplementedError(f"actuator path not in Phase 0: {command.path}")
+
+
+async def write(hass: HomeAssistant, command: ActuatorCommand) -> None:
+    """Translate one arbitrated command into exactly one HA service call."""
+    domain, service, data = service_call_for(command)
+    await hass.services.async_call(domain, service, data, blocking=False)
