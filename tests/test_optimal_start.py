@@ -94,3 +94,53 @@ def test_forecast_mean_partial_window_weights_by_time() -> None:
     samples = [(0.0, 0.0), (30.0, 0.0), (60.0, 12.0)]
     # area = 0 over [0,30] + trapezoid 0->12 over [30,60] = 0.5*12*30 = 180; /60 = 3
     assert mean_forecast_outdoor(samples, 60.0, fallback=99.0) == pytest.approx(3.0)
+
+
+def test_plan_preheat_coasts_at_window_end() -> None:
+    from custom_components.poise.control.optimal_start import plan_preheat
+    from custom_components.poise.estimation.thermal_ekf import ThermalModel
+
+    model = ThermalModel(alpha=0.15, beta_h=3.0, beta_c=0.0, beta_s=0.0, beta_o=0.0)
+    plan = plan_preheat(
+        comfort_base=21.0,
+        is_comfort=True,
+        setback_offset=0.0,
+        minutes_to_comfort=0.0,
+        optimal_start_enabled=True,
+        can_heat=True,
+        identified=True,
+        model=model,
+        room=21.0,
+        t_out_lead=5.0,
+        heat_lower=20.0,
+        heat_upper=24.0,
+        optimal_stop_enabled=True,
+        minutes_to_setback=5.0,
+        coast_lower=20.0,
+    )
+    assert plan.coasting and plan.base == 20.0
+
+
+def test_plan_preheat_no_coast_when_disabled() -> None:
+    from custom_components.poise.control.optimal_start import plan_preheat
+    from custom_components.poise.estimation.thermal_ekf import ThermalModel
+
+    model = ThermalModel(alpha=0.15, beta_h=3.0, beta_c=0.0, beta_s=0.0, beta_o=0.0)
+    plan = plan_preheat(
+        comfort_base=21.0,
+        is_comfort=True,
+        setback_offset=0.0,
+        minutes_to_comfort=0.0,
+        optimal_start_enabled=True,
+        can_heat=True,
+        identified=True,
+        model=model,
+        room=21.0,
+        t_out_lead=5.0,
+        heat_lower=20.0,
+        heat_upper=24.0,
+        optimal_stop_enabled=False,
+        minutes_to_setback=5.0,
+        coast_lower=20.0,
+    )
+    assert not plan.coasting and plan.base == 21.0

@@ -63,3 +63,21 @@ def test_parse_hhmm_variants() -> None:
     assert parse_hhmm(None) is None
     assert parse_hhmm("24:00") is None
     assert parse_hhmm("garbage") is None
+
+
+def test_minutes_to_setback_reports_window_end() -> None:
+    from custom_components.poise.comfort.schedule import ComfortSchedule, ComfortWindow
+
+    sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320)])  # 06:00-22:00
+    st = sched.state_at(600)  # 10:00, inside window
+    assert st.is_comfort and st.minutes_to_setback == 720  # 22:00 - 10:00
+    out = sched.state_at(60)  # 01:00, setback
+    assert not out.is_comfort and out.minutes_to_setback == 0
+
+
+def test_parse_hhmm_rejects_non_numeric() -> None:
+    from custom_components.poise.comfort.schedule import parse_hhmm
+
+    assert parse_hhmm("ab:cd") is None
+    assert parse_hhmm("noon") is None
+    assert parse_hhmm("25:00") is None

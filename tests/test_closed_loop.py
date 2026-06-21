@@ -85,3 +85,17 @@ def test_mpc_controller_gate_blends_with_identified_model() -> None:
     assert cold.power > 0.5 and cold.regime == "heat"  # heats a cold room
     assert warm.power == 0.0 and warm.regime == "idle"  # idles a warm room
     assert "w=1.00" in cold.reason  # identified -> MPC fully weighted (no cliff)
+
+
+def test_optimal_stop_coast_matches_plant() -> None:
+    from custom_components.poise.control.optimal_stop import coastdown_minutes
+
+    plant = RCPlant()
+    model = run_identification(plant).ekf.get_model()
+    room0, target, t_out, dt = 22.0, 20.0, 5.0, 60.0
+    lead = coastdown_minutes(model, room=room0, target=target, t_out=t_out)
+    assert lead is not None and 0.0 < lead < 240.0
+    air = room0
+    for _ in range(int(round(lead * 60.0 / dt))):
+        air = plant.step(air, 0.0, t_out, dt)  # heater off -> coast
+    assert abs(air - target) < 0.3  # lands at the lower comfort edge on schedule
