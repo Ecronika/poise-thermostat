@@ -171,6 +171,8 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
         else:
             self.coordinator.set_enabled(True)
             self.coordinator.set_climate_mode(climate_mode_for_hvac(hvac_mode.value))
+        # selecting a mode returns to automatic control: clear any manual hold (M2)
+        self.coordinator.set_override(None)
         await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:

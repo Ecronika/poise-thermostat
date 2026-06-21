@@ -109,6 +109,16 @@ def _num(state: State | None) -> float | None:
         return None
 
 
+def _num_attr(state: State | None, key: str) -> float | None:
+    """Read a numeric attribute (e.g. a climate setpoint) or None."""
+    if state is None or state.state == "unavailable":
+        return None
+    try:
+        return float(state.attributes.get(key))
+    except (ValueError, TypeError):
+        return None
+
+
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """One coordinator per room; capability-aware dual-setpoint each tick."""
 
@@ -128,7 +138,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._prev_room: float | None = None
         self._prev_room_mono: float | None = None
         self._last_target: float | None = None
-        self._last_written: float | None = None
         self._last_written_mode: str | None = None
         self._last_fed: float | None = None
         self._dirty = False  # override/enabled/mode changed -> persist next save
@@ -709,9 +718,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._notify_failure(failed)
 
         if self._enabled:
+            # Compare to the actuator's *actual* setpoint, not our last command, so
+            # we re-assert when something external (e.g. an "off"/away automation)
+            # changed it, while still skipping writes when it already matches
+            # (review P1.2; live-test finding 2026-06-21).
+            actual_sp = _num_attr(self.hass.states.get(self._actuator), "temperature")
             mode_changed = mode != self._last_written_mode
             if should_write(
-                self._last_written,
+                actual_sp,
                 target,
                 mode_changed=mode_changed,
                 deadband=WRITE_DEADBAND_C,
@@ -721,7 +735,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
                 try:
                     await actuator_mod.write(self.hass, cmd)
-                    self._last_written, self._last_written_mode = target, mode
+                    self._last_written_mode = mode
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
                         "Poise: actuator write failed for %s", self._actuator
