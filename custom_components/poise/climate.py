@@ -48,6 +48,8 @@ _ATTRS = (
     "minutes_to_comfort",
     "preheating",
     "preheat_outdoor",
+    "coasting",
+    "minutes_to_setback",
     "q_solar",
     "q_solar_source",
     "q_solar_internal",

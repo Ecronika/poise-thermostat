@@ -163,6 +163,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         else:
             self._schedule = ComfortSchedule.always_comfort()
         self._optimal_start: bool = bool(data.get(CONF_OPTIMAL_START, True))
+        # optimal-stop coasts to the lower comfort edge before window end; for
+        # now coupled to optimal-start (predictive scheduling), splittable later.
+        self._optimal_stop: bool = self._optimal_start
         self._weather: str | None = data.get(CONF_WEATHER)
         self._irradiance: str | None = data.get(CONF_IRRADIANCE)
         self._trv_ext_temp: str | None = data.get(CONF_TRV_EXTERNAL_TEMP)
@@ -569,10 +572,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             t_out_lead=t_out_lead,
             heat_lower=lo,
             heat_upper=hi,
+            optimal_stop_enabled=self._optimal_stop,
+            minutes_to_setback=float(sched.minutes_to_setback),
+            coast_lower=lo,
         )
         base = plan.base
         preheating = plan.preheating
         preheat_outdoor = plan.preheat_outdoor
+        coasting = plan.coasting
 
         # operative TRV-input mode (ADR-0029): write the operative target and feed
         # the operative temperature, IF the thermostat can be calibrated to an
@@ -749,6 +756,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "minutes_to_comfort": sched.minutes_to_comfort,
             "preheating": preheating,
             "preheat_outdoor": preheat_outdoor,
+            "coasting": coasting,
+            "minutes_to_setback": sched.minutes_to_setback,
             "sensor_frozen": frozen,
             "norm_binding": norm_binding,
             "device_schedule_active": sched_active,
