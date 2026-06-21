@@ -16,6 +16,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..constraints import Constraint, ConstraintKind, resolve_constraints
+from ..contracts import Precedence
+
 ASR_MAX_ROOM_C: float = 26.0  # ASR A3.5 room-air overheating threshold [°C]
 
 
@@ -32,10 +35,11 @@ def clamp_to_norm(
 
     The floor takes precedence over the cap (health/safety first) if they invert.
     """
-    if cap < floor:
-        return NormClamp(floor, "norm_floor")
-    if setpoint < floor:
-        return NormClamp(floor, "norm_floor")
-    if setpoint > cap:
-        return NormClamp(cap, "norm_cap")
-    return NormClamp(setpoint, None)
+    res = resolve_constraints(
+        setpoint,
+        [
+            Constraint(floor, "norm_floor", ConstraintKind.FLOOR, Precedence.HEALTH),
+            Constraint(cap, "norm_cap", ConstraintKind.CAP, Precedence.COMFORT),
+        ],
+    )
+    return NormClamp(res.value, res.binding.cause if res.binding else None)
