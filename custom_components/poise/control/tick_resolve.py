@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..comfort.norm_compliance import clamp_to_norm
+from ..comfort.norm_compliance import ASR_MAX_ROOM_C
+from ..constraints import Constraint, ConstraintKind, resolve_constraints
+from ..contracts import Precedence
 from ..estimation.solar import clear_sky_normalized, normalize_irradiance
 
 
@@ -54,6 +56,7 @@ class WriteTarget:
     target: float
     mode: str
     norm_binding: str | None
+    binding_precedence: str | None = None
 
 
 def resolve_write_target(
@@ -80,10 +83,44 @@ def resolve_write_target(
     else:
         target, mode = round(write_setpoint, 1), comfort_mode
 
-    if mode == "cool":
-        norm_binding: str | None = None
-    else:
-        nc = clamp_to_norm(target, floor=floor)
-        target, norm_binding = nc.value, nc.binding
+    # Unified hard envelope (ADR-0035): device max + (unless cooling) the ASR
+    # cap and frost/mould floor, composed with precedence. The device max is a
+    # physical SAFETY cap, the norm floor HEALTH, the norm cap COMFORT.
+    caps = [Constraint(device_max, "device_max", ConstraintKind.CAP, Precedence.SAFETY)]
+    floors: list[Constraint] = []
+    if mode != "cool":
+        caps.append(
+            Constraint(
+                ASR_MAX_ROOM_C, "norm_cap", ConstraintKind.CAP, Precedence.COMFORT
+            )
+        )
+        floors.append(
+            Constraint(floor, "norm_floor", ConstraintKind.FLOOR, Precedence.HEALTH)
+        )
+    res = resolve_constraints(target, floors + caps)
+    norm_binding = (
+        res.binding.cause
+        if (res.binding and res.binding.cause in ("norm_floor", "norm_cap"))
+        else None
+    )
+    precedence = res.binding.precedence.name.lower() if res.binding else None
+    return WriteTarget(round(res.value, 1), mode, norm_binding, precedence)
 
-    return WriteTarget(min(target, device_max), mode, norm_binding)
+
+def should_write(
+    prev: float | None,
+    target: float,
+    *,
+    mode_changed: bool,
+    deadband: float,
+) -> bool:
+    """Whether the actuator setpoint must be (re)written this tick (ADR-0012).
+
+    Writes on the first command, on a mode change, or on a setpoint change of at
+    least ``deadband`` K; otherwise the value is unchanged and the write is
+    skipped to spare battery/Zigbee TRVs from needless per-tick traffic.
+    """
+    if prev is None or mode_changed:
+        return True
+    # setpoints are 0.1-resolution; round the delta to avoid float artefacts
+    return round(abs(target - prev), 3) >= deadband
