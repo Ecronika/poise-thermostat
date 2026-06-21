@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poise"
-version = "0.23.0"
+version = "0.27.0"
 description = "Self-learning, norm-based thermostat for Home Assistant"
 requires-python = ">=3.12"
 
@@ -42,7 +42,6 @@ omit = [
     "custom_components/poise/config_flow.py",
     "custom_components/poise/coordinator.py",
     "custom_components/poise/climate.py",
-    "custom_components/poise/actuator.py",
     "custom_components/poise/storage.py",
     "custom_components/poise/sensor.py",
     "custom_components/poise/diagnostics.py",
