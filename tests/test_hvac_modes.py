@@ -13,8 +13,12 @@ def test_heat_only_is_unchanged() -> None:
     assert available_hvac_modes(True, False) == ("heat", "off")
 
 
-def test_heat_and_cool_adds_cool() -> None:
-    assert available_hvac_modes(True, True) == ("heat", "cool", "off")
+def test_heat_and_cool_adds_cool_and_auto() -> None:
+    assert available_hvac_modes(True, True) == ("auto", "heat", "cool", "off")
+
+
+def test_dual_capable_auto_displays_auto() -> None:
+    assert current_hvac_mode(True, "auto", True, True) == "auto"
 
 
 def test_cool_only() -> None:
@@ -30,15 +34,20 @@ def test_current_mode_heat_default() -> None:
 
 
 def test_current_mode_cool_when_selected_and_capable() -> None:
-    assert current_hvac_mode(True, "cool", True, True) == "cool"
+    assert current_hvac_mode(True, "cool_only", True, True) == "cool"
     # cool requested but device can't cool -> falls back to heat
-    assert current_hvac_mode(True, "cool", True, False) == "heat"
+    assert current_hvac_mode(True, "cool_only", True, False) == "heat"
 
 
-def test_climate_mode_mapping() -> None:
-    assert climate_mode_for_hvac("heat") == "heat"
-    assert climate_mode_for_hvac("cool") == "cool"
+def test_climate_mode_mapping_uses_decide_mode_vocabulary() -> None:
+    # must match decide_mode: auto / heat_only / cool_only (regression guard)
+    assert climate_mode_for_hvac("heat") == "heat_only"
+    assert climate_mode_for_hvac("cool") == "cool_only"
     assert climate_mode_for_hvac("off") == "auto"
+
+
+def test_current_mode_cool_only_internal() -> None:
+    assert current_hvac_mode(True, "heat_only", True, True) == "heat"
 
 
 def test_current_mode_cool_only_device() -> None:

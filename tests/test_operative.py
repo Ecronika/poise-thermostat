@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from custom_components.poise.comfort.operative import (
-    OffsetSmoother,
     air_weight,
     operative_temperature,
     operative_to_air,
@@ -29,15 +28,3 @@ def test_operative_to_air_inverts_operative() -> None:
 
 def test_operative_to_air_degrades_without_mrt() -> None:
     assert operative_to_air(21.0, t_mrt=None) == 21.0
-
-
-def test_offset_smoother_ewma() -> None:
-    smoother = OffsetSmoother(alpha=0.5)
-    assert smoother.update(20.0, 18.0) == pytest.approx(-2.0)  # seed
-    # next raw offset 0; EWMA -> 0.5*0 + 0.5*-2 = -1
-    assert smoother.update(20.0, 20.0) == pytest.approx(-1.0)
-
-
-def test_offset_smoother_holds_without_mrt() -> None:
-    smoother = OffsetSmoother()
-    assert smoother.update(20.0, None) == 0.0

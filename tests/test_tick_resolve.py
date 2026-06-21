@@ -142,3 +142,17 @@ def test_should_write_on_significant_change() -> None:
 def test_skip_write_on_tiny_change() -> None:
     assert should_write(21.0, 21.1, mode_changed=False, deadband=0.2) is False
     assert should_write(21.0, 21.0, mode_changed=False, deadband=0.2) is False
+
+
+def test_reasserts_when_actuator_changed_externally() -> None:
+    # actuator was reset to 5 °C by an external automation; target still 22.6
+    # -> Poise must re-write (regression guard, live finding 2026-06-21)
+    assert should_write(5.0, 22.6, mode_changed=False, deadband=0.2) is True
+
+
+def test_skips_when_actuator_already_at_target() -> None:
+    assert should_write(22.6, 22.6, mode_changed=False, deadband=0.2) is False
+
+
+def test_writes_when_actuator_setpoint_unknown() -> None:
+    assert should_write(None, 22.6, mode_changed=False, deadband=0.2) is True

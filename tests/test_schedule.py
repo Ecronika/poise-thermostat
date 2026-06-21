@@ -81,3 +81,26 @@ def test_parse_hhmm_rejects_non_numeric() -> None:
     assert parse_hhmm("ab:cd") is None
     assert parse_hhmm("noon") is None
     assert parse_hhmm("25:00") is None
+
+
+def test_overnight_window_is_comfort_across_midnight() -> None:
+    from custom_components.poise.comfort.schedule import ComfortSchedule, ComfortWindow
+
+    sched = ComfortSchedule.from_windows([ComfortWindow(1320, 360)])  # 22:00-06:00
+    assert sched.state_at(1380).is_comfort  # 23:00 comfort
+    assert sched.state_at(120).is_comfort  # 02:00 comfort
+    assert not sched.state_at(720).is_comfort  # 12:00 setback
+    # minutes_to_setback spans midnight: 23:00 -> 06:00 = 420 min
+    assert sched.state_at(1380).minutes_to_setback == 420
+    # early morning part: 02:00 -> 06:00 = 240 min
+    assert sched.state_at(120).minutes_to_setback == 240
+    # during setback at 12:00, next comfort start (22:00) is 600 min away
+    assert sched.state_at(720).minutes_to_comfort == 600
+
+
+def test_same_day_window_still_works() -> None:
+    from custom_components.poise.comfort.schedule import ComfortSchedule, ComfortWindow
+
+    sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320)])  # 06:00-22:00
+    assert sched.state_at(600).is_comfort and sched.state_at(60).is_comfort is False
+    assert sched.state_at(600).minutes_to_setback == 720
