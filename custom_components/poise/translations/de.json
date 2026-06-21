@@ -83,6 +83,12 @@
           "learning": "Lernt",
           "identified": "Identifiziert"
         }
+      },
+      "mpc_power": {
+        "name": "MPC-Leistung (Schatten)"
+      },
+      "mpc_weight": {
+        "name": "MPC-Gewicht"
       }
     }
   },

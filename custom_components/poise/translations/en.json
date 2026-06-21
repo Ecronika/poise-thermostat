@@ -83,6 +83,12 @@
           "learning": "Learning",
           "identified": "Identified"
         }
+      },
+      "mpc_power": {
+        "name": "MPC power (shadow)"
+      },
+      "mpc_weight": {
+        "name": "MPC weight"
       }
     }
   },
