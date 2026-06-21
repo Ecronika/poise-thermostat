@@ -120,3 +120,25 @@ def test_write_target_device_max() -> None:
         device_max=21.0,
     )
     assert wt.target == 21.0  # device max clamps below
+
+
+# --- write throttle (ADR-0012, review P1.2) ---
+
+from custom_components.poise.control.tick_resolve import should_write  # noqa: E402
+
+
+def test_should_write_first_time() -> None:
+    assert should_write(None, 21.0, mode_changed=False, deadband=0.2) is True
+
+
+def test_should_write_on_mode_change() -> None:
+    assert should_write(21.0, 21.0, mode_changed=True, deadband=0.2) is True
+
+
+def test_should_write_on_significant_change() -> None:
+    assert should_write(21.0, 21.2, mode_changed=False, deadband=0.2) is True
+
+
+def test_skip_write_on_tiny_change() -> None:
+    assert should_write(21.0, 21.1, mode_changed=False, deadband=0.2) is False
+    assert should_write(21.0, 21.0, mode_changed=False, deadband=0.2) is False
