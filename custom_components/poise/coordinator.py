@@ -64,6 +64,7 @@ from .const import (
     TICK_INTERVAL_S,
 )
 from .contracts import ActuatorCommand, ActuatorPath
+from .control.mpc_shadow import evaluate_shadow
 from .control.optimal_start import (
     forecast_samples_from_response,
     mean_forecast_outdoor,
@@ -692,6 +693,23 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         operative = operative_temperature(room, t_mrt)
         binding = "mold" if mold_min and mold_min >= decision.heat_sp else "en16798"
+
+        # Phase-4 Stufe 1 (ADR-0033): shadow MPC — compute what the predictive
+        # controller *would* command against the live EKF state, report only,
+        # never actuate. Dormant until the EKF identifies (heating season).
+        shadow = evaluate_shadow(
+            identified=self._ekf.identified,
+            t_air=room,
+            t_out=t_out_eff,
+            t_rm=t_rm_eff,
+            tau_hours=self._ekf.tau_hours,
+            model=self._ekf.get_model(),
+            prediction_std=self._ekf.temperature_std,
+            confidence=self._ekf.confidence,
+            target=decision.heat_sp,
+            lower=decision.heat_sp,
+            upper=decision.cool_sp,
+        )
         return {
             "available": True,
             "current_temperature": round(room, 1),
@@ -739,6 +757,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "trv_input_mode": (
                 "operative" if operative_active else ("air" if ext_num else "none")
             ),
+            "mpc_active": shadow.active,
+            "mpc_power": shadow.power,
+            "mpc_weight": shadow.weight,
+            "mpc_setpoint": shadow.setpoint,
+            "mpc_regime": shadow.regime,
             "seasonless_phase": self._seasonless.phase,
             "seasonless_rate": (
                 round(p, 3)

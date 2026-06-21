@@ -135,6 +135,25 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         options=["cold", "early", "learning", "identified"],
         value_fn=lambda d: d.get("learning_phase"),
     ),
+    # Phase-4 shadow MPC (ADR-0033): diagnostic only, dormant until identified.
+    PoiseSensorDescription(
+        key="mpc_power",
+        translation_key="mpc_power",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=0,
+        value_fn=_scaled("mpc_power", 100.0, 0),
+    ),
+    PoiseSensorDescription(
+        key="mpc_weight",
+        translation_key="mpc_weight",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=0,
+        value_fn=_scaled("mpc_weight", 100.0, 0),
+    ),
 )
 
 

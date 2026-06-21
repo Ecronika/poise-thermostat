@@ -63,6 +63,11 @@ _ATTRS = (
     "device_alarm",
     "trv_input_mode",
     "sensor_placement_suspect",
+    "mpc_active",
+    "mpc_power",
+    "mpc_weight",
+    "mpc_setpoint",
+    "mpc_regime",
 )
 
 
