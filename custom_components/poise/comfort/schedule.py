@@ -33,6 +33,7 @@ class ScheduleState:
     is_comfort: bool  # inside a comfort window now
     minutes_to_comfort: int  # 0 while in comfort; else minutes to the next start
     setback_offset: float  # 0.0 in comfort; -setback_delta during setback
+    minutes_to_setback: int = 0  # minutes until the current window ends; 0 in setback
 
 
 def _normalize(windows: Iterable[ComfortWindow]) -> tuple[ComfortWindow, ...]:
@@ -75,13 +76,13 @@ class ComfortSchedule:
     def state_at(self, minute: int) -> ScheduleState:
         """Comfort/setback verdict and minutes to the next comfort start."""
         if not self.windows:  # no windows => always comfort, no setback
-            return ScheduleState(True, 0, 0.0)
+            return ScheduleState(True, 0, 0.0, 0)
         m = minute % DAY_MINUTES
         for w in self.windows:
             if w.start_min <= m < w.end_min:
-                return ScheduleState(True, 0, 0.0)
+                return ScheduleState(True, 0, 0.0, w.end_min - m)
         to_next = min((w.start_min - m) % DAY_MINUTES for w in self.windows)
-        return ScheduleState(False, to_next, -self.setback_delta)
+        return ScheduleState(False, to_next, -self.setback_delta, 0)
 
 
 def parse_hhmm(value: str | None) -> int | None:
