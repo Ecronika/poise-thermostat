@@ -108,7 +108,7 @@ def resolve_write_target(
 
 
 def should_write(
-    prev: float | None,
+    actual: float | None,
     target: float,
     *,
     mode_changed: bool,
@@ -116,11 +116,13 @@ def should_write(
 ) -> bool:
     """Whether the actuator setpoint must be (re)written this tick (ADR-0012).
 
-    Writes on the first command, on a mode change, or on a setpoint change of at
-    least ``deadband`` K; otherwise the value is unchanged and the write is
-    skipped to spare battery/Zigbee TRVs from needless per-tick traffic.
+    ``actual`` is the actuator's *current* reported setpoint. Writes when it is
+    unknown, on a mode change, or when it differs from ``target`` by at least
+    ``deadband`` K. Comparing against the device's real setpoint (not our last
+    command) means we re-assert after an external change while still skipping
+    redundant writes — sparing battery/Zigbee TRVs from per-tick traffic.
     """
-    if prev is None or mode_changed:
+    if actual is None or mode_changed:
         return True
     # setpoints are 0.1-resolution; round the delta to avoid float artefacts
-    return round(abs(target - prev), 3) >= deadband
+    return round(abs(target - actual), 3) >= deadband
