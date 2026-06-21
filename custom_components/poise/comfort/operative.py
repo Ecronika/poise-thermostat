@@ -36,28 +36,3 @@ def operative_to_air(
         return t_op_target
     a = air_weight(velocity)
     return (t_op_target - (1.0 - a) * t_mrt) / a
-
-
-class OffsetSmoother:
-    """EWMA of the (MRT - air) offset to avoid a wandering target (ADR-0017).
-
-    The offset is smoothed slower than sensor noise but faster than solar
-    swings; the time constant is tuned in the harness (ADR-0011).
-    """
-
-    def __init__(self, alpha: float = 0.1) -> None:
-        self._alpha = alpha
-        self._offset: float | None = None
-
-    def update(self, t_air: float, t_mrt: float | None) -> float:
-        if t_mrt is None:
-            return 0.0 if self._offset is None else self._offset
-        raw = t_mrt - t_air
-        current = self._offset
-        new = (
-            raw
-            if current is None
-            else self._alpha * raw + (1.0 - self._alpha) * current
-        )
-        self._offset = new
-        return new
