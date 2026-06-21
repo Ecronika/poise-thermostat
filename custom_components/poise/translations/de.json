@@ -16,7 +16,15 @@
           "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
           "comfort_base": "Komfort-Basistemperatur (°C)",
           "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
+          "comfort_start": "Komfortfenster Beginn",
+          "comfort_end": "Komfortfenster Ende",
+          "setback_delta": "Nachtabsenkung (K)",
+          "optimal_start": "Optimal-Start (Vorheizen)",
+          "weather_entity": "Wetter-Entität (Prognose)",
+          "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
+          "trv_external_temp_input": "TRV-Eingang externe Temperatur",
+          "operative_input": "Operative Temperatur regeln"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
@@ -37,7 +45,15 @@
           "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
           "comfort_base": "Komfort-Basistemperatur (°C)",
           "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
+          "comfort_start": "Komfortfenster Beginn",
+          "comfort_end": "Komfortfenster Ende",
+          "setback_delta": "Nachtabsenkung (K)",
+          "optimal_start": "Optimal-Start (Vorheizen)",
+          "weather_entity": "Wetter-Entität (Prognose)",
+          "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
+          "trv_external_temp_input": "TRV-Eingang externe Temperatur",
+          "operative_input": "Operative Temperatur regeln"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."

@@ -16,7 +16,15 @@
           "window_sensor": "Window / contact sensor (optional — pauses heating when open)",
           "comfort_base": "Comfort base temperature (°C)",
           "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)"
+          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
+          "comfort_start": "Comfort window start",
+          "comfort_end": "Comfort window end",
+          "setback_delta": "Night setback (K)",
+          "optimal_start": "Optimal start (pre-heat)",
+          "weather_entity": "Weather entity (forecast)",
+          "irradiance_sensor": "Solar irradiance sensor (W/m²)",
+          "trv_external_temp_input": "TRV external-temperature input",
+          "operative_input": "Control operative temperature"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
@@ -37,7 +45,15 @@
           "window_sensor": "Window / contact sensor (optional — pauses heating when open)",
           "comfort_base": "Comfort base temperature (°C)",
           "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)"
+          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
+          "comfort_start": "Comfort window start",
+          "comfort_end": "Comfort window end",
+          "setback_delta": "Night setback (K)",
+          "optimal_start": "Optimal start (pre-heat)",
+          "weather_entity": "Weather entity (forecast)",
+          "irradiance_sensor": "Solar irradiance sensor (W/m²)",
+          "trv_external_temp_input": "TRV external-temperature input",
+          "operative_input": "Control operative temperature"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
