@@ -23,6 +23,7 @@ from datetime import datetime
 from typing import Any
 
 from ..estimation.thermal_ekf import ThermalModel
+from .optimal_stop import advise_stop
 
 _MIN_ALPHA = 1e-4  # guard against div-by-zero on a degenerate model
 _T_EQ_MARGIN = 0.1  # equilibrium must clear the target by this margin [K]
@@ -133,6 +134,7 @@ class PreheatPlan:
     base: float  # effective comfort base for this tick (setback applied / cancelled)
     preheating: bool  # optimal-start cancelled the setback to preheat now
     preheat_outdoor: float | None  # outdoor temp used for the lead estimate, if any
+    coasting: bool = False  # optimal-stop dropped the base early to coast down
 
 
 def plan_preheat(
@@ -149,6 +151,9 @@ def plan_preheat(
     t_out_lead: float,
     heat_lower: float,
     heat_upper: float,
+    optimal_stop_enabled: bool = False,
+    minutes_to_setback: float = 0.0,
+    coast_lower: float | None = None,
 ) -> PreheatPlan:
     """Decide the effective comfort base, applying night setback + optimal start.
 
@@ -159,6 +164,23 @@ def plan_preheat(
     the already-resolved outdoor temperature (forecast mean or constant).
     """
     if is_comfort:
+        if (
+            optimal_stop_enabled
+            and can_heat
+            and identified
+            and model is not None
+            and coast_lower is not None
+            and minutes_to_setback > 0
+        ):
+            coast_advice = advise_stop(
+                model,
+                room=room,
+                target=coast_lower,
+                t_out=t_out_lead,
+                minutes_to_setback=minutes_to_setback,
+            )
+            if coast_advice.stop_now:
+                return PreheatPlan(coast_lower, False, round(t_out_lead, 1), True)
         return PreheatPlan(comfort_base, False, None)
     base = comfort_base + setback_offset
     if not (optimal_start_enabled and can_heat and identified and model is not None):
