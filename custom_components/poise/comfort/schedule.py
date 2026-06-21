@@ -37,22 +37,27 @@ class ScheduleState:
 
 
 def _normalize(windows: Iterable[ComfortWindow]) -> tuple[ComfortWindow, ...]:
-    """Clamp to one day, drop empty intervals, sort, merge overlaps/adjacency."""
+    """Clamp to one day, drop empty intervals, merge same-day overlaps; overnight
+    windows (end < start, e.g. 22:00-06:00) are kept as wrap windows."""
     clean: list[ComfortWindow] = []
     for w in windows:
         start = max(0, min(int(w.start_min), DAY_MINUTES))
         end = max(0, min(int(w.end_min), DAY_MINUTES))
-        if end > start:
+        if end != start:  # drop empty; keep overnight (end < start) as a wrap window
             clean.append(ComfortWindow(start, end))
-    clean.sort(key=lambda w: w.start_min)
+    # merge only same-day windows; pass wrap windows (overnight) through untouched
+    nonwrap = sorted(
+        (w for w in clean if w.end_min > w.start_min), key=lambda w: w.start_min
+    )
+    wrap = [w for w in clean if w.end_min < w.start_min]
     merged: list[ComfortWindow] = []
-    for w in clean:
+    for w in nonwrap:
         if merged and w.start_min <= merged[-1].end_min:
             prev = merged[-1]
             merged[-1] = ComfortWindow(prev.start_min, max(prev.end_min, w.end_min))
         else:
             merged.append(w)
-    return tuple(merged)
+    return tuple(merged + wrap)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,8 +84,16 @@ class ComfortSchedule:
             return ScheduleState(True, 0, 0.0, 0)
         m = minute % DAY_MINUTES
         for w in self.windows:
-            if w.start_min <= m < w.end_min:
-                return ScheduleState(True, 0, 0.0, w.end_min - m)
+            wrap = w.end_min <= w.start_min  # overnight window crossing midnight
+            inside = (
+                (m >= w.start_min or m < w.end_min)
+                if wrap
+                else (w.start_min <= m < w.end_min)
+            )
+            if inside:
+                # minutes until this window ends, accounting for the midnight wrap
+                end = w.end_min + (DAY_MINUTES if wrap and m >= w.start_min else 0)
+                return ScheduleState(True, 0, 0.0, end - m)
         to_next = min((w.start_min - m) % DAY_MINUTES for w in self.windows)
         return ScheduleState(False, to_next, -self.setback_delta, 0)
 
