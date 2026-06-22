@@ -14,9 +14,11 @@ def test_classify_valve_patterns() -> None:
     assert classify_number_entity("number.x_pi_heating_demand") == "valve"
 
 
-def test_valve_opening_degree_is_excluded() -> None:
-    # max-opening limit, NOT live position -> must not be treated as a valve
-    assert classify_number_entity("number.trvzb_valve_opening_degree") == "max_limit"
+def test_valve_opening_degree_is_a_writable_valve() -> None:
+    # TRVZB FW v1.1.4+: writable open-position -> usable as TPI duty target
+    assert classify_number_entity("number.trvzb_valve_opening_degree") == "valve"
+    # closing degree is excluded (writing it breaks the TRVZB running_state)
+    assert classify_number_entity("number.trvzb_valve_closing_degree") == "max_limit"
 
 
 def test_classify_calibration_and_unknown() -> None:
@@ -32,10 +34,17 @@ def test_select_path_prefers_valve() -> None:
     assert select_path(caps) is ActuatorPath.TPI_VALVE
 
 
-def test_valve_opening_degree_only_falls_through_to_setpoint() -> None:
-    caps = capabilities_from_numbers(["number.trvzb_valve_opening_degree"])
-    assert not caps.writable_valve
-    assert select_path(caps) is ActuatorPath.PI_SETPOINT
+def test_trvzb_opening_degree_selects_valve_path() -> None:
+    # TRVZB exposes opening + closing degree + calibration -> valve wins
+    caps = capabilities_from_numbers(
+        [
+            "number.trvzb_valve_opening_degree",
+            "number.trvzb_valve_closing_degree",
+            "number.trvzb_local_temperature_calibration",
+        ]
+    )
+    assert caps.writable_valve
+    assert select_path(caps) is ActuatorPath.TPI_VALVE
 
 
 def test_calibration_path_needs_heat_mode() -> None:

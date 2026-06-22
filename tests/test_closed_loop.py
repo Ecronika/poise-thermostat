@@ -99,3 +99,40 @@ def test_optimal_stop_coast_matches_plant() -> None:
     for _ in range(int(round(lead * 60.0 / dt))):
         air = plant.step(air, 0.0, t_out, dt)  # heater off -> coast
     assert abs(air - target) < 0.3  # lands at the lower comfort edge on schedule
+
+
+def test_tpi_valve_control_converges_without_oscillation() -> None:
+    from custom_components.poise.control.tpi import seed_from_model
+    from tests.harness.closed_loop import run_tpi_control
+
+    plant = RCPlant()  # truth: alpha 0.15/h, full-power rise 20 -> beta_h 3.0
+    coef_int, coef_ext = seed_from_model(alpha=0.15, beta_h=3.0)
+    trace = run_tpi_control(
+        plant,
+        coef_int=coef_int,
+        coef_ext=coef_ext,
+        t_out=8.0,
+        target=21.0,
+        steps=144,
+        start_air=18.0,
+    )
+    last = [air for air, _ in trace[-48:]]
+    mean = sum(last) / len(last)
+    assert 20.5 <= mean <= 21.5  # holds the target
+    assert max(last) - min(last) < 0.5  # no sustained oscillation
+    assert all(0.0 <= d <= 1.0 for _, d in trace)  # duty stays a valid fraction
+    # physical steady-state duty for t_out=8, target=21 is ~0.65 (8 + 20*d = 21)
+    assert 0.5 < trace[-1][1] < 0.8
+
+
+def test_tpi_drives_a_cold_room_up() -> None:
+    from custom_components.poise.control.tpi import seed_from_model
+    from tests.harness.closed_loop import run_tpi_control
+
+    plant = RCPlant()
+    coef_int, coef_ext = seed_from_model(alpha=0.15, beta_h=3.0)
+    trace = run_tpi_control(
+        plant, coef_int=coef_int, coef_ext=coef_ext, start_air=18.0, steps=144
+    )
+    assert trace[0][1] == 1.0  # cold room -> full duty initially
+    assert trace[-1][0] > 20.0  # warmed toward target
