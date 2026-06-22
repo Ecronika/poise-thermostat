@@ -102,3 +102,31 @@ def run_mpc_optimizer(
         air = plant.step(air, power, t_out, dt)
         trace.append((air, power))
     return trace
+
+
+def run_tpi_control(
+    plant: RCPlant,
+    *,
+    coef_int: float,
+    coef_ext: float,
+    t_out: float = 8.0,
+    target: float = 21.0,
+    dt: float = 300.0,
+    steps: int = 144,
+    start_air: float = 18.0,
+) -> list[tuple[float, float]]:
+    """Run the TPI valve controller in closed loop; return [(air, duty), ...].
+
+    The duty (0..1) is the valve-open fraction, which the plant consumes as its
+    heating power — so this validates direct-valve control against real physics
+    without needing a heating season (ADR-0011/0036).
+    """
+    from custom_components.poise.control.tpi import tpi_duty
+
+    air = start_air
+    trace: list[tuple[float, float]] = []
+    for _ in range(steps):
+        duty = tpi_duty(coef_int, coef_ext, target, air, t_out)
+        air = plant.step(air, duty, t_out, dt)
+        trace.append((air, duty))
+    return trace
