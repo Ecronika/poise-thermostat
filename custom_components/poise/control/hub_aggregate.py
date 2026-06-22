@@ -144,3 +144,53 @@ def target_boiler_state(
         min_on_s=min_on_s,
         min_off_s=min_off_s,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class SheddingResult:
+    """Which zones to shed to fit the power budget (ADR-0013, Versatile method)."""
+
+    shed: tuple[str, ...]  # zone_ids, in the order they were shed
+    freed_power: float
+    deficit: float
+
+
+def resolve_load_shedding(
+    requests: Sequence[ZoneRequest], *, available_power: float
+) -> SheddingResult:
+    """Smallest-gap load shedding (Versatile method, ADR-0013).
+
+    ``available_power = max_power - current_power`` (negative = overload). When
+    overloaded, heating zones are shed **closest to their setpoint first** (they
+    can best spare the heat) until the deficit is covered. A zone in frost
+    protection is never shed (frost-safe). Zones without a declared power are
+    not sheddable (unknown contribution). Pure: no actuation, no time.
+    """
+    if available_power >= 0:
+        return SheddingResult((), 0.0, 0.0)
+    deficit = -available_power
+    candidates = sorted(
+        (r for r in requests if r.heating and r.declared_power and not r.frost_active),
+        key=lambda r: r.comfort_gap,  # smallest gap = nearest setpoint = shed first
+    )
+    shed: list[str] = []
+    freed = 0.0
+    for r in candidates:
+        if freed >= deficit:
+            break
+        shed.append(r.zone_id)
+        freed += float(r.declared_power or 0.0)
+    return SheddingResult(tuple(shed), round(freed, 3), round(deficit, 3))
+
+
+def group_call_for_heat(requests: Sequence[ZoneRequest]) -> dict[str, bool]:
+    """Per compressor group: does any member zone currently call for heat?
+
+    Groups a shared outdoor unit; the hub then applies min-run/off (ADR-0013)
+    via :func:`gate_min_cycle` per group. Zones without a group are ignored.
+    """
+    out: dict[str, bool] = {}
+    for r in requests:
+        if r.compressor_group:
+            out[r.compressor_group] = out.get(r.compressor_group, False) or r.heating
+    return out
