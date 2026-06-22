@@ -424,3 +424,93 @@ def test_step_min_cycle_advances_switch_only_on_change() -> None:
         min_off_s=300.0,
     )
     assert on2 is True and switch2 == 500.0
+
+
+def test_zone_request_frost_derived_from_cold_room() -> None:
+    # review #2: frost MUST come from the physical temperature, not the cause
+    from custom_components.poise.control.hub_aggregate import zone_request_from_data
+
+    cold = zone_request_from_data(
+        "z",
+        {"current_temperature": 6.0, "heat_sp": 7.0, "binding_lower_cause": "en16798"},
+        controls_boiler=False,
+        declared_power=None,
+        compressor_group=None,
+        mono_ts=0.0,
+    )
+    assert cold.frost_active is True
+    warm = zone_request_from_data(
+        "z",
+        {
+            "current_temperature": 21.0,
+            "heat_sp": 21.5,
+            "binding_lower_cause": "en16798",
+        },
+        controls_boiler=False,
+        declared_power=None,
+        compressor_group=None,
+        mono_ts=0.0,
+    )
+    assert warm.frost_active is False
+
+
+def test_zone_request_frost_fires_boiler_end_to_end() -> None:
+    # the exact scenario review #2 said was broken: cold non-opt-in zone -> demand
+    from custom_components.poise.control.hub_aggregate import (
+        aggregate_boiler_demand,
+        zone_request_from_data,
+    )
+
+    z = zone_request_from_data(
+        "cold",
+        {"current_temperature": 5.0, "heat_sp": 7.0},
+        controls_boiler=False,
+        declared_power=None,
+        compressor_group=None,
+        mono_ts=0.0,
+    )
+    assert aggregate_boiler_demand([z]).active is True
+
+
+def test_zone_request_health_from_mould_cause() -> None:
+    from custom_components.poise.control.hub_aggregate import zone_request_from_data
+
+    z = zone_request_from_data(
+        "z",
+        {"current_temperature": 19.0, "heat_sp": 20.0, "binding_lower_cause": "mold"},
+        controls_boiler=True,
+        declared_power=None,
+        compressor_group=None,
+        mono_ts=0.0,
+    )
+    assert z.health_active is True and z.frost_active is False
+
+
+def test_zone_request_demand_gap_and_passthrough() -> None:
+    from custom_components.poise.control.hub_aggregate import zone_request_from_data
+
+    z = zone_request_from_data(
+        "z",
+        {
+            "current_temperature": 18.0,
+            "heat_sp": 21.0,
+            "heating": True,
+            "tpi_duty": 0.4,
+        },
+        controls_boiler=True,
+        declared_power=1.5,
+        compressor_group="g1",
+        mono_ts=7.0,
+    )
+    assert z.heat_demand == 0.4 and z.comfort_gap == 3.0
+    assert z.declared_power == 1.5 and z.compressor_group == "g1" and z.mono_ts == 7.0
+    # fall-backs: no duty, not heating
+    z2 = zone_request_from_data(
+        "z",
+        {},
+        controls_boiler=False,
+        declared_power=None,
+        compressor_group=None,
+        mono_ts=0.0,
+    )
+    assert z2.heat_demand == 0.0 and z2.comfort_gap == 0.0 and z2.frost_active is False
