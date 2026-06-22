@@ -140,6 +140,10 @@
     "sensor_at_heat_source": {
       "title": "Poise: room sensor may be at the heat source",
       "description": "The learned thermal time constant for `{entity}` is implausibly short — typical of a sensor mounted on or near the radiator (e.g. a TRV's built-in sensor). Poise needs a free-standing room sensor away from the heater; otherwise the room model and comfort control degrade."
+    },
+    "valve_stuck": {
+      "title": "Poise: valve may be stuck",
+      "description": "The radiator valve's calibration step count (`{entity}`) is near zero, which usually means the valve failed to calibrate or is mechanically jammed. The room may not heat correctly. Re-pair or re-calibrate the TRV; the issue clears once a normal step count is reported."
     }
   }
 }

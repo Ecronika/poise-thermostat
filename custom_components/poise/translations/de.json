@@ -140,6 +140,10 @@
     "sensor_at_heat_source": {
       "title": "Poise: Raumsensor evtl. an der Wärmequelle",
       "description": "Die gelernte thermische Zeitkonstante für `{entity}` ist unplausibel kurz — typisch für einen Sensor am oder nahe dem Heizkörper (z. B. der eingebaute TRV-Sensor). Poise braucht einen **freistehenden** Raumsensor abseits der Heizung; sonst verschlechtern sich Raummodell und Komfortregelung."
+    },
+    "valve_stuck": {
+      "title": "Poise: Ventil möglicherweise blockiert",
+      "description": "Die Kalibrier-Schrittzahl des Heizkörperventils (`{entity}`) ist nahe null — das deutet auf eine fehlgeschlagene Kalibrierung oder ein mechanisch klemmendes Ventil hin. Der Raum heizt evtl. nicht korrekt. TRV neu kalibrieren/koppeln; der Hinweis verschwindet, sobald wieder eine normale Schrittzahl gemeldet wird."
     }
   }
 }
