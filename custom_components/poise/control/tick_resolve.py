@@ -139,3 +139,26 @@ def snap_to_step(value: float, step: float) -> float:
     if step <= 0.0:
         return value
     return round(round(value / step) * step, 2)
+
+
+def heat_drive_signal(hvac_action: str | None, *, fallback_heating: bool) -> float:
+    """EKF heating-drive input (0/1): prefer the actuator's *real* running state.
+
+    A TRV's ``hvac_action``/``running_state`` (e.g. Sonoff TRVZB) reports whether
+    the valve is actually heating, which is ground truth for the building-physics
+    EKF (ADR-0002). When the device does not report one, fall back to Poise's own
+    heat intent so devices without the attribute still learn.
+    """
+    if not hvac_action:
+        return 1.0 if fallback_heating else 0.0
+    return 1.0 if hvac_action == "heating" else 0.0
+
+
+def needs_heat_mode(current_mode: str | None, *, can_heat: bool) -> bool:
+    """True if the actuator must be commanded into ``heat``.
+
+    A TRV left in ``off`` ignores our setpoint, and ``auto`` runs the device's own
+    weekly schedule (Sonoff TRVZB ``system_mode=auto``) — both override Poise. We
+    only assert heat on a heat-capable device that has drifted to off/auto.
+    """
+    return can_heat and current_mode in ("auto", "off")
