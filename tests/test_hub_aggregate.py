@@ -126,3 +126,77 @@ def test_min_cycle_blocks_premature_on_and_no_change_passthrough() -> None:
         )
         is True
     )
+
+
+def test_parse_service_action_simple_and_with_attr() -> None:
+    from custom_components.poise.control.hub_aggregate import parse_service_action
+
+    a = parse_service_action("switch.boiler/switch.turn_on")
+    assert a is not None
+    assert a.domain == "switch" and a.service == "turn_on"
+    assert a.data == {"entity_id": "switch.boiler"}
+
+    b = parse_service_action("climate.b/climate.set_hvac_mode/hvac_mode:heat")
+    assert b is not None and b.service == "set_hvac_mode"
+    assert b.data == {"entity_id": "climate.b", "hvac_mode": "heat"}
+
+
+def test_parse_service_action_rejects_malformed() -> None:
+    from custom_components.poise.control.hub_aggregate import parse_service_action
+
+    assert parse_service_action(None) is None
+    assert parse_service_action("") is None
+    assert parse_service_action("switch.boiler") is None  # no service
+    assert parse_service_action("boiler/turn_on") is None  # no dots
+
+
+def test_target_boiler_state_activation_delay_then_on() -> None:
+    from custom_components.poise.control.hub_aggregate import target_boiler_state
+
+    # demand true 100s, delay 300 -> not yet on
+    assert (
+        target_boiler_state(
+            True,
+            currently_on=False,
+            demand_true_since=0.0,
+            now_mono=100.0,
+            activation_delay_s=300.0,
+            last_switch_mono=-1000.0,
+            min_on_s=0.0,
+            min_off_s=0.0,
+        )
+        is False
+    )
+    # demand true 400s -> on
+    assert (
+        target_boiler_state(
+            True,
+            currently_on=False,
+            demand_true_since=0.0,
+            now_mono=400.0,
+            activation_delay_s=300.0,
+            last_switch_mono=-1000.0,
+            min_on_s=0.0,
+            min_off_s=0.0,
+        )
+        is True
+    )
+
+
+def test_target_boiler_state_min_on_holds() -> None:
+    from custom_components.poise.control.hub_aggregate import target_boiler_state
+
+    # on, demand gone, but only 60s since switch, min_on 300 -> stay on
+    assert (
+        target_boiler_state(
+            False,
+            currently_on=True,
+            demand_true_since=None,
+            now_mono=60.0,
+            activation_delay_s=0.0,
+            last_switch_mono=0.0,
+            min_on_s=300.0,
+            min_off_s=0.0,
+        )
+        is True
+    )
