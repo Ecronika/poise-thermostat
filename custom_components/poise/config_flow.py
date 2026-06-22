@@ -29,10 +29,13 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_COMPRESSOR_GROUP,
     CONF_CONTROLS_BOILER,
+    CONF_CURRENT_POWER_SENSOR,
     CONF_ENTRY_TYPE,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
+    CONF_MAX_POWER_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
     CONF_OPERATIVE_INPUT,
@@ -144,6 +147,7 @@ def _schema() -> vol.Schema:
             vol.Required(
                 CONF_CONTROLS_BOILER, default=False
             ): selector.BooleanSelector(),
+            vol.Optional(CONF_COMPRESSOR_GROUP): selector.TextSelector(),
         }
     )
 
@@ -208,6 +212,12 @@ def _system_schema() -> vol.Schema:
                     unit_of_measurement="s",
                     mode=selector.NumberSelectorMode.BOX,
                 )
+            ),
+            vol.Optional(CONF_MAX_POWER_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="power")
+            ),
+            vol.Optional(CONF_CURRENT_POWER_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="power")
             ),
         }
     )

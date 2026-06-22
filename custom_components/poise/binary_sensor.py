@@ -31,6 +31,10 @@ _ATTRS = (
     "controlling_zones",
     "actuation_enabled",
     "boiler_on",
+    "available_power",
+    "shed_count",
+    "shed_zones",
+    "compressor_groups",
 )
 
 

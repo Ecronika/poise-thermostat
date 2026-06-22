@@ -29,7 +29,9 @@ from .const import (
     CONF_BOILER_ON_ACTION,
     CONF_BOILER_POWER_THRESHOLD,
     CONF_CONTROLS_BOILER,
+    CONF_CURRENT_POWER_SENSOR,
     CONF_ENTRY_TYPE,
+    CONF_MAX_POWER_SENSOR,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
     DEFAULT_BOILER_KEEPALIVE_S,
@@ -43,7 +45,10 @@ from .contracts import ZoneRequest
 from .control.hub_aggregate import (
     ServiceAction,
     aggregate_boiler_demand,
+    gate_min_cycle,
+    group_call_for_heat,
     parse_service_action,
+    resolve_load_shedding,
     target_boiler_state,
 )
 
@@ -108,6 +113,11 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_switch_mono = -1.0e9  # allow an immediate first switch
         self._demand_true_since: float | None = None
         self._last_keepalive_mono = 0.0
+        # S3 load shedding + S4 compressor groups (shadow stage)
+        self._max_power_sensor = d.get(CONF_MAX_POWER_SENSOR)
+        self._current_power_sensor = d.get(CONF_CURRENT_POWER_SENSOR)
+        self._group_on: dict[str, bool] = {}
+        self._group_switch: dict[str, float] = {}
 
     def _collect_requests(self) -> list[ZoneRequest]:
         now = self._clock.monotonic()
@@ -126,6 +136,50 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             )
         return out
+
+    def _power(self, entity_id: str | None) -> float | None:
+        if not entity_id:
+            return None
+        st = self.hass.states.get(entity_id)
+        if st is None or st.state in ("unknown", "unavailable", ""):
+            return None
+        try:
+            return float(st.state)
+        except (ValueError, TypeError):
+            return None
+
+    def _shared_resource_shadow(
+        self, requests: list[ZoneRequest], now: float
+    ) -> dict[str, Any]:
+        """S3 load-shedding + S4 compressor-group shadow (computed, not enforced)."""
+        max_p = self._power(self._max_power_sensor)
+        cur_p = self._power(self._current_power_sensor)
+        available = (max_p - cur_p) if max_p is not None and cur_p is not None else None
+        shedding = (
+            resolve_load_shedding(requests, available_power=available)
+            if available is not None
+            else None
+        )
+        groups: dict[str, bool] = {}
+        for grp, want in group_call_for_heat(requests).items():
+            gated = gate_min_cycle(
+                want,
+                currently_on=self._group_on.get(grp, False),
+                last_change_mono=self._group_switch.get(grp, -1.0e9),
+                now_mono=now,
+                min_on_s=self._min_on,
+                min_off_s=self._min_off,
+            )
+            if gated != self._group_on.get(grp, False):
+                self._group_switch[grp] = now
+            self._group_on[grp] = gated
+            groups[grp] = gated
+        return {
+            "available_power": round(available, 1) if available is not None else None,
+            "shed_zones": list(shedding.shed) if shedding else [],
+            "shed_count": len(shedding.shed) if shedding else 0,
+            "compressor_groups": groups,
+        }
 
     async def _call(self, action: ServiceAction) -> None:
         try:
@@ -169,6 +223,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._last_keepalive_mono = now
 
     async def _async_update_data(self) -> dict[str, Any]:
+        now = self._clock.monotonic()
         requests = self._collect_requests()
         demand = aggregate_boiler_demand(
             requests,
@@ -176,7 +231,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             power_threshold=self._power_threshold,
         )
         if self._actuation:
-            await self._actuate(demand.active, self._clock.monotonic())
+            await self._actuate(demand.active, now)
         return {
             "boiler_demand": demand.active,
             "active_zones": demand.active_count,
@@ -186,4 +241,5 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),
             "actuation_enabled": self._actuation,
             "boiler_on": self._boiler_on,
+            **self._shared_resource_shadow(requests, now),
         }

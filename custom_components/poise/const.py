@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.43.0"
+VERSION: Final = "0.44.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -81,3 +81,8 @@ DEFAULT_BOILER_ACTIVATION_DELAY_S: Final = 0.0
 DEFAULT_BOILER_KEEPALIVE_S: Final = 0.0
 DEFAULT_BOILER_MIN_ON_S: Final = 300.0
 DEFAULT_BOILER_MIN_OFF_S: Final = 300.0
+
+# Load shedding (S3) + compressor groups (S4) — both ADR-0013, shadow stage
+CONF_MAX_POWER_SENSOR: Final = "max_power_sensor"
+CONF_CURRENT_POWER_SENSOR: Final = "current_power_sensor"
+CONF_COMPRESSOR_GROUP: Final = "compressor_group"
