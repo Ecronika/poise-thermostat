@@ -77,6 +77,7 @@ from .control.tick_resolve import (
     select_q_solar,
     select_t_rm,
     should_write,
+    snap_to_step,
 )
 from .devices.capability import climate_capability
 from .devices.model_fixes import (
@@ -722,11 +723,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # we re-assert when something external (e.g. an "off"/away automation)
             # changed it, while still skipping writes when it already matches
             # (review P1.2; live-test finding 2026-06-21).
-            actual_sp = _num_attr(self.hass.states.get(self._actuator), "temperature")
+            act_state = self.hass.states.get(self._actuator)
+            actual_sp = _num_attr(act_state, "temperature")
+            # snap our target to the device's setpoint step so a coarse TRV's
+            # rounded echo doesn't trigger a write every tick (review R2)
+            step = _num_attr(act_state, "target_temperature_step") or 0.1
             mode_changed = mode != self._last_written_mode
             if should_write(
                 actual_sp,
-                target,
+                snap_to_step(target, step),
                 mode_changed=mode_changed,
                 deadband=WRITE_DEADBAND_C,
             ):
