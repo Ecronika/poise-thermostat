@@ -5,9 +5,10 @@ Per device exactly one path is chosen, top-down, first match wins:
   2. calibration   — a writable offset entity + reliable heat mode
   3. PI setpoint   — any climate entity (fallback)
 
-``valve_opening_degree`` is deliberately *excluded* from the valve path: on the
-Sonoff TRVZB it is a maximum-opening limit, not the live position — writing the
-TPI duty to it caps capacity instead of modulating it (ThermoSmart finding).
+``valve_opening_degree`` (Sonoff TRVZB, FW v1.1.4+) is a *writable* open-position
+control and is used as the TPI duty target (force the TRV open via a high setpoint,
+then modulate the opening). ``valve_closing_degree`` is excluded — writing it
+triggers a TRVZB firmware bug that breaks ``running_state``/``hvac_action``.
 """
 
 from __future__ import annotations
@@ -16,8 +17,15 @@ from dataclasses import dataclass
 
 from ..contracts import ActuatorPath
 
-AUTO_VALVE_PATTERNS = ("valve_position", "pi_heating_demand", "heating_demand", "level")
-MAX_LIMIT_PATTERNS = ("valve_opening_degree",)
+AUTO_VALVE_PATTERNS = (
+    "valve_position",
+    "pi_heating_demand",
+    "heating_demand",
+    "level",
+    "valve_opening_degree",  # Sonoff TRVZB: writable open-position (FW v1.1.4+)
+)
+# valve_closing_degree must never be written (TRVZB firmware bug breaks running_state)
+MAX_LIMIT_PATTERNS = ("valve_closing_degree",)
 CALIBRATION_PATTERNS = (
     "local_temperature_calibration",
     "temperature_offset",
