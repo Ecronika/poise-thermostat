@@ -72,6 +72,8 @@ from .control.optimal_start import (
     plan_preheat,
 )
 from .control.tick_resolve import (
+    heat_drive_signal,
+    needs_heat_mode,
     resolve_write_target,
     select_mrt,
     select_q_solar,
@@ -702,8 +704,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
+        act_state = self.hass.states.get(self._actuator)
         heating = self._enabled and not window_open and mode == "heat"
-        self._last_u_h = 1.0 if heating else 0.0
+        # A1: the EKF heating-drive uses the actuator's *real* running state when
+        # reported (TRVZB running_state -> hvac_action), else our heat intent.
+        self._last_u_h = heat_drive_signal(
+            act_state.attributes.get("hvac_action") if act_state else None,
+            fallback_heating=heating,
+        )
         self._last_q_solar = q_solar
         self._last_target = target
 
@@ -719,11 +727,26 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._notify_failure(failed)
 
         if self._enabled:
+            # A2: keep a heat-capable actuator in heat mode so it follows our
+            # setpoint instead of its own off/auto schedule (TRVZB system_mode).
+            if needs_heat_mode(
+                act_state.state if act_state else None, can_heat=can_heat
+            ):
+                try:
+                    await self.hass.services.async_call(
+                        "climate",
+                        "set_hvac_mode",
+                        {"entity_id": self._actuator, "hvac_mode": "heat"},
+                        blocking=False,
+                    )
+                except Exception:  # noqa: BLE001 - mode nudge is best-effort
+                    _LOGGER.exception(
+                        "Poise: set_hvac_mode(heat) failed for %s", self._actuator
+                    )
             # Compare to the actuator's *actual* setpoint, not our last command, so
             # we re-assert when something external (e.g. an "off"/away automation)
             # changed it, while still skipping writes when it already matches
             # (review P1.2; live-test finding 2026-06-21).
-            act_state = self.hass.states.get(self._actuator)
             actual_sp = _num_attr(act_state, "temperature")
             # snap our target to the device's setpoint step so a coarse TRV's
             # rounded echo doesn't trigger a write every tick (review R2)
