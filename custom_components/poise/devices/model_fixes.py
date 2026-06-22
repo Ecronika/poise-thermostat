@@ -61,3 +61,19 @@ def is_external_sensor_select(entity_id: str, options: object) -> bool:
         return False
     opts = options if isinstance(options, (list, tuple)) else ()
     return "external" in opts and "internal" in opts
+
+
+def looks_like_valve_steps(entity_id: str) -> str | None:
+    """Classify a valve motor step-counter sensor: "closing" / "idle" / None.
+
+    The Sonoff TRVZB reports ``closing_steps`` (steps to fully close) and
+    ``idle_steps`` (no-load calibration steps) — generic valve-health telemetry.
+    """
+    if not entity_id.startswith("sensor."):
+        return None
+    k = entity_id.lower()
+    if "closing_steps" in k:
+        return "closing"
+    if "idle_steps" in k:
+        return "idle"
+    return None
