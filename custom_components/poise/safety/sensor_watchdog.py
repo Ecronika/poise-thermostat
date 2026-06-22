@@ -33,3 +33,15 @@ def sensor_at_heat_source(
     trusted estimate (charter G17, anti-"garbage in").
     """
     return identified and tau_hours < min_plausible_tau_h
+
+
+def valve_stuck(closing_steps: float | None, *, min_steps: float = 10.0) -> bool:
+    """True if a motorised valve looks jammed / un-calibrated (advisory).
+
+    A healthy calibrated TRV reports a substantial closing-step count (e.g. the
+    Sonoff TRVZB ~300); a value near zero means calibration failed or the valve
+    is mechanically stuck. ``None`` (no telemetry) is treated as not stuck.
+    """
+    if closing_steps is None:
+        return False
+    return closing_steps < min_steps
