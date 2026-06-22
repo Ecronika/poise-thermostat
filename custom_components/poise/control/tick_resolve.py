@@ -154,11 +154,14 @@ def heat_drive_signal(hvac_action: str | None, *, fallback_heating: bool) -> flo
     return 1.0 if hvac_action == "heating" else 0.0
 
 
-def needs_heat_mode(current_mode: str | None, *, can_heat: bool) -> bool:
+def needs_heat_mode(current_mode: str | None, *, heat_supported: bool) -> bool:
     """True if the actuator must be commanded into ``heat``.
 
     A TRV left in ``off`` ignores our setpoint, and ``auto`` runs the device's own
     weekly schedule (Sonoff TRVZB ``system_mode=auto``) — both override Poise. We
-    only assert heat on a heat-capable device that has drifted to off/auto.
+    only assert heat when the device *literally* offers a ``heat`` mode: a device
+    whose only modes are ``auto``/``off`` (no ``heat``) would reject the call and
+    spam the log every tick (review V1). ``heat_supported`` must come from the
+    actuator's actual ``hvac_modes``, not from ``can_heat`` (which counts ``auto``).
     """
-    return can_heat and current_mode in ("auto", "off")
+    return heat_supported and current_mode in ("auto", "off")
