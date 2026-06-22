@@ -48,7 +48,9 @@ def aggregate_boiler_demand(
     calling = [r for r in participating if r.heating]
     active_count = len(calling)
     weighted = sum((r.declared_power or 1.0) * _clamp01(r.heat_demand) for r in calling)
-    frost_override = any(r.frost_active for r in participating)
+    # frost safety considers ALL zones, not just opt-in ones: a freezing room
+    # must be able to fire a shared boiler even if mis-configured (ADR-0039).
+    frost_override = any(r.frost_active for r in requests)
     by_count = active_count >= count_threshold
     by_power = power_threshold is not None and weighted >= power_threshold
     return BoilerDemand(
@@ -170,7 +172,14 @@ def resolve_load_shedding(
         return SheddingResult((), 0.0, 0.0)
     deficit = -available_power
     candidates = sorted(
-        (r for r in requests if r.heating and r.declared_power and not r.frost_active),
+        (
+            r
+            for r in requests
+            if r.heating
+            and r.declared_power
+            and not r.frost_active
+            and not r.health_active  # mould/health floor also protected
+        ),
         key=lambda r: r.comfort_gap,  # smallest gap = nearest setpoint = shed first
     )
     shed: list[str] = []
@@ -194,3 +203,114 @@ def group_call_for_heat(requests: Sequence[ZoneRequest]) -> dict[str, bool]:
         if r.compressor_group:
             out[r.compressor_group] = out.get(r.compressor_group, False) or r.heating
     return out
+
+
+@dataclass(frozen=True, slots=True)
+class BoilerState:
+    """Tick-crossing boiler orchestration state (pure; ADR-0039)."""
+
+    on: bool = False
+    last_switch_mono: float = -1.0e9  # allow an immediate first switch
+    demand_true_since: float | None = None
+    last_keepalive_mono: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class BoilerStep:
+    """Result of one orchestration step: the next state and the call to make."""
+
+    state: BoilerState
+    call: str | None  # "on" | "off" | None — which action the hub should invoke
+
+
+def step_boiler(
+    state: BoilerState,
+    *,
+    demand: bool,
+    now_mono: float,
+    activation_delay_s: float,
+    min_on_s: float,
+    min_off_s: float,
+    keepalive_s: float,
+) -> BoilerStep:
+    """Advance the boiler state machine by one tick (pure, fully testable).
+
+    Folds the activation latch (``demand_true_since``), the activation delay,
+    the min-on/min-off cycle guard (:func:`target_boiler_state`) and the
+    keep-alive resend into one deterministic transition. The coordinator only
+    performs the returned ``call`` — no control state lives in the glue, so the
+    hardware-protecting logic is unit-tested, not 0%-covered (review #1).
+    """
+    demand_true_since = state.demand_true_since
+    if demand and demand_true_since is None:
+        demand_true_since = now_mono
+    elif not demand:
+        demand_true_since = None
+    target = target_boiler_state(
+        demand,
+        currently_on=state.on,
+        demand_true_since=demand_true_since,
+        now_mono=now_mono,
+        activation_delay_s=activation_delay_s,
+        last_switch_mono=state.last_switch_mono,
+        min_on_s=min_on_s,
+        min_off_s=min_off_s,
+    )
+    if target != state.on:
+        return BoilerStep(
+            BoilerState(
+                on=target,
+                last_switch_mono=now_mono,
+                demand_true_since=demand_true_since,
+                last_keepalive_mono=now_mono,
+            ),
+            "on" if target else "off",
+        )
+    if (
+        state.on
+        and keepalive_s > 0.0
+        and (now_mono - state.last_keepalive_mono) >= keepalive_s
+    ):
+        return BoilerStep(
+            BoilerState(
+                on=state.on,
+                last_switch_mono=state.last_switch_mono,
+                demand_true_since=demand_true_since,
+                last_keepalive_mono=now_mono,
+            ),
+            "on",
+        )
+    return BoilerStep(
+        BoilerState(
+            on=state.on,
+            last_switch_mono=state.last_switch_mono,
+            demand_true_since=demand_true_since,
+            last_keepalive_mono=state.last_keepalive_mono,
+        ),
+        None,
+    )
+
+
+def step_min_cycle(
+    *,
+    prev_on: bool,
+    prev_switch_mono: float,
+    demand: bool,
+    now_mono: float,
+    min_on_s: float,
+    min_off_s: float,
+) -> tuple[bool, float]:
+    """One min-cycle transition for a shared resource (e.g. compressor group).
+
+    Returns ``(new_on, new_switch_mono)``; the switch timestamp only advances
+    on an actual state change. Pure — the hub stores the returned tuple.
+    """
+    on = gate_min_cycle(
+        demand,
+        currently_on=prev_on,
+        last_change_mono=prev_switch_mono,
+        now_mono=now_mono,
+        min_on_s=min_on_s,
+        min_off_s=min_off_s,
+    )
+    return on, (now_mono if on != prev_on else prev_switch_mono)
