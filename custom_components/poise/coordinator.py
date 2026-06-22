@@ -71,6 +71,8 @@ from .control.optimal_start import (
     mean_forecast_outdoor,
     plan_preheat,
 )
+from .control.pi import PiCompensator
+from .control.pi_shadow import evaluate_pi_shadow
 from .control.tick_resolve import (
     heat_drive_signal,
     needs_heat_mode,
@@ -140,6 +142,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ekf = ThermalEKF()
         self._trm_tracker = RunningMeanTracker()
         self._seasonless = SeasonlessRate()
+        self._pi = PiCompensator()
         self._prev_room: float | None = None
         self._prev_room_mono: float | None = None
         self._last_target: float | None = None
@@ -861,6 +864,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             room=room,
             t_out=t_out_eff,
         )
+        # PI-compensated setpoint shadow (ADR-0037): only for setpoint-only devices
+        # (no writable valve — complementary to the TPI shadow); reported, never
+        # written. external == room sensor (Poise's sensing).
+        pi = evaluate_pi_shadow(
+            self._pi,
+            applies=self._valve_entity is None,
+            target=decision.heat_sp,
+            room=room,
+            external=room,
+        )
         # valve health (A3): a near-zero closing-step count means the motorised
         # valve failed calibration / is jammed — advisory diagnostic + repair issue.
         closing_steps = self._read(self._valve_closing_steps)
@@ -928,6 +941,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "valve_health": valve_health,
             "valve_closing_steps": closing_steps,
             "valve_idle_steps": idle_steps,
+            "pi_active": pi.active,
+            "pi_setpoint": pi.setpoint,
+            "pi_offset": pi.offset,
             "tpi_active": tpi.active,
             "tpi_duty": tpi.duty,
             "tpi_valve_percent": tpi.valve_percent,
