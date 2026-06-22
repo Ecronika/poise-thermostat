@@ -67,3 +67,12 @@ def test_climate_capability_from_hvac_modes() -> None:
     # cool-capable (Sonoff TRVZB finding): auto implies heating only
     assert climate_capability(["off", "auto", "heat"]) == (True, False)
     assert climate_capability(["off", "auto"]) == (True, False)
+
+
+def test_looks_like_valve_steps() -> None:
+    from custom_components.poise.devices.model_fixes import looks_like_valve_steps
+
+    assert looks_like_valve_steps("sensor.trvzb_closing_steps") == "closing"
+    assert looks_like_valve_steps("sensor.trvzb_idle_steps") == "idle"
+    assert looks_like_valve_steps("sensor.trvzb_battery") is None
+    assert looks_like_valve_steps("number.trvzb_valve_opening_degree") is None

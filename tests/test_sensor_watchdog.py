@@ -33,3 +33,12 @@ def test_heat_source_detector() -> None:
     )
     # boundary: exactly at threshold is not flagged
     assert sensor_at_heat_source(1.0, identified=True, min_plausible_tau_h=1.0) is False
+
+
+def test_valve_stuck_detection() -> None:
+    from custom_components.poise.safety.sensor_watchdog import valve_stuck
+
+    assert valve_stuck(325.0) is False  # healthy TRVZB closing-step count
+    assert valve_stuck(0.0) is True  # not calibrated / jammed
+    assert valve_stuck(5.0, min_steps=10.0) is True
+    assert valve_stuck(None) is False  # no telemetry -> not stuck

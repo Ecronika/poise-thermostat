@@ -193,7 +193,9 @@ def test_heat_drive_falls_back_without_action() -> None:
 def test_needs_heat_mode_on_drift() -> None:
     from custom_components.poise.control.tick_resolve import needs_heat_mode
 
-    assert needs_heat_mode("auto", can_heat=True) is True  # internal schedule
-    assert needs_heat_mode("off", can_heat=True) is True
-    assert needs_heat_mode("heat", can_heat=True) is False  # already correct
-    assert needs_heat_mode("auto", can_heat=False) is False  # cool-only device
+    assert needs_heat_mode("auto", heat_supported=True) is True  # internal schedule
+    assert needs_heat_mode("off", heat_supported=True) is True
+    assert needs_heat_mode("heat", heat_supported=True) is False  # already correct
+    # V1 regression: an auto/off-only TRV (no real "heat" mode) must NOT be nudged
+    assert needs_heat_mode("auto", heat_supported=False) is False
+    assert needs_heat_mode("off", heat_supported=False) is False
