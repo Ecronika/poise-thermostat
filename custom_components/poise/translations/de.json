@@ -55,7 +55,8 @@
           "trv_external_temp_input": "TRV-Eingang externe Temperatur",
           "operative_input": "Operative Temperatur regeln",
           "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern",
-          "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit (optional)"
+          "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit (optional)",
+          "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf, optional)"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
