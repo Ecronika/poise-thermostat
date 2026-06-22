@@ -11,12 +11,61 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
+from ..const import FROST_FLOOR_C
 from ..contracts import ZoneRequest
 
 
 def _clamp01(value: float) -> float:
     return min(max(value, 0.0), 1.0)
+
+
+# a room at or just above the frost floor is in the anti-freeze regime
+_FROST_MARGIN_C = 0.5
+
+
+def zone_request_from_data(
+    zone_id: str,
+    data: dict[str, Any],
+    *,
+    controls_boiler: bool,
+    declared_power: float | None,
+    compressor_group: str | None,
+    mono_ts: float,
+) -> ZoneRequest:
+    """Build a ZoneRequest from a zone's published ``data`` dict + its config.
+
+    Pure and unit-tested (review #1/#2). ``heat_demand`` uses the live tpi_duty
+    shadow estimate when present, else a binary fall-back from ``heating``
+    (review #7). ``frost_active`` is a PHYSICAL signal derived from the room
+    temperature — the binding-cause string never carries "frost" (the frost
+    floor is the lowest bound and never binds the lower cause), so the old
+    cause-string derivation was always False (review #2). ``health_active`` is
+    read from the mould binding cause, which the coordinator does publish.
+    """
+    heating = bool(data.get("heating"))
+    cause = str(data.get("binding_lower_cause") or "").lower()
+    duty = data.get("tpi_duty")
+    heat_demand = float(duty) if duty is not None else (1.0 if heating else 0.0)
+    room = data.get("current_temperature")
+    sp = data.get("heat_sp")
+    gap = (float(sp) - float(room)) if room is not None and sp is not None else 0.0
+    frost_active = room is not None and float(room) <= FROST_FLOOR_C + _FROST_MARGIN_C
+    health_active = "mould" in cause or "schimmel" in cause or "mold" in cause
+    return ZoneRequest(
+        zone_id=zone_id,
+        heating=heating,
+        hvac_action="heating" if heating else "idle",
+        heat_demand=heat_demand,
+        comfort_gap=gap,
+        frost_active=frost_active,
+        controls_boiler=controls_boiler,
+        mono_ts=mono_ts,
+        declared_power=declared_power,
+        compressor_group=compressor_group,
+        health_active=health_active,
+    )
 
 
 @dataclass(frozen=True, slots=True)
