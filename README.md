@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.33.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
