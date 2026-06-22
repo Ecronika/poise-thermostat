@@ -54,3 +54,7 @@ def test_climate_capability_from_hvac_modes() -> None:
     assert climate_capability(["cool", "off"]) == (False, True)
     assert climate_capability(["heat_cool", "heat", "cool", "off"]) == (True, True)
     assert climate_capability(["off"]) == (False, False)
+    # a radiator TRV with an internal-schedule "auto" mode must NOT be treated as
+    # cool-capable (Sonoff TRVZB finding): auto implies heating only
+    assert climate_capability(["off", "auto", "heat"]) == (True, False)
+    assert climate_capability(["off", "auto"]) == (True, False)
