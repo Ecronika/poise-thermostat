@@ -126,3 +126,16 @@ def should_write(
         return True
     # setpoints are 0.1-resolution; round the delta to avoid float artefacts
     return round(abs(target - actual), 3) >= deadband
+
+
+def snap_to_step(value: float, step: float) -> float:
+    """Round ``value`` to the actuator's setpoint resolution.
+
+    Comparing our 0.1-resolution target against a device that reports back in a
+    coarser step (e.g. 0.5 K) would otherwise re-write every tick once the
+    rounding gap reaches the deadband; snapping makes the comparison like-for-
+    like so the write-throttle keeps sparing battery/Zigbee TRVs (review R2).
+    """
+    if step <= 0.0:
+        return value
+    return round(round(value / step) * step, 2)
