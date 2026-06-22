@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.37.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.39.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -27,15 +27,16 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Solar accounting** — measured global irradiance as a learned disturbance feeding the MRT/comfort path — counted once.
 - **Precedence constraint solver** — every bound (frost/mould/ASR cap/device max) is composed with explicit precedence into exactly one safe command per actuator.
 - **Cooling decision & modes** — capability-aware dual setpoints; `COOL` is surfaced as an HVAC mode **only when the actuator supports cooling** (heat-only TRVs stay HEAT/OFF).
-- **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts.
+- **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts. While enabled, Poise also keeps a heat-capable actuator in its `heat` mode so it follows Poise's setpoint instead of running its own `auto`/schedule.
 
 ### 🟡 Shadow / diagnostic (computed, not yet actuating)
 
 - **Predictive MPC** — runs every tick against the live learned model and is exposed as `mpc_*` diagnostic values, but **never writes the actuator** in this version. Active write authority is gated on cold-season validation (ADR-0033).
+- **Direct-valve TPI** — for a device with a writable valve-open entity (e.g. Sonoff TRVZB `valve_opening_degree`), the TPI valve duty is computed live and exposed as `tpi_*` diagnostics. The valve is **not written** yet — closed-loop validated in the harness, live actuation gated on cold-season validation (ADR-0036).
 
 ### 🗺️ Roadmap (built or designed, not in the active path)
 
-- **Direct valve / TPI control** — `valve_position` / `pi_heating_demand` / calibration paths exist generically but are parked: the current reference hardware exposes no writable live valve position.
+- **Direct valve / TPI control (live actuation)** — auto-detected for devices with a writable valve-open number (Sonoff TRVZB `valve_opening_degree`, FW v1.1.4+) and harness-validated; today it runs as a diagnostic shadow (above), with live valve writing gated on cold-season validation. `valve_closing_degree` is never written (TRVZB firmware bug). `pi_heating_demand` / calibration paths exist generically.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
 - **Multi-zone resource coordination** — cross-zone load-shedding / shared heat source (per-zone constraint solver is active; orchestration is pending).
 - **Efficiency report** — heating-degree-hour savings in kWh / €.
