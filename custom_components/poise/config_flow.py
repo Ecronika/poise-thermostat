@@ -32,6 +32,7 @@ from .const import (
     CONF_COMPRESSOR_GROUP,
     CONF_CONTROLS_BOILER,
     CONF_CURRENT_POWER_SENSOR,
+    CONF_DECLARED_POWER,
     CONF_ENTRY_TYPE,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
@@ -148,6 +149,11 @@ def _schema() -> vol.Schema:
                 CONF_CONTROLS_BOILER, default=False
             ): selector.BooleanSelector(),
             vol.Optional(CONF_COMPRESSOR_GROUP): selector.TextSelector(),
+            vol.Optional(CONF_DECLARED_POWER): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100000, step=0.1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
         }
     )
 

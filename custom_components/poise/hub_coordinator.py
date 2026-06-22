@@ -1,11 +1,16 @@
 """Multi-zone hub coordinator — shared-resource aggregation (ADR-0038/0039).
 
-Phase 2 of the two-phase tick. Reads each loaded Poise *zone* coordinator's last
-``data`` dict, builds a :class:`ZoneRequest`, aggregates the boiler demand from
-the opt-in zones, and — only if both on/off actions are configured — actuates a
-shared boiler (Stufe 2). All decisions come from the pure, tested
-``hub_aggregate`` helpers; this module is HA glue (single writer of the boiler).
-With no actions configured it stays shadow-only (just the diagnostic sensor).
+Phase 2 of the two-phase tick — note it is **not synchronous**: hub and zones
+tick independently (60 s each), so the hub reads each zone's *last published*
+snapshot, up to ~60 s old (review #6). For boiler aggregation with activation
+delay + min-cycle this staleness is immaterial.
+
+All control decisions — including the tick-crossing boiler/compressor state
+machines — live in the pure, unit-tested ``hub_aggregate`` helpers
+(``step_boiler``/``step_min_cycle``); this module only reads HA state and
+performs the single service call. With no boiler actions configured it stays
+shadow-only. Load shedding (S3) and compressor grouping (S4) are computed as
+diagnostics; zone-side enforcement is a later stage.
 """
 
 from __future__ import annotations
@@ -28,8 +33,10 @@ from .const import (
     CONF_BOILER_OFF_ACTION,
     CONF_BOILER_ON_ACTION,
     CONF_BOILER_POWER_THRESHOLD,
+    CONF_COMPRESSOR_GROUP,
     CONF_CONTROLS_BOILER,
     CONF_CURRENT_POWER_SENSOR,
+    CONF_DECLARED_POWER,
     CONF_ENTRY_TYPE,
     CONF_MAX_POWER_SENSOR,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
@@ -43,24 +50,37 @@ from .const import (
 )
 from .contracts import ZoneRequest
 from .control.hub_aggregate import (
+    BoilerState,
     ServiceAction,
     aggregate_boiler_demand,
-    gate_min_cycle,
     group_call_for_heat,
     parse_service_action,
     resolve_load_shedding,
-    target_boiler_state,
+    step_boiler,
+    step_min_cycle,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def zone_request_from_data(
-    zone_id: str, data: dict[str, Any], *, controls_boiler: bool, mono_ts: float
+    zone_id: str,
+    data: dict[str, Any],
+    *,
+    controls_boiler: bool,
+    declared_power: float | None,
+    compressor_group: str | None,
+    mono_ts: float,
 ) -> ZoneRequest:
-    """Build a ZoneRequest from a zone coordinator's published ``data`` dict."""
+    """Build a ZoneRequest from a zone's published ``data`` dict + its config.
+
+    ``heat_demand`` uses the live tpi_duty shadow estimate when present, else a
+    binary fall-back from ``heating`` (review #7 — fine for a diagnostic
+    aggregate). ``frost_active``/``health_active`` are read from the binding
+    lower cause so frost (SAFETY) and mould (HEALTH) floors are honoured.
+    """
     heating = bool(data.get("heating"))
-    cause = str(data.get("binding_lower_cause") or "")
+    cause = str(data.get("binding_lower_cause") or "").lower()
     duty = data.get("tpi_duty")
     heat_demand = float(duty) if duty is not None else (1.0 if heating else 0.0)
     room = data.get("current_temperature")
@@ -72,9 +92,12 @@ def zone_request_from_data(
         hvac_action="heating" if heating else "idle",
         heat_demand=heat_demand,
         comfort_gap=gap,
-        frost_active="frost" in cause.lower(),
+        frost_active="frost" in cause,
         controls_boiler=controls_boiler,
         mono_ts=mono_ts,
+        declared_power=declared_power,
+        compressor_group=compressor_group,
+        health_active="mould" in cause or "schimmel" in cause or "mold" in cause,
     )
 
 
@@ -109,13 +132,13 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self._min_on = float(d.get(CONF_BOILER_MIN_ON, DEFAULT_BOILER_MIN_ON_S))
         self._min_off = float(d.get(CONF_BOILER_MIN_OFF, DEFAULT_BOILER_MIN_OFF_S))
-        self._boiler_on = False
-        self._last_switch_mono = -1.0e9  # allow an immediate first switch
-        self._demand_true_since: float | None = None
-        self._last_keepalive_mono = 0.0
+        self._boiler = BoilerState()
         # S3 load shedding + S4 compressor groups (shadow stage)
         self._max_power_sensor = d.get(CONF_MAX_POWER_SENSOR)
         self._current_power_sensor = d.get(CONF_CURRENT_POWER_SENSOR)
+        # NOTE: compressor min-cycle reuses the boiler timers for the shadow;
+        # a heat-pump compressor needs its own (longer) min-off before actuation
+        # is wired (review #5).
         self._group_on: dict[str, bool] = {}
         self._group_switch: dict[str, float] = {}
 
@@ -129,10 +152,15 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             data = getattr(coord, "data", None)
             if not isinstance(data, dict) or not data.get("available"):
                 continue
-            controls = bool(e.data.get(CONF_CONTROLS_BOILER, False))  # opt-in
+            dp = e.data.get(CONF_DECLARED_POWER)
             out.append(
                 zone_request_from_data(
-                    e.entry_id, data, controls_boiler=controls, mono_ts=now
+                    e.entry_id,
+                    data,
+                    controls_boiler=bool(e.data.get(CONF_CONTROLS_BOILER, False)),
+                    declared_power=float(dp) if dp else None,
+                    compressor_group=e.data.get(CONF_COMPRESSOR_GROUP),
+                    mono_ts=now,
                 )
             )
         return out
@@ -162,18 +190,17 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         groups: dict[str, bool] = {}
         for grp, want in group_call_for_heat(requests).items():
-            gated = gate_min_cycle(
-                want,
-                currently_on=self._group_on.get(grp, False),
-                last_change_mono=self._group_switch.get(grp, -1.0e9),
+            on, switch = step_min_cycle(
+                prev_on=self._group_on.get(grp, False),
+                prev_switch_mono=self._group_switch.get(grp, -1.0e9),
+                demand=want,
                 now_mono=now,
                 min_on_s=self._min_on,
                 min_off_s=self._min_off,
             )
-            if gated != self._group_on.get(grp, False):
-                self._group_switch[grp] = now
-            self._group_on[grp] = gated
-            groups[grp] = gated
+            self._group_on[grp] = on
+            self._group_switch[grp] = switch
+            groups[grp] = on
         return {
             "available_power": round(available, 1) if available is not None else None,
             "shed_zones": list(shedding.shed) if shedding else [],
@@ -192,35 +219,20 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
 
     async def _actuate(self, demand_active: bool, now: float) -> None:
-        if demand_active and self._demand_true_since is None:
-            self._demand_true_since = now
-        elif not demand_active:
-            self._demand_true_since = None
-        target = target_boiler_state(
-            demand_active,
-            currently_on=self._boiler_on,
-            demand_true_since=self._demand_true_since,
+        step = step_boiler(
+            self._boiler,
+            demand=demand_active,
             now_mono=now,
             activation_delay_s=self._activation_delay,
-            last_switch_mono=self._last_switch_mono,
             min_on_s=self._min_on,
             min_off_s=self._min_off,
+            keepalive_s=self._keepalive,
         )
-        if target != self._boiler_on:
-            action = self._action_on if target else self._action_off
-            assert action is not None  # _actuation guarantees both are set
-            await self._call(action)
-            self._boiler_on = target
-            self._last_switch_mono = now
-            self._last_keepalive_mono = now
-        elif (
-            self._boiler_on
-            and self._keepalive > 0.0
-            and (now - self._last_keepalive_mono) >= self._keepalive
-            and self._action_on is not None
-        ):
+        self._boiler = step.state
+        if step.call == "on" and self._action_on is not None:
             await self._call(self._action_on)
-            self._last_keepalive_mono = now
+        elif step.call == "off" and self._action_off is not None:
+            await self._call(self._action_off)
 
     async def _async_update_data(self) -> dict[str, Any]:
         now = self._clock.monotonic()
@@ -240,6 +252,6 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "zone_count": len(requests),
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),
             "actuation_enabled": self._actuation,
-            "boiler_on": self._boiler_on,
+            "boiler_on": self._boiler.on,
             **self._shared_resource_shadow(requests, now),
         }

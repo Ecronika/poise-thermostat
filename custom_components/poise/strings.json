@@ -55,7 +55,8 @@
           "trv_external_temp_input": "TRV external-temperature input",
           "operative_input": "Control operative temperature",
           "controls_boiler": "This room may request the shared boiler",
-          "compressor_group": "Shared compressor/outdoor-unit group (optional)"
+          "compressor_group": "Shared compressor/outdoor-unit group (optional)",
+          "declared_power": "Declared heating power (for load shedding / weighted demand, optional)"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."

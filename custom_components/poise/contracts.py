@@ -179,6 +179,7 @@ class ZoneRequest:
     flow_temp_request: float | None = None
     source_pref: str | None = None  # energy-aware source policy (Deliverable 4)
     compressor_group: str | None = None
+    health_active: bool = False  # mould/health floor binding (excluded from shed)
 
 
 @dataclass(frozen=True, slots=True)
