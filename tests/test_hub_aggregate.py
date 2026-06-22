@@ -200,3 +200,90 @@ def test_target_boiler_state_min_on_holds() -> None:
         )
         is True
     )
+
+
+def _heating_zone(zid, *, gap, power, frost=False):
+    return ZoneRequest(
+        zone_id=zid,
+        heating=True,
+        hvac_action="heating",
+        heat_demand=1.0,
+        comfort_gap=gap,
+        frost_active=frost,
+        controls_boiler=False,
+        mono_ts=0.0,
+        declared_power=power,
+    )
+
+
+def test_no_shedding_when_within_budget() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_load_shedding
+
+    r = resolve_load_shedding(
+        [_heating_zone("a", gap=1.0, power=2.0)], available_power=5.0
+    )
+    assert r.shed == () and r.freed_power == 0.0
+
+
+def test_shedding_sheds_nearest_setpoint_first() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_load_shedding
+
+    zones = [
+        _heating_zone("far", gap=3.0, power=2.0),
+        _heating_zone("near", gap=0.2, power=2.0),
+        _heating_zone("mid", gap=1.5, power=2.0),
+    ]
+    # overload of 3 kW -> shed nearest first ('near'), then next nearest ('mid')
+    r = resolve_load_shedding(zones, available_power=-3.0)
+    assert r.shed == ("near", "mid") and r.freed_power == 4.0
+
+
+def test_frost_zone_never_shed() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_load_shedding
+
+    zones = [
+        _heating_zone("frost", gap=0.1, power=2.0, frost=True),
+        _heating_zone("ok", gap=2.0, power=2.0),
+    ]
+    r = resolve_load_shedding(zones, available_power=-1.0)
+    assert "frost" not in r.shed and r.shed == ("ok",)
+
+
+def test_group_call_for_heat() -> None:
+    from custom_components.poise.control.hub_aggregate import group_call_for_heat
+
+    a = ZoneRequest(
+        zone_id="a",
+        heating=True,
+        hvac_action="heating",
+        heat_demand=1.0,
+        comfort_gap=1.0,
+        frost_active=False,
+        controls_boiler=False,
+        mono_ts=0.0,
+        compressor_group="outdoor1",
+    )
+    b = ZoneRequest(
+        zone_id="b",
+        heating=False,
+        hvac_action="idle",
+        heat_demand=0.0,
+        comfort_gap=0.0,
+        frost_active=False,
+        controls_boiler=False,
+        mono_ts=0.0,
+        compressor_group="outdoor1",
+    )
+    c = ZoneRequest(
+        zone_id="c",
+        heating=False,
+        hvac_action="idle",
+        heat_demand=0.0,
+        comfort_gap=0.0,
+        frost_active=False,
+        controls_boiler=False,
+        mono_ts=0.0,
+        compressor_group="outdoor2",
+    )
+    g = group_call_for_heat([a, b, c])
+    assert g == {"outdoor1": True, "outdoor2": False}
