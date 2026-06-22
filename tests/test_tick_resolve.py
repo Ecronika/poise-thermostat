@@ -173,3 +173,27 @@ def test_throttle_no_rewrite_loop_on_coarse_trv() -> None:
     # Poise wants 21.3, a 0.5-step TRV echoes 21.5; snapped compare must NOT rewrite
     snapped = snap_to_step(21.3, 0.5)  # 21.5
     assert should_write(21.5, snapped, mode_changed=False, deadband=0.2) is False
+
+
+def test_heat_drive_uses_actuator_running_state() -> None:
+    from custom_components.poise.control.tick_resolve import heat_drive_signal
+
+    assert heat_drive_signal("heating", fallback_heating=False) == 1.0  # real heat
+    assert heat_drive_signal("idle", fallback_heating=True) == 0.0  # valve idle wins
+    assert heat_drive_signal("off", fallback_heating=True) == 0.0
+
+
+def test_heat_drive_falls_back_without_action() -> None:
+    from custom_components.poise.control.tick_resolve import heat_drive_signal
+
+    assert heat_drive_signal(None, fallback_heating=True) == 1.0
+    assert heat_drive_signal("", fallback_heating=False) == 0.0
+
+
+def test_needs_heat_mode_on_drift() -> None:
+    from custom_components.poise.control.tick_resolve import needs_heat_mode
+
+    assert needs_heat_mode("auto", can_heat=True) is True  # internal schedule
+    assert needs_heat_mode("off", can_heat=True) is True
+    assert needs_heat_mode("heat", can_heat=True) is False  # already correct
+    assert needs_heat_mode("auto", can_heat=False) is False  # cool-only device
