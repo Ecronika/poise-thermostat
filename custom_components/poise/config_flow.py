@@ -15,12 +15,15 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ACTUATOR,
+    CONF_BOILER_COUNT_THRESHOLD,
+    CONF_BOILER_POWER_THRESHOLD,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_ENTRY_TYPE,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
@@ -34,10 +37,12 @@ from .const import (
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    DEFAULT_BOILER_COUNT_THRESHOLD,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
+    ENTRY_TYPE_SYSTEM,
 )
 
 
@@ -129,6 +134,25 @@ def _schema() -> vol.Schema:
     )
 
 
+def _system_schema() -> vol.Schema:
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_BOILER_COUNT_THRESHOLD, default=DEFAULT_BOILER_COUNT_THRESHOLD
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=20, step=1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Optional(CONF_BOILER_POWER_THRESHOLD): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100000, step=0.1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+        }
+    )
+
+
 class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):
     """Guided per-room config flow with reconfigure support."""
 
@@ -137,11 +161,29 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="user", menu_options=["room", "system"])
+
+    async def async_step_room(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
         if user_input is not None:
             await self.async_set_unique_id(user_input[CONF_ACTUATOR])
             self._abort_if_unique_id_configured()
             return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
-        return self.async_show_form(step_id="user", data_schema=_schema())
+        return self.async_show_form(step_id="room", data_schema=_schema())
+
+    async def async_step_system(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        # singleton hub entry (ADR-0038)
+        await self.async_set_unique_id("poise_system")
+        self._abort_if_unique_id_configured()
+        if user_input is not None:
+            return self.async_create_entry(
+                title="Poise System",
+                data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
+            )
+        return self.async_show_form(step_id="system", data_schema=_system_schema())
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None

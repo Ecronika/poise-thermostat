@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.40.0"
+VERSION: Final = "0.42.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -61,3 +61,11 @@ EKF_SAVE_EVERY_TICKS: Final = 30
 
 # Optimal-start forecast (ADR-0025); refresh the weather forecast at most this often
 FORECAST_TTL_S: Final = 900.0
+
+# Multi-zone hub & boiler-demand aggregate (ADR-0038/0039)
+CONF_ENTRY_TYPE: Final = "entry_type"
+ENTRY_TYPE_SYSTEM: Final = "system"
+CONF_BOILER_COUNT_THRESHOLD: Final = "boiler_count_threshold"
+CONF_BOILER_POWER_THRESHOLD: Final = "boiler_power_threshold"
+CONF_CONTROLS_BOILER: Final = "controls_boiler"
+DEFAULT_BOILER_COUNT_THRESHOLD: Final = 1

@@ -155,3 +155,43 @@ class ActuatorCommand:
     hvac_mode: str
     reason: str = ""
     clamped_by: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneRequest:
+    """One zone's per-tick state handed to the multi-zone hub (ADR-0038).
+
+    Each zone writes this at the end of Phase 1 into the shared registry; the
+    hub resolves shared resources (boiler, power budget, compressor, flow temp)
+    from the set of all ``ZoneRequest``s. It is never an actuator command — the
+    hub replies with a :class:`ResourceRelease` cap, not a write.
+    """
+
+    zone_id: str
+    heating: bool
+    hvac_action: str
+    heat_demand: float  # 0..1, this zone's call-for-heat intensity
+    comfort_gap: float  # target - room (K); positive = below target
+    frost_active: bool
+    controls_boiler: bool
+    mono_ts: float
+    declared_power: float | None = None  # weighting unit, free choice (charter)
+    flow_temp_request: float | None = None
+    source_pref: str | None = None  # energy-aware source policy (Deliverable 4)
+    compressor_group: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceRelease:
+    """The hub's per-zone reply: caps the zone feeds into its own solver (ADR-0038).
+
+    The hub never writes a zone's actuator; it publishes this release and the
+    zone composes ``power_cap``/``shed`` into its existing constraint solver
+    (ADR-0035) as an additional high-precedence bound. Single-writer is kept.
+    """
+
+    zone_id: str
+    shed: bool = False
+    power_cap: float | None = None
+    source_grant: str | None = None
+    mono_ts: float = 0.0
