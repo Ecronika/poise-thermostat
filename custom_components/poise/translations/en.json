@@ -54,7 +54,8 @@
           "irradiance_sensor": "Solar irradiance sensor (W/m²)",
           "trv_external_temp_input": "TRV external-temperature input",
           "operative_input": "Control operative temperature",
-          "controls_boiler": "This room may request the shared boiler"
+          "controls_boiler": "This room may request the shared boiler",
+          "compressor_group": "Shared compressor/outdoor-unit group (optional)"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
@@ -79,7 +80,9 @@
           "boiler_activation_delay_s": "Activation delay before switching on (s)",
           "boiler_keepalive_s": "Keep-alive resend interval (s, 0 = off)",
           "boiler_min_on_s": "Minimum on-time (s)",
-          "boiler_min_off_s": "Minimum off-time (s)"
+          "boiler_min_off_s": "Minimum off-time (s)",
+          "max_power_sensor": "Maximum allowed power sensor (load shedding, optional)",
+          "current_power_sensor": "Current total power sensor (load shedding, optional)"
         }
       }
     },

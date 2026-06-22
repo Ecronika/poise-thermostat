@@ -54,7 +54,8 @@
           "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
           "trv_external_temp_input": "TRV-Eingang externe Temperatur",
           "operative_input": "Operative Temperatur regeln",
-          "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern"
+          "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern",
+          "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit (optional)"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
@@ -79,7 +80,9 @@
           "boiler_activation_delay_s": "Aktivierungs-Verzögerung vor dem Einschalten (s)",
           "boiler_keepalive_s": "Keep-Alive-Wiederholung (s, 0 = aus)",
           "boiler_min_on_s": "Mindest-Einschaltzeit (s)",
-          "boiler_min_off_s": "Mindest-Ausschaltzeit (s)"
+          "boiler_min_off_s": "Mindest-Ausschaltzeit (s)",
+          "max_power_sensor": "Sensor max. erlaubte Leistung (Lastabwurf, optional)",
+          "current_power_sensor": "Sensor aktuelle Gesamtleistung (Lastabwurf, optional)"
         }
       }
     },
