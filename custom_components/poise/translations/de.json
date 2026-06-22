@@ -53,7 +53,8 @@
           "weather_entity": "Wetter-Entität (Prognose)",
           "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
           "trv_external_temp_input": "TRV-Eingang externe Temperatur",
-          "operative_input": "Operative Temperatur regeln"
+          "operative_input": "Operative Temperatur regeln",
+          "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
@@ -69,10 +70,16 @@
       },
       "system": {
         "title": "Poise System",
-        "description": "Zonenübergreifende Ressourcen-Koordination. Der Kesselbedarf-Sensor ist in dieser Version nur Diagnose — er schaltet noch keinen Kessel.",
+        "description": "Zonenübergreifende Ressourcen-Koordination. Beide Kessel-Aktionen leer lassen = nur Diagnose (Shadow); gesetzt = Poise schaltet den Kessel. Pro teilnehmendem Raum „darf Kessel anfordern“ aktivieren.",
         "data": {
           "boiler_count_threshold": "Heizende Zonen für die Kesselanforderung",
-          "boiler_power_threshold": "Gewichtete Last-Schwelle (optional)"
+          "boiler_power_threshold": "Gewichtete Last-Schwelle (optional)",
+          "boiler_on_action": "Kessel-EIN-Aktion — entity_id/domain.service[/attr:value]",
+          "boiler_off_action": "Kessel-AUS-Aktion — entity_id/domain.service[/attr:value]",
+          "boiler_activation_delay_s": "Aktivierungs-Verzögerung vor dem Einschalten (s)",
+          "boiler_keepalive_s": "Keep-Alive-Wiederholung (s, 0 = aus)",
+          "boiler_min_on_s": "Mindest-Einschaltzeit (s)",
+          "boiler_min_off_s": "Mindest-Ausschaltzeit (s)"
         }
       }
     },

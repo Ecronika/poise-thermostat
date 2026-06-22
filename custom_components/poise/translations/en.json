@@ -53,7 +53,8 @@
           "weather_entity": "Weather entity (forecast)",
           "irradiance_sensor": "Solar irradiance sensor (W/m²)",
           "trv_external_temp_input": "TRV external-temperature input",
-          "operative_input": "Control operative temperature"
+          "operative_input": "Control operative temperature",
+          "controls_boiler": "This room may request the shared boiler"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
@@ -69,10 +70,16 @@
       },
       "system": {
         "title": "Poise System",
-        "description": "Shared-resource coordination across zones. The boiler-demand sensor is diagnostic only in this version — it does not switch a boiler yet.",
+        "description": "Shared-resource coordination across zones. Leave both boiler actions empty to stay diagnostic-only (shadow); set them to let Poise switch the boiler. Enable 'may request the boiler' on each participating room.",
         "data": {
           "boiler_count_threshold": "Heating zones required to request the boiler",
-          "boiler_power_threshold": "Weighted power threshold (optional)"
+          "boiler_power_threshold": "Weighted power threshold (optional)",
+          "boiler_on_action": "Boiler ON action — entity_id/domain.service[/attr:value]",
+          "boiler_off_action": "Boiler OFF action — entity_id/domain.service[/attr:value]",
+          "boiler_activation_delay_s": "Activation delay before switching on (s)",
+          "boiler_keepalive_s": "Keep-alive resend interval (s, 0 = off)",
+          "boiler_min_on_s": "Minimum on-time (s)",
+          "boiler_min_off_s": "Minimum off-time (s)"
         }
       }
     },
