@@ -56,3 +56,16 @@ def test_current_mode_cool_only_device() -> None:
 
 def test_current_mode_off_when_no_capability() -> None:
     assert current_hvac_mode(True, "auto", False, False) == "off"
+
+
+def test_card_mode_round_trips_through_decide_mode() -> None:
+    # H1 regression guard at the seam: the card's mode must be heating/cooling
+    # vocabulary that decide_mode actually accepts (not collapse to idle).
+    from custom_components.poise.comfort.dual_setpoint import DualSetpoint
+    from custom_components.poise.control.cooling import decide_mode
+
+    sp = DualSetpoint(21.0, 24.0)
+    cm_heat = climate_mode_for_hvac("heat")
+    assert decide_mode(18.0, sp, outdoor=5.0, climate_mode=cm_heat) == "heat"
+    cm_cool = climate_mode_for_hvac("cool")
+    assert decide_mode(27.0, sp, outdoor=28.0, climate_mode=cm_cool) == "cool"

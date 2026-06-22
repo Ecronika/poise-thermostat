@@ -156,3 +156,20 @@ def test_skips_when_actuator_already_at_target() -> None:
 
 def test_writes_when_actuator_setpoint_unknown() -> None:
     assert should_write(None, 22.6, mode_changed=False, deadband=0.2) is True
+
+
+def test_snap_to_step_coarse_device() -> None:
+    from custom_components.poise.control.tick_resolve import snap_to_step
+
+    assert snap_to_step(21.3, 0.5) == 21.5  # coarse TRV rounds up
+    assert snap_to_step(21.1, 0.5) == 21.0
+    assert snap_to_step(21.3, 0.1) == 21.3  # fine device unchanged
+    assert snap_to_step(21.3, 0.0) == 21.3  # guard: no step -> passthrough
+
+
+def test_throttle_no_rewrite_loop_on_coarse_trv() -> None:
+    from custom_components.poise.control.tick_resolve import should_write, snap_to_step
+
+    # Poise wants 21.3, a 0.5-step TRV echoes 21.5; snapped compare must NOT rewrite
+    snapped = snap_to_step(21.3, 0.5)  # 21.5
+    assert should_write(21.5, snapped, mode_changed=False, deadband=0.2) is False
