@@ -23,7 +23,15 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .hub_coordinator import PoiseHubCoordinator
 
-_ATTRS = ("active_zones", "weighted_demand", "frost_override", "zone_count")
+_ATTRS = (
+    "active_zones",
+    "weighted_demand",
+    "frost_override",
+    "zone_count",
+    "controlling_zones",
+    "actuation_enabled",
+    "boiler_on",
+)
 
 
 async def async_setup_entry(

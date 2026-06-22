@@ -15,7 +15,13 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ACTUATOR,
+    CONF_BOILER_ACTIVATION_DELAY,
     CONF_BOILER_COUNT_THRESHOLD,
+    CONF_BOILER_KEEPALIVE,
+    CONF_BOILER_MIN_OFF,
+    CONF_BOILER_MIN_ON,
+    CONF_BOILER_OFF_ACTION,
+    CONF_BOILER_ON_ACTION,
     CONF_BOILER_POWER_THRESHOLD,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
@@ -23,6 +29,7 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_CONTROLS_BOILER,
     CONF_ENTRY_TYPE,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
@@ -37,7 +44,11 @@ from .const import (
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
+    DEFAULT_BOILER_KEEPALIVE_S,
+    DEFAULT_BOILER_MIN_OFF_S,
+    DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_SETBACK_DELTA,
@@ -130,6 +141,9 @@ def _schema() -> vol.Schema:
             vol.Required(
                 CONF_OPERATIVE_INPUT, default=False
             ): selector.BooleanSelector(),
+            vol.Required(
+                CONF_CONTROLS_BOILER, default=False
+            ): selector.BooleanSelector(),
         }
     )
 
@@ -147,6 +161,52 @@ def _system_schema() -> vol.Schema:
             vol.Optional(CONF_BOILER_POWER_THRESHOLD): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=100000, step=0.1, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Optional(CONF_BOILER_ON_ACTION): selector.TextSelector(),
+            vol.Optional(CONF_BOILER_OFF_ACTION): selector.TextSelector(),
+            vol.Required(
+                CONF_BOILER_ACTIVATION_DELAY, default=DEFAULT_BOILER_ACTIVATION_DELAY_S
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=600,
+                    step=5,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_BOILER_KEEPALIVE, default=DEFAULT_BOILER_KEEPALIVE_S
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=600,
+                    step=5,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_BOILER_MIN_ON, default=DEFAULT_BOILER_MIN_ON_S
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=30,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_BOILER_MIN_OFF, default=DEFAULT_BOILER_MIN_OFF_S
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=3600,
+                    step=30,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
                 )
             ),
         }
@@ -189,9 +249,16 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         entry = self._get_reconfigure_entry()
+        is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+        schema = _system_schema() if is_system else _schema()
         if user_input is not None:
-            return self.async_update_reload_and_abort(entry, data_updates=user_input)
+            updates = (
+                {CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input}
+                if is_system
+                else user_input
+            )
+            return self.async_update_reload_and_abort(entry, data_updates=updates)
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(_schema(), entry.data),
+            data_schema=self.add_suggested_values_to_schema(schema, entry.data),
         )
