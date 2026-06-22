@@ -136,3 +136,15 @@ def test_tpi_drives_a_cold_room_up() -> None:
     )
     assert trace[0][1] == 1.0  # cold room -> full duty initially
     assert trace[-1][0] > 20.0  # warmed toward target
+
+
+def test_pi_compensator_reduces_proportional_droop() -> None:
+    from tests.harness.closed_loop import run_pi_setpoint
+
+    raw = run_pi_setpoint(RCPlant(), compensate=False)
+    comp = run_pi_setpoint(RCPlant(), compensate=True)
+    raw_air, comp_air = raw[-1][0], comp[-1][0]
+    assert raw_air < 20.0  # a bare proportional TRV droops well below target
+    assert comp_air - raw_air > 1.0  # compensation significantly cuts the droop
+    assert comp_air > 20.3  # and gets the room close to the 21 °C target
+    assert comp[-1][1] > 21.0  # by pushing the written setpoint above target
