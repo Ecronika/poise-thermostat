@@ -27,7 +27,15 @@ def service_call_for(command: ActuatorCommand) -> tuple[str, str, dict[str, Any]
             "set_temperature",
             {"entity_id": command.actuator_id, "temperature": command.value},
         )
-    raise NotImplementedError(f"actuator path not in Phase 0: {command.path}")
+    if command.path is ActuatorPath.TPI_VALVE:
+        # direct valve: actuator_id is the writable valve-opening number entity,
+        # value is the open percentage 0..100 (ADR-0036). Never valve_closing_*.
+        return (
+            "number",
+            "set_value",
+            {"entity_id": command.actuator_id, "value": command.value},
+        )
+    raise NotImplementedError(f"actuator path not wired: {command.path}")
 
 
 async def write(hass: HomeAssistant, command: ActuatorCommand) -> None:

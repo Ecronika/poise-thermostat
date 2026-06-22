@@ -81,7 +81,8 @@ from .control.tick_resolve import (
     should_write,
     snap_to_step,
 )
-from .devices.capability import climate_capability
+from .control.tpi_shadow import evaluate_tpi_shadow
+from .devices.capability import classify_number_entity, climate_capability
 from .devices.model_fixes import (
     is_external_sensor_select,
     is_low_battery,
@@ -196,6 +197,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._battery_entity: str | None = None
         self._ext_temp_auto: str | None = None
         self._sensor_select: str | None = None
+        self._valve_entity: str | None = None
         self._forecast: list[tuple[float, float]] = []
         self._forecast_at: float | None = None
 
@@ -295,6 +297,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         eid, sel.attributes.get("options") if sel else None
                     ):
                         self._sensor_select = eid
+                elif (
+                    self._valve_entity is None
+                    and eid.startswith("number.")
+                    and classify_number_entity(eid) == "valve"
+                ):
+                    self._valve_entity = eid
         except Exception:  # noqa: BLE001 - guard resolution must never break setup
             _LOGGER.debug("Poise: device-guard resolution failed", exc_info=True)
 
@@ -834,6 +842,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             lower=decision.heat_sp,
             upper=decision.cool_sp,
         )
+        # shadow direct-valve TPI duty (ADR-0036): computed + reported, never
+        # written; active once a writable valve-open entity is detected.
+        tpi = evaluate_tpi_shadow(
+            valve_available=self._valve_entity is not None,
+            model=self._ekf.get_model(),
+            target=decision.heat_sp,
+            room=room,
+            t_out=t_out_eff,
+        )
         return {
             "available": True,
             "current_temperature": round(room, 1),
@@ -884,6 +901,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "trv_input_mode": (
                 "operative" if operative_active else ("air" if ext_num else "none")
             ),
+            "tpi_active": tpi.active,
+            "tpi_duty": tpi.duty,
+            "tpi_valve_percent": tpi.valve_percent,
+            "tpi_valve_entity": self._valve_entity,
             "mpc_active": shadow.active,
             "mpc_power": shadow.power,
             "mpc_weight": shadow.weight,
