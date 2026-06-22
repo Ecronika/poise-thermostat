@@ -287,3 +287,140 @@ def test_group_call_for_heat() -> None:
     )
     g = group_call_for_heat([a, b, c])
     assert g == {"outdoor1": True, "outdoor2": False}
+
+
+def test_frost_override_fires_for_non_optin_zone() -> None:
+    # review #2: a freezing zone that is NOT opt-in must still fire the boiler
+    from custom_components.poise.control.hub_aggregate import aggregate_boiler_demand
+
+    z = _zone("cold", heating=False, frost=True, controls_boiler=False)
+    d = aggregate_boiler_demand([z], count_threshold=1)
+    assert d.active is True and d.frost_override is True
+
+
+def test_shedding_excludes_mould_health_zone() -> None:
+    # review #4: a mould/health-floored zone must never be shed
+    from custom_components.poise.control.hub_aggregate import resolve_load_shedding
+
+    health = ZoneRequest(
+        zone_id="mould",
+        heating=True,
+        hvac_action="heating",
+        heat_demand=1.0,
+        comfort_gap=0.1,
+        frost_active=False,
+        controls_boiler=False,
+        mono_ts=0.0,
+        declared_power=2.0,
+        health_active=True,
+    )
+    ok = _heating_zone("ok", gap=2.0, power=2.0)
+    r = resolve_load_shedding([health, ok], available_power=-1.0)
+    assert "mould" not in r.shed and r.shed == ("ok",)
+
+
+def test_step_boiler_activation_latch_across_ticks() -> None:
+    from custom_components.poise.control.hub_aggregate import BoilerState, step_boiler
+
+    st = BoilerState()
+    # demand appears at t=0, delay 300 -> no switch yet at t=100
+    s1 = step_boiler(
+        st,
+        demand=True,
+        now_mono=0.0,
+        activation_delay_s=300.0,
+        min_on_s=0.0,
+        min_off_s=0.0,
+        keepalive_s=0.0,
+    )
+    assert s1.call is None and s1.state.demand_true_since == 0.0
+    s2 = step_boiler(
+        s1.state,
+        demand=True,
+        now_mono=100.0,
+        activation_delay_s=300.0,
+        min_on_s=0.0,
+        min_off_s=0.0,
+        keepalive_s=0.0,
+    )
+    assert s2.call is None and s2.state.on is False
+    # at t=400 the latch matured -> switch on
+    s3 = step_boiler(
+        s2.state,
+        demand=True,
+        now_mono=400.0,
+        activation_delay_s=300.0,
+        min_on_s=0.0,
+        min_off_s=0.0,
+        keepalive_s=0.0,
+    )
+    assert s3.call == "on" and s3.state.on is True
+
+
+def test_step_boiler_min_on_holds_then_off() -> None:
+    from custom_components.poise.control.hub_aggregate import BoilerState, step_boiler
+
+    on = BoilerState(on=True, last_switch_mono=0.0, demand_true_since=None)
+    # demand gone at t=60, min_on 300 -> stays on, no call
+    s1 = step_boiler(
+        on,
+        demand=False,
+        now_mono=60.0,
+        activation_delay_s=0.0,
+        min_on_s=300.0,
+        min_off_s=0.0,
+        keepalive_s=0.0,
+    )
+    assert s1.call is None and s1.state.on is True
+    # t=400 -> min_on satisfied -> switch off
+    s2 = step_boiler(
+        s1.state,
+        demand=False,
+        now_mono=400.0,
+        activation_delay_s=0.0,
+        min_on_s=300.0,
+        min_off_s=0.0,
+        keepalive_s=0.0,
+    )
+    assert s2.call == "off" and s2.state.on is False
+
+
+def test_step_boiler_keepalive_resends_on() -> None:
+    from custom_components.poise.control.hub_aggregate import BoilerState, step_boiler
+
+    on = BoilerState(on=True, last_switch_mono=0.0, last_keepalive_mono=0.0)
+    # still on, demand true, keepalive 60 elapsed -> resend "on"
+    s = step_boiler(
+        on,
+        demand=True,
+        now_mono=60.0,
+        activation_delay_s=0.0,
+        min_on_s=0.0,
+        min_off_s=0.0,
+        keepalive_s=60.0,
+    )
+    assert s.call == "on" and s.state.last_keepalive_mono == 60.0
+
+
+def test_step_min_cycle_advances_switch_only_on_change() -> None:
+    from custom_components.poise.control.hub_aggregate import step_min_cycle
+
+    on, switch = step_min_cycle(
+        prev_on=False,
+        prev_switch_mono=-1.0e9,
+        demand=True,
+        now_mono=500.0,
+        min_on_s=300.0,
+        min_off_s=300.0,
+    )
+    assert on is True and switch == 500.0
+    # no change -> switch timestamp preserved
+    on2, switch2 = step_min_cycle(
+        prev_on=True,
+        prev_switch_mono=500.0,
+        demand=True,
+        now_mono=900.0,
+        min_on_s=300.0,
+        min_off_s=300.0,
+    )
+    assert on2 is True and switch2 == 500.0
