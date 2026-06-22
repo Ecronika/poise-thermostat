@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.30.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.32.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -27,7 +27,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Solar accounting** — measured global irradiance as a learned disturbance feeding the MRT/comfort path — counted once.
 - **Precedence constraint solver** — every bound (frost/mould/ASR cap/device max) is composed with explicit precedence into exactly one safe command per actuator.
 - **Cooling decision & modes** — capability-aware dual setpoints; `COOL` is surfaced as an HVAC mode **only when the actuator supports cooling** (heat-only TRVs stay HEAT/OFF).
-- **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, setpoint write-throttle, and learning + user intent (enable/override/mode) persisted across restarts.
+- **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts.
 
 ### 🟡 Shadow / diagnostic (computed, not yet actuating)
 
@@ -38,4 +38,26 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Direct valve / TPI control** — `valve_position` / `pi_heating_demand` / calibration paths exist generically but are parked: the current reference hardware exposes no writable live valve position.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
 - **Multi-zone resource coordination** — cross-zone load-shedding / shared heat source (per-zone constraint solver is active; orchestration is pending).
-- **Efficiency report** — 
+- **Efficiency report** — heating-degree-hour savings in kWh / €.
+
+## Status
+
+Alpha — under active development against a documented architecture (35+ ADRs) and a production-identical simulation harness, in which the predictive core (EKF → MPC → optimal start/stop → gate) is validated end-to-end. Roadmap milestones: M1 norm comfort ✅ → M2 self-learning ✅ → M3 valve (hardware-parked) → M4 MPC (shadow live, active gated on winter validation) → M5 release.
+
+## Installation (HACS)
+
+1. HACS → Integrations → ⋮ → *Custom repositories* → add `https://github.com/Ecronika/poise-thermostat` (type: Integration).
+2. Install **Poise Setpoint Thermostat**, restart Home Assistant.
+3. *Settings → Devices & Services → Add Integration → Poise.*
+
+Use a **free-standing room sensor** (not the TRV's internal sensor) for best results; Poise raises a repair issue if it detects a likely heat-source-mounted sensor.
+
+---
+
+### Repository topics (set on GitHub)
+
+`home-assistant` · `homeassistant` · `hacs` · `custom-component` · `thermostat` · `climate` · `hvac` · `heating` · `cooling` · `trv` · `en16798` · `operative-temperature` · `comfort` · `self-learning`
+
+### One-line description (GitHub *About* / HACS)
+
+> Self-learning setpoint thermostat for TRV & climate entities — EN 16798 adaptive comfort, operative temperature/MRT, optimal start/stop, mould protection. Fully local. Successor to Smart Setpoint.
