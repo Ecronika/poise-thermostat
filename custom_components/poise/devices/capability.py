@@ -65,8 +65,15 @@ def select_path(caps: DeviceCapabilities) -> ActuatorPath:
 
 
 def climate_capability(hvac_modes: list[str]) -> tuple[bool, bool]:
-    """(can_heat, can_cool) from a climate entity's hvac_modes (ADR-0023)."""
+    """(can_heat, can_cool) from a climate entity's hvac_modes (ADR-0023).
+
+    ``cool`` capability requires an *explicit* ``cool``/``heat_cool`` mode: many
+    radiator TRVs expose an ``auto`` (internal-schedule) mode but cannot cool, so
+    inferring cooling from ``auto`` would falsely enable a cool setpoint on a
+    heat-only valve (Sonoff TRVZB finding). ``auto`` still implies heating, which
+    is safe for a heating-first integration.
+    """
     modes = {m.lower() for m in hvac_modes}
     can_heat = bool(modes & {"heat", "heat_cool", "auto"})
-    can_cool = bool(modes & {"cool", "heat_cool", "auto"})
+    can_cool = bool(modes & {"cool", "heat_cool"})
     return can_heat, can_cool
