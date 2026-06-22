@@ -89,6 +89,7 @@ from .devices.model_fixes import (
     looks_like_external_temp_number,
     looks_like_fault_alarm,
     looks_like_internal_schedule,
+    looks_like_valve_steps,
 )
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.running_mean import RunningMeanTracker
@@ -96,7 +97,7 @@ from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
 from .safety.heating_failure import HeatingFailureDetector
-from .safety.sensor_watchdog import is_frozen, sensor_at_heat_source
+from .safety.sensor_watchdog import is_frozen, sensor_at_heat_source, valve_stuck
 from .storage import PoiseStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -198,6 +199,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ext_temp_auto: str | None = None
         self._sensor_select: str | None = None
         self._valve_entity: str | None = None
+        self._valve_closing_steps: str | None = None
+        self._valve_idle_steps: str | None = None
         self._forecast: list[tuple[float, float]] = []
         self._forecast_at: float | None = None
 
@@ -303,6 +306,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     and classify_number_entity(eid) == "valve"
                 ):
                     self._valve_entity = eid
+                elif looks_like_valve_steps(eid) == "closing":
+                    self._valve_closing_steps = eid
+                elif looks_like_valve_steps(eid) == "idle":
+                    self._valve_idle_steps = eid
         except Exception:  # noqa: BLE001 - guard resolution must never break setup
             _LOGGER.debug("Poise: device-guard resolution failed", exc_info=True)
 
@@ -737,8 +744,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self._enabled:
             # A2: keep a heat-capable actuator in heat mode so it follows our
             # setpoint instead of its own off/auto schedule (TRVZB system_mode).
+            heat_supported = "heat" in (
+                (act_state.attributes.get("hvac_modes") or []) if act_state else []
+            )
             if needs_heat_mode(
-                act_state.state if act_state else None, can_heat=can_heat
+                act_state.state if act_state else None, heat_supported=heat_supported
             ):
                 try:
                     await self.hass.services.async_call(
@@ -851,6 +861,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             room=room,
             t_out=t_out_eff,
         )
+        # valve health (A3): a near-zero closing-step count means the motorised
+        # valve failed calibration / is jammed — advisory diagnostic + repair issue.
+        closing_steps = self._read(self._valve_closing_steps)
+        idle_steps = self._read(self._valve_idle_steps)
+        v_stuck = valve_stuck(closing_steps)
+        valve_health = (
+            "stuck" if v_stuck else ("ok" if closing_steps is not None else "unknown")
+        )
+        self._issue(
+            f"valve_stuck_{self._entry_id}",
+            v_stuck,
+            translation_key="valve_stuck",
+            placeholders={"entity": self._valve_closing_steps or "—"},
+        )
         return {
             "available": True,
             "current_temperature": round(room, 1),
@@ -901,6 +925,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "trv_input_mode": (
                 "operative" if operative_active else ("air" if ext_num else "none")
             ),
+            "valve_health": valve_health,
+            "valve_closing_steps": closing_steps,
+            "valve_idle_steps": idle_steps,
             "tpi_active": tpi.active,
             "tpi_duty": tpi.duty,
             "tpi_valve_percent": tpi.valve_percent,
