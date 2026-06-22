@@ -130,3 +130,34 @@ def run_tpi_control(
         air = plant.step(air, duty, t_out, dt)
         trace.append((air, duty))
     return trace
+
+
+def run_pi_setpoint(
+    plant: RCPlant,
+    *,
+    target: float = 21.0,
+    t_out: float = 8.0,
+    dt: float = 300.0,
+    steps: int = 600,
+    start_air: float = 18.0,
+    compensate: bool = True,
+    k_trv: float = 0.3,
+) -> list[tuple[float, float]]:
+    """Plant + a *proportional* setpoint-only TRV; optional PI compensation.
+
+    The TRV opens its valve proportionally to (written_setpoint - sensed_room),
+    so on its own it settles *below* the setpoint (droop). Poise's PI compensator
+    pushes a higher setpoint to cancel the droop. Validates the setpoint-path
+    compensator against real physics without a heating season (ADR-0037).
+    """
+    from custom_components.poise.control.pi import PiCompensator
+
+    pi = PiCompensator()
+    air = start_air
+    trace: list[tuple[float, float]] = []
+    for _ in range(steps):
+        written = pi.compensate(target, air, air) if compensate else target
+        power = max(0.0, min(1.0, k_trv * (written - air)))
+        air = plant.step(air, power, t_out, dt)
+        trace.append((air, written))
+    return trace
