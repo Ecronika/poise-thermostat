@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.42.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.43.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -34,13 +34,13 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Predictive MPC** — runs every tick against the live learned model and is exposed as `mpc_*` diagnostic values, but **never writes the actuator** in this version. Active write authority is gated on cold-season validation (ADR-0033).
 - **Direct-valve TPI** — for a device with a writable valve-open entity (e.g. Sonoff TRVZB `valve_opening_degree`), the TPI valve duty is computed live and exposed as `tpi_*` diagnostics. The valve is **not written** yet — closed-loop validated in the harness, live actuation gated on cold-season validation (ADR-0036).
 - **PI-compensated setpoint** — for a setpoint-only TRV (no writable valve), the PI-compensated setpoint that would cancel the device's steady-state droop is computed and exposed as `pi_*` diagnostics (not written); harness-validated (ADR-0037). Every device thus gets exactly one matching shadow: valve → TPI, otherwise → PI.
-- **Multi-zone boiler demand** — an optional *Poise System* hub aggregates the call-for-heat across all zones into one frost-safe, device-granular `binary_sensor` boiler-demand signal. Diagnostic only — Poise does not switch a boiler in this version; wire your own automation off it today, opt-in actuation is staged (ADR-0038/0039).
+- **Multi-zone boiler demand** — an optional *Poise System* hub aggregates the call-for-heat across opt-in zones into one frost-safe, device-granular boiler-demand `binary_sensor`. Diagnostic by default (wire your own automation off it); **opt-in actuation** switches a configured boiler service with activation delay, keep-alive and min on/off cycling — the write path stays off unless you set the actions (ADR-0038/0039).
 
 ### 🗺️ Roadmap (built or designed, not in the active path)
 
 - **Direct valve / TPI control (live actuation)** — auto-detected for devices with a writable valve-open number (Sonoff TRVZB `valve_opening_degree`, FW v1.1.4+) and harness-validated; today it runs as a diagnostic shadow (above), with live valve writing gated on cold-season validation. `valve_closing_degree` is never written (TRVZB firmware bug). `pi_heating_demand` / calibration paths exist generically.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
-- **Multi-zone resource coordination** — the boiler-demand aggregate now ships as a diagnostic shadow (above, opt-in *Poise System* hub); cross-zone load-shedding, compressor protection and shared-boiler *actuation* are staged (ADR-0038/0039).
+- **Multi-zone resource coordination** — boiler-demand aggregate **and opt-in boiler actuation** ship via the *Poise System* hub (ADR-0038/0039); cross-zone load-shedding and compressor-group protection are staged.
 - **Efficiency report** — heating-degree-hour savings in kWh / €.
 
 ## Status
