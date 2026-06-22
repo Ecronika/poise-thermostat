@@ -1,7 +1,36 @@
 {
   "config": {
     "step": {
-      "user": {
+      "reconfigure": {
+        "title": "Poise — Raum neu konfigurieren",
+        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
+        "data": {
+          "name": "Raumname",
+          "temp_sensor": "Raumtemperatur-Sensor",
+          "actuator": "Zu steuerndes Thermostat / TRV",
+          "trm_sensor": "Gleitendes Außentemperatur-Mittel (optional)",
+          "outdoor_sensor": "Außentemperatur (optional)",
+          "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
+          "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
+          "category": "EN-16798-Komfortkategorie",
+          "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
+          "comfort_base": "Komfort-Basistemperatur (°C)",
+          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
+          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
+          "comfort_start": "Komfortfenster Beginn",
+          "comfort_end": "Komfortfenster Ende",
+          "setback_delta": "Nachtabsenkung (K)",
+          "optimal_start": "Optimal-Start (Vorheizen)",
+          "weather_entity": "Wetter-Entität (Prognose)",
+          "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
+          "trv_external_temp_input": "TRV-Eingang externe Temperatur",
+          "operative_input": "Operative Temperatur regeln"
+        },
+        "data_description": {
+          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
+        }
+      },
+      "room": {
         "title": "Poise — Raum hinzufügen",
         "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
         "data": {
@@ -30,33 +59,20 @@
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
         }
       },
-      "reconfigure": {
-        "title": "Poise — Raum neu konfigurieren",
-        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
+      "user": {
+        "title": "Poise hinzufügen",
+        "description": "Wähle, was hinzugefügt werden soll.",
+        "menu_options": {
+          "room": "Raum-Thermostat",
+          "system": "Poise System (Mehrzonen-Hub)"
+        }
+      },
+      "system": {
+        "title": "Poise System",
+        "description": "Zonenübergreifende Ressourcen-Koordination. Der Kesselbedarf-Sensor ist in dieser Version nur Diagnose — er schaltet noch keinen Kessel.",
         "data": {
-          "name": "Raumname",
-          "temp_sensor": "Raumtemperatur-Sensor",
-          "actuator": "Zu steuerndes Thermostat / TRV",
-          "trm_sensor": "Gleitendes Außentemperatur-Mittel (optional)",
-          "outdoor_sensor": "Außentemperatur (optional)",
-          "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
-          "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
-          "category": "EN-16798-Komfortkategorie",
-          "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
-          "comfort_base": "Komfort-Basistemperatur (°C)",
-          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
-          "comfort_start": "Komfortfenster Beginn",
-          "comfort_end": "Komfortfenster Ende",
-          "setback_delta": "Nachtabsenkung (K)",
-          "optimal_start": "Optimal-Start (Vorheizen)",
-          "weather_entity": "Wetter-Entität (Prognose)",
-          "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
-          "trv_external_temp_input": "TRV-Eingang externe Temperatur",
-          "operative_input": "Operative Temperatur regeln"
-        },
-        "data_description": {
-          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
+          "boiler_count_threshold": "Heizende Zonen für die Kesselanforderung",
+          "boiler_power_threshold": "Gewichtete Last-Schwelle (optional)"
         }
       }
     },
@@ -105,6 +121,11 @@
       },
       "mpc_weight": {
         "name": "MPC-Gewicht"
+      }
+    },
+    "binary_sensor": {
+      "boiler_demand": {
+        "name": "Kesselbedarf"
       }
     }
   },
