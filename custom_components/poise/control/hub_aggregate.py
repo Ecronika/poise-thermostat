@@ -79,3 +79,68 @@ def gate_min_cycle(
     if currently_on:  # want to turn off
         return elapsed < min_on_s  # stay on until min-on satisfied
     return elapsed >= min_off_s  # turn on only once min-off satisfied
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceAction:
+    """A parsed HA service call: ``domain.service`` plus call data (ADR-0039)."""
+
+    domain: str
+    service: str
+    data: dict[str, str]
+
+
+def parse_service_action(spec: str | None) -> ServiceAction | None:
+    """Parse ``entity_id/domain.service[/attr:value...]`` (Versatile format).
+
+    Returns None for empty/malformed specs (the hub then stays shadow-only).
+    Attribute values are kept as strings (e.g. ``hvac_mode:heat``).
+    """
+    if not spec:
+        return None
+    parts = [p.strip() for p in spec.split("/") if p.strip()]
+    if len(parts) < 2 or "." not in parts[0] or "." not in parts[1]:
+        return None
+    domain, service = parts[1].split(".", 1)
+    data: dict[str, str] = {"entity_id": parts[0]}
+    for extra in parts[2:]:
+        if ":" in extra:
+            key, value = extra.split(":", 1)
+            data[key.strip()] = value.strip()
+    return ServiceAction(domain=domain.strip(), service=service.strip(), data=data)
+
+
+def target_boiler_state(
+    demand: bool,
+    *,
+    currently_on: bool,
+    demand_true_since: float | None,
+    now_mono: float,
+    activation_delay_s: float,
+    last_switch_mono: float,
+    min_on_s: float,
+    min_off_s: float,
+) -> bool:
+    """Resolve the commanded boiler state from demand + timing guards (ADR-0039).
+
+    Turning ON additionally waits ``activation_delay_s`` of continuous demand
+    (valve-open time); turning OFF has no delay. The result is then min-cycle
+    gated (anti short-cycle). Pure: all time is passed in (ADR-0006).
+    """
+    if not currently_on:
+        ready = (
+            demand
+            and demand_true_since is not None
+            and (now_mono - demand_true_since) >= activation_delay_s
+        )
+        desired = ready
+    else:
+        desired = demand
+    return gate_min_cycle(
+        desired,
+        currently_on=currently_on,
+        last_change_mono=last_switch_mono,
+        now_mono=now_mono,
+        min_on_s=min_on_s,
+        min_off_s=min_off_s,
+    )
