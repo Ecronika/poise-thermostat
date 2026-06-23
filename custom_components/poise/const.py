@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.47.0"
+VERSION: Final = "0.48.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -94,3 +94,8 @@ CONF_MAX_FLOW_TEMP: Final = "max_flow_temp"
 CONF_FLOW_HYSTERESIS: Final = "flow_hysteresis"
 DEFAULT_MAX_FLOW_TEMP_C: Final = 60.0
 DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5
+
+# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise routes
+CONF_SOURCE_POLICY: Final = "source_policy"
+CONF_DEFAULT_SOURCE: Final = "default_heat_source"
+DEFAULT_HEAT_SOURCE: Final = "radiator"

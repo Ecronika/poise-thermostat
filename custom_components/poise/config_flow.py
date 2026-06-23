@@ -33,6 +33,7 @@ from .const import (
     CONF_CONTROLS_BOILER,
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
+    CONF_DEFAULT_SOURCE,
     CONF_ENTRY_TYPE,
     CONF_FLOW_HYSTERESIS,
     CONF_FLOW_TEMP,
@@ -46,6 +47,7 @@ from .const import (
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
     CONF_SETBACK_DELTA,
+    CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
@@ -59,6 +61,7 @@ from .const import (
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_FLOW_HYSTERESIS_C,
+    DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
@@ -168,6 +171,12 @@ def _schema() -> vol.Schema:
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
+            vol.Optional(CONF_SOURCE_POLICY): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["auto", "radiator", "heat_pump"],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
         }
     )
 
@@ -259,6 +268,14 @@ def _system_schema() -> vol.Schema:
                     step=0.5,
                     unit_of_measurement="K",
                     mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_DEFAULT_SOURCE, default=DEFAULT_HEAT_SOURCE
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["radiator", "heat_pump"],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
                 )
             ),
         }

@@ -37,17 +37,20 @@ from .const import (
     CONF_CONTROLS_BOILER,
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
+    CONF_DEFAULT_SOURCE,
     CONF_ENTRY_TYPE,
     CONF_FLOW_HYSTERESIS,
     CONF_FLOW_TEMP,
     CONF_MAX_FLOW_TEMP,
     CONF_MAX_POWER_SENSOR,
+    CONF_SOURCE_POLICY,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
     DEFAULT_BOILER_KEEPALIVE_S,
     DEFAULT_BOILER_MIN_OFF_S,
     DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_FLOW_HYSTERESIS_C,
+    DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
@@ -62,6 +65,7 @@ from .control.hub_aggregate import (
     parse_service_action,
     resolve_flow_temperature,
     resolve_load_shedding,
+    resolve_source_policy,
     step_boiler,
     step_min_cycle,
     zone_request_from_data,
@@ -115,6 +119,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             d.get(CONF_FLOW_HYSTERESIS, DEFAULT_FLOW_HYSTERESIS_C)
         )
         self._flow_current: float | None = None
+        self._default_source = str(d.get(CONF_DEFAULT_SOURCE, DEFAULT_HEAT_SOURCE))
 
     def _collect_requests(self) -> list[ZoneRequest]:
         now = self._clock.monotonic()
@@ -137,6 +142,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     flow_temp_request=(
                         float(ft) if (ft := e.data.get(CONF_FLOW_TEMP)) else None
                     ),
+                    source_pref=e.data.get(CONF_SOURCE_POLICY),
                     mono_ts=now,
                 )
             )
@@ -192,6 +198,9 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "compressor_groups": groups,
             "flow_target": flow.target,
             "flow_requested": flow.requested_max,
+            "source_grants": resolve_source_policy(
+                requests, default_source=self._default_source
+            ),
         }
 
     async def _call(self, action: ServiceAction) -> None:

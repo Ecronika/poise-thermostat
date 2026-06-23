@@ -37,6 +37,7 @@ _ATTRS = (
     "compressor_groups",
     "flow_target",
     "flow_requested",
+    "source_grants",
 )
 
 
