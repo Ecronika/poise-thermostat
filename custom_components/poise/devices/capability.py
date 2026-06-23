@@ -21,7 +21,6 @@ AUTO_VALVE_PATTERNS = (
     "valve_position",
     "pi_heating_demand",
     "heating_demand",
-    "level",
     "valve_opening_degree",  # Sonoff TRVZB: writable open-position (FW v1.1.4+)
 )
 # valve_closing_degree must never be written (TRVZB firmware bug breaks running_state)
