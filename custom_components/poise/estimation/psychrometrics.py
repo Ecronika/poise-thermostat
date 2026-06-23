@@ -12,6 +12,8 @@ import math
 _A: float = 17.625
 _B: float = 243.04  # °C
 _P0: float = 610.94  # Pa, saturation vapour pressure at 0 °C
+_RH_FLOOR: float = 1.0  # %, clamp before log: 0 % RH -> log(0); no sensor reads true 0
+_P_SAT_FLOOR: float = 1e-6  # Pa, guard temperature_at_saturation against log(0)
 
 
 def saturation_pressure(t_c: float) -> float:
@@ -21,18 +23,20 @@ def saturation_pressure(t_c: float) -> float:
 
 def vapour_pressure(t_c: float, rh_percent: float) -> float:
     """Actual water-vapour partial pressure [Pa] at temperature/RH."""
-    return (rh_percent / 100.0) * saturation_pressure(t_c)
+    rh = min(max(rh_percent, _RH_FLOOR), 100.0)
+    return (rh / 100.0) * saturation_pressure(t_c)
 
 
 def temperature_at_saturation(p_sat: float) -> float:
     """Inverse of :func:`saturation_pressure` — the temperature [°C] at which
     ``p_sat`` is the saturation pressure (i.e. the dewpoint of that pressure).
     """
-    gamma = math.log(p_sat / _P0)
+    gamma = math.log(max(p_sat, _P_SAT_FLOOR) / _P0)
     return _B * gamma / (_A - gamma)
 
 
 def dewpoint(t_c: float, rh_percent: float) -> float:
     """Dewpoint temperature [°C] from air temperature and relative humidity."""
-    gamma = math.log(rh_percent / 100.0) + _A * t_c / (_B + t_c)
+    rh = min(max(rh_percent, _RH_FLOOR), 100.0)
+    gamma = math.log(rh / 100.0) + _A * t_c / (_B + t_c)
     return _B * gamma / (_A - gamma)
