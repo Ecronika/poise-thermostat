@@ -17,6 +17,10 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
   hass!: HomeAssistant;
   private _config!: SysConfig;
 
+  static getConfigElement(): HTMLElement {
+    return document.createElement("poise-system-card-editor");
+  }
+
   static getStubConfig(hass: HomeAssistant): SysConfig {
     const e = Object.keys(hass.states).find(
       (id) =>
@@ -123,6 +127,43 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
       background: var(--secondary-background-color); }
     .empty { padding: 24px 16px; color: var(--secondary-text-color); }
   `;
+}
+
+class PoiseSystemCardEditor extends LitElement {
+  static properties = { hass: {}, _config: { state: true } };
+  hass!: HomeAssistant;
+  private _config!: SysConfig;
+
+  setConfig(config: SysConfig): void {
+    this._config = config;
+  }
+
+  protected shouldUpdate(c: PropertyValues): boolean {
+    return c.has("hass") || c.has("_config");
+  }
+
+  private _changed(ev: CustomEvent): void {
+    this.dispatchEvent(
+      new CustomEvent("config-changed", { detail: { config: ev.detail.value } }),
+    );
+  }
+
+  render() {
+    if (!this.hass || !this._config) return html``;
+    return html`<ha-form
+      .hass=${this.hass}
+      .data=${this._config}
+      .schema=${[
+        { name: "entity", required: true, selector: { entity: { integration: "poise", domain: "binary_sensor" } } },
+      ]}
+      .computeLabel=${(s: { name: string }) => s.name}
+      @value-changed=${this._changed}
+    ></ha-form>`;
+  }
+}
+
+if (!customElements.get("poise-system-card-editor")) {
+  customElements.define("poise-system-card-editor", PoiseSystemCardEditor);
 }
 
 if (!customElements.get("poise-system-card")) {
