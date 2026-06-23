@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .pi import PiCompensator
+from .pi import _NOMINAL_DT_H, PiCompensator
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,9 +30,10 @@ def evaluate_pi_shadow(
     target: float,
     room: float,
     external: float,
+    dt_h: float = _NOMINAL_DT_H,
 ) -> PiShadow:
     """Compute the shadow compensated setpoint; inactive on valve devices."""
     if not applies:
         return PiShadow(active=False)
-    sp = compensator.compensate(target, room, external)
+    sp = compensator.compensate(target, room, external, dt_h)
     return PiShadow(active=True, setpoint=round(sp, 2), offset=round(sp - target, 2))

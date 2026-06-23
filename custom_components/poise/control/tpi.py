@@ -33,6 +33,17 @@ def seed_from_model(alpha: float, beta_h: float) -> tuple[float, float]:
 
 
 class TpiLearner:
+    """Online nudge of the TPI coefficients from observed vs expected rise.
+
+    STAGED, not yet wired (review M5): online coefficient adaptation is a proven
+    best-of feature (Versatile Thermostat ships an opt-in Auto-TPI learner), but
+    it can only learn once Poise actually *drives* the valve — which is the
+    cold-season-gated active-TPI step (ADR-0036). Built + unit-tested now; it is
+    deliberately not instantiated until active valve writing lands, at which
+    point it becomes the opt-in Auto-TPI manager (VTherm pattern: learn ->
+    update coefficients -> stateless per-cycle duty law consumes them).
+    """
+
     """Online nudging of ``coef_int`` from observed vs expected temperature rise."""
 
     def __init__(self, coef_int: float, coef_ext: float, alpha: float = 0.15) -> None:
