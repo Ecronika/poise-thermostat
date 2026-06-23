@@ -42,3 +42,23 @@ def test_valve_stuck_detection() -> None:
     assert valve_stuck(0.0) is True  # not calibrated / jammed
     assert valve_stuck(5.0, min_steps=10.0) is True
     assert valve_stuck(None) is False  # no telemetry -> not stuck
+
+
+def test_sensor_age_seconds_from_last_changed() -> None:
+    from datetime import datetime, timedelta
+
+    from custom_components.poise.safety.sensor_watchdog import sensor_age_seconds
+
+    now = datetime(2026, 1, 1, 12, 0, 0)
+    changed = now - timedelta(hours=3)
+    assert sensor_age_seconds(now, changed) == 3 * 3600.0
+
+
+def test_should_learn_gates_on_window_and_frozen() -> None:
+    # M13/F1: learning runs only with a trustworthy signal; window OR frozen pauses it.
+    from custom_components.poise.safety.sensor_watchdog import should_learn
+
+    assert should_learn(window_open=False, frozen=False) is True
+    assert should_learn(window_open=True, frozen=False) is False
+    assert should_learn(window_open=False, frozen=True) is False  # frozen -> no learn
+    assert should_learn(window_open=True, frozen=True) is False

@@ -50,3 +50,15 @@ def test_failure_starting_mid_episode_is_caught() -> None:
     # Radiator now empties: temperature flat for the next window -> failure.
     failed = det.update(now_h=1.2, room=19.0, setpoint=22.0, heating=True)
     assert failed is True
+
+
+def test_failure_notification_edges() -> None:
+    # M13: create on a new failure, dismiss on recovery, None when unchanged.
+    from custom_components.poise.safety.heating_failure import (
+        failure_notification_action,
+    )
+
+    assert failure_notification_action(failed=True, already_notified=False) == "create"
+    assert failure_notification_action(failed=True, already_notified=True) is None
+    assert failure_notification_action(failed=False, already_notified=True) == "dismiss"
+    assert failure_notification_action(failed=False, already_notified=False) is None

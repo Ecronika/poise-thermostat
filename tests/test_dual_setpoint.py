@@ -48,7 +48,9 @@ def test_hot_room_with_cooling_cools_to_cool_sp() -> None:
         t_out=29.0,
     )
     assert d.mode == "cool"
-    assert d.target is not None and 25.0 <= d.target <= 27.5
+    # M1: cooling now tracks the comfort centre (base 21 + neutral band), no
+    # longer pinned to the absolute category upper.
+    assert d.target is not None and 22.0 <= d.target <= 24.0
 
 
 def test_heat_only_device_in_heat_does_not_cool() -> None:
@@ -84,3 +86,18 @@ def test_dewpoint_caps_cooling_setpoint() -> None:
 def test_band_never_inverts() -> None:
     d = decide(t_rm=15.0, room=22.0, t_out=15.0, category=Category.I)
     assert d.cool_sp >= d.heat_sp
+
+
+def test_cooling_tracks_comfort_base() -> None:
+    # M1: a higher comfort centre raises the cooling setpoint (clamped by the
+    # EN-16798 upper limit), instead of being pinned to that upper limit.
+    lo = decide(t_rm=26.0, room=29.0, comfort_base=21.0, can_cool=True, t_out=29.0)
+    hi = decide(t_rm=26.0, room=29.0, comfort_base=24.0, can_cool=True, t_out=29.0)
+    assert hi.cool_sp > lo.cool_sp
+
+
+def test_efficiency_widen_never_breaches_category_lower() -> None:
+    # M2: full-efficiency widening must not push the heating setpoint below the
+    # category comfort lower (Cat II = 20 °C); only frost/mould may go lower.
+    d = decide(t_rm=4.0, room=18.0, comfort_base=20.0, t_out=4.0, priority=0.0)
+    assert d.heat_sp >= 20.0
