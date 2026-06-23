@@ -911,6 +911,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             target=decision.heat_sp,
             room=room,
             external=room,
+            dt_h=TICK_INTERVAL_S / 3600.0,
         )
         # valve health (A3): a near-zero closing-step count means the motorised
         # valve failed calibration / is jammed — advisory diagnostic + repair issue.
