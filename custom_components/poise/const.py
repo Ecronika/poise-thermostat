@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.48.0"
+VERSION: Final = "0.49.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -99,3 +99,7 @@ DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5
 CONF_SOURCE_POLICY: Final = "source_policy"
 CONF_DEFAULT_SOURCE: Final = "default_heat_source"
 DEFAULT_HEAT_SOURCE: Final = "radiator"
+
+# Bundled Lovelace card, served + auto-registered by the integration (ADR-0040)
+CARD_URL_BASE: Final = "/poise"
+CARD_MODULES: Final = ({"name": "Poise Card", "filename": "poise-card.js"},)

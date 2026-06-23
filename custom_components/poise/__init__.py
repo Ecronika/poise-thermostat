@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .const import CONF_ENTRY_TYPE, ENTRY_TYPE_SYSTEM
+from .const import CONF_ENTRY_TYPE, DOMAIN, ENTRY_TYPE_SYSTEM, VERSION
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -21,6 +21,41 @@ if TYPE_CHECKING:
 
 def _is_system(entry: ConfigEntry) -> bool:
     return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Serve + auto-register the bundled Lovelace card once (ADR-0040).
+
+    HA imports stay local so the pure core remains importable without a HA
+    runtime. The card is frontend-only and never touches control state.
+    """
+    import voluptuous as vol
+    from homeassistant.components import websocket_api
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+    from homeassistant.core import CoreState
+
+    from .frontend import JSModuleRegistration
+
+    @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/card_version"})
+    @websocket_api.async_response
+    async def _card_version(hass_, connection, msg):  # type: ignore[no-untyped-def]
+        connection.send_result(msg["id"], {"version": VERSION})
+
+    websocket_api.async_register_command(hass, _card_version)
+
+    async def _register(_event=None):  # type: ignore[no-untyped-def]
+        try:
+            await JSModuleRegistration(hass).async_register()
+        except Exception:  # noqa: BLE001 — frontend registration must never block setup
+            import logging
+
+            logging.getLogger(__name__).exception("Poise card registration failed")
+
+    if hass.state is CoreState.running:
+        await _register()
+    else:
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
