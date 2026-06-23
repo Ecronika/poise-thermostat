@@ -56,7 +56,8 @@
           "operative_input": "Control operative temperature",
           "controls_boiler": "This room may request the shared boiler",
           "compressor_group": "Shared compressor/outdoor-unit group (optional)",
-          "declared_power": "Declared heating power (for load shedding / weighted demand, optional)"
+          "declared_power": "Declared heating power (for load shedding / weighted demand, optional)",
+          "design_flow_temp": "Design flow temperature for this zone (optional)"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
@@ -83,7 +84,9 @@
           "boiler_min_on_s": "Minimum on-time (s)",
           "boiler_min_off_s": "Minimum off-time (s)",
           "max_power_sensor": "Maximum allowed power sensor (load shedding, optional)",
-          "current_power_sensor": "Current total power sensor (load shedding, optional)"
+          "current_power_sensor": "Current total power sensor (load shedding, optional)",
+          "max_flow_temp": "Maximum flow temperature (cap)",
+          "flow_hysteresis": "Flow hysteresis (anti-hunt, K)"
         }
       }
     },

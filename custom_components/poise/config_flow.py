@@ -34,8 +34,11 @@ from .const import (
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
     CONF_ENTRY_TYPE,
+    CONF_FLOW_HYSTERESIS,
+    CONF_FLOW_TEMP,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
+    CONF_MAX_FLOW_TEMP,
     CONF_MAX_POWER_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
@@ -55,6 +58,8 @@ from .const import (
     DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_FLOW_HYSTERESIS_C,
+    DEFAULT_MAX_FLOW_TEMP_C,
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
@@ -154,6 +159,15 @@ def _schema() -> vol.Schema:
                     min=0, max=100000, step=0.1, mode=selector.NumberSelectorMode.BOX
                 )
             ),
+            vol.Optional(CONF_FLOW_TEMP): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=20,
+                    max=80,
+                    step=1,
+                    unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
         }
     )
 
@@ -224,6 +238,28 @@ def _system_schema() -> vol.Schema:
             ),
             vol.Optional(CONF_CURRENT_POWER_SENSOR): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="power")
+            ),
+            vol.Required(
+                CONF_MAX_FLOW_TEMP, default=DEFAULT_MAX_FLOW_TEMP_C
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=30,
+                    max=90,
+                    step=1,
+                    unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(
+                CONF_FLOW_HYSTERESIS, default=DEFAULT_FLOW_HYSTERESIS_C
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=10,
+                    step=0.5,
+                    unit_of_measurement="K",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
             ),
         }
     )

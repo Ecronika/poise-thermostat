@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.46.0"
+VERSION: Final = "0.47.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -87,3 +87,10 @@ CONF_MAX_POWER_SENSOR: Final = "max_power_sensor"
 CONF_CURRENT_POWER_SENSOR: Final = "current_power_sensor"
 CONF_COMPRESSOR_GROUP: Final = "compressor_group"
 CONF_DECLARED_POWER: Final = "declared_power"
+
+# Flow-temperature allocator (S5, ADR-0013) — highest request wins, capped, hysteresis
+CONF_FLOW_TEMP: Final = "design_flow_temp"
+CONF_MAX_FLOW_TEMP: Final = "max_flow_temp"
+CONF_FLOW_HYSTERESIS: Final = "flow_hysteresis"
+DEFAULT_MAX_FLOW_TEMP_C: Final = 60.0
+DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5

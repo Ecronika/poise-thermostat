@@ -38,12 +38,17 @@ from .const import (
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
     CONF_ENTRY_TYPE,
+    CONF_FLOW_HYSTERESIS,
+    CONF_FLOW_TEMP,
+    CONF_MAX_FLOW_TEMP,
     CONF_MAX_POWER_SENSOR,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
     DEFAULT_BOILER_KEEPALIVE_S,
     DEFAULT_BOILER_MIN_OFF_S,
     DEFAULT_BOILER_MIN_ON_S,
+    DEFAULT_FLOW_HYSTERESIS_C,
+    DEFAULT_MAX_FLOW_TEMP_C,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
     TICK_INTERVAL_S,
@@ -55,6 +60,7 @@ from .control.hub_aggregate import (
     aggregate_boiler_demand,
     group_call_for_heat,
     parse_service_action,
+    resolve_flow_temperature,
     resolve_load_shedding,
     step_boiler,
     step_min_cycle,
@@ -104,6 +110,11 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # is wired (review #5).
         self._group_on: dict[str, bool] = {}
         self._group_switch: dict[str, float] = {}
+        self._max_flow = float(d.get(CONF_MAX_FLOW_TEMP, DEFAULT_MAX_FLOW_TEMP_C))
+        self._flow_hysteresis = float(
+            d.get(CONF_FLOW_HYSTERESIS, DEFAULT_FLOW_HYSTERESIS_C)
+        )
+        self._flow_current: float | None = None
 
     def _collect_requests(self) -> list[ZoneRequest]:
         now = self._clock.monotonic()
@@ -123,6 +134,9 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     controls_boiler=bool(e.data.get(CONF_CONTROLS_BOILER, False)),
                     declared_power=float(dp) if dp else None,
                     compressor_group=e.data.get(CONF_COMPRESSOR_GROUP),
+                    flow_temp_request=(
+                        float(ft) if (ft := e.data.get(CONF_FLOW_TEMP)) else None
+                    ),
                     mono_ts=now,
                 )
             )
@@ -164,11 +178,20 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._group_on[grp] = on
             self._group_switch[grp] = switch
             groups[grp] = on
+        flow = resolve_flow_temperature(
+            requests,
+            current=self._flow_current,
+            max_flow=self._max_flow,
+            hysteresis=self._flow_hysteresis,
+        )
+        self._flow_current = flow.target
         return {
             "available_power": round(available, 1) if available is not None else None,
             "shed_zones": list(shedding.shed) if shedding else [],
             "shed_count": len(shedding.shed) if shedding else 0,
             "compressor_groups": groups,
+            "flow_target": flow.target,
+            "flow_requested": flow.requested_max,
         }
 
     async def _call(self, action: ServiceAction) -> None:

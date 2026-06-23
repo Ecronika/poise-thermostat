@@ -35,6 +35,8 @@ _ATTRS = (
     "shed_count",
     "shed_zones",
     "compressor_groups",
+    "flow_target",
+    "flow_requested",
 )
 
 
