@@ -17,6 +17,8 @@ from ..estimation.psychrometrics import (
 
 DEFAULT_F_RSI: float = 0.7  # DIN 4108-2 minimum for existing construction
 SURFACE_RH_LIMIT: float = 0.80  # mould growth criterion (EN ISO 13788)
+_F_RSI_FLOOR: float = 0.1  # f_Rsi in (0,1]; guard div-by-zero / unphysical input
+_MOLD_MAX_C: float = 24.0  # sane ceiling: caps the singularity blow-up (review F4)
 
 
 def surface_temperature(
@@ -47,6 +49,8 @@ def mold_min_air_temperature(
     ``t_air_ref`` (current room air temperature) is used to estimate the room's
     absolute humidity from ``rh_percent``.
     """
+    f = min(max(f_rsi, _F_RSI_FLOOR), 1.0)
+    lim = min(max(limit, 0.01), 1.0)
     p_v = vapour_pressure(t_air_ref, rh_percent)
-    t_si_min = temperature_at_saturation(p_v / limit)
-    return t_out + (t_si_min - t_out) / f_rsi
+    t_si_min = temperature_at_saturation(p_v / lim)
+    return min(t_out + (t_si_min - t_out) / f, _MOLD_MAX_C)
