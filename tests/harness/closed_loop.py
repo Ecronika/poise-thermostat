@@ -161,3 +161,47 @@ def run_pi_setpoint(
         air = plant.step(air, power, t_out, dt)
         trace.append((air, written))
     return trace
+
+
+def run_flow_allocator(
+    flow_series: list[list[float]],
+    *,
+    max_flow: float = 60.0,
+    hysteresis: float = 2.5,
+) -> tuple[list[float | None], int]:
+    """Drive the flow allocator over a series of per-tick flow requests.
+
+    ``flow_series[i]`` is the list of flow-temp requests of the heating zones at
+    tick i. Returns the commanded-setpoint sequence and the number of times the
+    command moved — the anti-hunt metric ADR-0013 requires validating for this
+    no-field-reference allocator (ADR-0011).
+    """
+    from custom_components.poise.contracts import ZoneRequest
+    from custom_components.poise.control.hub_aggregate import resolve_flow_temperature
+
+    current: float | None = None
+    targets: list[float | None] = []
+    changes = 0
+    for reqs in flow_series:
+        zones = [
+            ZoneRequest(
+                zone_id=f"z{i}",
+                heating=True,
+                hvac_action="heating",
+                heat_demand=1.0,
+                comfort_gap=1.0,
+                frost_active=False,
+                controls_boiler=False,
+                mono_ts=0.0,
+                flow_temp_request=f,
+            )
+            for i, f in enumerate(reqs)
+        ]
+        d = resolve_flow_temperature(
+            zones, current=current, max_flow=max_flow, hysteresis=hysteresis
+        )
+        if d.changed:
+            changes += 1
+        current = d.target
+        targets.append(d.target)
+    return targets, changes
