@@ -45,5 +45,9 @@ class HeatingFailureDetector:
             return self._failed
         start_h, room0 = self._start
         if (now_h - start_h) >= self._delay_h:
+            # Sliding (tumbling) window (review F5, VTherm pattern): evaluate the
+            # rise over the LAST window, then re-arm so a failure that begins
+            # mid-episode is still caught — not just the first window after demand.
             self._failed = (room - room0) < self._min_rise
+            self._start = (now_h, room)
         return self._failed
