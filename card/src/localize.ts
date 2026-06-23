@@ -16,6 +16,18 @@ const EN: Dict = {
   setpoint: "Setpoint",
   no_entity: "Select a Poise thermostat entity.",
   min_left: "min",
+  no_system: "Select the Poise System sensor.",
+  sys_title: "Poise System",
+  demand_on: "Boiler demand",
+  demand_off: "No demand",
+  frost: "Frost override",
+  zones: "zones",
+  heating_n: "heating",
+  flow: "Flow",
+  shed: "shed",
+  shadow_would: "would",
+  update_msg: "New Poise card version available — reload to update.",
+  reload: "Reload",
 };
 const DE: Dict = {
   in_band: "Im Komfortband",
@@ -33,6 +45,18 @@ const DE: Dict = {
   setpoint: "Sollwert",
   no_entity: "Bitte eine Poise-Thermostat-Entität wählen.",
   min_left: "Min",
+  no_system: "Bitte den Poise-System-Sensor wählen.",
+  sys_title: "Poise System",
+  demand_on: "Kesselbedarf",
+  demand_off: "Kein Bedarf",
+  frost: "Frost-Override",
+  zones: "Zonen",
+  heating_n: "heizen",
+  flow: "Vorlauf",
+  shed: "abgeworfen",
+  shadow_would: "würde",
+  update_msg: "Neue Poise-Karten-Version verfügbar — zum Aktualisieren neu laden.",
+  reload: "Neu laden",
 };
 
 export function t(lang: string | undefined, key: string): string {

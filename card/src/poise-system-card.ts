@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import type { HomeAssistant, LovelaceCard } from "./ha-types.ts";
 import type { LovelaceCardConfig } from "./ha-types.ts";
 import { t } from "./localize.ts";
+import { checkCardVersion } from "./version.ts";
 
 interface SysConfig extends LovelaceCardConfig {
   entity?: string;
@@ -37,6 +38,14 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
 
   getCardSize(): number {
     return 2;
+  }
+
+  getGridOptions() {
+    return { columns: 12, rows: 3, min_columns: 4, min_rows: 2 };
+  }
+
+  protected updated(): void {
+    if (this.hass) void checkCardVersion(this, this.hass);
   }
 
   shouldUpdate(changed: PropertyValues): boolean {

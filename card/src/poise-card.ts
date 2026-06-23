@@ -7,8 +7,7 @@ import "./poise-card-editor.ts";
 import "./poise-system-card.ts";
 import { chartGeometry, type Sample } from "./history.ts";
 import { DIAL, arcPath, pointToValue, polar, valueToAngle } from "./dial.ts";
-
-const CARD_VERSION = "0.54.0";
+import { CARD_VERSION, checkCardVersion } from "./version.ts";
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
@@ -48,6 +47,12 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     return 4;
   }
 
+  getGridOptions() {
+    return this._config?.compact
+      ? { columns: 6, rows: 4, min_columns: 4, min_rows: 3 }
+      : { columns: 12, rows: 8, min_columns: 6, min_rows: 5 };
+  }
+
   shouldUpdate(changed: PropertyValues): boolean {
     if (this._dragging) return true;
     if (changed.has("_config")) return true;
@@ -70,6 +75,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   }
 
   protected updated(): void {
+    if (this.hass) void checkCardVersion(this, this.hass);
     const id = this._config?.entity;
     if (id && this.hass && this._histFor !== id) {
       this._histFor = id;
@@ -164,15 +170,17 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     });
 
     return html`<ha-card .header=${a["friendly_name"] ?? "Poise"}>
-      <div class="wrap">
+      <div class="wrap ${this._config.compact ? "compact" : ""}">
         ${this._dial(a, lang)}
         <div class="verdict">
           ${band ? t(lang, band.verdict) : t(lang, "unknown")}
           ${band?.category ? html`<span class="cat">Kat. ${band.category}</span>` : nothing}
         </div>
-        ${this._control(this._pending ?? setpoint, lang)}
-        ${this._chart(num(a["comfort_low"]), num(a["comfort_high"]))}
-        ${this._chips(a, lang)}
+        ${this._config.compact
+          ? nothing
+          : html`${this._control(this._pending ?? setpoint, lang)}
+              ${this._chart(num(a["comfort_low"]), num(a["comfort_high"]))}
+              ${this._chips(a, lang)}`}
         ${this._learn(a, lang)}
       </div>
     </ha-card>`;
@@ -196,6 +204,8 @@ export class PoiseCard extends LitElement implements LovelaceCard {
             valueToAngle(Math.max(low, high)),
           )
         : "";
+    const action = String(a["hvac_action"] ?? "");
+    const hcls = action === "heating" ? "heat" : action === "cooling" ? "cool" : "";
     const h = polar(cx, cy, r, valueToAngle(sp));
     const opA = op != null ? polar(cx, cy, r, valueToAngle(op)) : null;
     return html`<div class="dialwrap">
@@ -215,11 +225,13 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           cy=${(opA?.y ?? 0).toFixed(1)}
           r=${opA ? 5 : 0}
         ></circle>
-        <circle class="handle" cx=${h.x.toFixed(1)} cy=${h.y.toFixed(1)} r="9"></circle>
+        <circle class="handle ${hcls}" cx=${h.x.toFixed(1)} cy=${h.y.toFixed(1)} r="9"></circle>
       </svg>
       <div class="dialctr">
-        <div class="op">${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
-        <div class="soll">${t(lang, "setpoint")} <b>${sp.toFixed(1)}°</b></div>
+        <div class="ctrclick" @click=${this._moreInfo}>
+          <div class="op">${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
+          <div class="soll">${t(lang, "setpoint")} <b>${sp.toFixed(1)}°</b></div>
+        </div>
       </div>
     </div>`;
   }
@@ -379,6 +391,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .opdot { fill: var(--primary-text-color, #fff); }
     .handle { fill: var(--primary-color, #2196f3); stroke: var(--card-background-color, #1c1c1c); stroke-width: 2; }
     .dialctr { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+    .ctrclick { pointer-events: auto; cursor: pointer; display: flex; flex-direction: column; align-items: center; }
+    .handle.heat { fill: var(--state-climate-heat-color, #ff8100); }
+    .handle.cool { fill: var(--state-climate-cool-color, #2b9af9); }
+    .wrap.compact .dialwrap { max-width: 150px; }
     .dialctr .op { font-size: 38px; font-weight: 600; line-height: 1; }
     .dialctr .op span { font-size: 16px; color: var(--secondary-text-color); }
     .dialctr .soll { font-size: 13px; color: var(--secondary-text-color); margin-top: 4px; }

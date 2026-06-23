@@ -5,6 +5,7 @@ import type { PoiseCardConfig } from "./card-config.ts";
 const SCHEMA = [
   { name: "entity", required: true, selector: { entity: { integration: "poise", domain: "climate" } } },
   { name: "show_shadow", selector: { boolean: {} } },
+  { name: "compact", selector: { boolean: {} } },
 ];
 
 export class PoiseCardEditor extends LitElement {
