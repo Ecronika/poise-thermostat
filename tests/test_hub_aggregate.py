@@ -437,6 +437,7 @@ def test_zone_request_frost_derived_from_cold_room() -> None:
         declared_power=None,
         compressor_group=None,
         flow_temp_request=None,
+        source_pref=None,
         mono_ts=0.0,
     )
     assert cold.frost_active is True
@@ -451,6 +452,7 @@ def test_zone_request_frost_derived_from_cold_room() -> None:
         declared_power=None,
         compressor_group=None,
         flow_temp_request=None,
+        source_pref=None,
         mono_ts=0.0,
     )
     assert warm.frost_active is False
@@ -470,6 +472,7 @@ def test_zone_request_frost_fires_boiler_end_to_end() -> None:
         declared_power=None,
         compressor_group=None,
         flow_temp_request=None,
+        source_pref=None,
         mono_ts=0.0,
     )
     assert aggregate_boiler_demand([z]).active is True
@@ -485,6 +488,7 @@ def test_zone_request_health_from_mould_cause() -> None:
         declared_power=None,
         compressor_group=None,
         flow_temp_request=None,
+        source_pref=None,
         mono_ts=0.0,
     )
     assert z.health_active is True and z.frost_active is False
@@ -505,6 +509,7 @@ def test_zone_request_demand_gap_and_passthrough() -> None:
         declared_power=1.5,
         compressor_group="g1",
         flow_temp_request=None,
+        source_pref=None,
         mono_ts=7.0,
     )
     assert z.heat_demand == 0.4 and z.comfort_gap == 3.0
@@ -517,6 +522,7 @@ def test_zone_request_demand_gap_and_passthrough() -> None:
         declared_power=None,
         compressor_group=None,
         flow_temp_request=None,
+        source_pref=None,
         mono_ts=0.0,
     )
     assert z2.heat_demand == 0.0 and z2.comfort_gap == 0.0 and z2.frost_active is False
@@ -572,3 +578,41 @@ def test_flow_demand_gone_releases() -> None:
         none_heating, current=45.0, max_flow=60.0, hysteresis=2.0
     )
     assert d.target is None and d.changed is True
+
+
+def _src_zone(zid, *, pref, heating=True):
+    return ZoneRequest(
+        zone_id=zid,
+        heating=heating,
+        hvac_action="heating" if heating else "idle",
+        heat_demand=1.0 if heating else 0.0,
+        comfort_gap=1.0,
+        frost_active=False,
+        controls_boiler=False,
+        mono_ts=0.0,
+        source_pref=pref,
+    )
+
+
+def test_source_policy_honours_explicit_and_defaults_auto() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_source_policy
+
+    zones = [
+        _src_zone("a", pref="heat_pump"),
+        _src_zone("b", pref="radiator"),
+        _src_zone("c", pref="auto"),
+        _src_zone("d", pref=None),
+    ]
+    g = resolve_source_policy(zones, default_source="radiator")
+    assert g == {"a": "heat_pump", "b": "radiator", "c": "radiator", "d": "radiator"}
+
+
+def test_source_policy_default_and_skips_idle() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_source_policy
+
+    zones = [
+        _src_zone("a", pref="auto"),
+        _src_zone("idle", pref="radiator", heating=False),
+    ]
+    g = resolve_source_policy(zones, default_source="heat_pump")
+    assert g == {"a": "heat_pump"}  # idle zone excluded, auto -> default
