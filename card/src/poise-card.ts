@@ -5,7 +5,7 @@ import type { PoiseCardConfig } from "./card-config.ts";
 import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
 
-const CARD_VERSION = "0.49.0";
+const CARD_VERSION = "0.50.0";
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
