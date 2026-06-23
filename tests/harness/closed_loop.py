@@ -156,7 +156,9 @@ def run_pi_setpoint(
     air = start_air
     trace: list[tuple[float, float]] = []
     for _ in range(steps):
-        written = pi.compensate(target, air, air) if compensate else target
+        written = (
+            pi.compensate(target, air, air, dt_h=dt / 3600.0) if compensate else target
+        )
         power = max(0.0, min(1.0, k_trv * (written - air)))
         air = plant.step(air, power, t_out, dt)
         trace.append((air, written))
