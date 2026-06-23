@@ -32,6 +32,7 @@ def zone_request_from_data(
     controls_boiler: bool,
     declared_power: float | None,
     compressor_group: str | None,
+    flow_temp_request: float | None,
     mono_ts: float,
 ) -> ZoneRequest:
     """Build a ZoneRequest from a zone's published ``data`` dict + its config.
@@ -64,6 +65,7 @@ def zone_request_from_data(
         mono_ts=mono_ts,
         declared_power=declared_power,
         compressor_group=compressor_group,
+        flow_temp_request=flow_temp_request,
         health_active=health_active,
     )
 
@@ -363,3 +365,44 @@ def step_min_cycle(
         min_off_s=min_off_s,
     )
     return on, (now_mono if on != prev_on else prev_switch_mono)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowDecision:
+    """The flow-temperature setpoint for a shared heat generator (ADR-0013, S5)."""
+
+    target: float | None  # commanded flow setpoint (None = no flow demand)
+    requested_max: float | None  # highest requested flow temp (pre-hysteresis)
+    changed: bool  # did the command move (past hysteresis) this tick
+
+
+def resolve_flow_temperature(
+    requests: Sequence[ZoneRequest],
+    *,
+    current: float | None,
+    max_flow: float,
+    hysteresis: float,
+) -> FlowDecision:
+    """Highest-request-wins flow allocation, capped, with anti-hunt hysteresis.
+
+    A single shared flow must satisfy the **most demanding** heating zone, so the
+    max requested flow temperature wins, clamped to ``max_flow``. To stop the
+    generator hunting on small fluctuations (the risk ADR-0013 flagged for this
+    no-field-reference design), the command only moves when the new request
+    differs from the current command by at least ``hysteresis``. Pure: no time,
+    no actuation; the hub holds ``current`` across ticks. Harness-validated
+    against oscillation (ADR-0011, ``run_flow_allocator``).
+    """
+    reqs = [
+        r.flow_temp_request
+        for r in requests
+        if r.heating and r.flow_temp_request is not None
+    ]
+    if not reqs:
+        return FlowDecision(None, None, current is not None)  # demand gone -> release
+    requested = min(max(reqs), max_flow)
+    if current is None:
+        return FlowDecision(requested, requested, True)
+    if abs(requested - current) < hysteresis:
+        return FlowDecision(current, requested, False)  # within band -> hold
+    return FlowDecision(requested, requested, True)
