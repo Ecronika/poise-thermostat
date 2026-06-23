@@ -103,8 +103,17 @@ from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature
-from .safety.heating_failure import HeatingFailureDetector
-from .safety.sensor_watchdog import is_frozen, sensor_at_heat_source, valve_stuck
+from .safety.heating_failure import (
+    HeatingFailureDetector,
+    failure_notification_action,
+)
+from .safety.sensor_watchdog import (
+    is_frozen,
+    sensor_age_seconds,
+    sensor_at_heat_source,
+    should_learn,
+    valve_stuck,
+)
 from .storage import PoiseStore
 
 _LOGGER = logging.getLogger(__name__)
@@ -368,7 +377,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # "Sensor lost / unavailable" is handled separately by the ingestion
         # degradation ladder. Threshold is long (hours) so a legitimately stable
         # room never false-positives (best-of: VTherm/BT, review F1).
-        return (dt_util.utcnow() - state.last_changed).total_seconds()
+        return sensor_age_seconds(dt_util.utcnow(), state.last_changed)
 
     def _local_minute(self) -> int:
         now = dt_util.now()
@@ -488,7 +497,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._prev_room_mono = now
 
     async def _notify_failure(self, failed: bool) -> None:
-        if failed and not self._failure_notified:
+        action = failure_notification_action(failed, self._failure_notified)
+        if action == "create":
             self._failure_notified = True
             await self.hass.services.async_call(
                 "persistent_notification",
@@ -503,7 +513,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 },
                 blocking=False,
             )
-        elif not failed and self._failure_notified:
+        elif action == "dismiss":
             self._failure_notified = False
             await self.hass.services.async_call(
                 "persistent_notification",
@@ -653,7 +663,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         can_heat, can_cool = self._capability()
         device_max = self._device_max()
 
-        if not window_open and not frozen:
+        if should_learn(window_open=window_open, frozen=frozen):
             self._learn(room, t_out_eff)
         self._observe_seasonless(room, t_out_eff)
         self._observe_window_auto(room)
