@@ -25,7 +25,8 @@ def test_classify_calibration_and_unknown() -> None:
     assert (
         classify_number_entity("number.local_temperature_calibration") == "calibration"
     )
-    assert classify_number_entity("number.battery_level_pct") == "valve"  # 'level'
+    # F3: a battery-level number must NOT be classified as a writable valve.
+    assert classify_number_entity("number.battery_level_pct") is None
     assert classify_number_entity("number.unrelated") is None
 
 

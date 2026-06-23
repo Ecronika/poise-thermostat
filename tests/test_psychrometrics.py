@@ -29,3 +29,20 @@ def test_inverse_roundtrip() -> None:
 
 def test_vapour_pressure_scales_with_humidity() -> None:
     assert vapour_pressure(20.0, 50.0) == pytest.approx(0.5 * saturation_pressure(20.0))
+
+
+def test_dewpoint_zero_humidity_no_crash() -> None:
+    # F2: 0 % RH must not raise math domain error; RH is floored before log.
+    val = dewpoint(20.0, 0.0)
+    assert val == pytest.approx(dewpoint(20.0, 1.0))  # clamped to the 1 % floor
+
+
+def test_vapour_pressure_floors_humidity() -> None:
+    # F2: 0 % and 1 % collapse to the same floored value (no zero pressure).
+    assert vapour_pressure(20.0, 0.0) == vapour_pressure(20.0, 1.0)
+    assert vapour_pressure(20.0, 0.0) > 0.0
+
+
+def test_temperature_at_saturation_zero_pressure_no_crash() -> None:
+    # F2: p_sat floored so log(0) cannot fire.
+    assert temperature_at_saturation(0.0) < -100.0
