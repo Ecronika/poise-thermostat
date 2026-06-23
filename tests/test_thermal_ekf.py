@@ -141,3 +141,33 @@ def test_learning_phase_tracks_identifiability() -> None:
     assert ekf.learning_phase in ("early", "learning")
     _drive_ekf(ekf, alpha_true=0.1, beta_h_true=2.0, steps=4000)
     assert ekf.learning_phase == "identified"
+
+
+def test_from_dict_roundtrip_preserves_state() -> None:
+    ekf = ThermalEKF()
+    ekf.n_heating = 7
+    restored = ThermalEKF.from_dict(ekf.to_dict())
+    assert restored.n_heating == 7
+
+
+def test_from_dict_bad_matrix_shape_recovers() -> None:
+    # M8: a corrupt P (wrong shape) must recover with a fresh model, not crash.
+    bad = ThermalEKF().to_dict()
+    bad["p"] = [[1.0, 2.0], [3.0, 4.0]]  # 2x2 instead of 6x6
+    ekf = ThermalEKF.from_dict(bad)
+    assert isinstance(ekf, ThermalEKF)
+    assert len(ekf.p) == 6 and all(len(row) == 6 for row in ekf.p)
+
+
+def test_from_dict_version_mismatch_recovers() -> None:
+    bad = ThermalEKF().to_dict()
+    bad["ekf_version"] = 999
+    ekf = ThermalEKF.from_dict(bad)
+    assert ekf.n_heating == 0  # fresh model
+
+
+def test_from_dict_non_finite_recovers() -> None:
+    bad = ThermalEKF().to_dict()
+    bad["x"][0] = float("nan")
+    ekf = ThermalEKF.from_dict(bad)
+    assert all(math.isfinite(v) for v in ekf.x)
