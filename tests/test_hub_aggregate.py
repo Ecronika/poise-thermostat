@@ -436,6 +436,7 @@ def test_zone_request_frost_derived_from_cold_room() -> None:
         controls_boiler=False,
         declared_power=None,
         compressor_group=None,
+        flow_temp_request=None,
         mono_ts=0.0,
     )
     assert cold.frost_active is True
@@ -449,6 +450,7 @@ def test_zone_request_frost_derived_from_cold_room() -> None:
         controls_boiler=False,
         declared_power=None,
         compressor_group=None,
+        flow_temp_request=None,
         mono_ts=0.0,
     )
     assert warm.frost_active is False
@@ -467,6 +469,7 @@ def test_zone_request_frost_fires_boiler_end_to_end() -> None:
         controls_boiler=False,
         declared_power=None,
         compressor_group=None,
+        flow_temp_request=None,
         mono_ts=0.0,
     )
     assert aggregate_boiler_demand([z]).active is True
@@ -481,6 +484,7 @@ def test_zone_request_health_from_mould_cause() -> None:
         controls_boiler=True,
         declared_power=None,
         compressor_group=None,
+        flow_temp_request=None,
         mono_ts=0.0,
     )
     assert z.health_active is True and z.frost_active is False
@@ -500,6 +504,7 @@ def test_zone_request_demand_gap_and_passthrough() -> None:
         controls_boiler=True,
         declared_power=1.5,
         compressor_group="g1",
+        flow_temp_request=None,
         mono_ts=7.0,
     )
     assert z.heat_demand == 0.4 and z.comfort_gap == 3.0
@@ -511,6 +516,59 @@ def test_zone_request_demand_gap_and_passthrough() -> None:
         controls_boiler=False,
         declared_power=None,
         compressor_group=None,
+        flow_temp_request=None,
         mono_ts=0.0,
     )
     assert z2.heat_demand == 0.0 and z2.comfort_gap == 0.0 and z2.frost_active is False
+
+
+def _flow_zone(zid, *, flow, heating=True):
+    return ZoneRequest(
+        zone_id=zid,
+        heating=heating,
+        hvac_action="heating" if heating else "idle",
+        heat_demand=1.0 if heating else 0.0,
+        comfort_gap=1.0,
+        frost_active=False,
+        controls_boiler=False,
+        mono_ts=0.0,
+        flow_temp_request=flow,
+    )
+
+
+def test_flow_highest_request_wins_and_caps() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_flow_temperature
+
+    zones = [_flow_zone("ufh", flow=35.0), _flow_zone("rad", flow=55.0)]
+    d = resolve_flow_temperature(zones, current=None, max_flow=60.0, hysteresis=2.0)
+    assert d.target == 55.0 and d.requested_max == 55.0 and d.changed is True
+    # cap applies
+    hot = resolve_flow_temperature(
+        [_flow_zone("rad", flow=80.0)], current=None, max_flow=60.0, hysteresis=2.0
+    )
+    assert hot.target == 60.0
+
+
+def test_flow_hysteresis_holds_small_changes() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_flow_temperature
+
+    # request 46 while commanding 45, hysteresis 2 -> hold 45 (no hunt)
+    hold = resolve_flow_temperature(
+        [_flow_zone("a", flow=46.0)], current=45.0, max_flow=60.0, hysteresis=2.0
+    )
+    assert hold.target == 45.0 and hold.changed is False
+    # request 48 -> exceeds band -> move
+    move = resolve_flow_temperature(
+        [_flow_zone("a", flow=48.0)], current=45.0, max_flow=60.0, hysteresis=2.0
+    )
+    assert move.target == 48.0 and move.changed is True
+
+
+def test_flow_demand_gone_releases() -> None:
+    from custom_components.poise.control.hub_aggregate import resolve_flow_temperature
+
+    none_heating = [_flow_zone("a", flow=45.0, heating=False)]
+    d = resolve_flow_temperature(
+        none_heating, current=45.0, max_flow=60.0, hysteresis=2.0
+    )
+    assert d.target is None and d.changed is True

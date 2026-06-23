@@ -148,3 +148,30 @@ def test_pi_compensator_reduces_proportional_droop() -> None:
     assert comp_air - raw_air > 1.0  # compensation significantly cuts the droop
     assert comp_air > 20.3  # and gets the room close to the 21 °C target
     assert comp[-1][1] > 21.0  # by pushing the written setpoint above target
+
+
+def test_flow_allocator_does_not_hunt_on_noise() -> None:
+    import math
+
+    from tests.harness.closed_loop import run_flow_allocator
+
+    # dominant zone steady at 50 + small noise (<hysteresis); a quieter UFH zone at 35
+    series = [
+        [50.0 + 1.0 * math.sin(t / 3.0), 35.0 + 1.0 * math.cos(t / 5.0)]
+        for t in range(120)
+    ]
+    targets, changes = run_flow_allocator(series, max_flow=60.0, hysteresis=2.5)
+    # tracks the MAX (~50), never the 35 zone
+    assert all(tg is not None and tg >= 48.0 for tg in targets[1:])
+    # hysteresis suppresses chatter: at most a handful of moves over 120 ticks
+    assert changes <= 3
+
+
+def test_flow_allocator_follows_real_step_and_caps() -> None:
+    from tests.harness.closed_loop import run_flow_allocator
+
+    # step 45 -> 55 (exceeds hysteresis) then a request above the cap (-> 60)
+    series = [[45.0]] * 5 + [[55.0]] * 5 + [[80.0]] * 5
+    targets, changes = run_flow_allocator(series, max_flow=60.0, hysteresis=2.5)
+    assert targets[4] == 45.0 and targets[9] == 55.0 and targets[14] == 60.0
+    assert changes == 3  # initial set, the step, and the capped move
