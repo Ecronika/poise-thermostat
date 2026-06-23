@@ -57,7 +57,8 @@
           "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern",
           "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit (optional)",
           "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf, optional)",
-          "design_flow_temp": "Auslegungs-Vorlauftemperatur dieser Zone (optional)"
+          "design_flow_temp": "Auslegungs-Vorlauftemperatur dieser Zone (optional)",
+          "source_policy": "Heizquellen-Policy (von deiner Energie-Automation gesetzt, optional)"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
@@ -86,7 +87,8 @@
           "max_power_sensor": "Sensor max. erlaubte Leistung (Lastabwurf, optional)",
           "current_power_sensor": "Sensor aktuelle Gesamtleistung (Lastabwurf, optional)",
           "max_flow_temp": "Maximale Vorlauftemperatur (Deckel)",
-          "flow_hysteresis": "Vorlauf-Hysterese (gegen Pendeln, K)"
+          "flow_hysteresis": "Vorlauf-Hysterese (gegen Pendeln, K)",
+          "default_heat_source": "Standard-Heizquelle für „auto“-Zonen"
         }
       }
     },
