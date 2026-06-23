@@ -318,8 +318,24 @@ class ThermalEKF:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ThermalEKF:
-        ekf = cls(list(data["x"]))
-        ekf.p = [list(row) for row in data["p"]]
+        # M8: validate version + matrix shapes; on any mismatch recover with a
+        # fresh model (the documented corruption-recovery, ADR-0007) instead of
+        # loading a malformed P that crashes later in _matmul.
+        try:
+            if int(data.get("ekf_version", 0)) != EKF_VERSION:
+                return cls()
+            x = [float(v) for v in data["x"]]
+            p = [[float(v) for v in row] for row in data["p"]]
+        except (KeyError, TypeError, ValueError):
+            return cls()
+        if len(x) != _N or len(p) != _N or any(len(row) != _N for row in p):
+            return cls()
+        if not all(math.isfinite(v) for v in x) or not all(
+            math.isfinite(v) for row in p for v in row
+        ):
+            return cls()
+        ekf = cls(x)
+        ekf.p = p
         ekf.n_updates = int(data.get("n_updates", 0))
         ekf.n_idle = int(data.get("n_idle", 0))
         ekf.n_heating = int(data.get("n_heating", 0))
