@@ -11,10 +11,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..control.cooling import DualSetpoint, decide_mode
-from .en16798 import COOLING_UPPER, HEATING_LOWER, HEATING_UPPER, Category
+from .en16798 import (
+    COOLING_LOWER,
+    COOLING_UPPER,
+    HEATING_LOWER,
+    HEATING_UPPER,
+    Category,
+)
 from .operative import operative_to_air
 
 _EFFICIENCY_WIDEN_K = 1.5  # max dead-band widening per side at full efficiency
+_NEUTRAL_DEADBAND_K = 2.0  # cooling edge sits this far above the comfort centre
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -49,14 +56,21 @@ def decide(
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
     _ = t_rm  # regime indicator; fixed design bands govern when conditioning
-    # operative dead-band from the fixed conditioned-building ranges
-    heat_op = _clamp(comfort_base, HEATING_LOWER[category], HEATING_UPPER[category])
-    cool_op = COOLING_UPPER[category]
-
-    # comfort/efficiency priority widens the dead-band toward efficiency
+    # Both edges are anchored to the comfort centre (the cooling edge tracks the
+    # user's target, it is NOT pinned to the absolute upper limit — review M1);
+    # the comfort/efficiency priority widens the neutral dead-band.
     widen = (1.0 - _clamp(priority, 0.0, 1.0)) * _EFFICIENCY_WIDEN_K
-    heat_op -= widen
-    cool_op += widen
+    # Clamp each edge into its EN-16798 category band AFTER widening, so a wide
+    # efficiency band can never breach the comfort category lower/upper (review
+    # M2). The norm limits act as guardrails (clamp), never as the setpoint.
+    heat_op = _clamp(
+        comfort_base - widen, HEATING_LOWER[category], HEATING_UPPER[category]
+    )
+    cool_op = _clamp(
+        comfort_base + _NEUTRAL_DEADBAND_K + widen,
+        COOLING_LOWER[category],
+        COOLING_UPPER[category],
+    )
 
     # operative -> air
     heat_sp = operative_to_air(heat_op, t_mrt, velocity)
