@@ -362,9 +362,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         state = self.hass.states.get(entity_id)
         if state is None:
             return None
-        # last_updated (not last_changed): a healthy sensor reporting a stable
-        # value still updates, so we only flag a truly stalled feed (review P1).
-        return (dt_util.utcnow() - state.last_updated).total_seconds()
+        # last_changed (the value-change time, per the watchdog contract): a
+        # dead/stuck sensor that keeps re-publishing the SAME value still bumps
+        # last_updated, so only last_changed detects "available but frozen".
+        # "Sensor lost / unavailable" is handled separately by the ingestion
+        # degradation ladder. Threshold is long (hours) so a legitimately stable
+        # room never false-positives (best-of: VTherm/BT, review F1).
+        return (dt_util.utcnow() - state.last_changed).total_seconds()
 
     def _local_minute(self) -> int:
         now = dt_util.now()

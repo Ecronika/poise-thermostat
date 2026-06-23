@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.60.0"
+VERSION: Final = "0.61.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -26,7 +26,9 @@ DEFAULT_FULL_POWER_RISE_C: Final = 20.0
 # Plausibility (ADR-0012 ingestion)
 TEMP_PLAUSIBLE_MIN_C: Final = -50.0
 TEMP_PLAUSIBLE_MAX_C: Final = 60.0
-SENSOR_FREEZE_AFTER_S: Final = 1800.0
+SENSOR_FREEZE_AFTER_S: Final = (
+    7200.0  # 2 h: last_changed-based (F1), avoids false alarms on stable rooms
+)
 LOW_BATTERY_PCT: Final = 15.0
 # Below this learned time constant a sensor is likely on/near the heat source
 MIN_PLAUSIBLE_TAU_H: Final = 1.0
