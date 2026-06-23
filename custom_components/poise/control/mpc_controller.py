@@ -13,6 +13,8 @@ from ..estimation.thermal_ekf import ThermalModel
 from .gate import blend, mpc_weight
 from .mpc import MpcParams, optimize_power
 
+_FALLBACK_T_OUT_C: float = 5.0  # conservative outdoor default when none known
+
 
 class MpcController:
     """Confidence-gated MPC behind the same protocol as BangBangController."""
@@ -46,7 +48,11 @@ class MpcController:
         model = self._model(state)
         identified = bool(state.identified) and state.prediction_std is not None
         if model is not None and identified:
-            t_out = state.t_out if state.t_out is not None else state.t_rm
+            # Never fall back to t_rm (an INDOOR running mean): using ~20 °C as
+            # outdoor inverts the heat-loss physics and makes the MPC
+            # equilibrium far too warm (review M3). Use a conservative cold
+            # default consistent with the coordinator's outdoor fallback.
+            t_out = state.t_out if state.t_out is not None else _FALLBACK_T_OUT_C
             u_mpc = optimize_power(model, t0, target, lower, upper, t_out, self._params)
             assert state.prediction_std is not None  # narrowed by `mature`
             weight = mpc_weight(state.prediction_std)
