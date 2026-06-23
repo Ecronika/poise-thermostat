@@ -4,7 +4,7 @@
 import type { HomeAssistant } from "./ha-types.ts";
 import { t } from "./localize.ts";
 
-export const CARD_VERSION = "0.60.0";
+export const CARD_VERSION = "0.61.0";
 let checked = false;
 
 function clearAndReload(): void {
