@@ -56,7 +56,8 @@
           "operative_input": "Operative Temperatur regeln",
           "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern",
           "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit (optional)",
-          "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf, optional)"
+          "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf, optional)",
+          "design_flow_temp": "Auslegungs-Vorlauftemperatur dieser Zone (optional)"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
@@ -83,7 +84,9 @@
           "boiler_min_on_s": "Mindest-Einschaltzeit (s)",
           "boiler_min_off_s": "Mindest-Ausschaltzeit (s)",
           "max_power_sensor": "Sensor max. erlaubte Leistung (Lastabwurf, optional)",
-          "current_power_sensor": "Sensor aktuelle Gesamtleistung (Lastabwurf, optional)"
+          "current_power_sensor": "Sensor aktuelle Gesamtleistung (Lastabwurf, optional)",
+          "max_flow_temp": "Maximale Vorlauftemperatur (Deckel)",
+          "flow_hysteresis": "Vorlauf-Hysterese (gegen Pendeln, K)"
         }
       }
     },
