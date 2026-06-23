@@ -33,6 +33,7 @@ def zone_request_from_data(
     declared_power: float | None,
     compressor_group: str | None,
     flow_temp_request: float | None,
+    source_pref: str | None,
     mono_ts: float,
 ) -> ZoneRequest:
     """Build a ZoneRequest from a zone's published ``data`` dict + its config.
@@ -66,6 +67,7 @@ def zone_request_from_data(
         declared_power=declared_power,
         compressor_group=compressor_group,
         flow_temp_request=flow_temp_request,
+        source_pref=source_pref,
         health_active=health_active,
     )
 
@@ -406,3 +408,25 @@ def resolve_flow_temperature(
     if abs(requested - current) < hysteresis:
         return FlowDecision(current, requested, False)  # within band -> hold
     return FlowDecision(requested, requested, True)
+
+
+def resolve_source_policy(
+    requests: Sequence[ZoneRequest], *, default_source: str = "radiator"
+) -> dict[str, str]:
+    """Per-zone heat-source grant from each zone's policy (ADR-0013, S6).
+
+    The energy-cost intelligence lives **outside** Poise (an automation sets the
+    per-zone policy from solar surplus, gas-vs-electricity price, COP, …, RM
+    #314); Poise keeps thermal control and merely *routes* the heating zone to
+    the granted source. ``source_pref`` of ``"radiator"``/``"heat_pump"`` is
+    honoured; anything else (``"auto"``/None) falls back to ``default_source``.
+    Only heating zones get a grant. Pure and generic (charter): sources are
+    free-form strings, no device-specific logic.
+    """
+    out: dict[str, str] = {}
+    for r in requests:
+        if not r.heating:
+            continue
+        pref = (r.source_pref or "auto").lower()
+        out[r.zone_id] = pref if pref in ("radiator", "heat_pump") else default_source
+    return out
