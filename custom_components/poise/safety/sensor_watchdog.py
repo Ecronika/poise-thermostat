@@ -9,6 +9,8 @@ learning — without altering the control output (no new control risk).
 
 from __future__ import annotations
 
+from datetime import datetime
+
 
 def is_frozen(age_s: float | None, threshold_s: float) -> bool:
     """True if the last value change is at least ``threshold_s`` seconds ago.
@@ -45,3 +47,22 @@ def valve_stuck(closing_steps: float | None, *, min_steps: float = 10.0) -> bool
     if closing_steps is None:
         return False
     return closing_steps < min_steps
+
+
+def sensor_age_seconds(now: datetime, last_changed: datetime) -> float:
+    """Seconds since the sensor value last changed (F1 feed for ``is_frozen``).
+
+    Pure timestamp arithmetic extracted from the coordinator glue so the
+    last-changed-based ageing is unit-testable without a HA runtime (review M13).
+    """
+    return (now - last_changed).total_seconds()
+
+
+def should_learn(*, window_open: bool, frozen: bool) -> bool:
+    """Learn only when the room signal is trustworthy.
+
+    An open window (air mixing) or a frozen sensor (stale value) must pause EKF
+    learning so the model is not poisoned (F1/ADR-0012). Extracted from the
+    coordinator tick so the gate itself is tested (review M13).
+    """
+    return not window_open and not frozen

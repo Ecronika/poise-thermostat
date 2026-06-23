@@ -51,3 +51,17 @@ class HeatingFailureDetector:
             self._failed = (room - room0) < self._min_rise
             self._start = (now_h, room)
         return self._failed
+
+
+def failure_notification_action(failed: bool, already_notified: bool) -> str | None:
+    """Edge-triggered notification action for a heating failure.
+
+    Returns ``"create"`` on a newly detected failure, ``"dismiss"`` when it
+    clears, else ``None`` (no change). Extracted from the coordinator so the
+    rising/falling-edge logic is unit-tested without a HA runtime (review M13).
+    """
+    if failed and not already_notified:
+        return "create"
+    if not failed and already_notified:
+        return "dismiss"
+    return None
