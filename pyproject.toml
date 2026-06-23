@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poise"
-version = "0.48.0"
+version = "0.49.0"
 description = "Self-learning, norm-based thermostat for Home Assistant"
 requires-python = ">=3.12"
 
@@ -32,7 +32,7 @@ module = ["homeassistant.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["custom_components.poise", "custom_components.poise.config_flow", "custom_components.poise.coordinator", "custom_components.poise.climate", "custom_components.poise.actuator", "custom_components.poise.storage", "custom_components.poise.sensor", "custom_components.poise.diagnostics", "custom_components.poise.hub_coordinator", "custom_components.poise.binary_sensor"]
+module = ["custom_components.poise", "custom_components.poise.config_flow", "custom_components.poise.coordinator", "custom_components.poise.climate", "custom_components.poise.actuator", "custom_components.poise.storage", "custom_components.poise.sensor", "custom_components.poise.diagnostics", "custom_components.poise.hub_coordinator", "custom_components.poise.binary_sensor", "custom_components.poise.frontend"]
 ignore_errors = true
 
 [tool.coverage.run]
@@ -47,6 +47,7 @@ omit = [
     "custom_components/poise/diagnostics.py",
     "custom_components/poise/hub_coordinator.py",
     "custom_components/poise/binary_sensor.py",
+    "custom_components/poise/frontend/__init__.py",
 ]
 
 [tool.coverage.report]
