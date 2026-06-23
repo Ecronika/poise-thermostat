@@ -7,7 +7,7 @@ import "./poise-card-editor.ts";
 import "./poise-system-card.ts";
 import { chartGeometry, type Sample } from "./history.ts";
 
-const CARD_VERSION = "0.51.0";
+const CARD_VERSION = "0.52.0";
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
