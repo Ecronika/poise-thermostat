@@ -31,10 +31,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """
     import voluptuous as vol
     from homeassistant.components import websocket_api
-    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-    from homeassistant.core import CoreState
 
-    from .frontend import JSModuleRegistration
+    from .frontend import async_register_card
 
     @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/card_version"})
     @websocket_api.async_response
@@ -43,18 +41,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     websocket_api.async_register_command(hass, _card_version)
 
-    async def _register(_event=None):  # type: ignore[no-untyped-def]
-        try:
-            await JSModuleRegistration(hass).async_register()
-        except Exception:  # noqa: BLE001 — frontend registration must never block setup
-            import logging
+    try:
+        await async_register_card(hass)
+    except Exception:  # noqa: BLE001 — a card failure must never block setup
+        import logging
 
-            logging.getLogger(__name__).exception("Poise card registration failed")
-
-    if hass.state is CoreState.running:
-        await _register()
-    else:
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register)
+        logging.getLogger(__name__).exception("Poise card registration failed")
     return True
 
 
