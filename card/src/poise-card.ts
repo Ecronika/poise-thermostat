@@ -6,8 +6,9 @@ import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
 import "./poise-system-card.ts";
 import { chartGeometry, type Sample } from "./history.ts";
+import { DIAL, arcPath, pointToValue, polar, valueToAngle } from "./dial.ts";
 
-const CARD_VERSION = "0.53.0";
+const CARD_VERSION = "0.54.0";
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
@@ -20,6 +21,8 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   private _config!: PoiseCardConfig;
   private _history: Sample[] = [];
   private _histFor: string | null = null;
+  private _dragging = false;
+  private _pending: number | null = null;
 
   static getConfigElement(): HTMLElement {
     return document.createElement("poise-card-editor");
@@ -46,6 +49,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   }
 
   shouldUpdate(changed: PropertyValues): boolean {
+    if (this._dragging) return true;
     if (changed.has("_config")) return true;
     const old = changed.get("hass") as HomeAssistant | undefined;
     if (!old || !this._config?.entity) return true;
@@ -161,15 +165,12 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
     return html`<ha-card .header=${a["friendly_name"] ?? "Poise"}>
       <div class="wrap">
-        ${this._hero(band, lang)}
-        <div class="big">
-          ${operative != null ? operative.toFixed(1) : "—"}<span>°C</span>
-        </div>
+        ${this._dial(a, lang)}
         <div class="verdict">
           ${band ? t(lang, band.verdict) : t(lang, "unknown")}
           ${band?.category ? html`<span class="cat">Kat. ${band.category}</span>` : nothing}
         </div>
-        ${this._control(setpoint, lang)}
+        ${this._control(this._pending ?? setpoint, lang)}
         ${this._chart(num(a["comfort_low"]), num(a["comfort_high"]))}
         ${this._chips(a, lang)}
         ${this._learn(a, lang)}
@@ -177,23 +178,92 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     </ha-card>`;
   }
 
-  private _hero(band: ReturnType<typeof buildBand>, _lang?: string) {
-    if (!band) return nothing;
-    const pct = (f: number) => `${(f * 100).toFixed(1)}%`;
-    return html`<div class="band">
-      <div
-        class="fill"
-        style="left:${pct(band.lowFrac)};right:${pct(1 - band.highFrac)}"
-      ></div>
-      ${band.setpointFrac != null
-        ? html`<div class="mark sp" style="left:${pct(band.setpointFrac)}"></div>`
-        : nothing}
-      ${band.operativeFrac != null
-        ? html`<div class="mark op" style="left:${pct(band.operativeFrac)}"></div>`
-        : nothing}
-      <div class="tick" style="left:${pct(band.lowFrac)}">${band.low.toFixed(0)}</div>
-      <div class="tick" style="left:${pct(band.highFrac)}">${band.high.toFixed(0)}</div>
+  private _dial(a: Record<string, unknown>, lang?: string) {
+    const op = num(a["operative_temperature"]) ?? num(a["current_temperature"]);
+    const actualSp = num(a["heat_sp"]) ?? num(a["temperature"]);
+    const sp = this._pending ?? actualSp ?? DIAL.min;
+    const low = num(a["comfort_low"]);
+    const high = num(a["comfort_high"]);
+    const cx = 100;
+    const cy = 100;
+    const r = 80;
+    const track = arcPath(cx, cy, r, DIAL.start, DIAL.start + DIAL.sweep);
+    const bandArc =
+      low != null && high != null
+        ? arcPath(
+            cx, cy, r,
+            valueToAngle(Math.min(low, high)),
+            valueToAngle(Math.max(low, high)),
+          )
+        : "";
+    const h = polar(cx, cy, r, valueToAngle(sp));
+    const opA = op != null ? polar(cx, cy, r, valueToAngle(op)) : null;
+    return html`<div class="dialwrap">
+      <svg
+        class="dial"
+        viewBox="0 0 200 200"
+        @pointerdown=${this._onDown}
+        @pointermove=${this._onMove}
+        @pointerup=${this._onUp}
+        @pointercancel=${this._onUp}
+      >
+        <path class="track" d=${track}></path>
+        <path class="bandarc" d=${bandArc}></path>
+        <circle
+          class="opdot"
+          cx=${(opA?.x ?? 0).toFixed(1)}
+          cy=${(opA?.y ?? 0).toFixed(1)}
+          r=${opA ? 5 : 0}
+        ></circle>
+        <circle class="handle" cx=${h.x.toFixed(1)} cy=${h.y.toFixed(1)} r="9"></circle>
+      </svg>
+      <div class="dialctr">
+        <div class="op">${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
+        <div class="soll">${t(lang, "setpoint")} <b>${sp.toFixed(1)}°</b></div>
+      </div>
     </div>`;
+  }
+
+  private _fromPointer(ev: PointerEvent, svg: SVGSVGElement): void {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !this._config.entity) return;
+    const vx = ((ev.clientX - rect.left) / rect.width) * 200 - 100;
+    const vy = ((ev.clientY - rect.top) / rect.height) * 200 - 100;
+    const step =
+      num(
+        this.hass.states[this._config.entity]?.attributes[
+          "target_temperature_step"
+        ],
+      ) ?? 0.5;
+    this._pending = Math.round(pointToValue(vx, vy) / step) * step;
+    this.requestUpdate();
+  }
+
+  private _onDown(ev: PointerEvent): void {
+    if (!this._config.entity) return;
+    ev.preventDefault();
+    const svg = ev.currentTarget as SVGSVGElement;
+    svg.setPointerCapture(ev.pointerId);
+    this._dragging = true;
+    this._fromPointer(ev, svg);
+  }
+
+  private _onMove(ev: PointerEvent): void {
+    if (this._dragging) this._fromPointer(ev, ev.currentTarget as SVGSVGElement);
+  }
+
+  private _onUp(): void {
+    if (!this._dragging) return;
+    this._dragging = false;
+    const v = this._pending;
+    this._pending = null;
+    if (v != null && this._config.entity) {
+      this.hass.callService("climate", "set_temperature", {
+        entity_id: this._config.entity,
+        temperature: v,
+      });
+    }
+    this.requestUpdate();
   }
 
   private _control(setpoint: number | null, lang?: string) {
@@ -302,6 +372,16 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .cop { fill: none; stroke: var(--primary-color, #2196f3); stroke-width: 2; vector-effect: non-scaling-stroke; }
     .csp { fill: none; stroke: var(--secondary-text-color, #888); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
     .chips { cursor: pointer; }
+    .dialwrap { position: relative; width: 100%; max-width: 230px; margin: 6px auto 2px; }
+    .dial { width: 100%; display: block; touch-action: none; cursor: pointer; }
+    .track { fill: none; stroke: var(--divider-color, #444); stroke-width: 10; stroke-linecap: round; }
+    .bandarc { fill: none; stroke: color-mix(in srgb, var(--success-color, #4caf50) 55%, transparent); stroke-width: 10; stroke-linecap: round; }
+    .opdot { fill: var(--primary-text-color, #fff); }
+    .handle { fill: var(--primary-color, #2196f3); stroke: var(--card-background-color, #1c1c1c); stroke-width: 2; }
+    .dialctr { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+    .dialctr .op { font-size: 38px; font-weight: 600; line-height: 1; }
+    .dialctr .op span { font-size: 16px; color: var(--secondary-text-color); }
+    .dialctr .soll { font-size: 13px; color: var(--secondary-text-color); margin-top: 4px; }
     .empty { padding: 24px 16px; color: var(--secondary-text-color); }
   `;
 }
