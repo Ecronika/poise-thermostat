@@ -84,6 +84,11 @@ from .control.tick_resolve import (
     snap_to_step,
 )
 from .control.tpi_shadow import evaluate_tpi_shadow
+from .control.window_auto import (
+    WindowAutoConfig,
+    WindowAutoState,
+    step_window_auto,
+)
 from .devices.capability import classify_number_entity, climate_capability
 from .devices.model_fixes import (
     is_external_sensor_select,
@@ -142,6 +147,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ekf = ThermalEKF()
         self._trm_tracker = RunningMeanTracker()
         self._seasonless = SeasonlessRate()
+        # Sensorless open-window detection (shadow, ADR-0041): slope-based,
+        # decoupled prev-sample so it observes regardless of heating.
+        self._window_auto = WindowAutoState()
+        self._window_auto_cfg = WindowAutoConfig()
+        self._wa_prev_room: float | None = None
+        self._wa_prev_mono: float | None = None
         self._pi = PiCompensator()
         self._prev_room: float | None = None
         self._prev_room_mono: float | None = None
@@ -242,6 +253,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._trm_tracker = RunningMeanTracker.from_dict(data["trm"])
                 if isinstance(data.get("seasonless"), dict):
                     self._seasonless = SeasonlessRate.from_dict(data["seasonless"])
+                if isinstance(data.get("window_auto"), dict):
+                    self._window_auto = WindowAutoState.from_dict(data["window_auto"])
                 self._enabled = bool(data.get("enabled", True))
                 ov = data.get("override")
                 self._override = float(ov) if isinstance(ov, (int, float)) else None
@@ -432,6 +445,25 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._last_mono = now
 
+    def _observe_window_auto(self, room: float) -> None:
+        """Feed the sensorless slope detector (shadow, ADR-0041).
+
+        Skipped when a window sensor exists (measured > estimated, ADR-0012).
+        Observes every tick — a window can open whether or not we heat.
+        """
+        if self._window is not None:
+            return
+        now = self._clock.monotonic()
+        if self._wa_prev_room is not None and self._wa_prev_mono is not None:
+            dt_h = (now - self._wa_prev_mono) / 3600.0
+            if 0.0 < dt_h < 1.0:
+                slope = (room - self._wa_prev_room) / dt_h
+                self._window_auto = step_window_auto(
+                    self._window_auto, slope, dt_h * 60.0, self._window_auto_cfg
+                )
+        self._wa_prev_room = room
+        self._wa_prev_mono = now
+
     def _observe_seasonless(self, room: float, t_out: float) -> None:
         """Record a normalised heat-up rate while heating (shadow, ADR-0004/0026)."""
         now = self._clock.monotonic()
@@ -481,6 +513,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "ekf": self._ekf.to_dict(),
             "trm": self._trm_tracker.to_dict(),
             "seasonless": self._seasonless.to_dict(),
+            "window_auto": self._window_auto.to_dict(),
             "enabled": self._enabled,
             "override": self._override,
             "climate_mode": self._climate_mode,
@@ -619,6 +652,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not window_open and not frozen:
             self._learn(room, t_out_eff)
         self._observe_seasonless(room, t_out_eff)
+        self._observe_window_auto(room)
 
         # mould floor + dewpoint cap from humidity
         mold_min = None
@@ -916,6 +950,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "category": self._category.value,
             "heating": heating,
             "window_open": window_open,
+            "window_auto_detected": self._window_auto.open,
+            "window_auto_slope": self._window_auto.ema_slope,
             "heating_failure": failed,
             "source": reading.source.value,
             "tau_hours": round(self._ekf.tau_hours, 1),

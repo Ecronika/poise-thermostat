@@ -43,6 +43,8 @@ _ATTRS = (
     "confidence",
     "learning_phase",
     "window_open",
+    "window_auto_detected",
+    "window_auto_slope",
     "heating_failure",
     "heat_sp",
     "cool_sp",
