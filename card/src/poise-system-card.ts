@@ -1,0 +1,138 @@
+import { LitElement, css, html, nothing, type PropertyValues } from "lit";
+import type { HomeAssistant, LovelaceCard } from "./ha-types.ts";
+import type { LovelaceCardConfig } from "./ha-types.ts";
+import { t } from "./localize.ts";
+
+interface SysConfig extends LovelaceCardConfig {
+  entity?: string;
+}
+
+function num(v: unknown): number | null {
+  const n = typeof v === "string" ? parseFloat(v) : (v as number);
+  return typeof n === "number" && !Number.isNaN(n) ? n : null;
+}
+
+export class PoiseSystemCard extends LitElement implements LovelaceCard {
+  static properties = { hass: {}, _config: { state: true } };
+  hass!: HomeAssistant;
+  private _config!: SysConfig;
+
+  static getStubConfig(hass: HomeAssistant): SysConfig {
+    const e = Object.keys(hass.states).find(
+      (id) =>
+        id.startsWith("binary_sensor.") &&
+        hass.states[id].attributes["zone_count"] !== undefined,
+    );
+    return { type: "custom:poise-system-card", entity: e ?? "" };
+  }
+
+  setConfig(config: SysConfig): void {
+    if (!config) throw new Error("Invalid configuration");
+    this._config = config;
+  }
+
+  getCardSize(): number {
+    return 2;
+  }
+
+  shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.has("_config")) return true;
+    const old = changed.get("hass") as HomeAssistant | undefined;
+    if (!old || !this._config?.entity) return true;
+    return old.states[this._config.entity] !== this.hass.states[this._config.entity];
+  }
+
+  private _moreInfo(): void {
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId: this._config.entity },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  render() {
+    const lang = this.hass?.locale?.language;
+    const id = this._config?.entity;
+    const st = id ? this.hass.states[id] : undefined;
+    if (!st) {
+      return html`<ha-card
+        ><div class="empty">${t(lang, "no_system")}</div></ha-card
+      >`;
+    }
+    const a = st.attributes;
+    const on = st.state === "on";
+    const flow = num(a["flow_target"]);
+    const shed = num(a["shed_count"]) ?? 0;
+    const grants = (a["source_grants"] as Record<string, string>) ?? {};
+    const grantKeys = Object.keys(grants);
+    return html`<ha-card .header=${t(lang, "sys_title")}>
+      <div class="wrap" @click=${this._moreInfo}>
+        <div class="state ${on ? "on" : ""}">
+          <ha-icon icon=${on ? "mdi:fire" : "mdi:fire-off"}></ha-icon>
+          <span>${on ? t(lang, "demand_on") : t(lang, "demand_off")}</span>
+          ${a["frost_override"]
+            ? html`<em class="frost">${t(lang, "frost")}</em>`
+            : nothing}
+        </div>
+        <div class="stats">
+          <div>
+            <strong>${num(a["active_zones"]) ?? 0}</strong
+            ><span>${t(lang, "heating_n")}</span>
+          </div>
+          <div>
+            <strong
+              >${num(a["controlling_zones"]) ?? 0}/${num(a["zone_count"]) ?? 0}</strong
+            ><span>${t(lang, "zones")}</span>
+          </div>
+          ${flow != null
+            ? html`<div>
+                <strong>${flow.toFixed(0)}°</strong><span>${t(lang, "flow")}</span>
+              </div>`
+            : nothing}
+          ${shed > 0
+            ? html`<div>
+                <strong>${shed}</strong><span>${t(lang, "shed")}</span>
+              </div>`
+            : nothing}
+        </div>
+        ${grantKeys.length
+          ? html`<div class="grants">
+              ${grantKeys.map(
+                (z) => html`<span class="chip">${z}: ${grants[z]}</span>`,
+              )}
+            </div>`
+          : nothing}
+      </div>
+    </ha-card>`;
+  }
+
+  static styles = css`
+    .wrap { padding: 8px 16px 16px; cursor: pointer; }
+    .state { display: flex; align-items: center; gap: 8px; font-size: 18px; }
+    .state ha-icon { --mdc-icon-size: 22px; color: var(--secondary-text-color); }
+    .state.on ha-icon { color: var(--error-color, #d33); }
+    .frost { font-style: normal; margin-left: auto; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; background: var(--info-color, #2196f3); color: var(--text-primary-color, #fff); }
+    .stats { display: flex; gap: 18px; margin-top: 10px; flex-wrap: wrap; }
+    .stats strong { font-size: 20px; }
+    .stats span { display: block; font-size: 11px; color: var(--secondary-text-color); }
+    .grants { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .chip { padding: 3px 8px; border-radius: 12px; font-size: 12px;
+      background: var(--secondary-background-color); }
+    .empty { padding: 24px 16px; color: var(--secondary-text-color); }
+  `;
+}
+
+if (!customElements.get("poise-system-card")) {
+  customElements.define("poise-system-card", PoiseSystemCard);
+}
+(window as unknown as { customCards: unknown[] }).customCards =
+  (window as unknown as { customCards: unknown[] }).customCards || [];
+(window as unknown as { customCards: unknown[] }).customCards.push({
+  type: "poise-system-card",
+  name: "Poise System",
+  preview: true,
+  description: "Multi-zone boiler demand, flow & load shedding for the Poise hub.",
+});

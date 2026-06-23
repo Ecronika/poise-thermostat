@@ -4,8 +4,10 @@ import { buildBand } from "./comfort.ts";
 import type { PoiseCardConfig } from "./card-config.ts";
 import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
+import "./poise-system-card.ts";
+import { chartGeometry, type Sample } from "./history.ts";
 
-const CARD_VERSION = "0.50.0";
+const CARD_VERSION = "0.51.0";
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
@@ -16,6 +18,8 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   static properties = { hass: {}, _config: { state: true } };
   hass!: HomeAssistant;
   private _config!: PoiseCardConfig;
+  private _history: Sample[] = [];
+  private _histFor: string | null = null;
 
   static getConfigElement(): HTMLElement {
     return document.createElement("poise-card-editor");
@@ -32,6 +36,8 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   setConfig(config: PoiseCardConfig): void {
     if (!config) throw new Error("Invalid configuration");
+    if (config.entity && !config.entity.startsWith("climate."))
+      throw new Error("Poise card: entity must be a climate entity");
     this._config = { show_shadow: true, ...config };
   }
 
@@ -57,6 +63,79 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       entity_id: id,
       temperature: Math.round((cur + delta * step) * 10) / 10,
     });
+  }
+
+  protected updated(): void {
+    const id = this._config?.entity;
+    if (id && this.hass && this._histFor !== id) {
+      this._histFor = id;
+      void this._loadHistory(id);
+    }
+  }
+
+  private async _loadHistory(id: string): Promise<void> {
+    if (!this.hass.connection) return;
+    const end = new Date();
+    const start = new Date(end.getTime() - 24 * 3600 * 1000);
+    try {
+      const resp = await this.hass.connection.sendMessagePromise<
+        Record<string, Array<Record<string, unknown>>>
+      >({
+        type: "history/history_during_period",
+        start_time: start.toISOString(),
+        end_time: end.toISOString(),
+        entity_ids: [id],
+        minimal_response: false,
+        no_attributes: false,
+      });
+      const list = resp?.[id] ?? [];
+      let attrs: Record<string, unknown> = {};
+      const samples: Sample[] = [];
+      for (const e of list) {
+        if (e["a"]) attrs = { ...attrs, ...(e["a"] as Record<string, unknown>) };
+        const ts = (num(e["lu"]) ?? num(e["lc"]) ?? 0) * 1000;
+        samples.push({
+          t: ts,
+          op: num(attrs["operative_temperature"]) ?? num(attrs["current_temperature"]),
+          sp: num(attrs["heat_sp"]) ?? num(attrs["temperature"]),
+        });
+      }
+      this._history = samples;
+      this.requestUpdate();
+    } catch {
+      /* graceful: no chart */
+    }
+  }
+
+  private _moreInfo(): void {
+    if (!this._config.entity) return;
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId: this._config.entity },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _chart(low: number | null, high: number | null) {
+    const g = chartGeometry(this._history, low, high, 300, 80);
+    if (!g) return nothing;
+    return html`<svg
+      class="chart"
+      viewBox="0 0 ${g.width} ${g.height}"
+      preserveAspectRatio="none"
+    >
+      <rect
+        x="0"
+        y=${g.bandTop}
+        width=${g.width}
+        height=${Math.max(0, g.bandBottom - g.bandTop)}
+        class="cband"
+      ></rect>
+      <polyline points=${g.spPath} class="csp"></polyline>
+      <polyline points=${g.opPath} class="cop"></polyline>
+    </svg>`;
   }
 
   render() {
@@ -90,7 +169,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           ${band ? t(lang, band.verdict) : t(lang, "unknown")}
           ${band?.category ? html`<span class="cat">Kat. ${band.category}</span>` : nothing}
         </div>
-        ${this._control(setpoint, lang)} ${this._chips(a, lang)}
+        ${this._control(setpoint, lang)}
+        ${this._chart(num(a["comfort_low"]), num(a["comfort_high"]))}
+        ${this._chips(a, lang)}
         ${this._learn(a, lang)}
       </div>
     </ha-card>`;
@@ -141,7 +222,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const cause = a["binding_lower_cause"];
     if (cause && cause !== "en16798")
       chips.push(this._chip("mdi:shield-alert", String(cause)));
-    return chips.length ? html`<div class="chips">${chips}</div>` : nothing;
+    return chips.length
+      ? html`<div class="chips" @click=${this._moreInfo}>${chips}</div>`
+      : nothing;
   }
 
   private _chip(icon: string, label: string, minutes?: unknown, lang?: string) {
@@ -157,6 +240,15 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const shadow =
       this._config.show_shadow &&
       (a["mpc_active"] || a["tpi_active"] || a["pi_active"]);
+    const sp = num(a["pi_setpoint"]);
+    const mp = num(a["mpc_setpoint"]);
+    const would = a["tpi_active"]
+      ? `TPI ${Math.round(num(a["tpi_valve_percent"]) ?? 0)}%`
+      : a["pi_active"] && sp != null
+        ? `PI ${sp.toFixed(1)}°`
+        : a["mpc_active"] && mp != null
+          ? `MPC ${mp.toFixed(1)}°`
+          : "";
     return html`<div class="learn">
       ${conf != null
         ? html`<div class="bar">
@@ -164,7 +256,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           </div>
           <span>${t(lang, "learning")} ${(conf * 100).toFixed(0)}%</span>`
         : nothing}
-      ${shadow ? html`<div class="pill">${t(lang, "shadow")}</div>` : nothing}
+      ${shadow
+        ? html`<div class="pill">
+            ${t(lang, "shadow")}${would ? html` · ${would}` : nothing}
+          </div>`
+        : nothing}
     </div>`;
   }
 
@@ -186,7 +282,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .big span { font-size: 18px; color: var(--secondary-text-color); }
     .verdict { color: var(--secondary-text-color); margin-bottom: 8px; }
     .cat { margin-left: 8px; opacity: 0.8; }
-    .ctl { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; }
+    .ctl { display: flex; align-items: center; justify-content: center; gap: 18px; margin: 10px 0 4px; }
     .sp { text-align: center; }
     .sp span { display: block; font-size: 12px; color: var(--secondary-text-color); }
     .sp strong { font-size: 20px; }
@@ -201,6 +297,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .learn span { font-size: 12px; color: var(--secondary-text-color); }
     .pill { padding: 2px 8px; border-radius: 10px; font-size: 11px;
       background: var(--primary-color); color: var(--text-primary-color, #fff); }
+    .chart { width: 100%; height: 80px; margin: 10px 0 2px; display: block; }
+    .cband { fill: color-mix(in srgb, var(--success-color, #4caf50) 16%, transparent); }
+    .cop { fill: none; stroke: var(--primary-color, #2196f3); stroke-width: 2; vector-effect: non-scaling-stroke; }
+    .csp { fill: none; stroke: var(--secondary-text-color, #888); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+    .chips { cursor: pointer; }
     .empty { padding: 24px 16px; color: var(--secondary-text-color); }
   `;
 }
