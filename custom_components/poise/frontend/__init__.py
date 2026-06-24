@@ -28,7 +28,7 @@ async def async_register_card(hass: HomeAssistant) -> None:
 
     HA's frontend service worker caches asset URLs aggressively and may serve a
     stale module even when only the query string (``?v=``) changes. Stamping the
-    *path* with the version (``poise-card-0.58.0.js``) yields a URL the browser
+    *path* with the version (``poise-card-<version>.js``) yields a URL the browser
     has never seen before, so each upgrade is fetched fresh — no manual
     hard-reload, no stale card overflowing its grid cell. The versioned URL is
     mapped onto the single on-disk file via a per-file static path, so no extra
