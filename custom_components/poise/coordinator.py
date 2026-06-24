@@ -305,6 +305,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._enabled = bool(data.get("enabled", True))
                 ov = data.get("override")
                 self._override = float(ov) if isinstance(ov, (int, float)) else None
+                # Re-arm the auto-revert timer from boot for a restored override
+                # (monotonic time is not comparable across restarts; review).
+                self._override_set_mono = (
+                    self._clock.monotonic() if self._override is not None else None
+                )
                 cm = data.get("climate_mode")
                 if isinstance(cm, str):
                     self._climate_mode = cm
