@@ -22,6 +22,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DEVICE_MAX_C, DOMAIN, FROST_FLOOR_C
+from .control.override import OverrideMode
 from .coordinator import PoiseCoordinator
 from .devices.hvac_modes import (
     available_hvac_modes,
@@ -45,6 +46,8 @@ _ATTRS = (
     "window_open",
     "window_auto_detected",
     "window_auto_slope",
+    "window_auto_threshold",
+    "window_bypass",
     "heating_failure",
     "heat_sp",
     "cool_sp",
@@ -105,9 +108,11 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
+        | ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
+    _attr_preset_modes = [m.value for m in OverrideMode]
     _attr_min_temp = FROST_FLOOR_C
     _attr_max_temp = DEVICE_MAX_C
     _attr_target_temperature_step = 0.5
@@ -167,6 +172,10 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
         return HVACAction.IDLE
 
     @property
+    def preset_mode(self) -> str:
+        return self.coordinator.preset.value
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {key: self._d.get(key) for key in _ATTRS}
 
@@ -175,6 +184,10 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
         if temp is not None:
             self.coordinator.set_override(float(temp))
             await self.coordinator.async_request_refresh()
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        self.coordinator.set_preset(OverrideMode(preset_mode))
+        await self.coordinator.async_request_refresh()
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode == HVACMode.OFF:

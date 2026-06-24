@@ -71,7 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform.CLIMATE, Platform.SENSOR]
+        entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
     )
     return True
 
@@ -85,7 +85,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     unloaded = await hass.config_entries.async_unload_platforms(
-        entry, [Platform.CLIMATE, Platform.SENSOR]
+        entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
     )
     if unloaded:
         # final save + repair-issue/notification cleanup (no learning loss)

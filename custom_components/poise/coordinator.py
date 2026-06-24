@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -71,6 +72,12 @@ from .control.optimal_start import (
     mean_forecast_outdoor,
     plan_preheat,
 )
+from .control.override import (
+    OverrideConfig,
+    OverrideMode,
+    manual_override_expired,
+    mode_comfort_base,
+)
 from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
 from .control.tick_resolve import (
@@ -87,6 +94,8 @@ from .control.tpi_shadow import evaluate_tpi_shadow
 from .control.window_auto import (
     WindowAutoConfig,
     WindowAutoState,
+    adaptive_open_threshold,
+    effective_window_open,
     step_window_auto,
 )
 from .devices.capability import classify_number_entity, climate_capability
@@ -162,6 +171,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._window_auto_cfg = WindowAutoConfig()
         self._wa_prev_room: float | None = None
         self._wa_prev_mono: float | None = None
+        self._window_bypass: bool = False  # ignore window reaction (ADR-0041 stage 2)
+        self._wa_open_threshold: float = self._window_auto_cfg.open_threshold
         self._pi = PiCompensator()
         self._prev_room: float | None = None
         self._prev_room_mono: float | None = None
@@ -182,6 +193,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._lock = asyncio.Lock()
         self._enabled = True
         self._override: float | None = None
+        self._override_set_mono: float | None = None
+        self._preset: OverrideMode = OverrideMode.NONE
+        self._override_cfg = OverrideConfig()
         data = entry.data
         self.zone_name: str = data[CONF_NAME]
         self._temp: str = data[CONF_TEMP_SENSOR]
@@ -237,11 +251,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def set_override(self, target: float | None) -> None:
         self._override = target
+        self._override_set_mono = (
+            self._clock.monotonic() if target is not None else None
+        )
         self._dirty = True
 
     def set_climate_mode(self, mode: str) -> None:
         self._climate_mode = mode
         self._dirty = True
+
+    def set_window_bypass(self, on: bool) -> None:
+        self._window_bypass = on
+        self._dirty = True
+
+    def set_preset(self, mode: OverrideMode) -> None:
+        self._preset = mode
+        self._dirty = True
+
+    @property
+    def preset(self) -> OverrideMode:
+        return self._preset
+
+    @property
+    def window_bypass(self) -> bool:
+        return self._window_bypass
 
     @property
     def capability(self) -> tuple[bool, bool]:
@@ -264,6 +297,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._seasonless = SeasonlessRate.from_dict(data["seasonless"])
                 if isinstance(data.get("window_auto"), dict):
                     self._window_auto = WindowAutoState.from_dict(data["window_auto"])
+                self._window_bypass = bool(data.get("window_bypass", False))
+                try:
+                    self._preset = OverrideMode(data.get("preset", "none"))
+                except ValueError:
+                    self._preset = OverrideMode.NONE
                 self._enabled = bool(data.get("enabled", True))
                 ov = data.get("override")
                 self._override = float(ov) if isinstance(ov, (int, float)) else None
@@ -458,21 +496,31 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         finally:
             self._last_mono = now
 
-    def _observe_window_auto(self, room: float) -> None:
-        """Feed the sensorless slope detector (shadow, ADR-0041).
+    def _observe_window_auto(self, room: float, t_out: float) -> None:
+        """Feed the sensorless slope detector (ADR-0041).
 
         Skipped when a window sensor exists (measured > estimated, ADR-0012).
-        Observes every tick — a window can open whether or not we heat.
+        Observes every tick — a window can open whether or not we heat. The open
+        threshold is adapted to the learned tau once the model is identified
+        (steeper natural cooling -> higher threshold), else the fixed default.
         """
         if self._window is not None:
             return
         now = self._clock.monotonic()
+        cfg = self._window_auto_cfg
+        if self._ekf.identified:
+            self._wa_open_threshold = adaptive_open_threshold(
+                self._ekf.tau_hours, room, t_out, cfg
+            )
+            cfg = replace(cfg, open_threshold=self._wa_open_threshold)
+        else:
+            self._wa_open_threshold = cfg.open_threshold
         if self._wa_prev_room is not None and self._wa_prev_mono is not None:
             dt_h = (now - self._wa_prev_mono) / 3600.0
             if 0.0 < dt_h < 1.0:
                 slope = (room - self._wa_prev_room) / dt_h
                 self._window_auto = step_window_auto(
-                    self._window_auto, slope, dt_h * 60.0, self._window_auto_cfg
+                    self._window_auto, slope, dt_h * 60.0, cfg
                 )
         self._wa_prev_room = room
         self._wa_prev_mono = now
@@ -528,6 +576,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "trm": self._trm_tracker.to_dict(),
             "seasonless": self._seasonless.to_dict(),
             "window_auto": self._window_auto.to_dict(),
+            "window_bypass": self._window_bypass,
+            "preset": self._preset.value,
             "enabled": self._enabled,
             "override": self._override,
             "climate_mode": self._climate_mode,
@@ -659,14 +709,29 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # outdoor + a solar radiant bump; a measured globe/MRT sensor overrides.
         mrt_internal = virtual_mrt(room, t_out_eff, q_solar)
         t_mrt, mrt_source = select_mrt(self._read(self._mrt), mrt_internal)
-        window_open = self._window_open()
+        if (
+            self._override is not None
+            and self._override_set_mono is not None
+            and manual_override_expired(
+                self._override_set_mono, self._clock.monotonic(), self._override_cfg
+            )
+        ):
+            self._override = None
+            self._override_set_mono = None
+            self._dirty = True
+        sensor_window_open = self._window_open()
+        window_open = effective_window_open(
+            sensor_open=sensor_window_open,
+            auto_open=self._window_auto.open,
+            bypass=self._window_bypass,
+        )
         can_heat, can_cool = self._capability()
         device_max = self._device_max()
 
         if should_learn(window_open=window_open, frozen=frozen):
             self._learn(room, t_out_eff)
         self._observe_seasonless(room, t_out_eff)
-        self._observe_window_auto(room)
+        self._observe_window_auto(room, t_out_eff)
 
         # mould floor + dewpoint cap from humidity
         mold_min = None
@@ -695,7 +760,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             t_out_lead, model = t_out_eff, None
         lo, hi = HEATING_LOWER[self._category], HEATING_UPPER[self._category]
         plan = plan_preheat(
-            comfort_base=self._comfort_base,
+            comfort_base=mode_comfort_base(
+                self._preset, self._comfort_base, self._override_cfg
+            ),
             is_comfort=sched.is_comfort,
             setback_offset=sched.setback_offset,
             minutes_to_comfort=float(sched.minutes_to_comfort),
@@ -966,6 +1033,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "heating": heating,
             "window_open": window_open,
             "window_auto_detected": self._window_auto.open,
+            "window_auto_threshold": round(self._wa_open_threshold, 1),
+            "window_bypass": self._window_bypass,
+            "preset": self._preset.value,
+            "override_active": self._override is not None,
             "window_auto_slope": self._window_auto.ema_slope,
             "heating_failure": failed,
             "source": reading.source.value,

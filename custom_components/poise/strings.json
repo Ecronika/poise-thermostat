@@ -143,6 +143,11 @@
       "boiler_demand": {
         "name": "Boiler demand"
       }
+    },
+    "switch": {
+      "window_bypass": {
+        "name": "Ignore open-window reaction"
+      }
     }
   },
   "issues": {
