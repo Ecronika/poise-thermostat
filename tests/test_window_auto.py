@@ -78,3 +78,52 @@ def test_state_roundtrip() -> None:
     st = _feed([-8.0, -8.0, -8.0])
     again = WindowAutoState.from_dict(st.to_dict())
     assert again == st
+
+
+def test_effective_window_open_combines_signals() -> None:
+    from custom_components.poise.control.window_auto import effective_window_open
+
+    # sensor OR slope opens; bypass forces closed regardless.
+    assert (
+        effective_window_open(sensor_open=True, auto_open=False, bypass=False) is True
+    )
+    assert (
+        effective_window_open(sensor_open=False, auto_open=True, bypass=False) is True
+    )
+    assert (
+        effective_window_open(sensor_open=False, auto_open=False, bypass=False) is False
+    )
+    assert effective_window_open(sensor_open=True, auto_open=True, bypass=True) is False
+
+
+def test_adaptive_threshold_scales_with_insulation() -> None:
+    from custom_components.poise.control.window_auto import adaptive_open_threshold
+
+    # Same temperature delta: a leaky room (small tau, fast natural cooling)
+    # needs a steeper drop to flag a window than a well-insulated one.
+    insulated = adaptive_open_threshold(10.0, t_room=21.0, t_out=6.0)
+    leaky = adaptive_open_threshold(2.0, t_room=21.0, t_out=6.0)
+    assert leaky > insulated
+
+
+def test_adaptive_threshold_is_clamped() -> None:
+    from custom_components.poise.control.window_auto import (
+        WindowAutoConfig,
+        adaptive_open_threshold,
+    )
+
+    cfg = WindowAutoConfig()
+    very_insulated = adaptive_open_threshold(200.0, 21.0, 6.0, cfg)
+    very_leaky = adaptive_open_threshold(0.5, 21.0, -10.0, cfg)
+    assert very_insulated == cfg.open_threshold_min  # floored
+    assert very_leaky == cfg.open_threshold_max  # capped
+
+
+def test_adaptive_threshold_falls_back_when_tau_unknown() -> None:
+    from custom_components.poise.control.window_auto import (
+        WindowAutoConfig,
+        adaptive_open_threshold,
+    )
+
+    cfg = WindowAutoConfig()
+    assert adaptive_open_threshold(0.0, 21.0, 6.0, cfg) == cfg.open_threshold
