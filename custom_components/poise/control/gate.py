@@ -18,7 +18,10 @@ def mpc_weight(
     noise_floor: float = NOISE_FLOOR_STD,
 ) -> float:
     """Weight in [0, 1] for the MPC output; 1 = confident, 0 = noisy."""
-    weight = (threshold - prediction_std) / (threshold - noise_floor)
+    span = threshold - noise_floor
+    if span <= 0.0:  # degenerate kwargs -> step at the threshold, no div-by-zero
+        return 1.0 if prediction_std <= noise_floor else 0.0
+    weight = (threshold - prediction_std) / span
     return min(1.0, max(0.0, weight))
 
 
