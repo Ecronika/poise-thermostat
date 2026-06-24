@@ -4,7 +4,11 @@
 import type { HomeAssistant } from "./ha-types.ts";
 import { t } from "./localize.ts";
 
-export const CARD_VERSION = "0.64.0";
+declare const CARD_BUILD_VERSION: string | undefined;
+// Single source of truth: injected from package.json at build time (esbuild
+// `define`); falls back to "dev" when run un-bundled, e.g. unit tests (M9).
+export const CARD_VERSION =
+  typeof CARD_BUILD_VERSION !== "undefined" ? CARD_BUILD_VERSION : "dev";
 let checked = false;
 
 function clearAndReload(): void {
