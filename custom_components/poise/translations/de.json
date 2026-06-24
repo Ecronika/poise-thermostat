@@ -143,6 +143,11 @@
       "boiler_demand": {
         "name": "Kesselbedarf"
       }
+    },
+    "switch": {
+      "window_bypass": {
+        "name": "Fenster-Reaktion ignorieren"
+      }
     }
   },
   "issues": {
