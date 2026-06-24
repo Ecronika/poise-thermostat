@@ -22,3 +22,11 @@ def test_blend_is_convex() -> None:
     assert blend(1.0, 0.0, 0.5) == 0.5
     assert blend(1.0, 0.0, 1.0) == 1.0
     assert blend(1.0, 0.0, 0.0) == 0.0
+
+
+def test_mpc_weight_degenerate_kwargs_no_div_by_zero() -> None:
+    from custom_components.poise.control.gate import mpc_weight
+
+    # threshold == noise_floor must not divide by zero; it becomes a step.
+    assert mpc_weight(0.1, threshold=0.5, noise_floor=0.5) == 1.0
+    assert mpc_weight(0.9, threshold=0.5, noise_floor=0.5) == 0.0

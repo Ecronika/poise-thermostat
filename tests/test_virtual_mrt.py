@@ -37,3 +37,10 @@ def test_blueprint_example_winter_correction() -> None:
 
 def test_negative_solar_is_ignored() -> None:
     assert virtual_mrt(21.0, 21.0, -1.0) == pytest.approx(21.0)
+
+
+def test_q_solar_bump_is_capped() -> None:
+    # Nit: an unbounded q_solar must not produce an unbounded radiant bump.
+    huge = virtual_mrt(t_air=21.0, t_out=21.0, q_solar=1000.0, env_coupling=0.0)
+    capped = virtual_mrt(t_air=21.0, t_out=21.0, q_solar=2.0, env_coupling=0.0)
+    assert huge == capped  # clamped to _Q_SOLAR_MAX

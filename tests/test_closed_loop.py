@@ -41,14 +41,16 @@ def test_mpc_converges_to_target_without_oscillation() -> None:
         model,
         t_out=8.0,
         target=21.0,
-        lower=20.0,
+        lower=21.0,  # production wires lower == target == heat_sp (band [heat,cool])
         upper=24.0,
         steps=144,
         start_air=18.0,
     )
     last_third = [air for air, _ in trace[-48:]]
     mean = sum(last_third) / len(last_third)
-    assert 20.5 <= mean <= 21.5  # settles at the target
+    # Band-aware MPC (M4) holds at the lower comfort edge (= heat_sp = target),
+    # the energy-optimal in-band point, instead of chasing a point above it.
+    assert 20.5 <= mean <= 21.5  # settles at the lower edge / heating setpoint
     assert max(last_third) - min(last_third) < 0.5  # no sustained oscillation
     assert max(air for air, _ in trace) <= 24.5  # never overshoots the band
 

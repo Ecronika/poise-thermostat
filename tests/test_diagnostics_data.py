@@ -35,3 +35,14 @@ def test_all_sensor_keys_redacted() -> None:
     payload = {k: f"entity.{k}" for k in REDACT_KEYS}
     out = redact(payload, REDACT_KEYS)
     assert all(v == REDACTED for v in out.values())
+
+
+def test_coordinator_data_redacts_entity_ids() -> None:
+    # Privacy: the live attributes leak tpi_valve_entity (a real entity id) ->
+    # it must be redacted while ordinary diagnostic values pass through.
+    diag = build_diagnostics(
+        {"name": "Bath"},
+        {"tpi_valve_entity": "number.trv_valve_opening_degree", "confidence": 0.7},
+    )
+    assert diag["data"]["tpi_valve_entity"] == REDACTED
+    assert diag["data"]["confidence"] == 0.7
