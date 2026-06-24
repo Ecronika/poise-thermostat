@@ -92,7 +92,9 @@ def aggregate_boiler_demand(
 
     Only zones with ``controls_boiler`` participate. A zone calls for heat when
     ``heating`` is true; its weighted contribution is
-    ``(declared_power or 1.0) * clamp01(heat_demand)``. Demand is active when the
+    ``(declared_power or 0.0) * clamp01(heat_demand)`` — a zone with unknown
+    power contributes 0 to the kW threshold (consistent with load-shedding) but
+    still counts toward ``count_threshold``. Demand is active when the
     count of calling zones reaches ``count_threshold`` OR (when configured) the
     weighted sum reaches ``power_threshold``. Any participating zone in frost
     protection forces demand on, independent of thresholds (frost-safe).
@@ -100,7 +102,7 @@ def aggregate_boiler_demand(
     participating = [r for r in requests if r.controls_boiler]
     calling = [r for r in participating if r.heating]
     active_count = len(calling)
-    weighted = sum((r.declared_power or 1.0) * _clamp01(r.heat_demand) for r in calling)
+    weighted = sum((r.declared_power or 0.0) * _clamp01(r.heat_demand) for r in calling)
     # frost safety considers ALL zones, not just opt-in ones: a freezing room
     # must be able to fire a shared boiler even if mis-configured (ADR-0039).
     frost_override = any(r.frost_active for r in requests)

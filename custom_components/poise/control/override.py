@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-class OverrideMode(str, Enum):  # noqa: UP042 — StrEnum needs py3.11; tests run on 3.10
+class OverrideMode(str, Enum):  # noqa: UP042 — explicit str+Enum, StrEnum-equivalent
     """Comfort preset. Values match HA's PRESET_* so the frontend translates them."""
 
     NONE = "none"

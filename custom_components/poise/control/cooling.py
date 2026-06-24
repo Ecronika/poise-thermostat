@@ -28,6 +28,11 @@ def decide_mode(
     heat_max_outdoor: float = 22.0,
 ) -> str:
     """Return "heat", "cool" or "idle" (the dead-band / gated case)."""
+    # A contradictory band (heat target above cool target) is a mis-config; do
+    # not act on it — otherwise both branches match between the edges and 'heat'
+    # would win silently (review M6). Upstream dual_setpoint enforces cool>=heat.
+    if setpoint.cool < setpoint.heat:
+        return "idle"
     heat_ok = (
         can_heat
         and climate_mode in ("auto", "heat_only")

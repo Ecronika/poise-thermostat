@@ -21,7 +21,7 @@ class WindowAutoConfig:
     """Thresholds for slope-based window detection (slopes in degC/hour)."""
 
     open_threshold: float = 3.0  # open when smoothed drop is steeper than this
-    close_threshold: float = 0.0  # close when smoothed slope recovers to this
+    close_fraction: float = 0.2  # close once slope recovers to within this * open
     max_duration_min: float = 30.0  # force-close after this long open (anti-stick)
     min_points: int = 3  # no verdict before this many samples
     ema_old_weight: float = 0.2  # EMA: w*old + (1-w)*new (VTherm 0.2/0.8)
@@ -118,7 +118,14 @@ def step_window_auto(
             if ema < -cfg.open_threshold:
                 open_ = True
                 minutes_open = 0.0
-        elif ema >= cfg.close_threshold or minutes_open >= cfg.max_duration_min:
+        # Close once the slope has RECOVERED to within close_fraction of the open
+        # threshold — not only when it turns positive. A flat/idle room hovers
+        # just below 0 and would otherwise hang open until max_duration (a
+        # live-observed summer false positive). Anti-stick max_duration still fires.
+        elif (
+            ema >= -cfg.close_fraction * cfg.open_threshold
+            or minutes_open >= cfg.max_duration_min
+        ):
             open_ = False
             minutes_open = 0.0
 
