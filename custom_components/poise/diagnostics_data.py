@@ -26,6 +26,10 @@ REDACT_KEYS = frozenset(
     }
 )
 
+# Entity-id-bearing keys that surface in the live coordinator_data attributes
+# (the room name is deliberately kept — see module docstring).
+COORDINATOR_REDACT_KEYS = frozenset({"tpi_valve_entity"})
+
 
 def redact(data: Mapping[str, Any], keys: frozenset[str]) -> dict[str, Any]:
     """Replace the values of ``keys`` with a redaction sentinel; copy the rest."""
@@ -36,9 +40,14 @@ def build_diagnostics(
     entry_data: Mapping[str, Any],
     coordinator_data: Mapping[str, Any] | None,
     redact_keys: frozenset[str] = REDACT_KEYS,
+    coordinator_redact_keys: frozenset[str] = COORDINATOR_REDACT_KEYS,
 ) -> dict[str, Any]:
-    """Assemble the config-entry diagnostics payload with redacted config."""
+    """Assemble the diagnostics payload, redacting config + live entity ids."""
     return {
         "config": redact(dict(entry_data), redact_keys),
-        "data": dict(coordinator_data) if coordinator_data is not None else None,
+        "data": (
+            redact(dict(coordinator_data), coordinator_redact_keys)
+            if coordinator_data is not None
+            else None
+        ),
     }
