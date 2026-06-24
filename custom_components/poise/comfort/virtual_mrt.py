@@ -19,6 +19,7 @@ from __future__ import annotations
 
 ENV_COUPLING: float = 0.08  # radiant coupling to the exterior envelope
 SOLAR_MRT_GAIN_K: float = 1.5  # perceived radiant bump at full normalised sun [K]
+_Q_SOLAR_MAX: float = 2.0  # cap normalised solar so the radiant bump stays bounded
 
 
 def virtual_mrt(
@@ -36,4 +37,5 @@ def virtual_mrt(
     envelope coupling is zero and there is no sun.
     """
     k = min(max(env_coupling, 0.0), 1.0)
-    return (1.0 - k) * t_air + k * t_out + solar_gain * max(0.0, q_solar)
+    q = min(_Q_SOLAR_MAX, max(0.0, q_solar))
+    return (1.0 - k) * t_air + k * t_out + solar_gain * q
