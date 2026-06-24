@@ -65,14 +65,14 @@ def test_frost_override_forces_on_below_threshold() -> None:
     assert d.active is True and d.frost_override is True and d.active_count == 0
 
 
-def test_heat_demand_clamped_and_default_power() -> None:
-    # declared_power None -> weight 1.0; heat_demand>1 clamped to 1.0
+def test_heat_demand_is_clamped_to_unit() -> None:
+    # heat_demand > 1 is clamped to 1.0 in the weighted kW sum (known power).
     d = aggregate_boiler_demand(
-        [_zone("a", heating=True, heat_demand=5.0)],
+        [_zone("a", heating=True, heat_demand=5.0, declared_power=2.0)],
         count_threshold=9,
-        power_threshold=1.0,
+        power_threshold=2.0,
     )
-    assert d.weighted_demand == 1.0 and d.active is True
+    assert d.weighted_demand == 2.0 and d.active is True  # 2.0 * clamp01(5.0)
 
 
 def test_min_cycle_blocks_premature_off() -> None:
@@ -616,3 +616,17 @@ def test_source_policy_default_and_skips_idle() -> None:
     ]
     g = resolve_source_policy(zones, default_source="heat_pump")
     assert g == {"a": "heat_pump"}  # idle zone excluded, auto -> default
+
+
+def test_unknown_power_does_not_trip_power_threshold() -> None:
+    # M7: a zone with unknown declared_power contributes 0 to the kW threshold
+    # (consistent with load-shedding) — it can only fire demand via count.
+    zones = [_zone("a", heating=True, heat_demand=1.0, declared_power=None)]
+    assert (
+        aggregate_boiler_demand(zones, count_threshold=9, power_threshold=0.5).active
+        is False
+    )
+    assert (
+        aggregate_boiler_demand(zones, count_threshold=1, power_threshold=0.5).active
+        is True
+    )

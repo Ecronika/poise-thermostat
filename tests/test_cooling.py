@@ -27,3 +27,9 @@ def test_outdoor_lockouts() -> None:
 def test_mode_restrictions() -> None:
     assert decide_mode(27.0, _SP, outdoor=28.0, climate_mode="heat_only") == "idle"
     assert decide_mode(19.0, _SP, outdoor=5.0, climate_mode="cool_only") == "idle"
+
+
+def test_inverted_band_does_not_silently_heat() -> None:
+    # M6: a contradictory band (heat target above cool target) must idle, not heat.
+    bad = DualSetpoint(heat=25.0, cool=21.0)
+    assert decide_mode(23.0, bad, outdoor=20.0) == "idle"

@@ -40,7 +40,7 @@ def test_slow_drift_does_not_open() -> None:
 def test_closes_when_slope_recovers() -> None:
     st = _feed([-8.0, -8.0, -8.0])
     assert st.open is True
-    # Temperature stops falling / starts rising -> slope >= close_threshold.
+    # Temperature stops falling / starts rising -> recovers above close band.
     st = _feed([2.0, 2.0], state=st)
     assert st.open is False
     assert st.minutes_open == 0.0
@@ -127,3 +127,13 @@ def test_adaptive_threshold_falls_back_when_tau_unknown() -> None:
 
     cfg = WindowAutoConfig()
     assert adaptive_open_threshold(0.0, 21.0, 6.0, cfg) == cfg.open_threshold
+
+
+def test_stuck_open_recovers_on_flat_slope() -> None:
+    # Live-observed summer false positive: opened on a transient drop, then the
+    # room goes flat (~0 slope). It must CLOSE (recover) within a few ticks, not
+    # hang open until the 30-min max-duration. (window_auto_detected stuck true.)
+    st = _feed([-8.0, -8.0, -8.0])  # open
+    assert st.open is True
+    st = _feed([-0.001, -0.001, -0.001, -0.001], state=st)  # flat, barely negative
+    assert st.open is False
