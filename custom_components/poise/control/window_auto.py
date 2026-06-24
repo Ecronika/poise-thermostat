@@ -26,6 +26,9 @@ class WindowAutoConfig:
     min_points: int = 3  # no verdict before this many samples
     ema_old_weight: float = 0.2  # EMA: w*old + (1-w)*new (VTherm 0.2/0.8)
     max_slope: float = 120.0  # |slope| above this is an artefact, ignored
+    open_factor: float = 1.8  # adaptive open threshold = factor * natural cooling
+    open_threshold_min: float = 2.0  # floor for the adaptive open threshold (degC/h)
+    open_threshold_max: float = 12.0  # cap for the adaptive open threshold (degC/h)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +59,30 @@ class WindowAutoState:
 
 
 _DEFAULT_CONFIG = WindowAutoConfig()
+
+
+def adaptive_open_threshold(
+    tau_hours: float,
+    t_room: float,
+    t_out: float,
+    cfg: WindowAutoConfig = _DEFAULT_CONFIG,
+) -> float:
+    """Open threshold (degC/h) scaled to the room's natural free-running cooling.
+
+    A window cools a room far faster than its envelope loss, whose magnitude is
+    ``(t_room - t_out) / tau``. The threshold sits a factor above that natural
+    rate, so a well-insulated room (large tau, gentle loss) flags a gentler drop
+    while a leaky room or a cold day needs a steeper one — fewer misses and
+    fewer false positives than a fixed user threshold (VTherm). Falls back to
+    the fixed ``cfg.open_threshold`` when tau is unknown (model not identified).
+    """
+    if tau_hours <= 0.0:
+        return cfg.open_threshold
+    natural = max(0.0, t_room - t_out) / tau_hours
+    return min(
+        cfg.open_threshold_max,
+        max(cfg.open_threshold_min, cfg.open_factor * natural),
+    )
 
 
 def step_window_auto(
@@ -101,3 +128,17 @@ def step_window_auto(
         open=open_,
         minutes_open=minutes_open,
     )
+
+
+def effective_window_open(*, sensor_open: bool, auto_open: bool, bypass: bool) -> bool:
+    """Control-effective open state (ADR-0041 stage 2 actuation).
+
+    A configured window sensor OR the sensorless slope detector opens the
+    reaction; a user ``bypass`` forces it closed — the escape hatch against a
+    false slope detection or a deliberate "heat with the window open" override
+    (community: BT #1638/#1487). The reaction itself (drop to the frost/mould
+    floor via the constraint solver) is unchanged from the sensor path.
+    """
+    if bypass:
+        return False
+    return sensor_open or auto_open
