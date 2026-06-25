@@ -171,3 +171,44 @@ def test_from_dict_non_finite_recovers() -> None:
     bad["x"][0] = float("nan")
     ekf = ThermalEKF.from_dict(bad)
     assert all(math.isfinite(v) for v in ekf.x)
+
+
+def test_beta_c_beta_o_not_identified_in_live_wiring() -> None:
+    # B1: the live wiring never feeds u_c / q_occ, so the cooling/occupancy gains
+    # are structurally unobservable and must report as not identified.
+    from custom_components.poise.estimation.thermal_ekf import ThermalEKF
+
+    ekf = ThermalEKF()
+    for _ in range(300):
+        ekf.predict(dt_h=0.1, t_out=5.0, u_h=1.0)  # heating only
+        ekf.update(z_temp=20.0)
+    assert ekf.cooling_identified is False
+    assert ekf.occupancy_identified is False
+
+
+def test_excitation_is_tracked_and_persisted() -> None:
+    # B1: u_c / q_occ excitation is counted and survives a save/load round trip.
+    from custom_components.poise.estimation.thermal_ekf import ThermalEKF
+
+    ekf = ThermalEKF()
+    ekf.predict(dt_h=0.1, t_out=30.0, u_c=1.0)
+    ekf.predict(dt_h=0.1, t_out=20.0, q_occ=0.5)
+    d = ekf.to_dict()
+    assert d["n_uc"] >= 1 and d["n_qocc"] >= 1
+    assert ThermalEKF.from_dict(d).to_dict()["n_uc"] == d["n_uc"]
+
+
+def test_cooling_identified_true_only_when_identified_and_excited() -> None:
+    # B1: the flag is not hard-coded — it turns True for a base-identified model
+    # that has seen real cooling excitation; occupancy stays False (never fed).
+    from custom_components.poise.estimation.thermal_ekf import ThermalEKF
+
+    ekf = ThermalEKF()
+    ekf.n_idle = 1000
+    ekf.n_heating = 1000
+    ekf.n_cooling = 1000
+    ekf.p[0][0] = 0.01  # temperature_std = 0.1 < 0.5 -> base model identified
+    ekf._n_uc = 1000
+    assert ekf.identified is True
+    assert ekf.cooling_identified is True
+    assert ekf.occupancy_identified is False

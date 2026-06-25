@@ -62,3 +62,14 @@ def test_should_learn_gates_on_window_and_frozen() -> None:
     assert should_learn(window_open=True, frozen=False) is False
     assert should_learn(window_open=False, frozen=True) is False  # frozen -> no learn
     assert should_learn(window_open=True, frozen=True) is False
+
+
+def test_frozen_safe_target_is_the_health_floor() -> None:
+    from custom_components.poise.safety.sensor_watchdog import frozen_safe_target
+
+    # no mould floor -> frost protection
+    assert frozen_safe_target(7.0, None) == 7.0
+    # mould floor higher than frost -> it wins (fails toward warmth, C3)
+    assert frozen_safe_target(7.0, 14.5) == 14.5
+    # never below frost
+    assert frozen_safe_target(7.0, 5.0) == 7.0
