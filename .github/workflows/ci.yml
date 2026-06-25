@@ -35,10 +35,30 @@ jobs:
         run: ruff check .
       - name: Format check (ruff)
         run: ruff format --check .
-      - name: Type-check core (mypy --strict)
+      - name: Type-check (mypy --strict, all modules)
         run: mypy
-      - name: Tests + coverage
+      - name: Pure-core tests + coverage
         run: pytest --cov=custom_components/poise --cov-fail-under=85
+
+  integration:
+    name: Glue integration (HA runtime, py ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install HA test harness (pulls Home Assistant)
+        run: pip install -r requirements-test.txt
+      - name: Glue integration tests (config flow, setup/unload, live tick)
+        run: >-
+          pytest tests/integration
+          -o asyncio_mode=auto
+          -o asyncio_default_fixture_loop_scope=function
 
   card:
     name: Card (build + verify)
