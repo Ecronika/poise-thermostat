@@ -10,6 +10,7 @@ and calls these.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from ..comfort.norm_compliance import ASR_MAX_ROOM_C
@@ -165,3 +166,14 @@ def needs_heat_mode(current_mode: str | None, *, heat_supported: bool) -> bool:
     actuator's actual ``hvac_modes``, not from ``can_heat`` (which counts ``auto``).
     """
     return heat_supported and current_mode in ("auto", "off")
+
+
+def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
+    """Validate a manual setpoint override at the boundary (review C2/Ü2).
+
+    Rejects a non-finite value (so NaN/Inf can never reach the actuator) and
+    clamps a finite one into ``[lo, hi]`` (frost floor .. device max).
+    """
+    if target is None or not math.isfinite(target):
+        return None
+    return min(hi, max(lo, target))
