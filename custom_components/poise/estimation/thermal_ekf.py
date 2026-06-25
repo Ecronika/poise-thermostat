@@ -122,6 +122,10 @@ class ThermalEKF:
         self.n_cooling: int = 0
         self._last_mode: str = "idle"
         self._alpha_pegged_count: int = 0
+        # ticks the cooling / occupancy inputs were actually excited; beta_c
+        # / beta_o are unobservable until these grow (review B1).
+        self._n_uc: int = 0
+        self._n_qocc: int = 0
 
     # -- prediction ----------------------------------------------------------
     def predict(
@@ -148,6 +152,10 @@ class ThermalEKF:
             self._last_mode = "cooling"
         else:
             self._last_mode = "idle"
+        if u_c > 0.0:
+            self._n_uc += 1
+        if q_occ > 0.0:
+            self._n_qocc += 1
 
         # Jacobian F (identity for the random-walk parameters)
         f = _identity()
@@ -294,6 +302,25 @@ class ThermalEKF:
         )
 
     @property
+    def cooling_identified(self) -> bool:
+        """Whether beta_c (cooling responsivity) is trustworthy (review B1).
+
+        beta_c is only observable if the cooling input u_c is actually excited.
+        The live coordinator never feeds u_c, so this stays False and downstream
+        (MPC / optimal-stop / TPI) must not trust beta_c -- it stays at prior.
+        """
+        return self.identified and self._n_uc >= _ACTIVE_GATE
+
+    @property
+    def occupancy_identified(self) -> bool:
+        """Whether beta_o (occupancy gain) is trustworthy (review B1).
+
+        beta_o is never excited in the live wiring (q_occ is not fed), so this
+        is False and beta_o stays at its prior -- flagged so it is not trusted.
+        """
+        return self.identified and self._n_qocc >= _ACTIVE_GATE
+
+    @property
     def learning_phase(self) -> str:
         """Phase consistent with identifiability (not just update count, ADR-0024)."""
         if self.identified:
@@ -314,6 +341,8 @@ class ThermalEKF:
             "n_idle": self.n_idle,
             "n_heating": self.n_heating,
             "n_cooling": self.n_cooling,
+            "n_uc": self._n_uc,
+            "n_qocc": self._n_qocc,
         }
 
     @classmethod
@@ -340,6 +369,8 @@ class ThermalEKF:
         ekf.n_idle = int(data.get("n_idle", 0))
         ekf.n_heating = int(data.get("n_heating", 0))
         ekf.n_cooling = int(data.get("n_cooling", 0))
+        ekf._n_uc = int(data.get("n_uc", 0))
+        ekf._n_qocc = int(data.get("n_qocc", 0))
         # recovery: a parameter pegged at its bound on load is unreliable ->
         # reset RC parameters to defaults but keep the observation counters so
         # the maturity gates stay satisfied while it re-learns (ADR-0007/0009).
