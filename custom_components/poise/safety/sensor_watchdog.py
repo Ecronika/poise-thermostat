@@ -58,6 +58,19 @@ def sensor_age_seconds(now: datetime, last_changed: datetime) -> float:
     return (now - last_changed).total_seconds()
 
 
+def frozen_safe_target(frost_floor: float, mold_min: float | None) -> float:
+    """Setpoint to command when the room sensor can no longer be trusted (C3/Ü3).
+
+    On a frozen/stale read we must not chase a comfort target computed from a
+    dead value (it could overheat, or miscompute the frost floor). Instead we
+    degrade to the *health floor* — the higher of frost protection and the
+    mould-avoidance minimum — and let the actuator hold it with its own sensor.
+    This "fails toward warmth": frost/mould protection is guaranteed without
+    trusting our reading. Pure, unit-tested.
+    """
+    return max(frost_floor, mold_min if mold_min is not None else frost_floor)
+
+
 def should_learn(*, window_open: bool, frozen: bool) -> bool:
     """Learn only when the room signal is trustworthy.
 
