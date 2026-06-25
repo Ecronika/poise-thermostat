@@ -1,0 +1,15 @@
+# ADR-0043: Prädiktive Solar-Verschattung (Cover-Shading)
+
+**Status:** akzeptiert (Umsetzung shadow-first) · **Datum:** 2026-06-24 · **Bezug:** ADR-0002 (EKF-Modell), ADR-0010 (Solar/β_s), ADR-0017 (Operativtemperatur/MRT), ADR-0023/0035 (Komfortband/Solver), ADR-0011 (Pure-Core/Test-first), ADR-0026 (Schatten-Schätzer) · **Grundlage:** `Konzept_Best-of-Integration.md` Feat 11; RoomMind `managers/cover_orchestrator.py`/`control/solar.py` (quellcode-verifiziert)
+
+## Kontext
+Im Sommer ist Überhitzung durch Solareintrag das Komfortproblem — gerade in einem norm-/operativtemperatur-basierten Regler. **Feldbefund (verifiziert):** Nur **RoomMind** macht prädiktive thermische Verschattung; Versatile/Better Thermostat/HA-Core haben **keine** (nur Sonnenstands-Blueprints, nicht prädiktiv-thermisch). RoomMind prognostiziert die Tages-Peak-Temperatur (Tier-1 EKF-Trajektorie wenn konfident, sonst linear `β_s·max(GHI-Serie)`), entscheidet mit Hysterese auf eine **graduelle 0–100-Position**, gated über die **Orientierung** (`cos(el)·cos(Δaz)` — Sonne auf der Wand?), und respektiert manuelle Overrides (~90-s-Settling, commanded-vs-actual-Drift). Poise hat alle Bausteine bereits: EKF (`predict`/`T_eq`), gemessene/geschätzte `q_solar`, Operativtemperatur, obere EN-16798-Komfortkante.
+
+## Entscheidung
+1. **Pure Helfer `control/cover_shading.py` (test-first)** — RoomMind-**Methode**, nicht -Code: `predict_peak_operative` (Zwei-Tier: ZOH-EKF-Trajektorie über den Resttag wenn konfident, sonst linear), `shading_target_position` (`excess = peak − T_obere_Kante`; Deploy > 1,5 K, Retract < 1,0 K, dazwischen Hold; graduelle Position + Positions-Deadband gegen Motor-Flattern), `orientation_factor` (Sonne hinter der Fläche → 0), `cover_user_override` (Drift nach Settle).
+2. **Operativtemperatur als Vergleichsgröße** (nicht Lufttemperatur) — die EN-16798-Kante ist operativ (ADR-0017). Konsistent mit dem restlichen Komfortpfad.
+3. **Shadow-first (ADR-0026/0033-Muster):** zuerst Diagnose `cover_predicted_peak`/`cover_would_shade`/`cover_position` exponieren, **ohne** Rollos zu fahren; Aktuierung (`cover.set_cover_position` + Cover-Entity- und Flächen-Azimut-Config) ist der zweite, separat verifizierte Schritt. **Nicht winter-gegated** — im Sommer live verifizierbar (anders als die HVAC-Aktorik).
+4. **Generisch bleiben (Charta):** Cover-Entity + Flächen-Orientierung als Config, keine herstellerspezifischen Sonderwege; Sonnenstand aus HAs `sun.sun`.
+
+## Konsequenzen
+**Positiv:** schließt die letzte *im Sommer validierbare* Konzept-Lücke (Feat 11); nutzt ausschließlich vorhandene Modellgrößen (EKF, q_solar, Operativtemperatur, Komfortkante) — keine neue Physik; präventiv statt reaktiv; pure+getestet. **Negativ/Risiko:** Prognosegüte hängt an der EKF-Identifizierbarkeit (im Sommer ohne Heizung schwach → Tier-2-Linear-Fallback greift, ehrlich begrenzt); Orientierung braucht eine kleine Config-Erweiterung; Aktuierung darf den Nutzer nie überfahren (Override-Schutz). **Failsafe:** keine Sonne auf der Fläche → nie verschatten; im Zweifel offen lassen.
