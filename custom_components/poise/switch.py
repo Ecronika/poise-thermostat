@@ -32,7 +32,7 @@ async def async_setup_entry(
     async_add_entities([PoiseWindowBypassSwitch(coordinator, entry)])
 
 
-class PoiseWindowBypassSwitch(CoordinatorEntity[PoiseCoordinator], SwitchEntity):
+class PoiseWindowBypassSwitch(CoordinatorEntity[PoiseCoordinator], SwitchEntity):  # type: ignore[misc]
     """Toggle that suppresses the open-window reaction for this zone."""
 
     _attr_has_entity_name = True
@@ -53,7 +53,7 @@ class PoiseWindowBypassSwitch(CoordinatorEntity[PoiseCoordinator], SwitchEntity)
 
     @property
     def is_on(self) -> bool:
-        return self.coordinator.window_bypass
+        return bool(self.coordinator.window_bypass)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self.coordinator.set_window_bypass(True)

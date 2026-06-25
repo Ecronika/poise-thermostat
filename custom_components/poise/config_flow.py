@@ -282,7 +282,7 @@ def _system_schema() -> vol.Schema:
     )
 
 
-class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):
+class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg]
     """Guided per-room config flow with reconfigure support."""
 
     VERSION = 1

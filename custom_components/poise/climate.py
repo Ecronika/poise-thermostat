@@ -106,7 +106,7 @@ async def async_setup_entry(
     async_add_entities([PoiseClimate(coordinator, entry)])
 
 
-class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
+class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type: ignore[misc]
     _attr_has_entity_name = True
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -177,7 +177,7 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):
 
     @property
     def preset_mode(self) -> str:
-        return self.coordinator.preset.value
+        return str(self.coordinator.preset.value)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

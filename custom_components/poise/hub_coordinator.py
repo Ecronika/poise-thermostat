@@ -74,7 +74,7 @@ from .control.hub_aggregate import (
 _LOGGER = logging.getLogger(__name__)
 
 
-class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
     """Singleton hub: aggregates and (opt-in) actuates the shared boiler."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:

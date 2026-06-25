@@ -50,7 +50,7 @@ async def async_setup_entry(
     async_add_entities([PoiseBoilerDemand(coordinator, entry)])
 
 
-class PoiseBoilerDemand(CoordinatorEntity[PoiseHubCoordinator], BinarySensorEntity):
+class PoiseBoilerDemand(CoordinatorEntity[PoiseHubCoordinator], BinarySensorEntity):  # type: ignore[misc]
     _attr_has_entity_name = True
     _attr_translation_key = "boiler_demand"
     _attr_device_class = BinarySensorDeviceClass.HEAT

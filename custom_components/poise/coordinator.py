@@ -148,7 +148,7 @@ def _num_attr(state: State | None, key: str) -> float | None:
     return parse_finite(state.attributes.get(key))
 
 
-class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
     """One coordinator per room; capability-aware dual-setpoint each tick."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -426,7 +426,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _local_minute(self) -> int:
         now = dt_util.now()
-        return now.hour * 60 + now.minute
+        return int(now.hour * 60 + now.minute)
 
     def _window_open(self) -> bool:
         if not self._window:

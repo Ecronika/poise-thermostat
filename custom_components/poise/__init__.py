@@ -10,7 +10,7 @@ ADR-0038/0039). They are distinguished by ``entry.data[CONF_ENTRY_TYPE]``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .const import CONF_ENTRY_TYPE, DOMAIN, ENTRY_TYPE_SYSTEM, VERSION
 
@@ -31,10 +31,10 @@ if TYPE_CHECKING:
 
 
 def _is_system(entry: ConfigEntry) -> bool:
-    return entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+    return bool(entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM)
 
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Serve + auto-register the bundled Lovelace card once (ADR-0040).
 
     HA imports stay local so the pure core remains importable without a HA
@@ -104,9 +104,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.const import Platform
 
     if _is_system(entry):
-        return await hass.config_entries.async_unload_platforms(
+        unloaded_sys = await hass.config_entries.async_unload_platforms(
             entry, [Platform.BINARY_SENSOR]
         )
+        return bool(unloaded_sys)
 
     unloaded = await hass.config_entries.async_unload_platforms(
         entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
@@ -114,4 +115,4 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unloaded:
         # final save + repair-issue/notification cleanup (no learning loss)
         await entry.runtime_data.async_persist_and_cleanup()
-    return unloaded
+    return bool(unloaded)

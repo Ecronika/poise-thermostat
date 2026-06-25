@@ -35,13 +35,15 @@ from .coordinator import PoiseCoordinator
 
 
 @dataclass(frozen=True, kw_only=True)
-class PoiseSensorDescription(SensorEntityDescription):
+class PoiseSensorDescription(SensorEntityDescription):  # type: ignore[misc]
     """Sensor description with a pull function over the coordinator data."""
 
     value_fn: Callable[[dict[str, Any]], float | str | None]
 
 
-def _scaled(key: str, factor: float = 1.0, digits: int = 2):
+def _scaled(
+    key: str, factor: float = 1.0, digits: int = 2
+) -> Callable[[dict[str, Any]], float | None]:
     def fn(data: dict[str, Any]) -> float | None:
         v = data.get(key)
         return round(float(v) * factor, digits) if isinstance(v, (int, float)) else None
@@ -166,7 +168,7 @@ async def async_setup_entry(
     async_add_entities(PoiseSensor(coordinator, entry, d) for d in SENSORS)
 
 
-class PoiseSensor(CoordinatorEntity[PoiseCoordinator], SensorEntity):
+class PoiseSensor(CoordinatorEntity[PoiseCoordinator], SensorEntity):  # type: ignore[misc]
     _attr_has_entity_name = True
     entity_description: PoiseSensorDescription
 
