@@ -6,8 +6,25 @@ import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
 import "./poise-system-card.ts";
 import { chartGeometry, type Sample } from "./history.ts";
-import { DIAL, arcPath, pointToValue, polar, valueToAngle } from "./dial.ts";
+import {
+  DIAL,
+  type DialConfig,
+  arcPath,
+  pointToValue,
+  polar,
+  valueToAngle,
+} from "./dial.ts";
 import { CARD_VERSION, checkCardVersion } from "./version.ts";
+
+function presetIcon(p: string): string {
+  const m: Record<string, string> = {
+    eco: "mdi:leaf",
+    boost: "mdi:rocket-launch",
+    away: "mdi:home-export-outline",
+    comfort: "mdi:sofa",
+  };
+  return m[p] ?? "mdi:tune";
+}
 
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : (v as number);
@@ -22,6 +39,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   private _histFor: string | null = null;
   private _dragging = false;
   private _pending: number | null = null;
+  private _dialCfg: DialConfig = DIAL;
 
   static getConfigElement(): HTMLElement {
     return document.createElement("poise-card-editor");
@@ -48,9 +66,14 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   }
 
   getGridOptions() {
+    // Default to natural height (rows:"auto" → HA sizes the cell to content).
+    // min_rows is a *floor*: the user may still drag the card larger in the
+    // Sections editor, but HA clamps any numeric rows up to this minimum, so
+    // it can never be shrunk small enough to clip the content — and a stale
+    // override saved into the dashboard (e.g. an old rows:8) is healed too.
     return this._config?.compact
-      ? { columns: 6, rows: 4, min_columns: 4, min_rows: 3 }
-      : { columns: 12, rows: 8, min_columns: 6, min_rows: 5 };
+      ? { columns: 6, rows: "auto", min_columns: 4, min_rows: 6 }
+      : { columns: 12, rows: "auto", min_columns: 6, min_rows: 9 };
   }
 
   shouldUpdate(changed: PropertyValues): boolean {
@@ -65,6 +88,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const id = this._config.entity;
     if (!id) return;
     const st = this.hass.states[id];
+    if (!st) return; // entity removed between render and click (M10)
     const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
     const cur =
       num(st.attributes["heat_sp"]) ?? num(st.attributes["temperature"]) ?? 21;
@@ -189,7 +213,16 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   private _dial(a: Record<string, unknown>, lang?: string) {
     const op = num(a["operative_temperature"]) ?? num(a["current_temperature"]);
     const actualSp = num(a["heat_sp"]) ?? num(a["temperature"]);
-    const sp = this._pending ?? actualSp ?? DIAL.min;
+    // Scale the dial to the device's own setpoint range, not a hard [16,28]
+    // (M12). Never invent a 16 °C setpoint — fall back to the operative reading.
+    const cfg: DialConfig = {
+      min: num(a["min_temp"]) ?? DIAL.min,
+      max: num(a["max_temp"]) ?? DIAL.max,
+      start: DIAL.start,
+      sweep: DIAL.sweep,
+    };
+    this._dialCfg = cfg.max > cfg.min ? cfg : DIAL;
+    const sp = this._pending ?? actualSp ?? op ?? this._dialCfg.min;
     const low = num(a["comfort_low"]);
     const high = num(a["comfort_high"]);
     const cx = 100;
@@ -200,14 +233,15 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       low != null && high != null
         ? arcPath(
             cx, cy, r,
-            valueToAngle(Math.min(low, high)),
-            valueToAngle(Math.max(low, high)),
+            valueToAngle(Math.min(low, high), this._dialCfg),
+            valueToAngle(Math.max(low, high), this._dialCfg),
           )
         : "";
     const action = String(a["hvac_action"] ?? "");
     const hcls = action === "heating" ? "heat" : action === "cooling" ? "cool" : "";
-    const h = polar(cx, cy, r, valueToAngle(sp));
-    const opA = op != null ? polar(cx, cy, r, valueToAngle(op)) : null;
+    const h = polar(cx, cy, r, valueToAngle(sp, this._dialCfg));
+    const opA =
+      op != null ? polar(cx, cy, r, valueToAngle(op, this._dialCfg)) : null;
     return html`<div class="dialwrap">
       <svg
         class="dial"
@@ -247,7 +281,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           "target_temperature_step"
         ],
       ) ?? 0.5;
-    this._pending = Math.round(pointToValue(vx, vy) / step) * step;
+    this._pending = Math.round(pointToValue(vx, vy, this._dialCfg) / step) * step;
     this.requestUpdate();
   }
 
@@ -299,7 +333,18 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       chips.push(this._chip("mdi:fire-circle", t(lang, "preheating"), a["minutes_to_comfort"], lang));
     if (a["coasting"])
       chips.push(this._chip("mdi:coffee", t(lang, "coasting"), a["minutes_to_setback"], lang));
-    if (a["window_open"]) chips.push(this._chip("mdi:window-open", t(lang, "window")));
+    if (a["window_open"])
+      chips.push(
+        this._chip(
+          "mdi:window-open",
+          t(lang, a["window_auto_detected"] ? "window_auto" : "window"),
+        ),
+      );
+    if (a["window_bypass"])
+      chips.push(this._chip("mdi:window-closed-variant", t(lang, "bypass")));
+    const preset = a["preset"] == null ? "none" : String(a["preset"]);
+    if (preset !== "none")
+      chips.push(this._chip(presetIcon(preset), t(lang, preset) || preset));
     if (a["heating_failure"]) chips.push(this._chip("mdi:alert", t(lang, "failure")));
     const cause = a["binding_lower_cause"];
     if (cause && cause !== "en16798")

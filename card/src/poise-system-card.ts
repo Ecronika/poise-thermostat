@@ -41,7 +41,9 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
   }
 
   getGridOptions() {
-    return { columns: 12, rows: 3, min_columns: 4, min_rows: 2 };
+    // Natural height by default; min_rows floors any numeric override so a
+    // manually resized hub card can never clip its content.
+    return { columns: 12, rows: "auto", min_columns: 4, min_rows: 4 };
   }
 
   protected updated(): void {
