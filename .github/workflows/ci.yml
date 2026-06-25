@@ -54,11 +54,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install HA test harness (pulls Home Assistant)
         run: pip install -r requirements-test.txt
-      - name: Glue integration tests (config flow, setup/unload, live tick)
+      - name: Glue integration tests + coverage gate (config flow, setup/unload, live tick)
         run: >-
           pytest tests/integration
           -o asyncio_mode=auto
           -o asyncio_default_fixture_loop_scope=function
+          --cov --cov-config=tests/integration/.coveragerc
+          --cov-report=term-missing --cov-fail-under=75
 
   card:
     name: Card (build + verify)
