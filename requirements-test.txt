@@ -8,3 +8,6 @@
 # HA core does not pin it, so a recent build is used.
 pytest-homeassistant-custom-component==0.13.195
 home-assistant-frontend==20250109.2
+
+# coverage plugin for the glue gate (pinned-compatible with pytest-hacc)
+pytest-cov
