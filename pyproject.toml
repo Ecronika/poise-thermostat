@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poise"
-version = "0.79.0"
+version = "0.80.0"
 description = "Self-learning, norm-based thermostat for Home Assistant"
 requires-python = ">=3.12"
 
@@ -28,15 +28,16 @@ mypy_path = "."
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["homeassistant.*"]
+module = ["homeassistant.*", "voluptuous"]
 ignore_missing_imports = true
 
-[[tool.mypy.overrides]]
-module = ["custom_components.poise", "custom_components.poise.config_flow", "custom_components.poise.coordinator", "custom_components.poise.climate", "custom_components.poise.storage", "custom_components.poise.sensor", "custom_components.poise.diagnostics", "custom_components.poise.hub_coordinator", "custom_components.poise.binary_sensor", "custom_components.poise.switch", "custom_components.poise.frontend"]
-ignore_errors = true
 
 [tool.coverage.run]
 source = ["custom_components/poise"]
+# NOTE: these HA-glue modules are now fully mypy --strict checked (no
+# ignore_errors). They stay coverage-omitted only until the HA-runtime
+# integration tests land (pytest-homeassistant-custom-component, CI-only;
+# the sandbox Python caps HA at 2023.7, too old for our 2025.1 APIs).
 omit = [
     "custom_components/poise/__init__.py",
     "custom_components/poise/config_flow.py",
