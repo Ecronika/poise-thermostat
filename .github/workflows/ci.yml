@@ -5,25 +5,43 @@ on:
   pull_request:
 
 jobs:
-  quality:
+  validate:
+    name: Validate (hassfest + HACS)
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hassfest (manifest / brands / quality)
+        uses: home-assistant/actions/hassfest@master
+      - name: HACS (repository structure)
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  quality:
+    name: Quality (py ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-      - name: Install tooling
-        run: pip install ruff mypy pytest pytest-cov
+          python-version: ${{ matrix.python-version }}
+      - name: Install pinned tooling
+        run: pip install -r requirements-dev.txt
       - name: Lint (ruff)
         run: ruff check .
       - name: Format check (ruff)
         run: ruff format --check .
       - name: Type-check core (mypy --strict)
         run: mypy
-      - name: Tests
+      - name: Tests + coverage
         run: pytest --cov=custom_components/poise --cov-fail-under=85
 
   card:
+    name: Card (build + verify)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,11 +51,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Install deps
-        run: npm install --no-audit --no-fund
+          cache: npm
+          cache-dependency-path: card/package-lock.json
+      - name: Install (reproducible — lockfile)
+        run: npm ci --no-audit --no-fund
       - name: Type-check card (tsc --noEmit)
         run: node node_modules/typescript/bin/tsc --noEmit
       - name: Card unit tests (node --test)
         run: node --test
       - name: Build bundle
         run: node build.mjs
+      - name: Assert bundle embeds package version
+        run: |
+          VER=$(node -p "require('./package.json').version")
+          grep -q "poise-card $VER " ../custom_components/poise/frontend/poise-card.js \
+            || { echo "::error::built bundle does not embed version $VER"; exit 1; }
+      - name: Guard — committed bundle matches a fresh build
+        run: |
+          git diff --exit-code -- ../custom_components/poise/frontend/poise-card.js \
+            || { echo "::error::poise-card.js is stale — run 'node build.mjs' in card/ and commit the result"; exit 1; }
