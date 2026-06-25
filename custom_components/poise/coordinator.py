@@ -66,6 +66,10 @@ from .const import (
     WRITE_DEADBAND_C,
 )
 from .contracts import ActuatorCommand, ActuatorPath
+from .control.cover_shading import (
+    predict_peak_operative,
+    shading_target_position,
+)
 from .control.mpc_shadow import evaluate_shadow
 from .control.optimal_start import (
     forecast_samples_from_response,
@@ -957,6 +961,25 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._maybe_save()
 
         operative = operative_temperature(room, t_mrt)
+        # Predictive solar-shading shadow (ADR-0043): forecast the peak operative
+        # temperature (Tier-2 linear while the EKF is not identified, e.g. summer)
+        # and what a cover *would* do — diagnostic only, no cover is moved yet.
+        _cm = self._ekf.get_model()
+        _cover_peak = predict_peak_operative(
+            operative,
+            t_out_eff,
+            [q_solar] * 36,
+            alpha=_cm.alpha,
+            beta_s=_cm.beta_s,
+            dt_h=5.0 / 60.0,
+            confident=self._ekf.identified and self._ekf.temperature_std < 0.5,
+        )
+        _cover_pos, _cover_reason = shading_target_position(
+            peak=_cover_peak,
+            t_upper=decision.cool_sp,
+            current_position=0.0,
+            oriented_q=q_solar,
+        )
         binding = "mold" if mold_min and mold_min >= decision.heat_sp else "en16798"
 
         # Phase-4 Stufe 1 (ADR-0033): shadow MPC — compute what the predictive
@@ -1042,6 +1065,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
             "override_active": self._override is not None,
+            "cover_predicted_peak": round(_cover_peak, 1),
+            "cover_would_shade": _cover_pos > 0,
+            "cover_shade_position": _cover_pos,
+            "cover_shade_reason": _cover_reason,
             "window_auto_slope": self._window_auto.ema_slope,
             "heating_failure": failed,
             "source": reading.source.value,
