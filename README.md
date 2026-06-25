@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.81.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.82.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -57,6 +57,42 @@ Alpha — under active development against a documented architecture (35+ ADRs) 
 3. *Settings → Devices & Services → Add Integration → Poise.*
 
 Use a **free-standing room sensor** (not the TRV's internal sensor) for best results; Poise raises a repair issue if it detects a likely heat-source-mounted sensor.
+
+
+## Configuration
+
+Poise is configured entirely through the UI (config flow) — there are no YAML keys. The menu offers **Room** (a per-zone thermostat) and **System** (the optional multi-zone hub). Settings can be edited in place later via *Reconfigure*, which preserves the learned model.
+
+### Room (per-zone thermostat)
+
+| Option | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| Room temperature sensor | yes | — | Free-standing room sensor Poise controls to (not the TRV's internal sensor). |
+| Actuator (climate) | yes | — | TRV / climate entity Poise writes the setpoint to. One entry per actuator. |
+| Comfort base | yes | 21 °C | Centre of the EN 16798-1 comfort band. |
+| Comfort category | yes | II | EN 16798-1 design category (I tightest … III widest). |
+| Climate mode | yes | auto | `auto` / `heat_only` / `cool_only`. |
+| Comfort weight | yes | 70 % | Comfort-vs-energy priority used by preheat / band widening. |
+| Setback delta | yes | 3 K | Night / away setback below the comfort base. |
+| Optimal start | yes | on | Forecast-aware preheat to the comfort deadline. |
+| Comfort start / end | no | — | Daily comfort window (enables scheduled setback when set). |
+| Outdoor / humidity / MRT / T_rm sensors | no | — | Improve accuracy (mould floor, operative temperature, running mean). |
+| Window sensor | no | — | Door/window contact for the open-window reaction (else the slope detector is used). |
+| Weather / irradiance | no | — | Forecast for optimal-start; measured solar gain. |
+| External-temperature input | no | — | TRV number entity Poise feeds the true room temperature to (operative mode). |
+| Operative input | no | off | Control on operative (felt) temperature instead of air. |
+| Controls boiler | no | off | This zone contributes to the *Poise System* boiler-demand aggregate. |
+| Compressor group · declared power · design flow temp · source policy | no | — | Multi-zone resource-coordination hints (shadow stage). |
+
+### System (optional multi-zone hub)
+
+A single *Poise System* entry aggregates the call-for-heat of opt-in zones into one boiler-demand sensor. **Boiler actuation is opt-in:** leave the on/off actions empty and the hub stays purely diagnostic (wire your own automation off the sensor); set them to switch a boiler with activation delay, keep-alive and minimum on/off cycling. Options: boiler count / power thresholds, on/off actions, activation-delay · keep-alive · min-on · min-off, max-power & current-power sensors, max flow temperature, flow hysteresis, and default heat source.
+
+## Entities created
+
+**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), plus diagnostic `sensor` entities for operative temperature, `T_rm`, MRT, solar gain, β_s, time constant τ, confidence, identification progress, learning phase, and the shadow `mpc_*` (and per-device `tpi_*` / `pi_*`) values; and a per-zone **`switch`** that toggles the open-window bypass.
+
+**System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow target and load-shedding attributes).
 
 ---
 
