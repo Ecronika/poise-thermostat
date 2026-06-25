@@ -31,3 +31,17 @@ def test_default_when_no_history() -> None:
     assert reading.source is Source.DEFAULT
     assert reading.value == 18.0
     assert not reading.sensor_ok
+
+
+def test_parse_finite_rejects_nan_inf_and_junk() -> None:
+    from custom_components.poise.ingestion import parse_finite
+
+    assert parse_finite("nan") is None  # C1: NaN must be rejected at the boundary
+    assert parse_finite("inf") is None
+    assert parse_finite("-inf") is None
+    assert parse_finite(float("nan")) is None
+    assert parse_finite(float("inf")) is None
+    assert parse_finite(None) is None
+    assert parse_finite("abc") is None
+    assert parse_finite("21.5") == 21.5
+    assert parse_finite(22) == 22.0
