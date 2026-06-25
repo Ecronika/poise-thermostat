@@ -1,0 +1,4 @@
+# Normalise line endings so the built card bundle (LF) is byte-identical
+# across platforms — keeps the CI artifact-diff guard from false-failing.
+* text=auto eol=lf
+*.png binary
