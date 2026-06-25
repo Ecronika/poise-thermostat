@@ -119,9 +119,11 @@ from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature, parse_finite
 from .safety.heating_failure import (
     HeatingFailureDetector,
+    actuator_running,
     failure_notification_action,
 )
 from .safety.sensor_watchdog import (
+    frozen_safe_target,
     is_frozen,
     sensor_age_seconds,
     sensor_at_heat_source,
@@ -193,7 +195,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._lock = asyncio.Lock()
         self._enabled = True
         self._override: float | None = None
-        self._override_set_mono: float | None = None
+        self._override_set_wall: float | None = None
         self._preset: OverrideMode = OverrideMode.NONE
         self._override_cfg = OverrideConfig()
         data = entry.data
@@ -253,8 +255,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # Validate at the trust boundary: reject non-finite, clamp to the safe
         # envelope so a bad manual setpoint can never reach the actuator (C2).
         self._override = sanitize_override(target, FROST_FLOOR_C, DEVICE_MAX_C)
-        self._override_set_mono = (
-            self._clock.monotonic() if self._override is not None else None
+        self._override_set_wall = (
+            dt_util.utcnow().timestamp() if self._override is not None else None
         )
         self._dirty = True
 
@@ -307,10 +309,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._enabled = bool(data.get("enabled", True))
                 ov = data.get("override")
                 self._override = float(ov) if isinstance(ov, (int, float)) else None
-                # Re-arm the auto-revert timer from boot for a restored override
-                # (monotonic time is not comparable across restarts; review).
-                self._override_set_mono = (
-                    self._clock.monotonic() if self._override is not None else None
+                # C5: restore the *wall-clock* set-time so the 2 h auto-revert
+                # measures real elapsed time and a hold cannot outlive a restart.
+                osw = data.get("override_set_wall")
+                self._override_set_wall = (
+                    float(osw)
+                    if self._override is not None and isinstance(osw, (int, float))
+                    else None
                 )
                 cm = data.get("climate_mode")
                 if isinstance(cm, str):
@@ -333,6 +338,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
                 if prior is not None:
                     self._ekf.seed_beta_h(prior)
+
+    def attach_listeners(self, entry: ConfigEntry) -> None:
+        """React promptly to input changes, not only on the 60 s tick (A6).
+
+        Subscribes to the room sensor, the window sensor and the actuator; any
+        change requests a refresh (coalesced by the coordinator's own debounce).
+        The tick still owns learning/safety -- this only cuts *reaction* latency
+        (notably an open window) from up to a tick to near-instant. Removed on
+        unload via ``entry.async_on_unload``.
+        """
+        from homeassistant.core import Event
+        from homeassistant.helpers.event import async_track_state_change_event
+
+        watched = [e for e in (self._temp, self._window, self._actuator) if e]
+
+        async def _on_change(_event: Event) -> None:
+            await self.async_request_refresh()
+
+        entry.async_on_unload(
+            async_track_state_change_event(self.hass, watched, _on_change)
+        )
 
     def _resolve_device_guards(self) -> None:
         """Find schedule/fault/battery entities on the actuator's device (once)."""
@@ -587,6 +613,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "preset": self._preset.value,
             "enabled": self._enabled,
             "override": self._override,
+            "override_set_wall": self._override_set_wall,
             "climate_mode": self._climate_mode,
         }
 
@@ -718,13 +745,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         t_mrt, mrt_source = select_mrt(self._read(self._mrt), mrt_internal)
         if (
             self._override is not None
-            and self._override_set_mono is not None
+            and self._override_set_wall is not None
             and manual_override_expired(
-                self._override_set_mono, self._clock.monotonic(), self._override_cfg
+                self._override_set_wall,
+                dt_util.utcnow().timestamp(),
+                self._override_cfg,
             )
         ):
             self._override = None
-            self._override_set_mono = None
+            self._override_set_wall = None
             self._dirty = True
         sensor_window_open = self._window_open()
         window_open = effective_window_open(
@@ -745,8 +774,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         dewpoint = None
         if rh is not None:
             dewpoint = psychro_dewpoint(room, rh)
-            if t_out is not None:
-                mold_min = mold_min_air_temperature(t_out, rh, room)
+            # C8: keep a (conservative) mould floor even without an outdoor sensor
+            # by using the effective outdoor proxy instead of skipping it.
+            mold_min = mold_min_air_temperature(t_out_eff, rh, room)
 
         # schedule: night setback + optimal-start preheat (ADR-0025).
         # Resolve the forecast outdoor (I/O) here, then let the pure planner
@@ -844,6 +874,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
+        if frozen:
+            # C3/Ü3: the room sensor is stale -> do not chase a comfort target on
+            # a dead value; degrade to the health floor and let the actuator hold
+            # it with its own sensor (fail toward warmth).
+            target = frozen_safe_target(FROST_FLOOR_C, mold_min)
+            mode = "heat"
+            self._last_target = target
         act_state = self.hass.states.get(self._actuator)
         heating = self._enabled and not window_open and mode == "heat"
         # A1: the EKF heating-drive uses the actuator's *real* running state when
@@ -855,12 +892,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._last_q_solar = q_solar
         self._last_target = target
 
+        # C6: the failure detector keys on the actuator's real running state
+        # (hvac_action) when reported, not just our heat intent.
+        running = actuator_running(
+            act_state.attributes.get("hvac_action") if act_state else None,
+            fallback=heating,
+        )
         failed = (
             self._failure.update(
                 now_h=now / 3600.0,
                 room=room,
                 setpoint=target,
-                heating=heating,
+                running=running,
             )
             or fault_active
         )

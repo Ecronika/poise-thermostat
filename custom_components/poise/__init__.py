@@ -94,6 +94,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_bootstrap()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    # A6: react promptly to room/window/actuator changes, not only on the tick.
+    coordinator.attach_listeners(entry)
     await hass.config_entries.async_forward_entry_setups(
         entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
     )
