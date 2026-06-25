@@ -88,6 +88,7 @@ from .control.tick_resolve import (
     heat_drive_signal,
     needs_heat_mode,
     resolve_write_target,
+    sanitize_override,
     select_mrt,
     select_q_solar,
     select_t_rm,
@@ -115,7 +116,7 @@ from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.thermal_ekf import ThermalEKF
-from .ingestion import RawSample, ingest_temperature
+from .ingestion import RawSample, ingest_temperature, parse_finite
 from .safety.heating_failure import (
     HeatingFailureDetector,
     failure_notification_action,
@@ -137,20 +138,14 @@ _INVALID = {"unknown", "unavailable", ""}
 def _num(state: State | None) -> float | None:
     if state is None or state.state in _INVALID:
         return None
-    try:
-        return float(state.state)
-    except (ValueError, TypeError):
-        return None
+    return parse_finite(state.state)  # rejects NaN/Inf at the boundary (C1)
 
 
 def _num_attr(state: State | None, key: str) -> float | None:
     """Read a numeric attribute (e.g. a climate setpoint) or None."""
     if state is None or state.state == "unavailable":
         return None
-    try:
-        return float(state.attributes.get(key))
-    except (ValueError, TypeError):
-        return None
+    return parse_finite(state.attributes.get(key))
 
 
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -160,6 +155,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=TICK_INTERVAL_S),
             # skip redundant entity notifications when a tick's data is unchanged
@@ -254,9 +250,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._dirty = True
 
     def set_override(self, target: float | None) -> None:
-        self._override = target
+        # Validate at the trust boundary: reject non-finite, clamp to the safe
+        # envelope so a bad manual setpoint can never reach the actuator (C2).
+        self._override = sanitize_override(target, FROST_FLOOR_C, DEVICE_MAX_C)
         self._override_set_mono = (
-            self._clock.monotonic() if target is not None else None
+            self._clock.monotonic() if self._override is not None else None
         )
         self._dirty = True
 

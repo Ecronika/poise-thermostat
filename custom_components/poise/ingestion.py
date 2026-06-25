@@ -10,8 +10,10 @@ The provenance is never hidden; every downstream value carries it.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from .const import TEMP_PLAUSIBLE_MAX_C, TEMP_PLAUSIBLE_MIN_C
 from .contracts import Reading, Source
@@ -56,3 +58,19 @@ def ingest_temperature(
     if last_good is not None:
         return Reading(last_good, "°C", Source.DERIVED, 0.4, now, sensor_ok=False)
     return Reading(default, "°C", Source.DEFAULT, 0.1, now, sensor_ok=False)
+
+
+def parse_finite(raw: Any) -> float | None:
+    """Parse a numeric value, rejecting None / non-numeric AND non-finite.
+
+    NaN/Inf parse fine via ``float()`` but compare False in every bracketing, so
+    the constraint solver cannot clamp them out — they must be rejected at the
+    trust boundary before they reach control (review C1/Ü2).
+    """
+    if raw is None:
+        return None
+    try:
+        v = float(raw)
+    except (ValueError, TypeError):
+        return None
+    return v if math.isfinite(v) else None

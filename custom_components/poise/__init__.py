@@ -14,6 +14,17 @@ from typing import TYPE_CHECKING
 
 from .const import CONF_ENTRY_TYPE, DOMAIN, ENTRY_TYPE_SYSTEM, VERSION
 
+# Config-entry-only integration schema (hassfest / quality-scale, review A3).
+# Guarded so the pure core stays importable without a HA runtime (ADR-0005):
+# importing any submodule runs this package __init__, and the test sandbox has
+# no Home Assistant installed.
+try:
+    from homeassistant.helpers import config_validation as cv
+
+    CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+except ImportError:  # pragma: no cover - only in the HA-free test environment
+    pass
+
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
@@ -43,7 +54,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     try:
         await async_register_card(hass)
-    except Exception:  # noqa: BLE001 — a card failure must never block setup
+    except Exception:  # noqa: BLE001 - a card failure must never block setup
         import logging
 
         logging.getLogger(__name__).exception("Poise card registration failed")
@@ -64,7 +75,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         return True
 
+    from homeassistant.exceptions import ConfigEntryNotReady
+
+    from .const import CONF_ACTUATOR, CONF_TEMP_SENSOR
     from .coordinator import PoiseCoordinator
+
+    # Fail with retry/backoff (not silently available=False) while a required
+    # entity is missing - the actuator/sensor may load after us (review A2).
+    missing = [
+        entry.data[k]
+        for k in (CONF_TEMP_SENSOR, CONF_ACTUATOR)
+        if hass.states.get(entry.data[k]) is None
+    ]
+    if missing:
+        raise ConfigEntryNotReady(f"required entity not available yet: {missing}")
 
     coordinator = PoiseCoordinator(hass, entry)
     await coordinator.async_bootstrap()

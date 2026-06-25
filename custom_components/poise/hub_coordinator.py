@@ -81,6 +81,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         super().__init__(
             hass,
             _LOGGER,
+            config_entry=entry,
             name=f"{DOMAIN}_hub",
             update_interval=timedelta(seconds=TICK_INTERVAL_S),
             always_update=False,
