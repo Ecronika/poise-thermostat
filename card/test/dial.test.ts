@@ -6,6 +6,7 @@ import {
   clampAngleToTrack,
   pointToValue,
   polar,
+  setpointForKey,
   valueToAngle,
 } from "../src/dial.ts";
 
@@ -45,4 +46,27 @@ test("polar + arcPath basics", () => {
   const d = arcPath(100, 100, 80, 135, 405);
   assert.ok(d.startsWith("M ") && d.includes(" A 80 80 0 1 1 ")); // large-arc flag set
   assert.equal(arcPath(100, 100, 80, 200, 200), ""); // degenerate
+});
+
+test("setpointForKey steps, pages, snaps and clamps (a11y D2)", () => {
+  const c = { min: 16, max: 28, start: 135, sweep: 270 };
+  // arrows step by one step in both orientations
+  assert.equal(setpointForKey("ArrowUp", 21, 0.5, c), 21.5);
+  assert.equal(setpointForKey("ArrowRight", 21, 0.5, c), 21.5);
+  assert.equal(setpointForKey("ArrowDown", 21, 0.5, c), 20.5);
+  assert.equal(setpointForKey("ArrowLeft", 21, 0.5, c), 20.5);
+  // page keys jump five steps
+  assert.equal(setpointForKey("PageUp", 21, 0.5, c), 23.5);
+  assert.equal(setpointForKey("PageDown", 21, 0.5, c), 18.5);
+  // home/end go to the device limits
+  assert.equal(setpointForKey("Home", 21, 0.5, c), 16);
+  assert.equal(setpointForKey("End", 21, 0.5, c), 28);
+  // clamps at the edges, never past the device range
+  assert.equal(setpointForKey("ArrowUp", 28, 0.5, c), 28);
+  assert.equal(setpointForKey("ArrowDown", 16, 0.5, c), 16);
+  // an off-grid current value snaps onto the step grid
+  assert.equal(setpointForKey("ArrowUp", 21.2, 0.5, c), 21.5);
+  // unrelated keys return null so the caller leaves the event alone
+  assert.equal(setpointForKey("Tab", 21, 0.5, c), null);
+  assert.equal(setpointForKey("a", 21, 0.5, c), null);
 });
