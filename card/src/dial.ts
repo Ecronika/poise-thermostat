@@ -67,3 +67,40 @@ export function pointToValue(dx: number, dy: number, c: DialConfig = DIAL): numb
   if (ang < 0) ang += 360;
   return angleToValue(ang, c);
 }
+
+// Keyboard stepping for the dial slider (accessibility, review D2). Returns the
+// new clamped+snapped setpoint for an arrow/page/home/end key, or null for any
+// other key (so the caller leaves the event alone).
+export function setpointForKey(
+  key: string,
+  current: number,
+  step: number,
+  c: DialConfig = DIAL,
+): number | null {
+  let next: number;
+  switch (key) {
+    case "ArrowUp":
+    case "ArrowRight":
+      next = current + step;
+      break;
+    case "ArrowDown":
+    case "ArrowLeft":
+      next = current - step;
+      break;
+    case "PageUp":
+      next = current + step * 5;
+      break;
+    case "PageDown":
+      next = current - step * 5;
+      break;
+    case "Home":
+      next = c.min;
+      break;
+    case "End":
+      next = c.max;
+      break;
+    default:
+      return null;
+  }
+  return Math.round(clamp(next, c.min, c.max) / step) * step;
+}

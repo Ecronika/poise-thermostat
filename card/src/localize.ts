@@ -34,6 +34,7 @@ const EN: Dict = {
   shadow_would: "would",
   update_msg: "New Poise card version available — reload to update.",
   reload: "Reload",
+  details: "Show details",
 };
 const DE: Dict = {
   in_band: "Im Komfortband",
@@ -69,6 +70,7 @@ const DE: Dict = {
   shadow_would: "würde",
   update_msg: "Neue Poise-Karten-Version verfügbar — zum Aktualisieren neu laden.",
   reload: "Neu laden",
+  details: "Details anzeigen",
 };
 
 export function t(lang: string | undefined, key: string): string {

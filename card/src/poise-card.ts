@@ -12,6 +12,7 @@ import {
   arcPath,
   pointToValue,
   polar,
+  setpointForKey,
   valueToAngle,
 } from "./dial.ts";
 import { CARD_VERSION, checkCardVersion } from "./version.ts";
@@ -246,6 +247,14 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       <svg
         class="dial"
         viewBox="0 0 200 200"
+        role="slider"
+        tabindex="0"
+        aria-label=${t(lang, "setpoint")}
+        aria-valuemin=${this._dialCfg.min}
+        aria-valuemax=${this._dialCfg.max}
+        aria-valuenow=${sp}
+        aria-valuetext="${sp.toFixed(1)} °C"
+        @keydown=${this._onKey}
         @pointerdown=${this._onDown}
         @pointermove=${this._onMove}
         @pointerup=${this._onUp}
@@ -262,7 +271,14 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         <circle class="handle ${hcls}" cx=${h.x.toFixed(1)} cy=${h.y.toFixed(1)} r="9"></circle>
       </svg>
       <div class="dialctr">
-        <div class="ctrclick" @click=${this._moreInfo}>
+        <div
+          class="ctrclick"
+          role="button"
+          tabindex="0"
+          aria-label=${t(lang, "details")}
+          @click=${this._moreInfo}
+          @keydown=${this._onActivateKey}
+        >
           <div class="op">${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
           <div class="soll">${t(lang, "setpoint")} <b>${sp.toFixed(1)}°</b></div>
         </div>
@@ -312,6 +328,35 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     this.requestUpdate();
   }
 
+  // Keyboard control for the dial slider (a11y, D2): arrows/page/home/end step
+  // the setpoint; everything else is left to the browser.
+  private _onKey(ev: KeyboardEvent): void {
+    const id = this._config.entity;
+    if (!id) return;
+    const st = this.hass.states[id];
+    if (!st) return;
+    const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
+    const cur =
+      num(st.attributes["heat_sp"]) ??
+      num(st.attributes["temperature"]) ??
+      this._dialCfg.min;
+    const next = setpointForKey(ev.key, cur, step, this._dialCfg);
+    if (next == null) return;
+    ev.preventDefault();
+    this.hass.callService("climate", "set_temperature", {
+      entity_id: id,
+      temperature: next,
+    });
+  }
+
+  // Enter/Space activate a div given button semantics (more-info targets).
+  private _onActivateKey(ev: KeyboardEvent): void {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      this._moreInfo();
+    }
+  }
+
   private _control(setpoint: number | null, lang?: string) {
     return html`<div class="ctl">
       <ha-icon-button @click=${() => this._setpoint(-1)} label="-">
@@ -350,7 +395,16 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (cause && cause !== "en16798")
       chips.push(this._chip("mdi:shield-alert", String(cause)));
     return chips.length
-      ? html`<div class="chips" @click=${this._moreInfo}>${chips}</div>`
+      ? html`<div
+          class="chips"
+          role="button"
+          tabindex="0"
+          aria-label=${t(lang, "details")}
+          @click=${this._moreInfo}
+          @keydown=${this._onActivateKey}
+        >
+          ${chips}
+        </div>`
       : nothing;
   }
 
@@ -430,6 +484,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .csp { fill: none; stroke: var(--secondary-text-color, #888); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
     .chips { cursor: pointer; }
     .dialwrap { position: relative; width: 100%; max-width: 230px; margin: 6px auto 2px; }
+    .dial:focus, .ctrclick:focus, .chips:focus { outline: none; }
+    .dial:focus-visible, .ctrclick:focus-visible, .chips:focus-visible {
+      outline: 2px solid var(--primary-color, #2196f3);
+      outline-offset: 2px; border-radius: 10px;
+    }
     .dial { width: 100%; display: block; touch-action: none; cursor: pointer; }
     .track { fill: none; stroke: var(--divider-color, #444); stroke-width: 10; stroke-linecap: round; }
     .bandarc { fill: none; stroke: color-mix(in srgb, var(--success-color, #4caf50) 55%, transparent); stroke-width: 10; stroke-linecap: round; }

@@ -67,6 +67,13 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
     );
   }
 
+  private _onActivateKey(ev: KeyboardEvent): void {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      this._moreInfo();
+    }
+  }
+
   render() {
     const lang = this.hass?.locale?.language;
     const id = this._config?.entity;
@@ -83,7 +90,14 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
     const grants = (a["source_grants"] as Record<string, string>) ?? {};
     const grantKeys = Object.keys(grants);
     return html`<ha-card .header=${t(lang, "sys_title")}>
-      <div class="wrap" @click=${this._moreInfo}>
+      <div
+        class="wrap"
+        role="button"
+        tabindex="0"
+        aria-label=${t(lang, "details")}
+        @click=${this._moreInfo}
+        @keydown=${this._onActivateKey}
+      >
         <div class="state ${on ? "on" : ""}">
           <ha-icon icon=${on ? "mdi:fire" : "mdi:fire-off"}></ha-icon>
           <span>${on ? t(lang, "demand_on") : t(lang, "demand_off")}</span>
@@ -125,6 +139,11 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
 
   static styles = css`
     .wrap { padding: 8px 16px 16px; cursor: pointer; }
+    .wrap:focus { outline: none; }
+    .wrap:focus-visible {
+      outline: 2px solid var(--primary-color, #2196f3);
+      outline-offset: -2px; border-radius: 10px;
+    }
     .state { display: flex; align-items: center; gap: 8px; font-size: 18px; }
     .state ha-icon { --mdc-icon-size: 22px; color: var(--secondary-text-color); }
     .state.on ha-icon { color: var(--error-color, #d33); }
