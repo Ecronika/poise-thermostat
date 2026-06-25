@@ -185,3 +185,32 @@ async def test_climate_exposes_comfort_band_attributes(hass: HomeAssistant) -> N
     assert attrs.get("comfort_low") is not None
     assert attrs.get("comfort_high") is not None
     assert attrs["comfort_low"] < attrs["comfort_high"]
+
+
+async def test_options_update_applies_tuning_without_reload(
+    hass: HomeAssistant,
+) -> None:
+    """An options change is hot-applied in place; the learned EKF survives (A10).
+
+    Drives the real update-listener path (``async_update_entry`` with new
+    options) rather than the HTTP-backed options-flow UI, and asserts the
+    coordinator is updated *in place* (not reloaded) so learning is kept.
+    """
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass)
+    entry = await _setup_zone(hass)
+    coord = entry.runtime_data
+    coord._ekf.n_heating = 123  # a learned-state marker a reload would wipe
+
+    hass.config_entries.async_update_entry(
+        entry, options={"comfort_base": 22.5, "category": "I"}
+    )
+    await hass.async_block_till_done()
+
+    # applied in place: same coordinator object (no reload) and the EKF is NOT
+    # wiped — it kept its learned observations (a reload would reset to a fresh
+    # / store-restored model). One apply-triggered refresh may tick it forward.
+    assert entry.runtime_data is coord
+    assert coord._comfort_base == 22.5
+    assert coord._ekf.n_heating >= 123
