@@ -22,3 +22,22 @@ jobs:
         run: mypy
       - name: Tests
         run: pytest --cov=custom_components/poise --cov-fail-under=85
+
+  card:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: card
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        run: npm install --no-audit --no-fund
+      - name: Type-check card (tsc --noEmit)
+        run: node node_modules/typescript/bin/tsc --noEmit
+      - name: Card unit tests (node --test)
+        run: node --test
+      - name: Build bundle
+        run: node build.mjs
