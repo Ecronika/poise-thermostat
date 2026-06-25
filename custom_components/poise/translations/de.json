@@ -187,5 +187,24 @@
       "title": "Poise: Ventil möglicherweise blockiert",
       "description": "Die Kalibrier-Schrittzahl des Heizkörperventils (`{entity}`) ist nahe null — das deutet auf eine fehlgeschlagene Kalibrierung oder ein mechanisch klemmendes Ventil hin. Der Raum heizt evtl. nicht korrekt. TRV neu kalibrieren/koppeln; der Hinweis verschwindet, sobald wieder eine normale Schrittzahl gemeldet wird."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Feineinstellung",
+        "description": "Komfort-Feineinstellung ohne Reload — das gelernte Modell bleibt erhalten.",
+        "data": {
+          "category": "EN-16798-Komfortkategorie",
+          "comfort_base": "Komfort-Basistemperatur (°C)",
+          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
+          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
+          "comfort_start": "Komfortfenster Beginn",
+          "comfort_end": "Komfortfenster Ende",
+          "setback_delta": "Nachtabsenkung (K)",
+          "optimal_start": "Optimal-Start (Vorheizen)",
+          "operative_input": "Operative Temperatur regeln"
+        }
+      }
+    }
   }
 }
