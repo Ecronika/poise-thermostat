@@ -105,3 +105,24 @@ async def test_system_hub_entry_is_tagged(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_ENTRY_TYPE] == ENTRY_TYPE_SYSTEM
+
+
+async def test_reconfigure_updates_room(hass: HomeAssistant) -> None:
+    """Reconfigure edits an existing room entry in place (learning preserved)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "reconfigure"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**ROOM_INPUT, CONF_COMFORT_BASE: 22.5}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_COMFORT_BASE] == 22.5
