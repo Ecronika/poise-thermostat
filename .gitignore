@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.coverage
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+node_modules/
+card/node_modules/
