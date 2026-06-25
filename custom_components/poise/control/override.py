@@ -50,11 +50,14 @@ def mode_comfort_base(
 
 
 def manual_override_expired(
-    set_at_mono: float, now_mono: float, cfg: OverrideConfig = _DEFAULT
+    set_at: float, now: float, cfg: OverrideConfig = _DEFAULT
 ) -> bool:
     """True once a manual setpoint override has outlived its auto-revert window.
 
     Addresses the most-requested override behaviour (VT#1875): a manual change
     must revert to the schedule/preset instead of holding the room high forever.
+    ``set_at``/``now`` must share one clock; the coordinator passes a persisted
+    *wall-clock* timestamp so a restored hold expires on real elapsed time and
+    cannot outlive a restart (review C5).
     """
-    return (now_mono - set_at_mono) >= cfg.manual_revert_h * 3600.0
+    return (now - set_at) >= cfg.manual_revert_h * 3600.0
