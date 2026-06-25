@@ -10,7 +10,12 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.helpers import selector
 
 from .const import (
@@ -282,10 +287,65 @@ def _system_schema() -> vol.Schema:
     )
 
 
+def _options_schema() -> vol.Schema:
+    """Volatile tuning that can be hot-applied without a reload (A10).
+
+    Only fields that the coordinator can update in place live here; structural
+    inputs (sensors / actuator) stay in the reconfigure step.
+    """
+    return vol.Schema(
+        {
+            vol.Required(CONF_CATEGORY): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["I", "II", "III"],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(CONF_COMFORT_BASE): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=16.0,
+                    max=26.0,
+                    step=0.5,
+                    unit_of_measurement="\u00b0C",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(CONF_CLIMATE_MODE): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["auto", "heat_only", "cool_only"],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER
+                )
+            ),
+            vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
+            vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
+            vol.Required(CONF_SETBACK_DELTA): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0,
+                    max=8.0,
+                    step=0.5,
+                    unit_of_measurement="K",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Required(CONF_OPTIMAL_START): selector.BooleanSelector(),
+            vol.Required(CONF_OPERATIVE_INPUT): selector.BooleanSelector(),
+        }
+    )
+
+
 class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg]
     """Guided per-room config flow with reconfigure support."""
 
     VERSION = 1
+
+    @staticmethod
+    def async_get_options_flow(config_entry: ConfigEntry) -> PoiseOptionsFlow:
+        return PoiseOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -330,4 +390,19 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(schema, entry.data),
+        )
+
+
+class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
+    """Edit volatile tuning in place — no reload, so learning is preserved (A10)."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+        current = {**self.config_entry.data, **self.config_entry.options}
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(_options_schema(), current),
         )

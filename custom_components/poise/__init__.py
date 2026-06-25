@@ -34,6 +34,12 @@ def _is_system(entry: ConfigEntry) -> bool:
     return bool(entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM)
 
 
+async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Apply changed tuning options in place — no reload, so learning survives (A10)."""
+    if not _is_system(entry):
+        await entry.runtime_data.async_apply_options(entry)
+
+
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Serve + auto-register the bundled Lovelace card once (ADR-0040).
 
@@ -96,6 +102,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = coordinator
     # A6: react promptly to room/window/actuator changes, not only on the tick.
     coordinator.attach_listeners(entry)
+    # A10: hot-apply tuning-option changes in place (no reload -> learning kept).
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     await hass.config_entries.async_forward_entry_setups(
         entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
     )

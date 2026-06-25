@@ -198,7 +198,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._override_set_wall: float | None = None
         self._preset: OverrideMode = OverrideMode.NONE
         self._override_cfg = OverrideConfig()
-        data = entry.data
+        # options override data for hot-applyable tuning (A10); structural
+        # inputs (sensors/actuator) live only in data.
+        data = {**entry.data, **entry.options}
         self.zone_name: str = data[CONF_NAME]
         self._temp: str = data[CONF_TEMP_SENSOR]
         self._actuator: str = data[CONF_ACTUATOR]
@@ -338,6 +340,34 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
                 if prior is not None:
                     self._ekf.seed_beta_h(prior)
+
+    async def async_apply_options(self, entry: ConfigEntry) -> None:
+        """Apply changed tuning options in place, without a reload (A10).
+
+        Re-reads the volatile tuning fields (options over data) and updates the
+        live state, so an options change does **not** discard the learned EKF
+        transient that a full reload would. Structural inputs are not options.
+        """
+        data = {**entry.data, **entry.options}
+        self._comfort_base = float(data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE))
+        self._category = Category(data.get(CONF_CATEGORY, "II"))
+        self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
+        self._priority = (
+            float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT)) / 100.0
+        )
+        delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
+        start = parse_hhmm(data.get(CONF_COMFORT_START))
+        end = parse_hhmm(data.get(CONF_COMFORT_END))
+        if start is not None and end is not None and delta > 0.0:
+            self._schedule = ComfortSchedule.from_windows(
+                [ComfortWindow(start, end)], delta
+            )
+        else:
+            self._schedule = ComfortSchedule.always_comfort()
+        self._optimal_start = bool(data.get(CONF_OPTIMAL_START, True))
+        self._optimal_stop = self._optimal_start
+        self._operative_input = bool(data.get(CONF_OPERATIVE_INPUT, False))
+        await self.async_request_refresh()
 
     def attach_listeners(self, entry: ConfigEntry) -> None:
         """React promptly to input changes, not only on the 60 s tick (A6).
