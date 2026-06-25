@@ -34,10 +34,11 @@ ignore_missing_imports = true
 
 [tool.coverage.run]
 source = ["custom_components/poise"]
-# NOTE: these HA-glue modules are now fully mypy --strict checked (no
-# ignore_errors). They stay coverage-omitted only until the HA-runtime
-# integration tests land (pytest-homeassistant-custom-component, CI-only;
-# the sandbox Python caps HA at 2023.7, too old for our 2025.1 APIs).
+# NOTE: these HA-glue modules are fully mypy --strict checked (no
+# ignore_errors). They are omitted from THIS (HA-free) pure-core coverage
+# gate only; they are exercised by the HA-runtime suite in tests/integration
+# (separate CI job, e.g. coordinator.py ~66%, config_flow ~81%), which the
+# sandbox cannot run (its Python 3.10 caps HA at 2023.7, < our 2025.1 APIs).
 omit = [
     "custom_components/poise/__init__.py",
     "custom_components/poise/config_flow.py",

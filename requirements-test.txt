@@ -1,0 +1,4 @@
+# HA-runtime integration-test harness (CI-only; needs Python >= 3.12).
+# Pinned to the version verified against HA 2024.12 / our 2025.1 APIs; it pulls
+# Home Assistant + pytest + pytest-asyncio transitively (all version-locked).
+pytest-homeassistant-custom-component==0.13.195
