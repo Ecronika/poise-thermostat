@@ -1,4 +1,10 @@
 # HA-runtime integration-test harness (CI-only; needs Python >= 3.12).
-# Pinned to the version verified against HA 2024.12 / our 2025.1 APIs; it pulls
-# Home Assistant + pytest + pytest-asyncio transitively (all version-locked).
+# Pinned to versions verified against our 2025.1 APIs.
+#
+# pytest-homeassistant-custom-component installs a *slim* Home Assistant that
+# omits the (large) frontend wheel, but our manifest declares `frontend` as a
+# dependency (it serves the Lovelace card), so HA refuses to set the
+# integration up without `hass_frontend`. We therefore install it explicitly;
+# HA core does not pin it, so a recent build is used.
 pytest-homeassistant-custom-component==0.13.195
+home-assistant-frontend==20250109.2
