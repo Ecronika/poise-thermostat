@@ -189,6 +189,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._last_q_solar: float = 0.0
         self._save_counter = 0
         self._failure_notified = False
+        # Silver log-when-unavailable: log the loss/recovery of the room sensor
+        # exactly once each, not every 60 s tick.
+        self._unavailable_logged = False
         self._notif_id = f"poise_heating_failure_{entry.entry_id}"
         self._entry_id = entry.entry_id
         self._active_issues: set[str] = set()
@@ -746,7 +749,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             placeholders={"entity": self._temp},
         )
         if air is None:
+            if not self._unavailable_logged:
+                _LOGGER.warning(
+                    "Poise %s: room temperature sensor %s is unavailable; "
+                    "holding the entity in its last state until it returns",
+                    self.zone_name,
+                    self._temp,
+                )
+                self._unavailable_logged = True
             return {"available": False}
+        if self._unavailable_logged:
+            _LOGGER.info(
+                "Poise %s: room temperature sensor %s is back; resuming control",
+                self.zone_name,
+                self._temp,
+            )
+            self._unavailable_logged = False
         frozen, sched_active, fault_active, heat_source_suspect = (
             self._emit_health_issues()
         )

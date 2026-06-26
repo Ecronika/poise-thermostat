@@ -57,22 +57,18 @@ rules:
     status: exempt
     comment: No authentication; fully local, no credentials.
   parallel-updates: done  # PARALLEL_UPDATES = 0 in every platform module
-  log-when-unavailable:
-    status: todo
-    comment: >-
-      Repair issues are raised on sensor/actuator loss; add the coordinator
-      once-on-loss / once-on-recovery logging idiom (UpdateFailed flow).
+  log-when-unavailable: done  # room-sensor loss logged once (WARNING) + recovery once (INFO)
   test-coverage:
     status: todo
     comment: >-
-      Pure core ~98.6%; HA-glue ~85% via the separate integration gate (24
+      Pure core ~98.6%; HA-glue ~86% via the separate integration gate (28
       tests, gate at 83%). The remaining gap to 95% is the predictive-shadow
       wiring (MPC/optimal-start/TPI), device-registry guards and weather/
       multi-zone-power glue, which need an identified-model harness — the
       underlying algorithms are already ~98% covered in the closed-loop harness.
 
   # ---------------- Gold ----------------
-  devices: done  # DeviceInfo per zone + system hub
+  devices: done  # DeviceInfo per zone + hub; via_device hub<->zone link still pending (review M9)
   diagnostics: done  # diagnostics.py (redacted)
   reconfiguration-flow: done
   repair-issues: done
