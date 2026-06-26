@@ -10,6 +10,7 @@ H2 — with an identified model and optimal-stop enabled, the comfort-phase coas
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -184,3 +185,60 @@ async def test_optimal_stop_coast_reachable_in_comfort(hass: HomeAssistant) -> N
     # the comfort tick reached the coast logic and produced a boolean decision
     assert coord.data.get("coasting") in (True, False)
     assert coord.data.get("available") is True
+
+
+# ----------------------------------------------------- Silver: log-when-unavailable
+async def test_sensor_loss_and_recovery_log_once_each(
+    hass: HomeAssistant, caplog
+) -> None:
+    """A lost room sensor logs WARNING once, recovery logs INFO once (not per tick)."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set("sensor.room_temp", "20.0", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 20.0,
+            "current_temperature": 20.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+    entry = await _setup(hass, _base())
+    coord = entry.runtime_data
+    logger = "custom_components.poise.coordinator"
+
+    with caplog.at_level(logging.INFO, logger=logger):
+        # sensor disappears; refresh twice — only ONE loss warning despite two ticks
+        hass.states.async_set("sensor.room_temp", "unavailable")
+        await coord.async_refresh()
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert coord.data.get("available") is False
+        warns = [
+            r
+            for r in caplog.records
+            if r.name == logger
+            and r.levelno == logging.WARNING
+            and "unavailable" in r.getMessage()
+        ]
+        assert len(warns) == 1, f"expected exactly one loss warning, got {len(warns)}"
+
+        # sensor returns; exactly ONE recovery info
+        hass.states.async_set(
+            "sensor.room_temp", "20.0", {"device_class": "temperature"}
+        )
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+        assert coord.data.get("available") is True
+        recoveries = [
+            r
+            for r in caplog.records
+            if r.name == logger
+            and r.levelno == logging.INFO
+            and "is back" in r.getMessage()
+        ]
+        assert len(recoveries) == 1, f"expected one recovery, got {len(recoveries)}"
