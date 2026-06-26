@@ -102,3 +102,12 @@ jobs:
         run: |
           git diff --exit-code -- ../custom_components/poise/frontend/poise-card.js \
             || { echo "::error::poise-card.js is stale — run 'node build.mjs' in card/ and commit the result"; exit 1; }
+
+  # M7: a single required check that proves validate + quality + integration +
+  # card all passed *in the same run* (the per-job gates are no longer decoupled).
+  gate:
+    name: All gates green
+    needs: [validate, quality, integration, card]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "validate, quality (pure-core + coverage), integration (glue + coverage) and card all passed"
