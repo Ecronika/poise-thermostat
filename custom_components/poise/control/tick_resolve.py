@@ -163,12 +163,20 @@ def needs_mode_nudge(
     A TRV left in ``off`` ignores our setpoint, and ``auto`` runs the device's own
     weekly schedule (Sonoff TRVZB ``system_mode=auto``) — both override Poise, so
     we nudge it into the mode that matches our write: ``cool`` when we cool, else
-    ``heat``. We only assert a mode the device *literally* offers (``supported``
-    from the actuator's real ``hvac_modes``); otherwise the call is rejected and
-    spams the log every tick (review V1). A device the user left in a specific
-    mode is not fought — we only override the device's own ``auto``/``off``.
+    ``heat``. We *also* correct a device sitting in the **opposite active** mode —
+    e.g. an auto/seasonal heat-pump that autonomously switched to ``heat`` while we
+    now cool — because writing a cool setpoint into a heating device (or vice
+    versa) drives the room the wrong way (review H1 residual). We only assert a
+    mode the device *literally* offers (``supported`` from the actuator's real
+    ``hvac_modes``); otherwise the call is rejected and spams the log every tick
+    (review V1). A device already in ``desired_mode`` is left alone.
     """
-    return supported and current_mode in ("auto", "off")
+    if not supported:
+        return False
+    if current_mode in ("auto", "off"):
+        return True
+    opposite = {"cool": "heat", "heat": "cool"}.get(desired_mode)
+    return current_mode == opposite
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
