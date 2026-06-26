@@ -212,3 +212,28 @@ def test_cooling_identified_true_only_when_identified_and_excited() -> None:
     assert ekf.identified is True
     assert ekf.cooling_identified is True
     assert ekf.occupancy_identified is False
+
+
+def test_enforce_psd_bounds_off_diagonals() -> None:
+    """M3: an over-large off-diagonal is repaired so every 2x2 minor stays >= 0."""
+    ekf = ThermalEKF()
+    ekf.p[0][0] = 1.0
+    ekf.p[1][1] = 4.0
+    ekf.p[0][1] = ekf.p[1][0] = 100.0  # correlation 50 -> non-PSD
+    ekf._enforce_psd()
+    bound = math.sqrt(ekf.p[0][0] * ekf.p[1][1])  # 2.0
+    assert ekf.p[0][1] == ekf.p[1][0]  # symmetric
+    assert abs(ekf.p[0][1]) <= bound + 1e-9  # |corr| <= 1
+    for i in range(6):
+        for j in range(i + 1, 6):
+            assert ekf.p[i][i] * ekf.p[j][j] - ekf.p[i][j] ** 2 >= -1e-9
+
+
+def test_seed_beta_h_holds_the_seed_loosely() -> None:
+    """M4: seeding beta_h inflates its variance so the prior is not pinned."""
+    ekf = ThermalEKF()
+    before = ekf.p[2][2]  # _BH = 2, default variance 1.0
+    ekf.seed_beta_h(50.0)
+    assert ekf.x[2] == 50.0  # within bounds, applied
+    assert ekf.p[2][2] >= 25.0  # inflated (_SEED_BH_VAR)
+    assert ekf.p[2][2] > before

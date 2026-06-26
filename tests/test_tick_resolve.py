@@ -206,3 +206,35 @@ def test_needs_mode_nudge_on_drift() -> None:
     assert needs_mode_nudge("auto", "cool", supported=False) is False
     assert needs_mode_nudge("off", "heat", supported=False) is False
     assert needs_mode_nudge("heat", "cool", supported=False) is False
+
+
+def test_device_max_never_undercuts_health_floor() -> None:
+    """M2: a misreported device max below the health floor must not defeat it."""
+    wt = resolve_write_target(
+        window_open=False,
+        override=None,
+        heat_sp=20.0,
+        cool_sp=26.0,
+        write_setpoint=5.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=3.0,  # absurd / misreported, below the frost floor
+    )
+    # frost protection still wins — not clamped down to the bogus device max
+    assert wt.target >= 7.0
+    assert wt.norm_binding == "norm_floor"
+
+    # the cooling path is unchanged: a real device max still caps the cool target
+    cool = resolve_write_target(
+        window_open=False,
+        override=None,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        write_setpoint=24.0,
+        comfort_mode="cool",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=22.0,
+    )
+    assert cool.target <= 22.0
