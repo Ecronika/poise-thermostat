@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.83.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.85.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -57,6 +57,11 @@ Alpha — under active development against a documented architecture (35+ ADRs) 
 3. *Settings → Devices & Services → Add Integration → Poise.*
 
 Use a **free-standing room sensor** (not the TRV's internal sensor) for best results; Poise raises a repair issue if it detects a likely heat-source-mounted sensor.
+
+
+## Removing the integration
+
+Poise has no cloud account or external state. To remove it: *Settings → Devices & Services →* Poise → the **⋮** menu on the entry → **Delete**. Repeat for each room entry and (if present) the *Poise System* hub entry. This removes the integration's entities, devices and stored learned model. If you installed it as a HACS custom repository and no longer want updates, also remove it from *HACS → Integrations*.
 
 
 ## Configuration
