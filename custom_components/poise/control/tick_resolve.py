@@ -87,7 +87,12 @@ def resolve_write_target(
     # Unified hard envelope (ADR-0035): device max + (unless cooling) the ASR
     # cap and frost/mould floor, composed with precedence. The device max is a
     # physical SAFETY cap, the norm floor HEALTH, the norm cap COMFORT.
-    caps = [Constraint(device_max, "device_max", ConstraintKind.CAP, Precedence.SAFETY)]
+    # M2: a misreported device max *below* the active health floor would win the
+    # inversion (SAFETY > HEALTH) and silently defeat frost/mould protection.
+    # When heating, clamp the cap up to the floor so health is never undercut —
+    # the device still caps its own physical reach; we simply never command less.
+    device_cap = max(device_max, floor) if mode != "cool" else device_max
+    caps = [Constraint(device_cap, "device_max", ConstraintKind.CAP, Precedence.SAFETY)]
     floors: list[Constraint] = []
     if mode != "cool":
         caps.append(
