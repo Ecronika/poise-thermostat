@@ -88,6 +88,16 @@ jobs:
           VER=$(node -p "require('./package.json').version")
           grep -q "poise-card $VER " ../custom_components/poise/frontend/poise-card.js \
             || { echo "::error::built bundle does not embed version $VER"; exit 1; }
+      - name: Guard — card version equals the integration version
+        run: |
+          CARD=$(node -p "require('./package.json').version")
+          MANIFEST=$(node -p "require('../custom_components/poise/manifest.json').version")
+          CONST=$(grep -E '^VERSION:' ../custom_components/poise/const.py \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          if [ "$CARD" != "$MANIFEST" ] || [ "$CARD" != "$CONST" ]; then
+            echo "::error::version drift — card=$CARD manifest=$MANIFEST const=$CONST must match. The poise/card_version WS endpoint serves const.VERSION; any mismatch shows every card user a permanent 'reload' toast. Bump card/package.json + rebuild."
+            exit 1
+          fi
       - name: Guard — committed bundle matches a fresh build
         run: |
           git diff --exit-code -- ../custom_components/poise/frontend/poise-card.js \
