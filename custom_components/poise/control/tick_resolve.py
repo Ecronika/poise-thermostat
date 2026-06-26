@@ -155,17 +155,20 @@ def heat_drive_signal(hvac_action: str | None, *, fallback_heating: bool) -> flo
     return 1.0 if hvac_action == "heating" else 0.0
 
 
-def needs_heat_mode(current_mode: str | None, *, heat_supported: bool) -> bool:
-    """True if the actuator must be commanded into ``heat``.
+def needs_mode_nudge(
+    current_mode: str | None, desired_mode: str, *, supported: bool
+) -> bool:
+    """True if the actuator must be commanded into ``desired_mode`` (H1).
 
     A TRV left in ``off`` ignores our setpoint, and ``auto`` runs the device's own
-    weekly schedule (Sonoff TRVZB ``system_mode=auto``) — both override Poise. We
-    only assert heat when the device *literally* offers a ``heat`` mode: a device
-    whose only modes are ``auto``/``off`` (no ``heat``) would reject the call and
-    spam the log every tick (review V1). ``heat_supported`` must come from the
-    actuator's actual ``hvac_modes``, not from ``can_heat`` (which counts ``auto``).
+    weekly schedule (Sonoff TRVZB ``system_mode=auto``) — both override Poise, so
+    we nudge it into the mode that matches our write: ``cool`` when we cool, else
+    ``heat``. We only assert a mode the device *literally* offers (``supported``
+    from the actuator's real ``hvac_modes``); otherwise the call is rejected and
+    spams the log every tick (review V1). A device the user left in a specific
+    mode is not fought — we only override the device's own ``auto``/``off``.
     """
-    return heat_supported and current_mode in ("auto", "off")
+    return supported and current_mode in ("auto", "off")
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
