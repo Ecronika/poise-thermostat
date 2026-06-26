@@ -47,6 +47,7 @@ _LOWER = (-50.0, 0.005, 0.1, 0.1, 0.0, 0.0)
 _UPPER = (60.0, 2.0, 200.0, 300.0, 50.0, 20.0)
 
 _P0 = (1.0, 0.01, 1.0, 1.0, 0.5, 0.5)  # initial covariance diagonal
+_SEED_BH_VAR: float = 25.0  # M4: variance a cold-start beta_h seed is held at
 
 EKF_VERSION: int = 1
 
@@ -231,12 +232,23 @@ class ThermalEKF:
             self.x[i] = min(max(self.x[i], _LOWER[i]), _UPPER[i])
 
     def _enforce_psd(self) -> None:
+        # symmetrise, then floor the diagonal
         for i in range(_N):
             for j in range(i + 1, _N):
                 avg = 0.5 * (self.p[i][j] + self.p[j][i])
                 self.p[i][j] = self.p[j][i] = avg
             if self.p[i][i] < _PSD_FLOOR:
                 self.p[i][i] = _PSD_FLOOR
+        # M3: bound each off-diagonal so |corr| <= 1 (every 2x2 principal minor
+        # stays >= 0). A positive diagonal alone does not keep P positive
+        # semi-definite; this repairs the cheap necessary condition every tick.
+        for i in range(_N):
+            for j in range(i + 1, _N):
+                bound = math.sqrt(self.p[i][i] * self.p[j][j])
+                if self.p[i][j] > bound:
+                    self.p[i][j] = self.p[j][i] = bound
+                elif self.p[i][j] < -bound:
+                    self.p[i][j] = self.p[j][i] = -bound
 
     def _runtime_recovery(self) -> None:
         """Reset alpha if it stays pegged at a bound (low excitation, ADR-0024)."""
@@ -259,6 +271,10 @@ class ThermalEKF:
         with the filter (charter G6).
         """
         self.x[_BH] = min(max(value, _LOWER[_BH]), _UPPER[_BH])
+        # M4: a cold-start seed is an informed guess, not a measurement — hold it
+        # loosely (inflate its variance) so the filter moves off an arbitrary
+        # beta_h quickly once real heating data arrives, instead of being biased.
+        self.p[_BH][_BH] = max(self.p[_BH][_BH], _SEED_BH_VAR)
 
     def get_model(self) -> ThermalModel:
         return ThermalModel(
@@ -285,6 +301,10 @@ class ThermalEKF:
 
     @property
     def accuracy_factor(self) -> float:
+        """Covariance-side confidence in [0, 1]: 1 minus the temperature
+        std-dev (so ~1 K of state uncertainty maps to 0), clamped. The heuristic
+        companion to the data-driven ``data_factor`` in ``confidence`` (ADR-0024).
+        """
         return min(1.0, max(0.0, 1.0 - self.temperature_std))
 
     @property
