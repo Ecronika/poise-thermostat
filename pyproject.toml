@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poise"
-version = "0.86.0"
+version = "0.89.0"
 description = "Self-learning, norm-based thermostat for Home Assistant"
 requires-python = ">=3.12"
 
@@ -23,7 +23,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["custom_components/poise"]
+# M6: strict typing covers the integration AND the HA-free closed-loop harness
+# (algorithm-adjacent, ADR-0011). The pytest scaffolding under tests/ is not
+# strict-typed by design — obvious-typed helpers add little safety value.
+files = ["custom_components/poise", "tests/harness"]
 mypy_path = "."
 explicit_package_bases = true
 
