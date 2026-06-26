@@ -192,6 +192,7 @@ class PoiseSensor(CoordinatorEntity[PoiseCoordinator], SensorEntity):  # type: i
             manufacturer="Poise",
             model="Setpoint Thermostat",
             entry_type=DeviceEntryType.SERVICE,
+            via_device=coordinator.via_device_id,
         )
 
     @property

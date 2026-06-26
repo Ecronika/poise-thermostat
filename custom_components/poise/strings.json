@@ -97,6 +97,25 @@
       "reconfigure_successful": "Poise was updated."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tuning",
+        "description": "Adjust comfort tuning without a reload — the learned model is kept.",
+        "data": {
+          "category": "EN 16798 comfort category",
+          "comfort_base": "Comfort base temperature (°C)",
+          "climate_mode": "Climate mode (auto / heat only / cool only)",
+          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
+          "comfort_start": "Comfort window start",
+          "comfort_end": "Comfort window end",
+          "setback_delta": "Night setback (K)",
+          "optimal_start": "Optimal start (pre-heat)",
+          "operative_input": "Control operative temperature"
+        }
+      }
+    }
+  },
   "entity": {
     "sensor": {
       "t_rm": {

@@ -2,8 +2,14 @@
 
 This module is **pure**: it imports no Home Assistant. That keeps the control
 logic fast and deterministically testable (ADR-0011) and enforces the
-downward dependency direction (ADR-0005). The HA coordinator (coordinator.py)
-merely wraps :func:`run_tick` with a lock and a refresh schedule.
+downward dependency direction (ADR-0005).
+
+NOTE (review M1): :func:`run_tick` is the Phase-0/1 *reference* pipeline — it is
+exercised by the closed-loop harness and the pure-core tests, **not** by the live
+integration. The production coordinator (``coordinator.py``) implements the full,
+feature-complete per-tick logic in its own ``_run_once`` (dual-setpoint, night
+setback + optimal start/stop, MPC/TPI/PI shadows, safety gates); it does not wrap
+``run_tick``. This module is kept as the documented minimal-tick skeleton.
 
 Per-tick order (subset for Phase 0/1; full order in the Programmstrukturplan):
     ingest -> comfort(corridor) -> control -> arbitration -> one command/zone

@@ -38,6 +38,7 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_ENTRY_TYPE,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
@@ -57,6 +58,7 @@ from .const import (
     DEVICE_MAX_C,
     DOMAIN,
     EKF_SAVE_EVERY_TICKS,
+    ENTRY_TYPE_SYSTEM,
     FORECAST_TTL_S,
     FROST_FLOOR_C,
     LOW_BATTERY_PCT,
@@ -289,6 +291,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     def capability(self) -> tuple[bool, bool]:
         """(can_heat, can_cool) of the actuator (review P2 cooling modes)."""
         return self._capability()
+
+    @property
+    def via_device_id(self) -> tuple[str, str] | None:
+        """Device-registry link from this zone to the system hub (M9).
+
+        Returns the hub device identifier when a system entry is configured, so
+        zones nest under the Poise System device; ``None`` (no link) otherwise.
+        """
+        for e in self.hass.config_entries.async_entries(DOMAIN):
+            if e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM:
+                return (DOMAIN, e.entry_id)
+        return None
 
     @property
     def climate_mode(self) -> str:
@@ -1140,6 +1154,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         return {
             "available": True,
+            # H3/ADR-0038: monotonic stamp of when this snapshot was produced, so
+            # the system hub can detect a silently stale zone (age-based staleness).
+            "mono_ts": now,
             "current_temperature": round(room, 1),
             "target_temperature": target,
             "operative_temperature": round(operative, 1),

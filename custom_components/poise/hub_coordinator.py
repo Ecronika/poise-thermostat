@@ -54,6 +54,7 @@ from .const import (
     DEFAULT_MAX_FLOW_TEMP_C,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
+    HUB_ZONE_STALE_AFTER_S,
     TICK_INTERVAL_S,
 )
 from .contracts import ZoneRequest
@@ -137,6 +138,12 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             # reports unavailable via last_update_success; the hub must match).
             if not getattr(coord, "last_update_success", True):
                 continue
+            # H3/ADR-0038: drop a zone whose snapshot is too old even though its
+            # coordinator still "succeeds" — a silently hung update loop must not
+            # call for heat forever. Both stamps use the process monotonic clock.
+            zmono = data.get("mono_ts")
+            if zmono is not None and (now - float(zmono)) > HUB_ZONE_STALE_AFTER_S:
+                continue
             dp = e.data.get(CONF_DECLARED_POWER)
             out.append(
                 zone_request_from_data(
@@ -149,7 +156,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
                         float(ft) if (ft := e.data.get(CONF_FLOW_TEMP)) else None
                     ),
                     source_pref=e.data.get(CONF_SOURCE_POLICY),
-                    mono_ts=now,
+                    mono_ts=float(zmono) if zmono is not None else now,
                 )
             )
         return out
