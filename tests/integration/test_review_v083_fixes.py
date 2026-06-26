@@ -11,9 +11,12 @@ H2 — with an identified model and optimal-stop enabled, the comfort-phase coas
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -25,6 +28,8 @@ from custom_components.poise.const import (
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_END,
+    CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
     CONF_ENTRY_TYPE,
@@ -242,3 +247,160 @@ async def test_sensor_loss_and_recovery_log_once_each(
             and "is back" in r.getMessage()
         ]
         assert len(recoveries) == 1, f"expected one recovery, got {len(recoveries)}"
+
+
+# --------------------------------------------------------------- M9: via_device
+async def test_zone_device_nests_under_hub(hass: HomeAssistant) -> None:
+    """M9: with a system hub configured, a zone device links to it via via_device."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    # the hub is set up first so its device exists when the zone links to it
+    hub = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, CONF_BOILER_COUNT_THRESHOLD: 1},
+        title="Poise System",
+    )
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    hass.states.async_set("sensor.room_temp", "20.0", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 20.0,
+            "current_temperature": 20.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+    zone = await _setup(hass, _base())
+
+    assert zone.runtime_data.via_device_id == (DOMAIN, hub.entry_id)
+    reg = dr.async_get(hass)
+    zone_dev = reg.async_get_device(identifiers={(DOMAIN, zone.entry_id)})
+    hub_dev = reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
+    assert zone_dev is not None and hub_dev is not None
+    assert zone_dev.via_device_id == hub_dev.id  # nested under the hub
+
+
+async def test_zone_without_hub_has_no_via_device(hass: HomeAssistant) -> None:
+    """A standalone zone (no hub) sets no via_device link."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set("sensor.room_temp", "20.0", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 20.0,
+            "current_temperature": 20.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+    zone = await _setup(hass, _base())
+    assert zone.runtime_data.via_device_id is None
+
+
+# ------------------------------------------------ H3 residual: age-based staleness
+async def test_hub_drops_silently_stale_zone(hass: HomeAssistant) -> None:
+    """H3/ADR-0038: a zone whose snapshot is too old is dropped even when its
+    coordinator still reports success (a silently hung update loop)."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set("sensor.room_temp", "16.0", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 21.0,
+            "current_temperature": 16.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+    zone = await _setup(hass, _base(**{CONF_CONTROLS_BOILER: True}))
+
+    hub = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, CONF_BOILER_COUNT_THRESHOLD: 1},
+        title="Poise System",
+    )
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    # cold room → the fresh zone calls for heat and the hub counts it
+    await hub.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hub.runtime_data.data["controlling_zones"] >= 1
+
+    # the update still "succeeds" but the snapshot is far older than the staleness
+    # window — the hub must stop calling for heat on it
+    assert zone.runtime_data.last_update_success is True
+    zone.runtime_data.data["mono_ts"] = zone.runtime_data._clock.monotonic() - 1000.0
+    await hub.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert hub.runtime_data.data["controlling_zones"] == 0
+
+
+# --------------------------------------------- H2 (strong): coasting becomes True
+async def test_optimal_stop_coasts_near_window_end(
+    hass: HomeAssistant, freezer
+) -> None:
+    """H2: identified EKF + comfort window ending soon + warm room over a cold
+    outside → the wiring actually produces ``coasting`` True (not just no-crash)."""
+    freezer.move_to("2026-01-15 12:00:00")  # frozen so the schedule is deterministic
+    now_local = dt_util.now()
+    start = (now_local - timedelta(hours=2)).strftime("%H:%M")
+    end = (now_local + timedelta(minutes=5)).strftime("%H:%M")
+
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set("sensor.room_temp", "25.0", {"device_class": "temperature"})
+    hass.states.async_set("sensor.outdoor", "4.0", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 21.0,
+            "current_temperature": 25.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+    entry = await _setup(
+        hass,
+        _base(
+            **{
+                CONF_COMFORT_START: start,
+                CONF_COMFORT_END: end,
+                CONF_OUTDOOR_SENSOR: "sensor.outdoor",
+            }
+        ),
+    )
+    coord = entry.runtime_data
+    ekf = coord._ekf
+    ekf.n_idle = 1000
+    ekf.n_heating = 1000
+    ekf.p[0][0] = 0.01
+    assert ekf.identified is True
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    # warm room far above the lower comfort edge with the window ending in ~5 min
+    # and a cold outside → stop heating now and coast down
+    assert coord.data.get("coasting") is True
