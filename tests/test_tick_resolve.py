@@ -198,6 +198,11 @@ def test_needs_mode_nudge_on_drift() -> None:
     assert needs_mode_nudge("off", "heat", supported=True) is True
     assert needs_mode_nudge("off", "cool", supported=True) is True  # H1: cool too
     assert needs_mode_nudge("heat", "heat", supported=True) is False  # already correct
+    assert needs_mode_nudge("cool", "cool", supported=True) is False  # already correct
+    # H1 residual: a device autonomously in the OPPOSITE active mode is corrected
+    assert needs_mode_nudge("heat", "cool", supported=True) is True  # heat→cool switch
+    assert needs_mode_nudge("cool", "heat", supported=True) is True  # cool→heat switch
     # V1 regression: an auto/off-only TRV (no real "heat" mode) must NOT be nudged
     assert needs_mode_nudge("auto", "cool", supported=False) is False
     assert needs_mode_nudge("off", "heat", supported=False) is False
+    assert needs_mode_nudge("heat", "cool", supported=False) is False
