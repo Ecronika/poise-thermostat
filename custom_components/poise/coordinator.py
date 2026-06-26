@@ -86,7 +86,7 @@ from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
 from .control.tick_resolve import (
     heat_drive_signal,
-    needs_heat_mode,
+    needs_mode_nudge,
     resolve_write_target,
     sanitize_override,
     select_mrt,
@@ -812,16 +812,23 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # Resolve the forecast outdoor (I/O) here, then let the pure planner
         # decide the effective base — the decision is unit-tested without HA.
         sched = self._schedule.state_at(self._local_minute())
-        do_eval = (
-            not sched.is_comfort
-            and self._optimal_start
-            and can_heat
+        # A model is needed for the predictive plan in BOTH phases: preheat during
+        # setback (lead = minutes to comfort) and coast/optimal-stop during comfort
+        # (lead = minutes to setback). H2: build it whenever the EKF is identified
+        # and either feature is enabled — it was previously built only during
+        # setback, which left the comfort-phase coast (optimal-stop) branch dead.
+        predictive = (
+            can_heat
             and self._ekf.identified
+            and (self._optimal_start or self._optimal_stop)
         )
-        if do_eval:
-            t_out_lead = await self._forecast_outdoor(
-                float(sched.minutes_to_comfort), t_out_eff
+        if predictive:
+            lead_minutes = (
+                sched.minutes_to_setback
+                if sched.is_comfort
+                else sched.minutes_to_comfort
             )
+            t_out_lead = await self._forecast_outdoor(float(lead_minutes), t_out_eff)
             model = self._ekf.get_model()
         else:
             t_out_lead, model = t_out_eff, None
@@ -940,24 +947,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         await self._notify_failure(failed)
 
         if self._enabled:
-            # A2: keep a heat-capable actuator in heat mode so it follows our
+            # H1/A2: keep a controllable actuator in the mode that matches our
+            # write — cool when we cool, heat otherwise — so it follows our
             # setpoint instead of its own off/auto schedule (TRVZB system_mode).
-            heat_supported = "heat" in (
+            desired_hvac = "cool" if mode == "cool" else "heat"
+            act_modes = (
                 (act_state.attributes.get("hvac_modes") or []) if act_state else []
             )
-            if needs_heat_mode(
-                act_state.state if act_state else None, heat_supported=heat_supported
+            if needs_mode_nudge(
+                act_state.state if act_state else None,
+                desired_hvac,
+                supported=desired_hvac in act_modes,
             ):
                 try:
                     await self.hass.services.async_call(
                         "climate",
                         "set_hvac_mode",
-                        {"entity_id": self._actuator, "hvac_mode": "heat"},
+                        {"entity_id": self._actuator, "hvac_mode": desired_hvac},
                         blocking=False,
                     )
                 except Exception:  # noqa: BLE001 - mode nudge is best-effort
                     _LOGGER.exception(
-                        "Poise: set_hvac_mode(heat) failed for %s", self._actuator
+                        "Poise: set_hvac_mode(%s) failed for %s",
+                        desired_hvac,
+                        self._actuator,
                     )
             # Compare to the actuator's *actual* setpoint, not our last command, so
             # we re-assert when something external (e.g. an "off"/away automation)
@@ -975,7 +988,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 deadband=WRITE_DEADBAND_C,
             ):
                 cmd = ActuatorCommand(
-                    self._actuator, ActuatorPath.SETPOINT, target, "heat", mode, None
+                    actuator_id=self._actuator,
+                    path=ActuatorPath.SETPOINT,
+                    value=target,
+                    hvac_mode=mode,
+                    reason="tick",
                 )
                 try:
                     await actuator_mod.write(self.hass, cmd)

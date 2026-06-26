@@ -1,0 +1,129 @@
+# Home Assistant Integration Quality Scale — self-assessment for Poise.
+# https://developers.home-assistant.io/docs/core/integration-quality-scale/
+#
+# NOTE: Poise is distributed as a HACS *custom* integration, so Home Assistant
+# officially classifies it under the "Custom" special tier (the scaled tiers
+# Bronze..Platinum apply to core integrations). This file is an honest
+# rule-by-rule self-assessment of where the code stands if it were submitted to
+# core — and a to-do list for getting there.
+#
+# Status: done | exempt | todo
+rules:
+  # ---------------- Bronze ----------------
+  config-flow: done
+  config-flow-test-coverage: done  # tests/integration: create/dup-abort/system/reconfigure
+  test-before-setup: done  # ConfigEntryNotReady when actuator/sensor missing (review A2)
+  unique-config-entry: done  # unique_id = actuator; system hub is a singleton
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done  # entry.runtime_data
+  entity-event-setup: done  # CoordinatorEntity; coordinator listeners via async_on_unload
+  appropriate-polling: done  # 60 s DataUpdateCoordinator tick + event-driven refresh (A6)
+  common-modules: done  # coordinator.py; pure core/HA-glue separation (ADR-0005)
+  dependency-transparency:
+    status: exempt
+    comment: No external Python dependencies (manifest requirements: []).
+  action-setup:
+    status: exempt
+    comment: No custom service actions; control uses standard climate/number services.
+  docs-actions:
+    status: exempt
+    comment: No custom service actions to document.
+  test-before-configure:
+    status: exempt
+    comment: >-
+      Controls user-selected Home Assistant entities, not an external device or
+      service, so there is no connection to test in the flow. Required entities
+      are validated at setup via ConfigEntryNotReady (test-before-setup).
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  brands:
+    status: todo
+    comment: >-
+      In-repo brand/icon.png + logo.png exist (satisfies HACS); a PR to
+      home-assistant/brands is still needed for the core rule.
+  docs-removal-instructions: done  # README "Removing the integration" section
+
+  # ---------------- Silver ----------------
+  config-entry-unloading: done  # async_unload_entry + persist/cleanup
+  integration-owner: done  # codeowners: ["@Ecronika"]
+  entity-unavailable: done  # climate.available + {"available": False} payload
+  docs-configuration-parameters: done  # README Configuration table (review E6)
+  docs-installation-parameters: done  # README Configuration table covers setup params
+  action-exceptions:
+    status: exempt
+    comment: No custom service actions.
+  reauthentication-flow:
+    status: exempt
+    comment: No authentication; fully local, no credentials.
+  parallel-updates: done  # PARALLEL_UPDATES = 0 in every platform module
+  log-when-unavailable:
+    status: todo
+    comment: >-
+      Repair issues are raised on sensor/actuator loss; add the coordinator
+      once-on-loss / once-on-recovery logging idiom (UpdateFailed flow).
+  test-coverage:
+    status: todo
+    comment: >-
+      Pure core ~98.6%; HA-glue ~85% via the separate integration gate (24
+      tests, gate at 83%). The remaining gap to 95% is the predictive-shadow
+      wiring (MPC/optimal-start/TPI), device-registry guards and weather/
+      multi-zone-power glue, which need an identified-model harness — the
+      underlying algorithms are already ~98% covered in the closed-loop harness.
+
+  # ---------------- Gold ----------------
+  devices: done  # DeviceInfo per zone + system hub
+  diagnostics: done  # diagnostics.py (redacted)
+  reconfiguration-flow: done
+  repair-issues: done
+  entity-category: done  # diagnostic sensors + config switch
+  entity-device-class: done  # temperature/humidity/power device classes
+  entity-translations: done  # translation_key + en/de translations
+  discovery:
+    status: exempt
+    comment: Consumes user-selected HA entities; nothing to network-discover.
+  discovery-update-info:
+    status: exempt
+    comment: No network discovery.
+  dynamic-devices:
+    status: exempt
+    comment: One device per config entry; no dynamically appearing sub-devices.
+  stale-devices:
+    status: exempt
+    comment: One device per config entry; removed on unload.
+  entity-disabled-by-default:
+    status: todo
+    comment: Disable the noisy shadow diagnostics (mpc_*/tpi_*/pi_*/beta_s) by default.
+  exception-translations:
+    status: todo
+    comment: Make the ConfigEntryNotReady / error messages translatable.
+  icon-translations:
+    status: todo
+    comment: Add icons.json with icon translations.
+  docs-supported-functions: done  # README capability status + Entities created
+  docs-data-update:
+    status: todo
+    comment: Document the 60 s polling + event-driven update model in the docs.
+  docs-supported-devices:
+    status: todo
+    comment: List known-good TRVs / climate entities.
+  docs-known-limitations:
+    status: todo
+    comment: Document the Alpha / shadow-only predictive paths as limitations.
+  docs-troubleshooting:
+    status: todo
+    comment: Add a troubleshooting section (repair issues, common pitfalls).
+  docs-use-cases:
+    status: todo
+  docs-examples:
+    status: todo
+    comment: Add automation/dashboard examples.
+
+  # ---------------- Platinum ----------------
+  strict-typing: done  # mypy --strict over all 63 modules (no ignore_errors)
+  async-dependency:
+    status: exempt
+    comment: No external dependency; the integration is fully async.
+  inject-websession:
+    status: exempt
+    comment: No external HTTP client; weather forecasts use HA's own service.

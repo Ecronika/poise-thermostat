@@ -41,6 +41,11 @@ _ATTRS = (
 )
 
 
+# Coordinator-driven: entities read shared data and writes go through the
+# single actuator choke-point, so updates need no per-entity throttling.
+PARALLEL_UPDATES = 0
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,

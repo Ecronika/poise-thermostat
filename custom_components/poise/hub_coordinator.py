@@ -132,6 +132,11 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             data = getattr(coord, "data", None)
             if not isinstance(data, dict) or not data.get("available"):
                 continue
+            # H3/ADR-0038: a zone whose last coordinator update failed exposes a
+            # stale snapshot — never call for heat on it (the zone entity already
+            # reports unavailable via last_update_success; the hub must match).
+            if not getattr(coord, "last_update_success", True):
+                continue
             dp = e.data.get(CONF_DECLARED_POWER)
             out.append(
                 zone_request_from_data(
