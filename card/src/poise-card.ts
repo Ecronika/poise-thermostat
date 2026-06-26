@@ -87,7 +87,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   private _setpoint(delta: number): void {
     const id = this._config.entity;
-    if (!id) return;
+    if (!id || !this.hass) return; // M12: hass may be unset during early render
     const st = this.hass.states[id];
     if (!st) return; // entity removed between render and click (M10)
     const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
