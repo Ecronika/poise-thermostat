@@ -190,12 +190,14 @@ def test_heat_drive_falls_back_without_action() -> None:
     assert heat_drive_signal("", fallback_heating=False) == 0.0
 
 
-def test_needs_heat_mode_on_drift() -> None:
-    from custom_components.poise.control.tick_resolve import needs_heat_mode
+def test_needs_mode_nudge_on_drift() -> None:
+    from custom_components.poise.control.tick_resolve import needs_mode_nudge
 
-    assert needs_heat_mode("auto", heat_supported=True) is True  # internal schedule
-    assert needs_heat_mode("off", heat_supported=True) is True
-    assert needs_heat_mode("heat", heat_supported=True) is False  # already correct
+    # nudge away from the device's own auto/off into the mode that matches our write
+    assert needs_mode_nudge("auto", "heat", supported=True) is True
+    assert needs_mode_nudge("off", "heat", supported=True) is True
+    assert needs_mode_nudge("off", "cool", supported=True) is True  # H1: cool too
+    assert needs_mode_nudge("heat", "heat", supported=True) is False  # already correct
     # V1 regression: an auto/off-only TRV (no real "heat" mode) must NOT be nudged
-    assert needs_heat_mode("auto", heat_supported=False) is False
-    assert needs_heat_mode("off", heat_supported=False) is False
+    assert needs_mode_nudge("auto", "cool", supported=False) is False
+    assert needs_mode_nudge("off", "heat", supported=False) is False
