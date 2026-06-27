@@ -123,6 +123,10 @@ from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature, parse_finite
+from .multi.discovery import EntitySnapshot
+from .multi.model import Direction
+from .multi.resolvers import ThermalDemand
+from .multi.shadow import evaluate_thermal_shadow
 from .safety.heating_failure import (
     HeatingFailureDetector,
     actuator_running,
@@ -143,6 +147,9 @@ _LOGGER = logging.getLogger(__name__)
 # known — mirrors control.mpc_controller._FALLBACK_T_OUT_C (a cold-ish day keeps
 # heating engaged rather than mild-locking it out).
 _FALLBACK_OUTDOOR_C = 5.0
+# Comfort mode -> thermal-arbitration direction (ADR-0046 P1 shadow). "idle" and
+# any other value map to None (no thermal demand).
+_THERMAL_DIR: dict[str, Direction] = {"heat": Direction.HEAT, "cool": Direction.COOL}
 
 _INVALID = {"unknown", "unavailable", ""}
 
@@ -1164,6 +1171,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             external=room,
             dt_h=TICK_INTERVAL_S / 3600.0,
         )
+        # Phase-1 thermal-arbitration shadow (ADR-0046): run the multi-actuator
+        # pipeline against the single actuator as a transient ZoneDevice; report
+        # the source Poise *would* drive + the reason, never actuate (single-active
+        # today, the seam is live for TRV+AC arbitration in P3).
+        _act_modes = (act_state.attributes.get("hvac_modes") or []) if act_state else []
+        _act_avail = act_state is not None and act_state.state not in (
+            "unavailable",
+            "unknown",
+        )
+        multi_shadow = evaluate_thermal_shadow(
+            EntitySnapshot(
+                entity_id=self._actuator,
+                domain="climate",
+                hvac_modes=tuple(str(m) for m in _act_modes),
+                available=_act_avail,
+            ),
+            ThermalDemand(_THERMAL_DIR.get(decision.mode), decision.target),
+        )
         # valve health (A3): a near-zero closing-step count means the motorised
         # valve failed calibration / is jammed — advisory diagnostic + repair issue.
         closing_steps = self._read(self._valve_closing_steps)
@@ -1247,6 +1272,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "pi_active": pi.active,
             "pi_setpoint": pi.setpoint,
             "pi_offset": pi.offset,
+            "multi_active_source": multi_shadow.active_source,
+            "multi_reason": multi_shadow.reason,
+            "multi_severity": multi_shadow.severity,
+            "multi_blocked": list(multi_shadow.blocked),
             "tpi_active": tpi.active,
             "tpi_duty": tpi.duty,
             "tpi_valve_percent": tpi.valve_percent,
