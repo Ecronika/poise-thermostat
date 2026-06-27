@@ -1,6 +1,6 @@
 # ADR-0046 — Mehrere Klimaaktoren je Raum: Arbitrierung (thermisch / Feuchte / Lüften)
 
-**Status:** In Arbeit (10 %) · **Datum:** 2026-06-27 · **Bezug:** Poise v0.89.0; ADR-0005 (Pure-Core/Glue), ADR-0012 (Safety/Window/Heating-Failure), ADR-0013/0038 (Hub), ADR-0023 (Dual-Setpoint), ADR-0035 (Constraint-Solver, Präzedenz), ADR-0042 (Override).
+**Status:** In Arbeit (20 %) · **Datum:** 2026-06-27 · **Bezug:** Poise v0.89.0; ADR-0005 (Pure-Core/Glue), ADR-0012 (Safety/Window/Heating-Failure), ADR-0013/0038 (Hub), ADR-0023 (Dual-Setpoint), ADR-0035 (Constraint-Solver, Präzedenz), ADR-0042 (Override).
 **Konsolidiert aus:** zwei Arbeits-Designdokumenten (Projekt-Arbeitsstand: Best-of-Multi-Aktor + Begleitdokument Lüften/Trocknen/Feuchte), Wettbewerber-Quelltext (dual_smart_thermostat, Versatile Thermostat, climate_group_helper), HA-Community/GitHub-Nutzerfeedback, HA-Dev-Doku — und zwei externen Design-Reviews. Frühere `ZoneActuator`-/monolithische `select_actuators`-Modelle aus den Arbeitsdokumenten sind **veraltet, nicht implementieren** — maßgeblich ist allein dieses Dokument.
 
 ---
@@ -263,6 +263,8 @@ Der **Schema-Builder ist rein** (Phase-0-tabellentestbar: „gegeben Geräte-Men
 | **P8** | Hub-Resource-Coordination (eigene Sub-ADR zuerst, §10) | Hub **blockiert gegensätzliche** Shared-Resource-Requests; Konfliktklassen §10 |
 
 **Reihenfolge: zuerst thermische Mehrquellen-Arbitrierung vollständig**, dann Feuchte, dann Lüften, dann geteilte Ressourcen.
+
+**Umsetzungsstand:** **P0** (pures `multi/`-Paket: model/reason/discovery/schema/resolvers + Tests) **und P1** (Thermal-Shadow **live** im Coordinator — `multi/shadow.py:evaluate_thermal_shadow` baut den transienten `ZoneDevice` aus dem Aktor und exponiert die Diagnose-Attribute `multi_active_source` / `multi_reason` / `multi_severity` / `multi_blocked`; **keine** Aktor-Writes, Feuchte/Luft weiter no-op) sind umgesetzt. Single-Active heute, der Seam ist live. Nächster Schritt **P2** (Per-Device-Lifecycle).
 
 ---
 
