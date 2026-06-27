@@ -148,6 +148,8 @@ Pro Gerät **und** Achse: `min_on`, `min_off`, `min_mode_hold`, `max_starts_per_
 
 **Neustart-Persistenz:** Persistiert werden **Wall-Clock-Zeitstempel, nicht monotonic time** (monotonic ist über einen HA-Neustart nicht übertragbar; vgl. ADR-0006/0007). Beim Restore wird die **verbleibende Sperrzeit** aus `now_wall − issued_at_wall` berechnet. Bei **offensichtlich falscher Systemzeit oder sehr altem Zustand** wird **konservativ** entschieden: lieber `min_off` einhalten als den Verdichter versehentlich sofort starten. Persistiert: last command (`expected_echo`), min-on/off-Timer, mode-hold, Lease, Health.
 
+**Verortung aus dem Meinungsbild Fenster/Kühlen (B/C):** Der wiederkehrende **AC-Kurzzyklus**-Schmerzpunkt ist genau dieses §8-Thema (`min_off`, P2) — wirksam, sobald die AC über die Multi-Pipeline läuft; im **Standalone-Single-AC-Betrieb** (Sollwert + Modus an `climate`) übernimmt den Verdichterschutz die **Geräte-Firmware**. Eine **`fan_only`-Fenster-/Lüften-Aktion** (statt `off`) nutzt die Luftbewegungs-Capability (§4/§7); ihr **Fenster-Auslöser** liegt jedoch in **ADR-0041** — die *konfigurierbare* Fensteraktion (`off | fan_only | setback`) ist daher eine ADR-0041-Erweiterung (eigenes künftiges ADR), nicht Teil dieses ADR.
+
 ---
 
 ## 9. Ownership / Lease / Manual-Override (harte Invariante)

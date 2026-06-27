@@ -65,6 +65,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0044](ADR-0044-Outcome-Scoring-ts-vs-obs.md) | Outcome-Scoring — ts-vs-obs-Selbstvalidierung | In Arbeit (35 %) |
 | [0045](ADR-0045-Effizienz-Report-HDH-kWh-Euro.md) | Effizienz-Report — Heating-Degree-Hours → kWh/€ | In Arbeit (35 %) |
 | [0046](ADR-0046-Multi-Aktor-Arbitrierung.md) | Mehrere Klimaaktoren je Raum — Arbitrierung (thermisch/Feuchte/Lüften) | In Arbeit (10 %) |
+| [0047](ADR-0047-Aussen-Lockout-Konfigurierbar.md) | Konfigurierbarer Außen-Temperatur-Lockout (Heizen/Kühlen) | Implementiert |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
