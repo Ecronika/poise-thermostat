@@ -46,6 +46,8 @@ def decide(
     can_heat: bool = True,
     can_cool: bool = False,
     climate_mode: str = "auto",
+    cool_min_outdoor: float | None = 16.0,
+    heat_max_outdoor: float | None = 22.0,
     t_out: float,
     t_mrt: float | None = None,
     velocity: float = 0.1,
@@ -92,6 +94,8 @@ def decide(
         climate_mode=climate_mode,
         can_heat=can_heat,
         can_cool=can_cool,
+        cool_min_outdoor=cool_min_outdoor,
+        heat_max_outdoor=heat_max_outdoor,
     )
 
     if mode == "heat":
