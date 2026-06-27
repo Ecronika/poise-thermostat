@@ -24,10 +24,15 @@ def decide_mode(
     climate_mode: str = "auto",
     can_heat: bool = True,
     can_cool: bool = True,
-    cool_min_outdoor: float = 16.0,
-    heat_max_outdoor: float = 22.0,
+    cool_min_outdoor: float | None = 16.0,
+    heat_max_outdoor: float | None = 22.0,
 ) -> str:
-    """Return "heat", "cool" or "idle" (the dead-band / gated case)."""
+    """Return "heat", "cool" or "idle" (the dead-band / gated case).
+
+    ``cool_min_outdoor``/``heat_max_outdoor`` are the outdoor lockouts and are
+    **configurable per zone**; ``None`` disables that direction's outdoor gate
+    (e.g. an internal-gain room that must cool regardless of outside, ADR-0047).
+    """
     # A contradictory band (heat target above cool target) is a mis-config; do
     # not act on it — otherwise both branches match between the edges and 'heat'
     # would win silently (review M6). Upstream dual_setpoint enforces cool>=heat.
@@ -36,12 +41,12 @@ def decide_mode(
     heat_ok = (
         can_heat
         and climate_mode in ("auto", "heat_only")
-        and outdoor <= heat_max_outdoor
+        and (heat_max_outdoor is None or outdoor <= heat_max_outdoor)
     )
     cool_ok = (
         can_cool
         and climate_mode in ("auto", "cool_only")
-        and outdoor >= cool_min_outdoor
+        and (cool_min_outdoor is None or outdoor >= cool_min_outdoor)
     )
     if heat_ok and room < setpoint.heat:
         return "heat"
