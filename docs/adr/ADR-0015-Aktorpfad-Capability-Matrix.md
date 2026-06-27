@@ -1,6 +1,6 @@
 # ADR-0015: Aktorpfad-Capability-Matrix & coef_ext
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E12, E21, K7 · **Verifizierung:** Code-Review ThermoSmart/BT (Thema K)
+**Status:** In Arbeit (70 %) · **Datum:** 2026-06-18 · **Bezug:** E12, E21, K7 · **Verifizierung:** Code-Review ThermoSmart/BT (Thema K)
 
 ## Kontext
 ADR-0004 verlangt einen **exklusiven** Aktorpfad je Gerät (tpi / kalibrierung / pi). Offen: wie die Gerätefähigkeit erkannt wird und wie `coef_ext` final behandelt wird.

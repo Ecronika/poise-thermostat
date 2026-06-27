@@ -1,6 +1,6 @@
 # ADR-0019: KNX-/Norm-Expose-Schnittstelle
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E15, G28, G29 · **Verifizierung:** Code-Review (kein Feld-Vorbild — Alleinstellung)
+**Status:** Vorgeschlagen · **Datum:** 2026-06-18 · **Bezug:** E15, G28, G29 · **Verifizierung:** Code-Review (kein Feld-Vorbild — Alleinstellung)
 
 ## Kontext
 KNX-Expose ist Teil des Norm-/Gewerbe-Moats (EN ISO 52120-1 Klasse B, VDI 3813) und im gesamten Wettbewerbsfeld konkurrenzlos. Offen: welche Objekte in welche Richtung exponiert werden und wie das die Schichtarchitektur berührt.

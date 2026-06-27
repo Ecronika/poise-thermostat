@@ -1,6 +1,6 @@
 # ADR-0001: MPC-Solver — greedy variable Trajektorie + Robustheitsbausteine
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E16, E17, K2 · **Verifizierung:** V1, V3
+**Status:** In Arbeit (80 %) · **Datum:** 2026-06-18 · **Bezug:** E16, E17, K2 · **Verifizierung:** V1, V3
 
 ## Kontext
 Die Regelungsebene (`control/mpc`) braucht einen Optimierer, der die Stellgröße über einen Horizont plant. Drei reale Vorbilder stehen zur Wahl, deren Code in Runde 2 gelesen wurde.

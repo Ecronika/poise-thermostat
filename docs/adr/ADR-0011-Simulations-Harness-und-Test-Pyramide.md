@@ -1,6 +1,6 @@
 # ADR-0011: Simulations-Harness & Test-Pyramide
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E22, E23 · **Verifizierung:** Code-Review RoomMind `analytics_simulator.py`/`tests/`, BT `tests/test_mpc.py`, Versatile `tests/` (Thema G)
+**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E22, E23 · **Verifizierung:** Code-Review RoomMind `analytics_simulator.py`/`tests/`, BT `tests/test_mpc.py`, Versatile `tests/` (Thema G)
 
 ## Kontext
 Physik und MPC sind ohne Hardware nur über Simulation verifizierbar (G1/G25). Offen: Aufbau des Test-/Simulationsfundaments.

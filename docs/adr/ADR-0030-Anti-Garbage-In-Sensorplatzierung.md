@@ -1,6 +1,6 @@
 # ADR-0030: Anti-Garbage-In — Erkennung falscher Sensorplatzierung
 
-**Status:** akzeptiert · **Datum:** 2026-06-20 · **Bezug:** Charta G17 („schlechte Sensorik wird erkannt, nicht geglaubt"), ADR-0002/0024 (EKF), ADR-0012 (Repair-Issues), externe Review #2 · **Verifizierung:** EKF-`tau_hours`/`identified`
+**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** Charta G17 („schlechte Sensorik wird erkannt, nicht geglaubt"), ADR-0002/0024 (EKF), ADR-0012 (Repair-Issues), externe Review #2 · **Verifizierung:** EKF-`tau_hours`/`identified`
 
 ## Kontext
 Das ganze Lernmodell hängt an einem **gut platzierten, freistehenden** Raumsensor. Nutzt jemand den **eingebauten TRV-Sensor** (am Heizkörper), reagiert die Messtemperatur fast sofort auf Heizen → das 1R1C-Modell lernt eine unplausibel kurze Zeitkonstante und der ganze Komfort/Vorhersage-Stack degradiert („Garbage In"). Das ist der laut Review kritischste Massentauglichkeits-Fallstrick.

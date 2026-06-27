@@ -1,12 +1,12 @@
 # ADR-0000: ADR-Format und -Prozess
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** Festlegung E27 aus `Offene_Festlegungen_und_Verifizierung.md`
+**Status:** Gültig · **Datum:** 2026-06-18 · **Bezug:** Festlegung E27 aus `Offene_Festlegungen_und_Verifizierung.md`
 
 ## Kontext
 Das Designpaket (Best-of-Konzept, Charta, Konflikt-Analyse, Strukturplan, Festlegungs-Register) trifft viele Architektur- und Algorithmik-Entscheidungen. Es fehlt ein einheitliches, nachvollziehbares Gefäß, das **je Entscheidung** Kontext, Optionen, Wahl, Begründung, Konsequenzen und **Code-Beleg** festhält und unveränderlich dokumentiert. Das ist Grundsatz G3/G27 (Auditierbarkeit, Determinismus) auf Projektebene.
 
 ## Entscheidung
-Jede nicht-triviale Architektur-/Algorithmik-Entscheidung wird als **Architecture Decision Record (ADR)** im Ordner `ADR/` festgehalten, fortlaufend nummeriert (`ADR-NNNN-kurztitel.md`).
+Jede nicht-triviale Architektur-/Algorithmik-Entscheidung wird als **Architecture Decision Record (ADR)** im Ordner `docs/adr/` festgehalten, fortlaufend nummeriert (`ADR-NNNN-kurztitel.md`).
 
 **Pflichtfelder je ADR:**
 1. **Status** — `vorgeschlagen` → `akzeptiert` → ggf. `abgelöst durch ADR-XXXX` / `zurückgezogen`
@@ -32,4 +32,4 @@ Jede nicht-triviale Architektur-/Algorithmik-Entscheidung wird als **Architectur
 **Negativ/Kosten:** Disziplin nötig; ADRs müssen gepflegt (abgelöst) werden, sonst veralten sie wie jedes Dokument.
 
 ## Verknüpfungen
-Index: `ADR/README.md`. Erste akzeptierte Records: ADR-0001…0004. Offene P0-Punkte ohne ADR: E1, E2, E4, E6, E7/E8, E10/E11, E17, E19, E22/E23 (künftige ADRs).
+Index: `docs/adr/README.md` (alleiniger, maßgeblicher Ablageort). Erste akzeptierte Records: ADR-0001…0004. Offene P0-Punkte ohne ADR: E1, E2, E4, E6, E7/E8, E10/E11, E17, E19, E22/E23 (künftige ADRs).

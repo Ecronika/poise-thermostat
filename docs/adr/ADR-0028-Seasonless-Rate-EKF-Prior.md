@@ -1,6 +1,6 @@
 # ADR-0028: Seasonless-Rate als EKF-Cold-Start-Prior
 
-**Status:** akzeptiert · **Datum:** 2026-06-20 · **Bezug:** Charta G12/G6, ADR-0004 (Seed), ADR-0009 (EKF), ADR-0026 (Schatten-Schätzer), Phase 2 · **Verifizierung:** ThermoSmart `learning_engine.py` (Feat 2, normalisierte Rate + Gauss-Kernel + 180d-Halbwertszeit)
+**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** Charta G12/G6, ADR-0004 (Seed), ADR-0009 (EKF), ADR-0026 (Schatten-Schätzer), Phase 2 · **Verifizierung:** ThermoSmart `learning_engine.py` (Feat 2, normalisierte Rate + Gauss-Kernel + 180d-Halbwertszeit)
 
 ## Kontext
 Der EKF startet β_h (Heiz-Responsivität) auf einem statischen Default und braucht echte Heizzyklen, um ihn zu lernen. Zu Saisonbeginn (erste kalte Tage) ist β_h daher unsicher. Charta G12 fordert **saisonübergreifendes, alterungsbewusstes** Lernen: Raten gegen das treibende ΔT normalisiert, nach Ähnlichkeit gewichtet, mit Halbwertszeit vergessen.

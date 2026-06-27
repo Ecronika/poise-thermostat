@@ -1,6 +1,6 @@
 # ADR-0012: Fehlerbehandlung, Logging & Repair-Issues
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E3, E26 · **Verifizierung:** Code-Review RoomMind/BT/ThermoSmart/Versatile (Thema H)
+**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E3, E26 · **Verifizierung:** Code-Review RoomMind/BT/ThermoSmart/Versatile (Thema H)
 
 ## Kontext
 Die Charta verlangt „robust, aber nicht versteckt" (G15) und eine klare Trennung „degradieren vs. werfen" (E3). Offen: Ausnahme-Taxonomie, Nutzer-Meldungen, Logging.

@@ -1,6 +1,6 @@
 # ADR-0010: Solar-Buchhaltung
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E19, K3 · **Verifizierung:** Code-Review RoomMind `solar.py`/`mpc_controller.py`/`thermal_model.py`, BT `mpc.py` (Thema F)
+**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E19, K3 · **Verifizierung:** Code-Review RoomMind `solar.py`/`mpc_controller.py`/`thermal_model.py`, BT `mpc.py` (Thema F)
 
 ## Kontext
 Solareintrag droht doppelt zu wirken: als Störgröße im Wärmemodell **und** als MRT-Anhebung der Operativtemperatur (K3). Zusätzlich kann eine orientierungsabhängige Solar-Rückkopplung mit der Verschattung oszillieren. Offen: ein einziger, definierter Solar-Pfad.

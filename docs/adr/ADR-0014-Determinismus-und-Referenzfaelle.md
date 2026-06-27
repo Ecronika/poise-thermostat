@@ -1,6 +1,6 @@
 # ADR-0014: Determinismus & numerische Referenzfälle
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E9, E24 · **Verifizierung:** Code-Review (kein Feld-Vorbild — Befund)
+**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E9, E24 · **Verifizierung:** Code-Review (kein Feld-Vorbild — Befund)
 
 ## Kontext
 G27 verlangt: gleiche Eingänge → gleiche Stellentscheidung, und jede Entscheidung aus Diagnose nachvollziehbar. Offen: wie Determinismus technisch sichern und gegen welche Referenzwerte prüfen.

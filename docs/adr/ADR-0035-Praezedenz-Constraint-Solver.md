@@ -1,6 +1,6 @@
 # ADR-0035: Präzedenz-expliziter Constraint-Solver (ADR-0013 Stufe 1)
 
-**Status:** akzeptiert · **Datum:** 2026-06-21 · **Bezug:** ADR-0013 (Arbitrierung/Choke-Point), ADR-0023 (Dual-Setpoint), ADR-0027 (Norm-Envelope), Charta-Präzedenz (K4/K7) · **Verifizierung:** `tests/test_constraints.py` + unveränderte `test_arbitration`/`test_norm_compliance`/`test_tick_resolve` (Verhaltenserhalt)
+**Status:** Implementiert · **Datum:** 2026-06-21 · **Bezug:** ADR-0013 (Arbitrierung/Choke-Point), ADR-0023 (Dual-Setpoint), ADR-0027 (Norm-Envelope), Charta-Präzedenz (K4/K7) · **Verifizierung:** `tests/test_constraints.py` + unveränderte `test_arbitration`/`test_norm_compliance`/`test_tick_resolve` (Verhaltenserhalt)
 
 ## Kontext
 Die Sollwert-Begrenzung lag an **drei** Stellen mit je *impliziter* Reihenfolge: `arbitration.resolve` (Korridor + device_max, Harness-Pfad), `resolve_write_target` (Norm-Envelope + `min(device_max)`, Live-Pfad) und `clamp_to_norm` (ASR-Cap + Frost/Schimmel-Floor). Die Charta-`Precedence` (SAFETY<HEALTH<COMFORT<EFFICIENCY…) existierte, war aber nirgends als Auflösungsregel kodiert. Bei Konflikten (z. B. Schimmel-Floor über Geräte-Max) entschied die zufällige Code-Reihenfolge, nicht die Präzedenz.

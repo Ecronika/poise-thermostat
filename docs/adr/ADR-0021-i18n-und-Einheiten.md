@@ -1,6 +1,6 @@
 # ADR-0021: i18n-Struktur & Einheiten
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E29 · **Verifizierung:** Code-Review ThermoSmart/Versatile/BT/RoomMind/Vesta (Thema N)
+**Status:** In Arbeit (70 %) · **Datum:** 2026-06-18 · **Bezug:** E29 · **Verifizierung:** Code-Review ThermoSmart/Versatile/BT/RoomMind/Vesta (Thema N)
 
 ## Kontext
 Mehrsprachigkeit erhöht die Reichweite (ThermoSmart: 24 Sprachen). Offen: Quellstruktur, Abdeckung, Sprachpflege, Einheiten.

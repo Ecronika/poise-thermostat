@@ -1,6 +1,6 @@
 # ADR-0027: Norm-Compliance — unkonditionale Sollwert-Grenzen (ASR A3.5)
 
-**Status:** akzeptiert · **Datum:** 2026-06-20 · **Bezug:** Charta G1/G18, K4/K7 (Konflikt-Analyse), Programmstrukturplan (`norm_compliance`), ADR-0023 (Dual-Setpoint), Phase 1 · **Verifizierung:** ASR A3.5 (Raumtemperatur); Coordinator-Code
+**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** Charta G1/G18, K4/K7 (Konflikt-Analyse), Programmstrukturplan (`norm_compliance`), ADR-0023 (Dual-Setpoint), Phase 1 · **Verifizierung:** ASR A3.5 (Raumtemperatur); Coordinator-Code
 
 ## Kontext
 Phase 1 forderte ein `norm_compliance`-Modul (ASR/GEG/VDI-Grenzen). Bis v0.14.0 gab es Frost-Floor, Schimmel-Floor und Taupunkt-Cap, aber **keinen expliziten, unkonditionalen oberen Sollwert-Deckel**. Mit dem virtuellen MRT (v0.11.0, Kaltwand-Term) kann der Luft-Sollwert in extremer Kälte rechnerisch hoch getrieben werden (Richtung `device_max=30`). Charta G18 verlangt harte, durch Lernen/Defaults **nicht** übersteuerbare Grenzen; K4/K7 verlangen, dass auch der manuelle Override in den Frost/Schimmel/**Norm**-Korridor geklemmt wird.

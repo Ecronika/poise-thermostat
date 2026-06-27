@@ -1,6 +1,6 @@
 # ADR-0016: Entity-Modell & Karten-Vertrag
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E13, E14 · **Verifizierung:** Code-Review ThermoSmart/RoomMind/Vesta (Thema L)
+**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E13, E14 · **Verifizierung:** Code-Review ThermoSmart/RoomMind/Vesta (Thema L)
 
 ## Kontext
 Offen: welche HA-Entities das System exponiert und wie die Bedienkarte ihre Werte bezieht (sauberer Card/Integration-Vertrag).

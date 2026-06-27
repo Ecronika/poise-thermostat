@@ -1,6 +1,6 @@
 # ADR-0003: Residual-Heat / Optimal-Stop als advisory Dienst
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** K5, E18 · **Verifizierung:** V4
+**Status:** In Arbeit (85 %) · **Datum:** 2026-06-18 · **Bezug:** K5, E18 · **Verifizierung:** V4
 
 ## Kontext
 Optimal Start und Optimal Stop/Coasting können entweder **eigenständig** Stellbefehle erzeugen oder dem MPC nur **Information** liefern. Zwei konkurrierende Trajektorien-Eigentümer (MPC-Horizont *und* dedizierter Optimal-Start) sind die Konfliktklasse **K5** — und entsprechen exakt der real aufgetretenen Re-Entry-Bugklasse des eigenen Stacks (`_start_preheat` ohne Guard).

@@ -1,6 +1,6 @@
 # ADR-0023: Capability-aware Dual-Setpoint mit Totband
 
-**Status:** akzeptiert · **Datum:** 2026-06-19 · **Bezug:** Livetest v0.6.0, ADR-0010/0016/0017 · **Verifizierung:** EN 16798-1 (Web), RoomMind/Versatile/BT-Code, eigenes Smart-Setpoint-Gist v5.3.1
+**Status:** Implementiert · **Datum:** 2026-06-19 · **Bezug:** Livetest v0.6.0, ADR-0010/0016/0017 · **Verifizierung:** EN 16798-1 (Web), RoomMind/Versatile/BT-Code, eigenes Smart-Setpoint-Gist v5.3.1
 
 ## Kontext
 Livetest: Poise setzte den Sollwert = adaptive Neutraltemperatur `0.33·T_rm+18.8` → 24 °C bei T_rm 15,7 — zu warm fürs Heizen, und es heizte einen bereits 23,5 °C warmen Raum. Ein **einzelner** geklemmter Sollwert ist falsch: er kann ein Nur-Kühlen-Gerät im Sommer an die untere Grenze zwingen (Energieverschwendung) und ignoriert die Gerätefähigkeit.

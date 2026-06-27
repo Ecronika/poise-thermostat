@@ -1,6 +1,6 @@
 # ADR-0004: TPI-Koeffizienten-Lernen — physikalischer Seed + Online-Nachführung
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E21, K7 · **Verifizierung:** V2
+**Status:** In Arbeit (45 %) · **Datum:** 2026-06-18 · **Bezug:** E21, K7 · **Verifizierung:** V2
 
 ## Kontext
 Der direkte Ventil-/TPI-Aktorpfad (`control/tpi_valve`) braucht die Koeffizienten `coef_int`, `coef_ext` für `on_percent = coef_int·ΔT_int + coef_ext·ΔT_ext`. Zwei Wettbewerber lösen das Lernen unterschiedlich — beide am Code gelesen.

@@ -1,6 +1,6 @@
 # ADR-0042: Override-Modus-Modell — Kategorie/Offset auf der Komfortbasis mit Auto-Rückkehr
 
-**Status:** akzeptiert (konkretisiert das 7-Modi-Override aus ADR-0012) · **Datum:** 2026-06-23 · **Bezug:** ADR-0012 (Override/State-Maschine), ADR-0023 (Capability-aware Dual-Setpoint), ADR-0025 (Schedule/Nachtabsenkung), ADR-0027/0035 (Norm-Floors & Constraint-Solver), ADR-0014 (Safety/Watchdog), ADR-0011 (Test-first) · **Grundlage:** `Meinungsbild_Override-und-Fenster-Slope.md`
+**Status:** Implementiert · **Datum:** 2026-06-23 · **Bezug:** ADR-0012 (Override/State-Maschine), ADR-0023 (Capability-aware Dual-Setpoint), ADR-0025 (Schedule/Nachtabsenkung), ADR-0027/0035 (Norm-Floors & Constraint-Solver), ADR-0014 (Safety/Watchdog), ADR-0011 (Test-first) · **Grundlage:** `Meinungsbild_Override-und-Fenster-Slope.md`
 
 ## Kontext
 Poise kennt heute genau **einen** manuellen Sollwert-Override — kein Anlass, keine Dauer, keine definierte Rückkehr. **Feld (verifiziert):** Versatile Thermostat bietet Presets (Frost/Eco/Comfort/Boost + versteckte Power/Safety), `*_away`/`*_ac`-Kontext, Activity/Bewegung, Safety-Notlast bei totem Sensor, Window-Bypass — aber als **freie Preset-Temperaturen**. **Community-Meinungsbild:** meistgewünscht ist ein **zeitlich begrenzter manueller Override mit Auto-Rückkehr** [VT#1875] („damit nicht die ganze Nacht hoch geheizt wird"); Timed-/Boost-Presets haben Steck-Bugs [VT#1961]; Presets sind nur Temperatur, Nutzer wollen explizite „Aus"-Aktion [VT#1979]; UI-Wert weicht von gespeichertem Preset ab [VT#1980].

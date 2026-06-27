@@ -1,6 +1,6 @@
 # ADR-0013: Mehrzonen-Ausführung & Ressourcen-Koordination
 
-**Status:** akzeptiert · **Datum:** 2026-06-18 · **Bezug:** E5, E20, K8, K12 · **Verifizierung:** Code-Review RoomMind/Versatile (Thema J)
+**Status:** In Arbeit (70 %) · **Datum:** 2026-06-18 · **Bezug:** E5, E20, K8, K12 · **Verifizierung:** Code-Review RoomMind/Versatile (Thema J)
 
 ## Kontext
 Mehrere Zonen fordern je Leistung/Vorlauf an; Kessel und Leistungsbudget sind global (K12). Offen: Ausführungsreihenfolge und Auflösungsalgorithmus.
