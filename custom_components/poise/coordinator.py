@@ -38,7 +38,9 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_COOL_MIN_OUTDOOR,
     CONF_ENTRY_TYPE,
+    CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
@@ -54,6 +56,8 @@ from .const import (
     CONF_WINDOW_SENSOR,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_COOL_MIN_OUTDOOR_C,
+    DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_SETBACK_DELTA,
     DEVICE_MAX_C,
     DOMAIN,
@@ -135,6 +139,10 @@ from .safety.sensor_watchdog import (
 from .storage import PoiseStore
 
 _LOGGER = logging.getLogger(__name__)
+# Conservative outdoor default when neither a sensor nor the running mean is
+# known — mirrors control.mpc_controller._FALLBACK_T_OUT_C (a cold-ish day keeps
+# heating engaged rather than mild-locking it out).
+_FALLBACK_OUTDOOR_C = 5.0
 
 _INVALID = {"unknown", "unavailable", ""}
 
@@ -219,6 +227,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
         )
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
+        self._cool_min_outdoor: float = float(
+            data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
+        )
+        self._heat_max_outdoor: float = float(
+            data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
+        )
         weight = float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT))
         self._priority: float = weight / 100.0
         delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
@@ -369,6 +383,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comfort_base = float(data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE))
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
+        self._cool_min_outdoor = float(
+            data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
+        )
+        self._heat_max_outdoor = float(
+            data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
+        )
         self._priority = (
             float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT)) / 100.0
         )
@@ -792,7 +812,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         t_rm, t_rm_source = select_t_rm(
             self._read(self._trm), self._trm_tracker.current, t_out
         )
-        t_out_eff = t_out if t_out is not None else (t_rm if t_rm is not None else 5.0)
+        t_out_eff = (
+            t_out
+            if t_out is not None
+            else (t_rm if t_rm is not None else _FALLBACK_OUTDOOR_C)
+        )
         t_rm_eff = t_rm if t_rm is not None else t_out_eff
         rh = self._read(self._humidity)
         # solar disturbance q_solar (normalised, ADR-0010): internal clear-sky
@@ -922,6 +946,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             can_heat=can_heat,
             can_cool=can_cool,
             climate_mode=self._climate_mode,
+            cool_min_outdoor=self._cool_min_outdoor,
+            heat_max_outdoor=self._heat_max_outdoor,
             t_out=t_out_eff,
             t_mrt=t_mrt_decide,
             frost_floor=FROST_FLOOR_C,

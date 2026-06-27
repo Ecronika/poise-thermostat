@@ -36,12 +36,14 @@ from .const import (
     CONF_COMFORT_WEIGHT,
     CONF_COMPRESSOR_GROUP,
     CONF_CONTROLS_BOILER,
+    CONF_COOL_MIN_OUTDOOR,
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
     CONF_DEFAULT_SOURCE,
     CONF_ENTRY_TYPE,
     CONF_FLOW_HYSTERESIS,
     CONF_FLOW_TEMP,
+    CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
     CONF_MAX_FLOW_TEMP,
@@ -65,7 +67,9 @@ from .const import (
     DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_FLOW_HYSTERESIS_C,
+    DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
     DEFAULT_SETBACK_DELTA,
@@ -314,6 +318,28 @@ def _options_schema() -> vol.Schema:
                 selector.SelectSelectorConfig(
                     options=["auto", "heat_only", "cool_only"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                CONF_COOL_MIN_OUTDOOR, default=DEFAULT_COOL_MIN_OUTDOOR_C
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-30.0,
+                    max=30.0,
+                    step=0.5,
+                    unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(
+                CONF_HEAT_MAX_OUTDOOR, default=DEFAULT_HEAT_MAX_OUTDOOR_C
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0,
+                    max=45.0,
+                    step=0.5,
+                    unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.BOX,
                 )
             ),
             vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(

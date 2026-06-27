@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.89.0"
+VERSION: Final = "0.90.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -49,6 +49,8 @@ CONF_CATEGORY: Final = "category"
 CONF_WINDOW_SENSOR: Final = "window_sensor"
 CONF_COMFORT_BASE: Final = "comfort_base"
 CONF_CLIMATE_MODE: Final = "climate_mode"
+CONF_COOL_MIN_OUTDOOR: Final = "cool_min_outdoor"
+CONF_HEAT_MAX_OUTDOOR: Final = "heat_max_outdoor"
 CONF_COMFORT_WEIGHT: Final = "comfort_weight"
 CONF_COMFORT_START: Final = "comfort_start"
 CONF_COMFORT_END: Final = "comfort_end"
@@ -61,6 +63,12 @@ CONF_OPERATIVE_INPUT: Final = "operative_input"
 DEFAULT_COMFORT_BASE: Final = 21.0
 DEFAULT_COMFORT_WEIGHT: Final = 70
 DEFAULT_SETBACK_DELTA: Final = 3.0
+# Outdoor lockouts (ADR-0047): cool only when outdoor >= cool_min, heat only when
+# outdoor <= heat_max. Defaults from ADR-0023/RoomMind; configurable per zone.
+# For internal-gain rooms (servers, kitchen, sun-facing), set the cool floor very
+# low so the room cools regardless of a mild outdoor temperature.
+DEFAULT_COOL_MIN_OUTDOOR_C: Final = 16.0
+DEFAULT_HEAT_MAX_OUTDOOR_C: Final = 22.0
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30
