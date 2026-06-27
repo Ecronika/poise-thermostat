@@ -33,3 +33,22 @@ def test_inverted_band_does_not_silently_heat() -> None:
     # M6: a contradictory band (heat target above cool target) must idle, not heat.
     bad = DualSetpoint(heat=25.0, cool=21.0)
     assert decide_mode(23.0, bad, outdoor=20.0) == "idle"
+
+
+def test_configurable_cool_lockout() -> None:
+    # ADR-0047: the cool lockout is configurable per zone.
+    # default 16: too cold outside to cool
+    assert decide_mode(27.0, _SP, outdoor=10.0) == "idle"
+    # lowered floor: an internal-gain room cools at 10 °C outside
+    assert decide_mode(27.0, _SP, outdoor=10.0, cool_min_outdoor=5.0) == "cool"
+    # disabled (None): cools regardless of outside temperature
+    assert decide_mode(27.0, _SP, outdoor=-5.0, cool_min_outdoor=None) == "cool"
+
+
+def test_configurable_lockout_is_direction_separated() -> None:
+    # default 22: too mild outside to heat
+    assert decide_mode(19.0, _SP, outdoor=25.0) == "idle"
+    # raised heat ceiling: heats at 25 °C outside
+    assert decide_mode(19.0, _SP, outdoor=25.0, heat_max_outdoor=30.0) == "heat"
+    # disabling the COOL lockout must not enable heating (direction-separated)
+    assert decide_mode(19.0, _SP, outdoor=25.0, cool_min_outdoor=None) == "idle"

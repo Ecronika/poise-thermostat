@@ -101,3 +101,20 @@ def test_efficiency_widen_never_breaches_category_lower() -> None:
     # category comfort lower (Cat II = 20 °C); only frost/mould may go lower.
     d = decide(t_rm=4.0, room=18.0, comfort_base=20.0, t_out=4.0, priority=0.0)
     assert d.heat_sp >= 20.0
+
+
+def test_configurable_cool_lockout_threads_through() -> None:
+    # ADR-0047: the cool-lockout option reaches decide_mode. An internal-gain
+    # room cools despite cool outside when the lockout is disabled (None)...
+    hot = decide(
+        t_rm=20.0,
+        room=29.0,
+        can_heat=False,
+        can_cool=True,
+        t_out=8.0,
+        cool_min_outdoor=None,
+    )
+    assert hot.mode == "cool"
+    # ...and the default 16 keeps the cold-outside lockout (regression).
+    gated = decide(t_rm=20.0, room=29.0, can_heat=False, can_cool=True, t_out=8.0)
+    assert gated.mode == "idle"
