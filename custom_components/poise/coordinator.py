@@ -123,8 +123,9 @@ from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature, parse_finite
+from .multi import lifecycle as _lifecycle
 from .multi.discovery import EntitySnapshot
-from .multi.model import Direction
+from .multi.model import DeviceHealth, Direction
 from .multi.resolvers import ThermalDemand
 from .multi.shadow import evaluate_thermal_shadow
 from .safety.heating_failure import (
@@ -216,6 +217,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._enabled = True
         self._override: float | None = None
         self._override_set_wall: float | None = None
+        # ADR-0046 P2: per-device anti-short-cycle lifecycle (wall-clock, survives
+        # restart). Shadow-only today — tracks the actuator's run-state + health to
+        # report the min-off / health gate; actuates nothing until P3.
+        self._multi_lifecycle = _lifecycle.DeviceLifecycle()
         self._preset: OverrideMode = OverrideMode.NONE
         self._override_cfg = OverrideConfig()
         # options override data for hot-applyable tuning (A10); structural
@@ -341,6 +346,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._seasonless = SeasonlessRate.from_dict(data["seasonless"])
                 if isinstance(data.get("window_auto"), dict):
                     self._window_auto = WindowAutoState.from_dict(data["window_auto"])
+                if isinstance(data.get("multi_lifecycle"), dict):
+                    # ADR-0046 P2: restore the wall-clock lifecycle so a compressor
+                    # min-off keeps counting across a restart (conservative on a
+                    # skewed clock — a future stamp is clamped, never trusted long).
+                    self._multi_lifecycle = _lifecycle.from_dict(
+                        data["multi_lifecycle"], now=dt_util.utcnow().timestamp()
+                    )
                 self._window_bypass = bool(data.get("window_bypass", False))
                 try:
                     self._preset = OverrideMode(data.get("preset", "none"))
@@ -683,6 +695,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "trm": self._trm_tracker.to_dict(),
             "seasonless": self._seasonless.to_dict(),
             "window_auto": self._window_auto.to_dict(),
+            "multi_lifecycle": _lifecycle.to_dict(self._multi_lifecycle),
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
             "enabled": self._enabled,
@@ -1180,6 +1193,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "unavailable",
             "unknown",
         )
+        # P2: fold the actuator's real run-state into the per-device lifecycle on a
+        # wall-clock basis, then derive the resolver's min-off / health gate. The
+        # lifecycle persists across restarts; this still actuates nothing.
+        _now_wall = dt_util.utcnow().timestamp()
+        _act_action = act_state.attributes.get("hvac_action") if act_state else None
+        self._multi_lifecycle = _lifecycle.observe(
+            self._multi_lifecycle,
+            conditioning=_act_action in ("heating", "cooling"),
+            mode=act_state.state if (act_state and _act_avail) else None,
+            now=_now_wall,
+            health=(
+                DeviceHealth.OK.value if _act_avail else DeviceHealth.UNAVAILABLE.value
+            ),
+        )
+        _multi_policy = _lifecycle.LifecyclePolicy()
+        _multi_runtime = _lifecycle.to_runtime(
+            self._multi_lifecycle, _now_wall, _multi_policy
+        )
         multi_shadow = evaluate_thermal_shadow(
             EntitySnapshot(
                 entity_id=self._actuator,
@@ -1188,6 +1219,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 available=_act_avail,
             ),
             ThermalDemand(_THERMAL_DIR.get(decision.mode), decision.target),
+            runtime=_multi_runtime,
         )
         # valve health (A3): a near-zero closing-step count means the motorised
         # valve failed calibration / is jammed — advisory diagnostic + repair issue.
@@ -1276,6 +1308,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "multi_reason": multi_shadow.reason,
             "multi_severity": multi_shadow.severity,
             "multi_blocked": list(multi_shadow.blocked),
+            "multi_min_off_remaining": round(
+                _lifecycle.min_off_remaining(
+                    self._multi_lifecycle, _now_wall, _multi_policy
+                )
+            ),
+            "multi_device_health": self._multi_lifecycle.health,
             "tpi_active": tpi.active,
             "tpi_duty": tpi.duty,
             "tpi_valve_percent": tpi.valve_percent,
