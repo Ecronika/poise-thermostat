@@ -71,6 +71,19 @@ def test_normal_count_demand_still_works() -> None:
     assert d.active is True and d.active_count == 1 and d.frost_override is False
 
 
+def test_frost_excluded_surfaces_cold_non_boiler_zones() -> None:
+    # review N-2: a freezing zone that does NOT control the boiler is surfaced so
+    # the hub can raise a repair issue; a boiler-controlling cold zone still fires.
+    requests = [
+        _zr(zone_id="ac_room", frost_active=True, controls_boiler=False),
+        _zr(zone_id="bath", frost_active=True, controls_boiler=True),
+        _zr(zone_id="warm", frost_active=False, controls_boiler=False),
+    ]
+    d = aggregate_boiler_demand(requests)
+    assert d.frost_excluded == ("ac_room",)
+    assert d.frost_zone_id == "bath"
+
+
 # --- P1/2.1: implausible-reading sensor-fault floor ------------------------
 
 
