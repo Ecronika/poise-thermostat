@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.96.0"
+VERSION: Final = "0.97.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -69,6 +69,13 @@ DEFAULT_SETBACK_DELTA: Final = 3.0
 # low so the room cools regardless of a mild outdoor temperature.
 DEFAULT_COOL_MIN_OUTDOOR_C: Final = 16.0
 DEFAULT_HEAT_MAX_OUTDOOR_C: Final = 22.0
+
+# Efficiency report (ADR-0045): an *estimate* from a configured annual figure,
+# not metered energy. Defaults are sane EU values; override per zone.
+CONF_ANNUAL_KWH: Final = "annual_heating_kwh"
+CONF_PRICE_EUR_KWH: Final = "price_eur_kwh"
+DEFAULT_ANNUAL_KWH: Final = 12000.0
+DEFAULT_PRICE_EUR_KWH: Final = 0.30
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30

@@ -20,6 +20,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ACTUATOR,
+    CONF_ANNUAL_KWH,
     CONF_BOILER_ACTIVATION_DELAY,
     CONF_BOILER_COUNT_THRESHOLD,
     CONF_BOILER_KEEPALIVE,
@@ -53,6 +54,7 @@ from .const import (
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
@@ -60,6 +62,7 @@ from .const import (
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    DEFAULT_ANNUAL_KWH,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
     DEFAULT_BOILER_KEEPALIVE_S,
@@ -72,6 +75,7 @@ from .const import (
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
+    DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
@@ -360,6 +364,20 @@ def _options_schema() -> vol.Schema:
             ),
             vol.Required(CONF_OPTIMAL_START): selector.BooleanSelector(),
             vol.Required(CONF_OPERATIVE_INPUT): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_ANNUAL_KWH, default=DEFAULT_ANNUAL_KWH
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=100000, step=100, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            vol.Optional(
+                CONF_PRICE_EUR_KWH, default=DEFAULT_PRICE_EUR_KWH
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=2, step=0.01, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
         }
     )
 

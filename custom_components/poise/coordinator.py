@@ -32,6 +32,7 @@ from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.virtual_mrt import virtual_mrt
 from .const import (
     CONF_ACTUATOR,
+    CONF_ANNUAL_KWH,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
@@ -48,16 +49,19 @@ from .const import (
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    DEFAULT_ANNUAL_KWH,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
+    DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
     DEVICE_MAX_C,
     DOMAIN,
@@ -76,11 +80,17 @@ from .control.cover_shading import (
     predict_peak_operative,
     shading_target_position,
 )
+from .control.hdh_savings import HdhConfig, HdhSavings
 from .control.mpc_shadow import evaluate_shadow
 from .control.optimal_start import (
     forecast_samples_from_response,
     mean_forecast_outdoor,
     plan_preheat,
+)
+from .control.outcome_scoring import (
+    OutcomeSession,
+    OutcomeStats,
+    observe_session,
 )
 from .control.override import (
     OverrideConfig,
@@ -242,6 +252,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comfort_base: float = float(
             data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
         )
+        # ADR-0044 outcome scoring + ADR-0045 efficiency report (diagnostic only)
+        self._outcome_stats = OutcomeStats()
+        self._outcome_session = OutcomeSession()
+        self._hdh = HdhSavings()
+        self._hdh_cfg = HdhConfig(
+            annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
+            price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
+        )
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
             data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
@@ -357,6 +375,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._multi_lifecycle = _lifecycle.from_dict(
                         data["multi_lifecycle"], now=dt_util.utcnow().timestamp()
                     )
+                if isinstance(data.get("outcome_stats"), dict):
+                    self._outcome_stats = OutcomeStats.from_dict(data["outcome_stats"])
+                if isinstance(data.get("hdh_savings"), dict):
+                    self._hdh = HdhSavings.from_dict(data["hdh_savings"])
                 self._window_bypass = bool(data.get("window_bypass", False))
                 try:
                     self._preset = OverrideMode(data.get("preset", "none"))
@@ -404,6 +426,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """
         data = {**entry.data, **entry.options}
         self._comfort_base = float(data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE))
+        self._hdh_cfg = HdhConfig(
+            annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
+            price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
+        )
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -714,6 +740,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "seasonless": self._seasonless.to_dict(),
             "window_auto": self._window_auto.to_dict(),
             "multi_lifecycle": _lifecycle.to_dict(self._multi_lifecycle),
+            "outcome_stats": self._outcome_stats.to_dict(),
+            "hdh_savings": self._hdh.to_dict(),
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
             "enabled": self._enabled,
@@ -1312,8 +1340,57 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             translation_key="valve_stuck",
             placeholders={"entity": self._valve_closing_steps or "—"},
         )
+        # ADR-0044 outcome scoring + ADR-0045 efficiency report (diagnostic only;
+        # never raises — a scoring slip must not break the control tick).
+        outcome_diag: dict[str, Any] = {
+            "outcome_last_score": None,
+            "outcome_ts_avg": None,
+            "outcome_obs_avg": None,
+            "outcome_n": 0,
+            "savings_kwh_month": 0.0,
+            "savings_eur_month": 0.0,
+            "savings_pct": 0.0,
+        }
+        try:
+            _tick_min = TICK_INTERVAL_S / 60.0
+            self._hdh = self._hdh.observe(
+                comfort=self._comfort_base,
+                setpoint=decision.heat_sp,
+                outdoor=t_out_eff,
+                dt_min=_tick_min,
+                now_month=dt_util.now().month,
+                cfg=self._hdh_cfg,
+            )
+            self._outcome_session, _fin = observe_session(
+                self._outcome_session,
+                temp=room,
+                target=decision.heat_sp,
+                heating=heating,
+                controlling=self._enabled,
+                dt_min=_tick_min,
+                expected_minutes=float(sched.minutes_to_comfort),
+                q_solar=q_solar,
+                outdoor=t_out_eff,
+            )
+            if _fin is not None:
+                self._outcome_stats = self._outcome_stats.observe(
+                    _fin.score, _fin.controller
+                )
+            _rep = self._hdh.report(self._hdh_cfg)
+            outcome_diag = {
+                "outcome_last_score": self._outcome_stats.last_score,
+                "outcome_ts_avg": self._outcome_stats.ts_avg,
+                "outcome_obs_avg": self._outcome_stats.obs_avg,
+                "outcome_n": self._outcome_stats.ts_n + self._outcome_stats.obs_n,
+                "savings_kwh_month": _rep["kwh"],
+                "savings_eur_month": _rep["eur"],
+                "savings_pct": _rep["pct"],
+            }
+        except Exception:  # noqa: BLE001 - diagnostics must never break control
+            _LOGGER.debug("Poise outcome/savings diagnostics failed", exc_info=True)
         return {
             "available": True,
+            **outcome_diag,
             # H3/ADR-0038: monotonic stamp of when this snapshot was produced, so
             # the system hub can detect a silently stale zone (age-based staleness).
             "mono_ts": now,
