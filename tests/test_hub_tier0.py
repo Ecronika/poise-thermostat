@@ -8,13 +8,13 @@ physical boiler stuck on.
 
 from __future__ import annotations
 
+from custom_components.poise.contracts import ZoneRequest
 from custom_components.poise.control.hub_aggregate import (
     BoilerState,
     aggregate_boiler_demand,
     step_boiler,
     zone_request_from_data,
 )
-from custom_components.poise.contracts import ZoneRequest
 
 
 def _zr(
