@@ -212,7 +212,9 @@
           "comfort_end": "Comfort window end",
           "setback_delta": "Night setback (K)",
           "optimal_start": "Optimal start (pre-heat)",
-          "operative_input": "Control operative temperature"
+          "operative_input": "Control operative temperature",
+          "annual_heating_kwh": "Annual heating energy (kWh) — for the savings estimate",
+          "price_eur_kwh": "Energy price (€/kWh) — for the savings estimate"
         }
       }
     }

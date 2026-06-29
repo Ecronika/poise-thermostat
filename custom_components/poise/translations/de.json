@@ -212,7 +212,9 @@
           "comfort_end": "Komfortfenster Ende",
           "setback_delta": "Nachtabsenkung (K)",
           "optimal_start": "Optimal-Start (Vorheizen)",
-          "operative_input": "Operative Temperatur regeln"
+          "operative_input": "Operative Temperatur regeln",
+          "annual_heating_kwh": "Jährliche Heizenergie (kWh) — für die Einsparungsschätzung",
+          "price_eur_kwh": "Energiepreis (€/kWh) — für die Einsparungsschätzung"
         }
       }
     }
