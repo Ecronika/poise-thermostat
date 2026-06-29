@@ -21,6 +21,7 @@ class PiShadow:
     active: bool
     setpoint: float | None = None
     offset: float | None = None
+    next_acc: float | None = None  # integrator the caller persists once per tick
 
 
 def evaluate_pi_shadow(
@@ -32,8 +33,17 @@ def evaluate_pi_shadow(
     external: float,
     dt_h: float = _NOMINAL_DT_H,
 ) -> PiShadow:
-    """Compute the shadow compensated setpoint; inactive on valve devices."""
+    """Compute the shadow compensated setpoint; inactive on valve devices.
+
+    Pure: does NOT mutate ``compensator`` (review P6/F-1). Returns the integrator
+    as ``next_acc``; the caller advances persisted state once per tick.
+    """
     if not applies:
         return PiShadow(active=False)
-    sp = compensator.compensate(target, room, external, dt_h)
-    return PiShadow(active=True, setpoint=round(sp, 2), offset=round(sp - target, 2))
+    sp, new_acc = compensator.evaluate(target, room, external, dt_h)
+    return PiShadow(
+        active=True,
+        setpoint=round(sp, 2),
+        offset=round(sp - target, 2),
+        next_acc=new_acc,
+    )

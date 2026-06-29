@@ -33,6 +33,30 @@ class PiCompensator:
         self._offset_max = offset_max
         self._acc = 0.0
 
+    def evaluate(
+        self,
+        target: float,
+        room: float,
+        external: float,
+        dt_h: float = _NOMINAL_DT_H,
+    ) -> tuple[float, float]:
+        """Pure: return ``(compensated_setpoint, new_acc)`` WITHOUT mutating state.
+
+        The integrator value is returned, not stored, so a *shadow* evaluation has
+        no side effect on the persisted integrator (review P6/F-1); the caller
+        persists ``new_acc`` once per tick. ``external`` is the **outdoor**
+        temperature for the feed-forward term — passing ``room`` kills the
+        ``k_ext`` term, which is its whole purpose.
+        """
+        error = target - room
+        new_acc = self._acc + error * dt_h
+        # anti-windup: cap the integral so ki·acc stays within +-offset_max
+        if self._ki > 0.0:
+            acc_limit = self._offset_max / self._ki
+            new_acc = _clamp(new_acc, -acc_limit, acc_limit)
+        offset = self._kp * error + self._ki * new_acc + self._k_ext * (room - external)
+        return target + _clamp(offset, -self._offset_max, self._offset_max), new_acc
+
     def compensate(
         self,
         target: float,
@@ -40,17 +64,17 @@ class PiCompensator:
         external: float,
         dt_h: float = _NOMINAL_DT_H,
     ) -> float:
-        """Return the compensated setpoint to push to the TRV (``dt_h`` in hours)."""
-        error = target - room
-        self._acc += error * dt_h
-        # anti-windup: cap the integral so ki·acc stays within +-offset_max
-        if self._ki > 0.0:
-            acc_limit = self._offset_max / self._ki
-            self._acc = _clamp(self._acc, -acc_limit, acc_limit)
-        offset = (
-            self._kp * error + self._ki * self._acc + self._k_ext * (room - external)
-        )
-        return target + _clamp(offset, -self._offset_max, self._offset_max)
+        """Compensated setpoint for the live path; advances the integrator."""
+        setpoint, self._acc = self.evaluate(target, room, external, dt_h)
+        return setpoint
+
+    @property
+    def acc(self) -> float:
+        return self._acc
+
+    @acc.setter
+    def acc(self, value: float) -> None:
+        self._acc = value
 
     def reset(self) -> None:
         self._acc = 0.0

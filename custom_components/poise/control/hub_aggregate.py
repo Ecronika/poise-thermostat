@@ -21,8 +21,23 @@ def _clamp01(value: float) -> float:
     return min(max(value, 0.0), 1.0)
 
 
+def _num(value: Any) -> float | None:
+    """Coerce to float; None on a non-numeric value (e.g. an ``"unavailable"``
+    string HA commonly publishes) — a bad reading must never abort the whole
+    ZoneRequest build / hub tick (review C-3ctrl).
+    """
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 # a room at or just above the frost floor is in the anti-freeze regime
 _FROST_MARGIN_C = 0.5
+# below this, a "cold" reading is treated as a sensor fault, not real frost — a
+# broken sensor (e.g. -50 °C) must not be able to pin the shared boiler on
+# (review P1/2.1). Real indoor/garage temperatures stay well above this.
+_FROST_PLAUSIBLE_MIN_C = -20.0
 
 
 def zone_request_from_data(
@@ -48,12 +63,15 @@ def zone_request_from_data(
     """
     heating = bool(data.get("heating"))
     cause = str(data.get("binding_lower_cause") or "").lower()
-    duty = data.get("tpi_duty")
-    heat_demand = float(duty) if duty is not None else (1.0 if heating else 0.0)
-    room = data.get("current_temperature")
-    sp = data.get("heat_sp")
-    gap = (float(sp) - float(room)) if room is not None and sp is not None else 0.0
-    frost_active = room is not None and float(room) <= FROST_FLOOR_C + _FROST_MARGIN_C
+    duty = _num(data.get("tpi_duty"))
+    heat_demand = duty if duty is not None else (1.0 if heating else 0.0)
+    room = _num(data.get("current_temperature"))
+    sp = _num(data.get("heat_sp"))
+    gap = (sp - room) if room is not None and sp is not None else 0.0
+    frost_active = (
+        room is not None
+        and _FROST_PLAUSIBLE_MIN_C <= room <= FROST_FLOOR_C + _FROST_MARGIN_C
+    )
     health_active = "mould" in cause or "schimmel" in cause or "mold" in cause
     return ZoneRequest(
         zone_id=zone_id,
@@ -80,6 +98,7 @@ class BoilerDemand:
     active_count: int
     weighted_demand: float
     frost_override: bool
+    frost_zone_id: str | None = None  # which zone forced frost (review P1/2.1)
 
 
 def aggregate_boiler_demand(
@@ -103,9 +122,18 @@ def aggregate_boiler_demand(
     calling = [r for r in participating if r.heating]
     active_count = len(calling)
     weighted = sum((r.declared_power or 0.0) * _clamp01(r.heat_demand) for r in calling)
-    # frost safety considers ALL zones, not just opt-in ones: a freezing room
-    # must be able to fire a shared boiler even if mis-configured (ADR-0039).
-    frost_override = any(r.frost_active for r in requests)
+    # Frost safety fires the shared boiler — but only for a zone the boiler
+    # actually serves (``controls_boiler``) AND only on a *plausible* cold
+    # reading (the sensor-fault floor is applied in ``zone_request_from_data``).
+    # A cooling-only zone or a broken sensor can no longer pin the boiler on; the
+    # triggering zone is surfaced for diagnostics (review P1/2.1). A boiler-heated
+    # room mis-configured as NOT controlling the boiler is a config error —
+    # surfaced via config validation / a repair issue, not by silently firing the
+    # shared boiler from every cold sensor in the house (was: any zone, ADR-0039).
+    frost_zone_id = next(
+        (r.zone_id for r in requests if r.frost_active and r.controls_boiler), None
+    )
+    frost_override = frost_zone_id is not None
     by_count = active_count >= count_threshold
     by_power = power_threshold is not None and weighted >= power_threshold
     return BoilerDemand(
@@ -113,6 +141,7 @@ def aggregate_boiler_demand(
         active_count=active_count,
         weighted_demand=round(weighted, 3),
         frost_override=frost_override,
+        frost_zone_id=frost_zone_id,
     )
 
 
@@ -321,11 +350,10 @@ def step_boiler(
             ),
             "on" if target else "off",
         )
-    if (
-        state.on
-        and keepalive_s > 0.0
-        and (now_mono - state.last_keepalive_mono) >= keepalive_s
-    ):
+    if keepalive_s > 0.0 and (now_mono - state.last_keepalive_mono) >= keepalive_s:
+        # Re-assert the CURRENT state periodically so a dropped service call
+        # self-heals. Symmetric for OFF too: a missed off-call (review 2.3) can
+        # never leave the physical boiler stuck on (set keepalive_s=0 to disable).
         return BoilerStep(
             BoilerState(
                 on=state.on,
@@ -333,7 +361,7 @@ def step_boiler(
                 demand_true_since=demand_true_since,
                 last_keepalive_mono=now_mono,
             ),
-            "on",
+            "on" if state.on else "off",
         )
     return BoilerStep(
         BoilerState(
