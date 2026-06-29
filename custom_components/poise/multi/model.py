@@ -19,7 +19,7 @@ from .reason import ReasonCode
 class Axis(Enum):
     THERMAL = "thermal"
     AIR_MOVEMENT = "air_movement"
-    VENTILATION = "ventilation"
+    VENTILATION = "ventilation"  # reserved non-goal; not inventoried (ADR-0048)
     HUMIDITY = "humidity"
 
 
@@ -32,7 +32,7 @@ class Direction(Enum):
     BALANCED = "balanced"
     RECIRCULATE = "recirculate"
     DRY = "dry"
-    HUMIDIFY = "humidify"
+    HUMIDIFY = "humidify"  # inventory-only; never actuated (ADR-0048)
 
 
 class DeviceMode(Enum):
