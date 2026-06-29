@@ -99,6 +99,7 @@ class BoilerDemand:
     weighted_demand: float
     frost_override: bool
     frost_zone_id: str | None = None  # which zone forced frost (review P1/2.1)
+    frost_excluded: tuple[str, ...] = ()  # frost-active zones NOT controls_boiler (N-2)
 
 
 def aggregate_boiler_demand(
@@ -134,6 +135,13 @@ def aggregate_boiler_demand(
         (r.zone_id for r in requests if r.frost_active and r.controls_boiler), None
     )
     frost_override = frost_zone_id is not None
+    # A freezing zone that does NOT control the boiler is excluded from firing it
+    # (review P1/2.1) — surfaced so the hub can raise a repair issue (N-2): the user
+    # may have a boiler-heated room they forgot to mark ``controls_boiler``, which
+    # otherwise silently loses shared-boiler frost protection.
+    frost_excluded = tuple(
+        r.zone_id for r in requests if r.frost_active and not r.controls_boiler
+    )
     by_count = active_count >= count_threshold
     by_power = power_threshold is not None and weighted >= power_threshold
     return BoilerDemand(
@@ -142,6 +150,7 @@ def aggregate_boiler_demand(
         weighted_demand=round(weighted, 3),
         frost_override=frost_override,
         frost_zone_id=frost_zone_id,
+        frost_excluded=frost_excluded,
     )
 
 
