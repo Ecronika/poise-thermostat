@@ -57,7 +57,7 @@ jobs:
       - name: Guard — integration suite actually collected tests (no silent skip)
         run: |
           # match the real run's options so async tests are actually collected
-          N=$(pytest tests/integration -o asyncio_mode=auto --co -q 2>/dev/null \
+          N=$(pytest tests/integration -o asyncio_mode=auto --co 2>/dev/null \
                 | grep -cE '::' || true)
           echo "integration tests collected: $N"
           if [ "$N" -eq 0 ]; then
