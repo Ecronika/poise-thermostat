@@ -1223,9 +1223,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # P2: fold the actuator's run-state into the per-device lifecycle on a
             # wall-clock basis, then derive the resolver's min-off / health gate.
             _now_wall = dt_util.utcnow().timestamp()
-            _act_action = (
-                act_state.attributes.get("hvac_action") if act_state else None
-            )
+            _act_action = act_state.attributes.get("hvac_action") if act_state else None
             self._multi_lifecycle = _lifecycle.observe(
                 self._multi_lifecycle,
                 conditioning=_act_action in ("heating", "cooling"),
