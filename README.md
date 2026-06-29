@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.96.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.97.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -45,6 +45,18 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
 - **Multi-zone resource coordination** — via the *Poise System* hub (ADR-0038/0039): boiler-demand aggregate + opt-in boiler actuation, plus **load-shedding, compressor-group protection and a flow-temperature allocator computed as diagnostic shadows** (smallest-gap shedding, per-group min-run/off, highest-request-wins flow with anti-hunt hysteresis — the last harness-validated against oscillation, ADR-0013). Zone-side / generator-side enforcement is the next stage.
 - **Efficiency report** — heating-degree-hour savings in kWh / €.
+
+## Scope & Non-Goals
+
+Poise controls heating/cooling **setpoints** and protects against **surface condensation / mould** (building physics). To stay honest and publishable, it explicitly does **not**:
+
+1. **Maintain mechanical-ventilation / AC hygiene** — no VDI 6022 filter, maintenance or cleaning monitoring, and no operation-block on overdue hygiene. Poise owns no air-handling hardware.
+2. **Manage CO₂-based or burst ("Stoßlüften") ventilation, nor size/rate ventilation.** Poise *displays* CO₂ for awareness but never acts on it; CO₂ → fresh air belongs in a dedicated ventilation device or a separate HA automation (the standard `air_quality` trigger → `fan` pattern).
+3. **Actively humidify.** An AC / heat pump / TRV can only *remove* moisture (cooling / `dry`), never add it — raising humidity needs a separate appliance, which HA models as its own `humidifier` domain. Poise only **lowers** humidity.
+
+Poise's mould protection (`mold.py`, surface-RH / condensation per **DIN 4108-2 / EN ISO 13788**) is **building physics** and stays — it is **not** a substitute for **VDI 6022** ventilation-system hygiene.
+
+**Monitoring vs. control.** Poise may *read and display* any indoor-environment metric (temperature, humidity, CO₂) and may *nudge* you (e.g. "CO₂ high — open a window"); it only *acts* on quantities it can move with the actuators it owns: setpoint / heat / cool, and humidity *downward* via cooling / `dry`. CO₂ and active humidification are monitor / inform-only. (ADR-0048)
 
 ## Status
 
