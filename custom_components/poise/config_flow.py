@@ -407,12 +407,24 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
         schema = _system_schema() if is_system else _schema()
         if user_input is not None:
-            updates = (
-                {CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input}
-                if is_system
-                else user_input
+            if is_system:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
+                )
+            # 1.1/1.2: the actuator is a zone's unique_id. Re-validate on
+            # reconfigure so a changed actuator can't silently collide with
+            # another zone's entry, and keep this entry's unique_id tracking it.
+            await self.async_set_unique_id(user_input[CONF_ACTUATOR])
+            for other in self._async_current_entries():
+                if (
+                    other.entry_id != entry.entry_id
+                    and other.unique_id == self.unique_id
+                ):
+                    return self.async_abort(reason="already_configured")
+            return self.async_update_reload_and_abort(
+                entry, unique_id=self.unique_id, data_updates=user_input
             )
-            return self.async_update_reload_and_abort(entry, data_updates=updates)
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(schema, entry.data),

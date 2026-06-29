@@ -26,7 +26,7 @@ from . import actuator as actuator_mod
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
-from .comfort.mold import mold_min_air_temperature
+from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.virtual_mrt import virtual_mrt
@@ -178,8 +178,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=TICK_INTERVAL_S),
-            # skip redundant entity notifications when a tick's data is unchanged
-            always_update=False,
+            # H-5: the snapshot carries a per-tick monotonic heartbeat ("mono_ts",
+            # ADR-0038 hub staleness) that necessarily differs every tick, so the
+            # data is never equal tick-to-tick -- always_update=False could never
+            # skip and was a no-op. Be honest: every tick is a genuinely new state.
+            # (Refresh storms from input churn are cut by the _on_change filter, H-1.)
+            always_update=True,
         )
         self._clock = MonotonicClock()
         self._ekf = ThermalEKF()
@@ -439,7 +443,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
         watched = [e for e in (self._temp, self._window, self._actuator) if e]
 
-        async def _on_change(_event: Event) -> None:
+        async def _on_change(event: Event) -> None:
+            # H-1: skip pure attribute churn. A watched entity may emit many
+            # state-change events per tick while the value Poise reacts to is
+            # unchanged; refresh only on a real change (the state itself, or --
+            # for the actuator -- its hvac_action attribute).
+            new = event.data.get("new_state")
+            if new is None:
+                return
+            old = event.data.get("old_state")
+            if old is not None and old.state == new.state:
+                old_action = old.attributes.get("hvac_action")
+                new_action = new.attributes.get("hvac_action")
+                is_actuator = event.data.get("entity_id") == self._actuator
+                if not (is_actuator and old_action != new_action):
+                    return
             await self.async_request_refresh()
 
         entry.async_on_unload(
@@ -877,12 +895,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
         # mould floor + dewpoint cap from humidity
         mold_min = None
+        mold_capped = False
         dewpoint = None
         if rh is not None:
             dewpoint = psychro_dewpoint(room, rh)
             # C8: keep a (conservative) mould floor even without an outdoor sensor
             # by using the effective outdoor proxy instead of skipping it.
-            mold_min = mold_min_air_temperature(t_out_eff, rh, room)
+            # F15: surface when the required floor is clipped at 24 °C -- the room
+            # really needs dehumidification there, so protection is insufficient.
+            mold_min, mold_capped = mold_min_air_temperature_detail(
+                t_out_eff, rh, room
+            )
 
         # schedule: night setback + optimal-start preheat (ADR-0025).
         # Resolve the forecast outdoor (I/O) here, then let the pure planner
@@ -1333,6 +1356,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "cover_shade_reason": _cover_reason,
             "window_auto_slope": self._window_auto.ema_slope,
             "heating_failure": failed,
+            "mold_capped": mold_capped,  # F15: mould floor clipped at 24 °C
             "source": reading.source.value,
             "tau_hours": round(self._ekf.tau_hours, 1),
             "confidence": round(self._ekf.confidence, 2),

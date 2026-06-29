@@ -15,12 +15,14 @@ diagnostics; zone-side enforcement is a later stage.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .clock import MonotonicClock
@@ -73,6 +75,7 @@ from .control.hub_aggregate import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+_BOILER_CALL_TIMEOUT_S = 10.0  # a hung boiler service must not stall the hub (N-1)
 
 
 class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
@@ -122,6 +125,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         )
         self._flow_current: float | None = None
         self._default_source = str(d.get(CONF_DEFAULT_SOURCE, DEFAULT_HEAT_SOURCE))
+        self._active_issues: set[str] = set()
 
     def _collect_requests(self) -> list[ZoneRequest]:
         now = self._clock.monotonic()
@@ -222,15 +226,20 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
 
     async def _call(self, action: ServiceAction) -> bool:
         # blocking=True so a failed boiler action is observable synchronously
-        # (review 2.3): the caller keeps the old state on failure and retries.
+        # (review 2.3); wrapped in a timeout so a hung boiler integration cannot
+        # stall the whole hub tick (review N-1). A timeout/error counts as failure
+        # -> the caller keeps the old state and retries next tick.
         try:
-            await self.hass.services.async_call(
-                action.domain, action.service, dict(action.data), blocking=True
-            )
+            async with asyncio.timeout(_BOILER_CALL_TIMEOUT_S):
+                await self.hass.services.async_call(
+                    action.domain, action.service, dict(action.data), blocking=True
+                )
             return True
         except Exception:
             _LOGGER.exception(
-                "Poise boiler action failed: %s.%s", action.domain, action.service
+                "Poise boiler action failed/timed out: %s.%s",
+                action.domain,
+                action.service,
             )
             return False
 
@@ -254,6 +263,33 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             await self._call(self._action_on)
         self._boiler = step.state
 
+    def _zone_name(self, zone_id: str) -> str:
+        entry = self.hass.config_entries.async_get_entry(zone_id)
+        return entry.title if entry is not None else zone_id
+
+    def _update_frost_issues(self, excluded: tuple[str, ...]) -> None:
+        """N-2 (ADR-0039 Korrektur #3): a freezing zone that does not control the
+        boiler silently loses shared-boiler frost protection. Surface it as a
+        repair issue so the config error is visible; cleared when none remain.
+        """
+        issue_id = "frost_zone_not_controlling_boiler"
+        if excluded:
+            self._active_issues.add(issue_id)
+            ir.async_create_issue(  # idempotent; refreshes the zone list each tick
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="frost_zone_not_boiler",
+                translation_placeholders={
+                    "zones": ", ".join(self._zone_name(z) for z in excluded)
+                },
+            )
+        elif issue_id in self._active_issues:
+            self._active_issues.discard(issue_id)
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
     async def _async_update_data(self) -> dict[str, Any]:
         now = self._clock.monotonic()
         requests = self._collect_requests()
@@ -262,6 +298,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             count_threshold=self._count_threshold,
             power_threshold=self._power_threshold,
         )
+        self._update_frost_issues(demand.frost_excluded)
         if self._actuation:
             await self._actuate(demand.active, now)
         return {
@@ -270,6 +307,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             "weighted_demand": demand.weighted_demand,
             "frost_override": demand.frost_override,
             "frost_zone": demand.frost_zone_id,  # which zone forced frost (P1/2.1)
+            "frost_excluded": list(demand.frost_excluded),  # cold non-boiler zones (N-2)
             "zone_count": len(requests),
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),
             "actuation_enabled": self._actuation,
