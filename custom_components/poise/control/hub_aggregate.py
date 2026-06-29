@@ -27,7 +27,7 @@ def _num(value: Any) -> float | None:
     ZoneRequest build / hub tick (review C-3ctrl).
     """
     try:
-        return float(value)  # type: ignore[arg-type]
+        return float(value)
     except (TypeError, ValueError):
         return None
 
