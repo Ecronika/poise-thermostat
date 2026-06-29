@@ -23,6 +23,13 @@ REDACT_KEYS = frozenset(
         "weather_entity",
         "irradiance_sensor",
         "trv_external_temp_input",
+        # system-entry config: action specs + power-sensor ids + group label
+        # (review P4/1.3-1.4 — hygiene, not secrets, but should not leak setup)
+        "boiler_on_action",
+        "boiler_off_action",
+        "max_power_sensor",
+        "current_power_sensor",
+        "compressor_group",
     }
 )
 

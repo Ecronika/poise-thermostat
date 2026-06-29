@@ -142,7 +142,11 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             # coordinator still "succeeds" — a silently hung update loop must not
             # call for heat forever. Both stamps use the process monotonic clock.
             zmono = data.get("mono_ts")
-            if zmono is not None and (now - float(zmono)) > HUB_ZONE_STALE_AFTER_S:
+            # review 2.2: a MISSING stamp is fail-CLOSED — treat the zone as stale
+            # and drop it, instead of stamping it "now" (eternally fresh), which
+            # would let a silently hung / version-mismatched zone call for heat
+            # forever (the very failure this age check exists to prevent).
+            if zmono is None or (now - float(zmono)) > HUB_ZONE_STALE_AFTER_S:
                 continue
             dp = e.data.get(CONF_DECLARED_POWER)
             out.append(
@@ -156,7 +160,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
                         float(ft) if (ft := e.data.get(CONF_FLOW_TEMP)) else None
                     ),
                     source_pref=e.data.get(CONF_SOURCE_POLICY),
-                    mono_ts=float(zmono) if zmono is not None else now,
+                    mono_ts=float(zmono),  # guaranteed present by the guard above
                 )
             )
         return out
@@ -216,15 +220,19 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             ),
         }
 
-    async def _call(self, action: ServiceAction) -> None:
+    async def _call(self, action: ServiceAction) -> bool:
+        # blocking=True so a failed boiler action is observable synchronously
+        # (review 2.3): the caller keeps the old state on failure and retries.
         try:
             await self.hass.services.async_call(
-                action.domain, action.service, dict(action.data), blocking=False
+                action.domain, action.service, dict(action.data), blocking=True
             )
+            return True
         except Exception:
             _LOGGER.exception(
                 "Poise boiler action failed: %s.%s", action.domain, action.service
             )
+            return False
 
     async def _actuate(self, demand_active: bool, now: float) -> None:
         step = step_boiler(
@@ -236,11 +244,15 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             min_off_s=self._min_off,
             keepalive_s=self._keepalive,
         )
-        self._boiler = step.state
-        if step.call == "on" and self._action_on is not None:
+        # Safety (review 2.3): never record the boiler OFF internally while it may
+        # still be physically on. If the OFF call fails, keep the previous state so
+        # the next tick re-issues OFF (the keep-alive also re-asserts it).
+        if step.call == "off" and self._action_off is not None:
+            if not await self._call(self._action_off):
+                return
+        elif step.call == "on" and self._action_on is not None:
             await self._call(self._action_on)
-        elif step.call == "off" and self._action_off is not None:
-            await self._call(self._action_off)
+        self._boiler = step.state
 
     async def _async_update_data(self) -> dict[str, Any]:
         now = self._clock.monotonic()
@@ -257,6 +269,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             "active_zones": demand.active_count,
             "weighted_demand": demand.weighted_demand,
             "frost_override": demand.frost_override,
+            "frost_zone": demand.frost_zone_id,  # which zone forced frost (P1/2.1)
             "zone_count": len(requests),
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),
             "actuation_enabled": self._actuation,

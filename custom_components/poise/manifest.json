@@ -4,11 +4,11 @@
   "after_dependencies": ["weather", "recorder"],
   "codeowners": ["@Ecronika"],
   "config_flow": true,
-  "dependencies": ["frontend", "http"],
+  "dependencies": ["frontend", "http", "websocket_api"],
   "documentation": "https://github.com/Ecronika/poise-thermostat",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/Ecronika/poise-thermostat/issues",
   "requirements": [],
-  "version": "0.92.0"
+  "version": "0.94.0"
 }

@@ -1130,97 +1130,155 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # Predictive solar-shading shadow (ADR-0043): forecast the peak operative
         # temperature (Tier-2 linear while the EKF is not identified, e.g. summer)
         # and what a cover *would* do — diagnostic only, no cover is moved yet.
-        _cm = self._ekf.get_model()
-        _cover_peak = predict_peak_operative(
-            operative,
-            t_out_eff,
-            [q_solar] * 36,
-            alpha=_cm.alpha,
-            beta_s=_cm.beta_s,
-            dt_h=5.0 / 60.0,
-            confident=self._ekf.identified and self._ekf.temperature_std < 0.5,
-        )
-        _cover_pos, _cover_reason = shading_target_position(
-            peak=_cover_peak,
-            t_upper=decision.cool_sp,
-            current_position=0.0,
-            oriented_q=q_solar,
-        )
-        binding = "mold" if mold_min and mold_min >= decision.heat_sp else "en16798"
-
-        # Phase-4 Stufe 1 (ADR-0033): shadow MPC — compute what the predictive
-        # controller *would* command against the live EKF state, report only,
-        # never actuate. Dormant until the EKF identifies (heating season).
-        shadow = evaluate_shadow(
-            identified=self._ekf.identified,
-            t_air=room,
-            t_out=t_out_eff,
-            t_rm=t_rm_eff,
-            tau_hours=self._ekf.tau_hours,
-            model=self._ekf.get_model(),
-            prediction_std=self._ekf.temperature_std,
-            confidence=self._ekf.confidence,
-            target=decision.heat_sp,
-            lower=decision.heat_sp,
-            upper=decision.cool_sp,
-        )
-        # shadow direct-valve TPI duty (ADR-0036): computed + reported, never
-        # written; active once a writable valve-open entity is detected.
-        tpi = evaluate_tpi_shadow(
-            valve_available=self._valve_entity is not None,
-            model=self._ekf.get_model(),
-            target=decision.heat_sp,
-            room=room,
-            t_out=t_out_eff,
-        )
-        # PI-compensated setpoint shadow (ADR-0037): only for setpoint-only devices
-        # (no writable valve — complementary to the TPI shadow); reported, never
-        # written. external == room sensor (Poise's sensing).
-        pi = evaluate_pi_shadow(
-            self._pi,
-            applies=self._valve_entity is None,
-            target=decision.heat_sp,
-            room=room,
-            external=room,
-            dt_h=TICK_INTERVAL_S / 3600.0,
-        )
-        # Phase-1 thermal-arbitration shadow (ADR-0046): run the multi-actuator
-        # pipeline against the single actuator as a transient ZoneDevice; report
-        # the source Poise *would* drive + the reason, never actuate (single-active
-        # today, the seam is live for TRV+AC arbitration in P3).
-        _act_modes = (act_state.attributes.get("hvac_modes") or []) if act_state else []
-        _act_avail = act_state is not None and act_state.state not in (
-            "unavailable",
-            "unknown",
-        )
-        # P2: fold the actuator's real run-state into the per-device lifecycle on a
-        # wall-clock basis, then derive the resolver's min-off / health gate. The
-        # lifecycle persists across restarts; this still actuates nothing.
-        _now_wall = dt_util.utcnow().timestamp()
-        _act_action = act_state.attributes.get("hvac_action") if act_state else None
-        self._multi_lifecycle = _lifecycle.observe(
-            self._multi_lifecycle,
-            conditioning=_act_action in ("heating", "cooling"),
-            mode=act_state.state if (act_state and _act_avail) else None,
-            now=_now_wall,
-            health=(
-                DeviceHealth.OK.value if _act_avail else DeviceHealth.UNAVAILABLE.value
-            ),
-        )
-        _multi_policy = _lifecycle.LifecyclePolicy()
-        _multi_runtime = _lifecycle.to_runtime(
-            self._multi_lifecycle, _now_wall, _multi_policy
-        )
-        multi_shadow = evaluate_thermal_shadow(
-            EntitySnapshot(
-                entity_id=self._actuator,
-                domain="climate",
-                hvac_modes=tuple(str(m) for m in _act_modes),
-                available=_act_avail,
-            ),
-            ThermalDemand(_THERMAL_DIR.get(decision.mode), decision.target),
-            runtime=_multi_runtime,
-        )
+        # --- Diagnostics-only shadows (review P2/R-4) -----------------------
+        # The setpoint is already written above. A failure in any predictive
+        # shadow (e.g. a degenerate value from a not-yet-identified EKF) must
+        # NEVER take control reporting offline — so the whole block is guarded and
+        # degrades to neutral diagnostics while the written setpoint stands.
+        binding = "en16798"
+        _cover_peak = operative
+        _cover_pos = 0.0
+        _cover_reason = ""
+        shadow_objs: dict[str, Any] = {
+            "pi_active": False,
+            "pi_setpoint": None,
+            "pi_offset": None,
+            "multi_active_source": None,
+            "multi_reason": "shadow_error",
+            "multi_severity": "info",
+            "multi_blocked": [],
+            "multi_min_off_remaining": 0,
+            "multi_device_health": self._multi_lifecycle.health,
+            "tpi_active": False,
+            "tpi_duty": None,
+            "tpi_valve_percent": None,
+            "mpc_active": False,
+            "mpc_power": None,
+            "mpc_weight": None,
+            "mpc_setpoint": None,
+            "mpc_regime": "hold",
+        }
+        try:
+            _cm = self._ekf.get_model()
+            _cover_peak = predict_peak_operative(
+                operative,
+                t_out_eff,
+                [q_solar] * 36,
+                alpha=_cm.alpha,
+                beta_s=_cm.beta_s,
+                dt_h=5.0 / 60.0,
+                confident=self._ekf.identified and self._ekf.temperature_std < 0.5,
+            )
+            _cover_pos, _cover_reason = shading_target_position(
+                peak=_cover_peak,
+                t_upper=decision.cool_sp,
+                current_position=0.0,
+                oriented_q=q_solar,
+            )
+            binding = "mold" if mold_min and mold_min >= decision.heat_sp else "en16798"
+            # shadow MPC (ADR-0033): what the predictive controller *would* command
+            # against the live EKF state; reported only, dormant until identified.
+            shadow = evaluate_shadow(
+                identified=self._ekf.identified,
+                t_air=room,
+                t_out=t_out_eff,
+                t_rm=t_rm_eff,
+                tau_hours=self._ekf.tau_hours,
+                model=self._ekf.get_model(),
+                prediction_std=self._ekf.temperature_std,
+                confidence=self._ekf.confidence,
+                target=decision.heat_sp,
+                lower=decision.heat_sp,
+                upper=decision.cool_sp,
+            )
+            # shadow direct-valve TPI duty (ADR-0036): computed + reported only.
+            tpi = evaluate_tpi_shadow(
+                valve_available=self._valve_entity is not None,
+                model=self._ekf.get_model(),
+                target=decision.heat_sp,
+                room=room,
+                t_out=t_out_eff,
+            )
+            # PI-compensated setpoint shadow (ADR-0037): setpoint-only devices.
+            pi = evaluate_pi_shadow(
+                self._pi,
+                applies=self._valve_entity is None,
+                target=decision.heat_sp,
+                room=room,
+                external=t_out_eff,  # real outdoor temp (review F-1: external==room
+                dt_h=TICK_INTERVAL_S / 3600.0,  # killed the k_ext feed-forward term)
+            )
+            # F-1: the shadow is pure now — advance the persisted integrator here,
+            # exactly once per tick, instead of as a hidden side effect of the read.
+            if pi.next_acc is not None:
+                self._pi.acc = pi.next_acc
+            # Phase-1/2 thermal-arbitration shadow (ADR-0046): transient ZoneDevice.
+            _act_modes = (
+                (act_state.attributes.get("hvac_modes") or []) if act_state else []
+            )
+            _act_avail = act_state is not None and act_state.state not in (
+                "unavailable",
+                "unknown",
+            )
+            # P2: fold the actuator's run-state into the per-device lifecycle on a
+            # wall-clock basis, then derive the resolver's min-off / health gate.
+            _now_wall = dt_util.utcnow().timestamp()
+            _act_action = (
+                act_state.attributes.get("hvac_action") if act_state else None
+            )
+            self._multi_lifecycle = _lifecycle.observe(
+                self._multi_lifecycle,
+                conditioning=_act_action in ("heating", "cooling"),
+                mode=act_state.state if (act_state and _act_avail) else None,
+                now=_now_wall,
+                health=(
+                    DeviceHealth.OK.value
+                    if _act_avail
+                    else DeviceHealth.UNAVAILABLE.value
+                ),
+            )
+            _multi_policy = _lifecycle.LifecyclePolicy()
+            _multi_runtime = _lifecycle.to_runtime(
+                self._multi_lifecycle, _now_wall, _multi_policy
+            )
+            multi_shadow = evaluate_thermal_shadow(
+                EntitySnapshot(
+                    entity_id=self._actuator,
+                    domain="climate",
+                    hvac_modes=tuple(str(m) for m in _act_modes),
+                    available=_act_avail,
+                ),
+                ThermalDemand(_THERMAL_DIR.get(decision.mode), decision.target),
+                runtime=_multi_runtime,
+            )
+            shadow_objs = {
+                "pi_active": pi.active,
+                "pi_setpoint": pi.setpoint,
+                "pi_offset": pi.offset,
+                "multi_active_source": multi_shadow.active_source,
+                "multi_reason": multi_shadow.reason,
+                "multi_severity": multi_shadow.severity,
+                "multi_blocked": list(multi_shadow.blocked),
+                "multi_min_off_remaining": round(
+                    _lifecycle.min_off_remaining(
+                        self._multi_lifecycle, _now_wall, _multi_policy
+                    )
+                ),
+                "multi_device_health": self._multi_lifecycle.health,
+                "tpi_active": tpi.active,
+                "tpi_duty": tpi.duty,
+                "tpi_valve_percent": tpi.valve_percent,
+                "mpc_active": shadow.active,
+                "mpc_power": shadow.power,
+                "mpc_weight": shadow.weight,
+                "mpc_setpoint": shadow.setpoint,
+                "mpc_regime": shadow.regime,
+            }
+        except Exception:  # noqa: BLE001 - diagnostics must never break control
+            _LOGGER.exception(
+                "Poise: shadow evaluation failed; the written setpoint stands, "
+                "diagnostics degraded this tick"
+            )
         # valve health (A3): a near-zero closing-step count means the motorised
         # valve failed calibration / is jammed — advisory diagnostic + repair issue.
         closing_steps = self._read(self._valve_closing_steps)
@@ -1301,28 +1359,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "valve_health": valve_health,
             "valve_closing_steps": closing_steps,
             "valve_idle_steps": idle_steps,
-            "pi_active": pi.active,
-            "pi_setpoint": pi.setpoint,
-            "pi_offset": pi.offset,
-            "multi_active_source": multi_shadow.active_source,
-            "multi_reason": multi_shadow.reason,
-            "multi_severity": multi_shadow.severity,
-            "multi_blocked": list(multi_shadow.blocked),
-            "multi_min_off_remaining": round(
-                _lifecycle.min_off_remaining(
-                    self._multi_lifecycle, _now_wall, _multi_policy
-                )
-            ),
-            "multi_device_health": self._multi_lifecycle.health,
-            "tpi_active": tpi.active,
-            "tpi_duty": tpi.duty,
-            "tpi_valve_percent": tpi.valve_percent,
+            **shadow_objs,
             "tpi_valve_entity": self._valve_entity,
-            "mpc_active": shadow.active,
-            "mpc_power": shadow.power,
-            "mpc_weight": shadow.weight,
-            "mpc_setpoint": shadow.setpoint,
-            "mpc_regime": shadow.regime,
             "seasonless_phase": self._seasonless.phase,
             "seasonless_rate": (
                 round(p, 3)
