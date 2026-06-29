@@ -1,8 +1,11 @@
 {
   "name": "poise-card",
-  "version": "0.92.0",
+  "version": "0.94.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
   "scripts": {
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
