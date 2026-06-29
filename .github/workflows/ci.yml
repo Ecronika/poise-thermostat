@@ -56,8 +56,15 @@ jobs:
         run: pip install -r requirements-test.txt
       - name: Guard — integration suite actually collected tests (no silent skip)
         run: |
-          pytest tests/integration --co -q 2>/dev/null | grep -qE '::' \
-            || { echo "::error::tests/integration collected 0 tests — HA import failed or the whole dir was skipped; the glue suite must actually run on this Python/HA"; exit 1; }
+          # match the real run's options so async tests are actually collected
+          N=$(pytest tests/integration -o asyncio_mode=auto --co -q 2>/dev/null \
+                | grep -cE '::' || true)
+          echo "integration tests collected: $N"
+          if [ "$N" -eq 0 ]; then
+            echo "::error::tests/integration collected 0 tests — HA import failed or the dir was skipped. Collection output:"
+            pytest tests/integration -o asyncio_mode=auto --co || true
+            exit 1
+          fi
       - name: Glue integration tests + coverage gate (config flow, setup/unload, live tick)
         run: >-
           pytest tests/integration
