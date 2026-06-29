@@ -904,7 +904,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # F15: surface when the required floor is clipped at 24 °C -- the room
             # really needs dehumidification there, so protection is insufficient.
             mold_min, mold_capped = mold_min_air_temperature_detail(
-                t_out_eff, rh, room
+                t_out_eff, rh, room,
             )
 
         # schedule: night setback + optimal-start preheat (ADR-0025).

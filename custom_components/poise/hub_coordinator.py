@@ -307,7 +307,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             "weighted_demand": demand.weighted_demand,
             "frost_override": demand.frost_override,
             "frost_zone": demand.frost_zone_id,  # which zone forced frost (P1/2.1)
-            "frost_excluded": list(demand.frost_excluded),  # cold non-boiler zones (N-2)
+            "frost_excluded": list(demand.frost_excluded),  # N-2
             "zone_count": len(requests),
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),
             "actuation_enabled": self._actuation,
