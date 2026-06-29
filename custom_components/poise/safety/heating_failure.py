@@ -55,6 +55,14 @@ class HeatingFailureDetector:
         it — recovery is only declared after a confirmed rise, or after demand
         has been absent for a full window, so an ongoing failure can't be masked.
         """
+        # F22: tolerate a non-monotonic clock. If now_h precedes a stored anchor
+        # (a wall-clock correction or DST step-back), re-anchor to now_h rather
+        # than computing a negative elapsed that would stall the detection window
+        # or, on a later forward jump, fire it prematurely.
+        if self._start is not None and now_h < self._start[0]:
+            self._start = (now_h, room)
+        if self._clear_start is not None and now_h < self._clear_start:
+            self._clear_start = now_h
         demand = running and (setpoint - room) >= self._cmd_delta
         if not demand:
             if self._clear_start is None:
