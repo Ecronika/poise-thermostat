@@ -190,6 +190,10 @@
     "valve_stuck": {
       "title": "Poise: Ventil möglicherweise blockiert",
       "description": "Die Kalibrier-Schrittzahl des Heizkörperventils (`{entity}`) ist nahe null — das deutet auf eine fehlgeschlagene Kalibrierung oder ein mechanisch klemmendes Ventil hin. Der Raum heizt evtl. nicht korrekt. TRV neu kalibrieren/koppeln; der Hinweis verschwindet, sobald wieder eine normale Schrittzahl gemeldet wird."
+    },
+    "frost_zone_not_boiler": {
+      "title": "Poise: frierender Raum steuert den geteilten Kessel nicht",
+      "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere in seinen Optionen \"Diese Zone steuert den Kessel\" (ein reiner Kühl-Raum kann ignoriert werden). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
     }
   },
   "options": {

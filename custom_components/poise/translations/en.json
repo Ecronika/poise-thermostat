@@ -190,6 +190,10 @@
     "valve_stuck": {
       "title": "Poise: valve may be stuck",
       "description": "The radiator valve's calibration step count (`{entity}`) is near zero, which usually means the valve failed to calibrate or is mechanically jammed. The room may not heat correctly. Re-pair or re-calibrate the TRV; the issue clears once a normal step count is reported."
+    },
+    "frost_zone_not_boiler": {
+      "title": "Poise: freezing room not controlling the shared boiler",
+      "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable \"This zone controls the boiler\" in its options (a cooling-only room can be ignored). This issue clears automatically once no such room is freezing."
     }
   },
   "options": {
