@@ -62,10 +62,16 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0041](ADR-0041-Fenster-Auto-Erkennung-Slope-und-Bypass.md) | Fenster-Auto-Erkennung per Temperatur-Slope + Bypass | Implementiert |
 | [0042](ADR-0042-Override-Modus-Modell-mit-Auto-Rueckkehr.md) | Override-Modus-Modell — Kategorie/Offset mit Auto-Rückkehr | Implementiert |
 | [0043](ADR-0043-Praediktive-Solar-Verschattung.md) | Prädiktive Solar-Verschattung (Cover-Shading) | In Arbeit (60 %) |
-| [0044](ADR-0044-Outcome-Scoring-ts-vs-obs.md) | Outcome-Scoring — ts-vs-obs-Selbstvalidierung | In Arbeit (35 %) |
-| [0045](ADR-0045-Effizienz-Report-HDH-kWh-Euro.md) | Effizienz-Report — Heating-Degree-Hours → kWh/€ | In Arbeit (35 %) |
+| [0044](ADR-0044-Outcome-Scoring-ts-vs-obs.md) | Outcome-Scoring — ts-vs-obs-Selbstvalidierung | Implementiert |
+| [0045](ADR-0045-Effizienz-Report-HDH-kWh-Euro.md) | Effizienz-Report — Heating-Degree-Hours → kWh/€ | Implementiert |
 | [0046](ADR-0046-Multi-Aktor-Arbitrierung.md) | Mehrere Klimaaktoren je Raum — Arbitrierung (thermisch/Feuchte/Lüften) | In Arbeit (30 %) |
 | [0047](ADR-0047-Aussen-Lockout-Konfigurierbar.md) | Konfigurierbarer Außen-Temperatur-Lockout (Heizen/Kühlen) | Implementiert |
+| [0048](ADR-0048-Abgrenzung-Luftqualitaet-und-Hygiene.md) | Abgrenzung Luftqualität & Hygiene (Nicht-Ziele); Nachträge 0027/0046 | Implementiert |
+| [0049](ADR-0049-Card-Monitoring-Ampel.md) | Card-Monitoring-Ampel (Temp/Feuchte/CO₂) + optionaler CO₂-Sensor (Anzeige) | Vorgeschlagen |
+| [0050](ADR-0050-Feuchte-Management-Dry-Pfad.md) | Feuchte-Management — Dry-Guard + aktive Entfeuchtung (shadow-first) | Vorgeschlagen |
+| [0051](ADR-0051-Thermoschock-Delta-Hitzetag-Kuehlband.md) | Thermoschock-Delta & Hitzetag-Kühlband (adaptiver Kühl-Sollwert) | Vorgeschlagen |
+| [0052](ADR-0052-Aktor-Dynamik-Profile.md) | Aktor-Dynamik-Profile — Regler-Zeitkonstanten je HVAC-Typ (PI/MPC) | Vorgeschlagen |
+| [0053](ADR-0053-Leerlauf-Belegt-Luefterumwaelzung.md) | Leerlauf-/Belegt-Lüfterumwälzung (Fan-Low im besetzten Totband) | Vorgeschlagen |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 

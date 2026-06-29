@@ -52,6 +52,8 @@ class ZoneDevice:
 
 Eine reversible AC = **ein** `ZoneDevice` mit Capabilities {thermal:heat, thermal:cool, air_movement:recirculate(fan), humidity:dry}. Das löst „**ein `hvac_mode` pro Gerät und Tick**": die Pipeline wählt höchstens **eine** Capability je Gerät pro Tick.
 
+**Nicht-Ziele (ADR-0048).** Die Achse `ventilation` und die Richtung `humidify` sind **reservierte Platzhalter, keine aktiven Funktionen**: `discovery` ordnet **kein** Gerät der Achse `ventilation` zu (sie wird nie inventarisiert), und `humidify` wird bei einem echten Befeuchter zwar **inventarisiert**, aber vom Control-Pfad (`assignment_planner` baut Kommandos ausschließlich für `Axis.THERMAL` + Standby) **nie aktuiert** — Poise senkt Feuchte nur über Kühlen/`dry`. `air_movement` ist ausschließlich **Kühlkanten-Ventilator-Gutschrift** bzw. (ab ADR-0053) **Leerlauf-/Belegt-Umwälzung zur Entschichtung** — **keine** IAQ-/Frischluft-/CO₂-Lüftung. CO₂ ist monitor-only (ADR-0048/0049). Ein Guard-Test sichert beide Garantien ab.
+
 ---
 
 ## 3. Adapter-Vertrag (Phase-0-Liefergegenstand)

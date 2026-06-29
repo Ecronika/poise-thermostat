@@ -1,0 +1,54 @@
+# ADR-0050: Feuchte-Management — Dry-Guard + aktive Entfeuchtung (capability-getrieben, shadow-first)
+
+**Status:** Vorgeschlagen · **Datum:** 2026-06-29 · **Bezug:** ADR-0023 (Dual-Setpoint), ADR-0026/0033 (Shadow-Politik), ADR-0035 (Präzedenz-Solver), ADR-0046 (Multi-Aktor: Capability/Lifecycle), ADR-0047 (Außen-Lockout), ADR-0041 (Fenster→off), ADR-0010 (Schimmel/Taupunkt), ADR-0048 (nur Entfeuchtung, nie Befeuchtung) · **Verifizierung:** Wettbewerber-Quellcode (HA-core `generic_hygrostat` voll gelesen, `dual_smart_thermostat`, Versatile Thermostat, SmartIR) + Community-Blueprint (franzudev) + HA-Forum/GitHub-Sentiment
+
+## Kontext
+Feuchte ist heute in Poise **passiv**: gelesen (Coordinator-Feuchte-Pfad, speist Taupunkt-Cap `cool_sp ≥ Taupunkt + 2 K` und `mold.py`), aber nicht aktiv geregelt. Im Multi-Aktor-Shadow (ADR-0046) existiert `dry` nur als nicht-aktiver Pfad. Für den Büro-/Klima-Einsatz fehlen zwei Dinge: **(a)** ein **Dry-Guard**, der bei bereits zu trockener Luft nicht weiter austrocknet (Kühlung trocknet via Kondensation mit), und **(b)** **aktive Entfeuchtung** über `hvac_mode=dry`, wenn die Luft zu feucht ist und die Temperatur im Totband liegt. Beides ist **capability-getrieben** (nur falls Gerät `dry` kann). **Code-Befund (zu beheben):** `multi/discovery.py` erkennt Modi/Presets case-insensitiv (`m.lower()`), **commandet im Preset-Pfad aber den lowercased Token** (`mode_command=dry_preset`, Z. ~112) — ein Gerät mit Preset „Dry"/„Dehumidify" bekäme `set_preset_mode("dry")` und schlägt fehl; das Kommando muss die **Originalschreibweise** des Geräts tragen.
+
+## Entscheidungstreiber
+Komfort/Behaglichkeit (Schwüle senken) ohne Überkühlung; Kompressor-/Verdichterschutz (kein Short-Cycling); ehrliche Physik (RH ist mit Split-AC **nicht garantierbar**); Capability-Gating + graceful ohne Sensor; Shadow-first (ADR-0033/0026); Kohärenz mit dem Kühlpfad (ADR-0023/0047) und Schimmel/Taupunkt (ADR-0010).
+
+## Betrachtete Optionen (mit Quelle)
+1. **Status quo (Feuchte passiv).** Lässt schwüle-aber-nicht-heiße Lagen ungelöst; Nutzer behelfen sich mit Fremd-Blueprints.
+2. **`dual_smart_thermostat`-Muster übernehmen (DRY vor COOL in Auto).** Quellcode-belegt: `AutoModeEvaluator` priorisiert **DRY > HEAT > COOL** (`managers/auto_mode_evaluator.py`). Verworfen als Default für Poise — widerspricht der Überkühlungs-Sorge der Nutzer und Poises Temperatur-Komfort-Primat.
+3. **`generic_hygrostat`-Dual-Toleranz-Bang-Bang auf `hvac_mode=dry` abbilden, cool-first/dry-nur-im-Totband, via bestehende Lifecycle-Schicht, shadow-first.** — **gewählt.** Belegt durch HA-core `generic_hygrostat` (Goldstandard), den franzudev-Blueprint (dry-über-hoch / off-unter-niedrig) und das Forum-Konsens-Verhalten (Kühlen entfeuchtet).
+
+## Entscheidung
+**Entscheidungs-Priorität (in `comfort/dual_setpoint` + `control/cooling` zu integrieren; eine Tabelle Temp×RH×Capability):**
+1. **Health-Floors unverändert:** Frost, Schimmel, **`cool_sp ≥ Taupunkt + 2 K`** (harte Grenze, ADR-0010) — nie zugunsten einer RH-Zahl unterschreiten.
+2. **zu warm UND zu feucht → `cool`** (Kühlen entfeuchtet zugleich; **Vorrang vor `dry`**). Temperatur bleibt die harte Randbedingung — **nicht** zur RH-Jagd über das Totband hinaus überkühlen.
+3. **Temp im Totband UND RH ≥ `rh_high` UND `can_dry` → `dry`.** Genau die Lücke, die `cool` nicht ohne Überkühlung füllt.
+4. **RH < `rh_low` → Dry-Guard:** `dry` aus; Kühlkante eher anheben (weniger Entfeuchtung); kein entfeuchtender Eingriff.
+5. sonst bestehende heat/cool/idle-Logik.
+
+**Parameter & Schwellen (Default, konfigurierbar):**
+- `rh_high` = **60 %** (Eintritt aktive Entfeuchtung), **Austritt ~55 %** (asymmetrische Hysterese, nicht exakt am Ziel stoppen).
+- `rh_low` = **40 %** (Dry-Guard-Boden) — darunter **blockiert** jeden entfeuchtenden Eingriff.
+- **Hysterese-Band 5 % RH** (Eintritt 60 / Austritt 55), gespiegelt aus `generic_hygrostat`-`wet_tolerance`/`dry_tolerance`; bewusst **breiter** als die 2–3 % dedizierter Entfeuchter, weil ein **kompressorgetriebenes** Gerät im `dry`-Modus längere Zyklen braucht.
+- **`dry`-Min-Off = 10 min** (+ Min-On ~10 min), **über die bestehende Per-Device-Lifecycle-/Min-Cycle-Schicht** (ADR-0046), **nicht** als globaler Einheitswert — vermeidet das `dual_smart`-Manko eines geteilten `min_cycle_duration`.
+
+**Weitere Festlegungen:**
+6. **Geräte ohne `dry`, aber mit `fan_only`: NIEMALS `fan_only` zur Entfeuchtung.** Physikbeleg (Forum/HVAC): Ventilator über nasser Verdampferschlange **re-verdunstet Kondensat → hebt RH**. Fallback: gegrenztes `cool` (mit Temp-Boden) oder Feature für dieses Gerät inaktiv + als Capability-Lücke diagnostizieren.
+7. **RH ist ein gebundenes Ziel, kein garantierter Sollwert.** Eintritt/Austritt von `dry`/`cool` werden über RH-Schwellen getriggert, die **Temperatur-Komfortgrenze bleibt hart**; Taupunkt + 2 K ist der echte harte Schutz. UI/Diagnose nennt es „Feuchte-Komfortband", keinen Sollwert.
+8. **Wechselwirkung Außen-Lockout (ADR-0047):** `dry` zählt als **Kühl-Familie** für den Lockout (läuft den Verdichter, kühlt), **mit eigenem Override** — der Büro-AC-Fall (interne Lasten bei kühler Außenluft) will Entfeuchtung trotz niedrigem Außenwert. **Fenster→`off` (ADR-0041) gilt auch für `dry`.**
+9. **Token-Casing-Fix in `discovery.py`:** Detektion case-insensitiv lassen, aber `mode_command` mit der **Original-Geräteschreibweise** des Presets/Modus belegen (Bug s. Kontext).
+10. **Ohne Feuchtesensor:** Feature sauber inaktiv (graceful). **Shadow-first:** zunächst `humidity_action`/`dry_active` nur **berechnen + auf Card zeigen** (ADR-0049), dann aktuieren.
+
+## Begründung
+**`generic_hygrostat` (HA-core, voll gelesen — der Goldstandard):** asymmetrisches Bang-Bang mit zwei Schwellen relativ zum Ziel: für `DEHUMIDIFIER` **EIN bei `too_wet = cur − target ≥ wet_tolerance`, AUS bei `too_dry = target − cur ≥ dry_tolerance`**; `min_cycle_duration` erzwingt Mindesthaltezeit; Stale-Sensor → Not-Aus (`_async_operate`). Genau dieses Muster spiegelt Poises aktive Entfeuchtung — nur auf `hvac_mode=dry` statt eines Schalters abgebildet ([core `generic_hygrostat/humidifier.py`](https://github.com/home-assistant/core)). **`dual_smart_thermostat`** zeigt dieselbe Hysterese-Form (Default-Toleranzen **0**, `target_humidity`-Default 50), aber **gegenseitig exklusive** Modi und Auto-Priorität **DRY > COOL** — defensibel, doch konträr zu Poises Temperatur-Primat ([`auto_mode_evaluator.py`](https://github.com/swingerman/ha-dual-smart-thermostat)). **VTherm `over_climate`** macht **keine** Feuchteregelung und aktuiert `dry` nicht (Auto-Fan dient nur schnellerer Temperaturlieferung) — der stärkste „Voll"-Wettbewerber lässt das Feld frei. **SmartIR** führt `humidity_sensor` **display-only**, `dry`/`fan_only` sind rein datengetriebene Geräte-Codes (= Poises Capability-Gating, ohne Closed-Loop). **Community-Blueprint franzudev** „Room Humidity Control for Climate" (Jan 2026): RH über hoch → `dry`, RH unter niedrig → Gerät aus — exakt Poises Aktiv-Dry-Muster, als reales Nutzer-Feature validiert.
+
+**Nutzer-Sentiment:** Nutzer entfeuchten überwiegend per **`cool`**, nicht `dry`; Hauptklage ist **Überkühlung** beim Jagen einer RH-Zahl („AC läuft viel länger … wird zu kalt", Kosten); typischer Selbstschutz: „50 % **oder** 25 °C, was zuerst kommt" = Temperatur-Boden. Zweitklage **Short-Cycling/Chatter** ohne Totband → Nutzer nehmen ±2–3 % (Entfeuchter) bzw. 10–20 min Min-Cycle. HVAC-Profis im Forum: **eine Haus-AC kann keinen RH-Sollwert garantieren** (echte RH-Regelung braucht Kühlen-Kondensieren-**Nachheizen**), und das Erzwingen über sehr tiefe Temperatur riskiert **Verdampfer-Vereisung/Geräteschaden**. Dry-Modus = Verdichter bei niedriger Lüfterstufe, **kühlt mit ab → nur intermittierend** sinnvoll. Belege: [„Use Air Conditioner to lower humidity"](https://community.home-assistant.io/t/use-air-conditioner-to-lower-humidity/589412), [„Humidification/dehumidification hysteresis"](https://community.home-assistant.io/t/humidification-dehumidification-hysteresis/673081), [franzudev-Blueprint](https://community.home-assistant.io/t/room-humidity-control-for-climate-hvac-devices/971133), Min-Cycle-„not respected" ([GitHub core #83416](https://github.com/home-assistant/core/issues/83416)).
+
+**Warum cool-first (bewusst gegen `dual_smart`):** Kühlen entfeuchtet inhärent und bedient zugleich Poises primäres Temperatur-Ziel; `dry` wird auf den Fall reserviert, den `cool` ohne Überkühlung **nicht** lösen kann (RH hoch, Temp im Totband). Das adressiert direkt die #1-Nutzerklage und Poises EN-16798-Temperatur-Komfort-Primat.
+
+## Konsequenzen
+**Positiv:** schließt schwüle-aber-nicht-heiße Lagen (Büro); echte Differenzierung (Voll-Wettbewerber VTherm hat es nicht); nutzt die bestehende Lifecycle-/Taupunkt-Infrastruktur; ehrliche RH-Erwartung. **Negativ/Kosten:** neue **aktive Aktuierung** (Risiko mittel — Verdichter); mehr Optionen (rh_low/rh_high/Hysterese, Dry-Override des Lockouts) — über Progressive Disclosure gering; Token-Casing-Fix nötig; Geräte ohne `dry` bleiben auf gegrenztes `cool` beschränkt. **Mitigation:** Shadow-first; Min-Cycle über Lifecycle; „state changed?"-Prüfung vor Vertrauen in den Timer (Forum-/GitHub-Lehre).
+
+## Verifizierung (Plan)
+**Pure** Entscheidungs-/Hysterese-Logik (`humidity_decide`: Temp×RH×capability → {idle/cool/dry/dry-guard} mit asymmetrischer Hysterese) test-first unit-getestet (Eintritt 60/Austritt 55, Dry-Guard <40, cool-vor-dry bei warm+feucht, fan-only nie für Feuchte, Taupunkt+2 K hält). **Shadow-first:** Coordinator berechnet `humidity_action`/`dry_active` zunächst nur als Diagnose + Card (ADR-0049), keine Writes. **Glue (CI):** Aktuierung über Aktor-`set_hvac_mode("dry")`/Preset (Original-Casing), Lifecycle-Min-Off, Lockout-/Fenster-Gating, Capability `can_dry`. `discovery.py`-Token-Casing-Fix mit pure Test (Preset „Dry" → Kommando „Dry"). i18n (de/en); Diagnose-Redaction unberührt (Feuchte schon vorhanden).
+
+## Compliance
+Generische, capability-getriebene Logik (G15/G29/G30); keine geräte-/herstellerspezifische Sonderlogik (Capability statt Modellnamen). Schimmel/Taupunkt (ADR-0010) bleibt harter Schutz; nur Entfeuchtung, nie Befeuchtung (ADR-0048).
+
+## Verknüpfungen
+**Erweitert ADR-0023** (Dual-Setpoint um Feuchte-Achse) und **ADR-0046** (`dry`/`can_dry` live statt nur Shadow; Lifecycle-Min-Off für Verdichter); **nutzt ADR-0026/0033** (shadow-first), **ADR-0035** (Präzedenz: Health-Floors vor Feuchte), **ADR-0010** (Taupunkt+2 K harte Grenze), **ADR-0047** (Lockout, mit Dry-Override) und **ADR-0041** (Fenster→off gilt für `dry`). **Gemeinsamer Berührungspunkt mit ADR-0051:** beide ändern `dual_setpoint`/`cooling` → **zusammen entwerfen** (eine Entscheidungstabelle Temp×Feuchte×Außen). **Belege:** core `generic_hygrostat`, `dual_smart_thermostat`, VTherm, SmartIR, franzudev-Blueprint, HA-Forum/GitHub (s. Begründung).

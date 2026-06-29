@@ -1,0 +1,45 @@
+# ADR-0049: Card-Monitoring-Ampel (Temperatur / Feuchte / CO₂) + optionaler CO₂-Sensor (Anzeige)
+
+**Status:** Vorgeschlagen · **Datum:** 2026-06-29 · **Bezug:** ADR-0040 (Card), ADR-0016 (Entity-/Card-Vertrag), ADR-0048 (CO₂ monitor-only), ADR-0012 (Diagnostics/Redaction), ADR-0027 (ASR A3.5) · **Verifizierung:** Card-/Ökosystem-Muster (`air-quality-card`, Gauge, bar-card, mushroom-chips, mini-graph, ApexCharts) + CO₂-Schemata (UBA/Ad-hoc-AG, EN 16798-1) + ASR A3.5 + HA-Forum/GitHub-Sentiment
+
+## Kontext
+Die Poise-Card zeigt heute Komfort/Setpoint, aber **keine** zusammenfassende Zustands-Ampel für die Raumumgebung. Für den Büro-/Klima-Einsatz ist eine **read-only** Ampel (grün/gelb/rot) für **Temperatur** (immer), **Feuchte** (falls `humidity_sensor` gesetzt — wird bereits gelesen, `coordinator.py` Feuchte-Pfad) und **CO₂** (falls neuer optionaler Sensor gesetzt) gewünscht. **Reine Anzeige, keine Steuerung** (ADR-0048: CO₂ ist monitor-only). Der Card-Quellcode (`card/src/*`) ist auf Komponentenebene bisher ungetestet (offener Befund F21) — gute Gelegenheit, Render-Tests mitzuziehen. Zugleich ist die **Recorder-Last** zu beachten (offener Befund H-4): Anzeigewerte nicht unnötig als schnell wechselnde Entity-Attribute im 60-s-Takt aufzeichnen.
+
+## Entscheidungstreiber
+At-a-glance-Bewertung für Laien; Normbezug (EN 16798-1, ASR A3.5, UBA); Capability-Gating (nur vorhandene Sensoren); Recorder-schonend; konfigurierbare Schwellen mit sinnvollen Defaults; Card-Teststruktur stärken (F21).
+
+## Betrachtete Optionen (mit Quelle)
+1. **Drei separate Standard-Cards** (Gauge/bar-card/mushroom je Größe). Funktioniert, aber kein einheitliches Komfort-Verdict, kein Poise-Komfortband-Bezug, Recorder-Spam je nach Aufbau.
+2. **Eine card-seitige Ampel über die vorhandenen Sensoren, Schwellen konfigurierbar, Farben fix.** — **gewählt.** Muster belegt durch `air-quality-card` (per-Metrik-Schwellen-Arrays, stille Default-Fallbacks, Passthrough-Entity) und die ökosystemweite Praxis, das Verdict **im Frontend** aus dem Live-State zu rechnen (mushroom-Template-Chips, mini-graph/ApexCharts `color_thresholds`).
+3. **Verdict als aufgezeichnete Entität/Attribute.** Verworfen als Default (Recorder-Last); nur optional als **recorder-exkludierbare** Diagnose-Entität für Automationen.
+
+## Entscheidung
+1. **Neuer optionaler CO₂-Sensor** im Config-Flow (`sensor`, `device_class="carbon_dioxide"`) — **nur Durchreichen zur Anzeige**, nicht in die Regelung. Coordinator veröffentlicht `co2` (und das bereits gelesene `humidity`) als Entity-Attribute **statisch genug** für die Card.
+2. **Ampel card-seitig gerechnet** (reines Verdict in TypeScript, analog zum bestehenden `comfort.ts`-Verdict) über den Live-State der Sensoren — **kein neues aufgezeichnetes Entity**, keine 60-s-Attribut-Schreibungen. Damit ist die Recorder-Zusatzlast **null** (H-4 entschärft).
+3. **Temperatur-Skala:** Default = **Wiederverwendung des Poise-Komfortband-Verdicts** (`comfort.ts`: in_band→grün, Kante→gelb, außerhalb→rot). **Opt-in** „ASR-Büro-Hitze-Overlay" (≤26 grün / 26–30 gelb / >30 rot, >35 harte Rot-Stufe) per Schalter `temperature_scale: comfort | asr_office`. **Nicht beide gleichzeitig** (ein zweites, nur-Hitze-Skala-Licht widerspräche dem „zu kalt"-Fall).
+4. **CO₂-Schema:** Default = **UBA absolut** (grün <1000 / gelb 1000–2000 / rot >2000 ppm). **Opt-in** „EN 16798-1 Außen-Offset" (`co2_scheme: uba | en16798`, EN braucht `outdoor_co2_entity` oder ~420-ppm-Annahme, färbt nach Kat. II/III +800/+1350 über außen). Schwellen editierbar (`co2_thresholds: [gelb, rot]`, Default `[1000, 2000]`).
+5. **Feuchte-Schwellen** (Default, konfigurierbar): grün **40–60 %**, gelb 30–40 / 60–65 %, rot <30 / **≥65 %** (≥65 % = belegte Schimmel-Keimgrenze; <30 % = Atemwegs-/Virus-Linie). Als 4-Grenzen-Array `humidity_thresholds: [30, 40, 60, 65]` (Konvention wie `air-quality-card`).
+6. **Schwellen konfigurierbar, Farben fix** an HA-Theme-Variablen (`--success/--warning/--error-color`) — Theme-Konsistenz + Barrierefreiheit; **stille Fallbacks** auf Defaults bei ungültiger Eingabe (kein geworfener Fehler).
+7. **Optionale Diagnose-Entität** (falls für Automationen gewünscht) wird **recorder-exkludierbar ausgeliefert** (dokumentiertes `entity_globs: - sensor.poise_*_status`) und trägt **keine** schnell wechselnden Attribute.
+8. **Redaction:** neuer CO₂-Sensor in `REDACT_KEYS` (ADR-0012), wie Feuchte-/Power-Sensoren.
+
+## Begründung
+**Nächstes Vorbild `air-quality-card` (KadenThomp36):** per-Metrik-Schwellen als `[a,b,c,d]`-Arrays mit dokumentierten Defaults (CO₂ `[600,800,1000,1500]`, Feuchte `[30,40,50,60]`), Farben **nicht** anpassbar, ungültige Arrays → stiller Default; `display: full|compact|expandable` (compact überspringt den History-Fetch = perf-relevant); ein **Passthrough**-Entity, das den Wert nur anzeigt, ohne ihn zu interpretieren — exakt die device_class-Passthrough-Philosophie für Poises CO₂-Sensor ([Repo](https://github.com/KadenThomp36/air-quality-card)). Die nativen Schwellen-Primitive (Gauge `severity`, bar-card, mushroom-Chips mit `icon_color`, mini-graph `color_thresholds`) zeigen: **das Verdict wird im Frontend aus dem Live-State gerechnet** → null Recorder-Zusatzlast ([Gauge](https://www.home-assistant.io/dashboards/gauge/), [mini-graph-card](https://github.com/kalkih/mini-graph-card)).
+
+**Schwellen normbelegt:** UBA/Ad-hoc-AG Innenraumluft: <1000 unbedenklich / 1000–2000 hygienisch auffällig / >2000 inakzeptabel (Pettenkofers 1000-ppm-Linie; [Umweltbundesamt](https://www.umweltbundesamt.de/en/topics/health/commissions-working-groups/german-committee-on-indoor-air-guide-values)). EN 16798-1: CO₂ als Anstieg über außen je Kategorie (+550 / +800 / +1350 ppm; [REHVA](https://www.rehva.eu/fileadmin/user_upload/2024/2_Jarek.pdf), [ASHRAE Position Document CO₂](https://www.ashrae.org/file%20library/about/position%20documents/pd-on-indoor-carbon-dioxide-english.pdf)). Feuchte 40–60 % als Gesundheits-/Komfortband (EPA/ASHRAE/Mayo; ≥65 % Schimmel in 24–48 h). ASR A3.5: ≤26 (soll) / >26 (soll-Maßnahmen) / >30 (muss) / >35 (ungeeignet; [BAuA](https://www.baua.de/DE/Angebote/Regelwerk/ASR/ASR-A3-5)).
+
+**Nutzer-Sentiment:** Read-only „nur melden, wenn etwas nicht stimmt" wird ausdrücklich geschätzt (Air-Comfort-Card-Autor: „nur wenn etwas falsch ist, soll es kommunizieren"). CO₂-Verdict wird als **„lüften oder nicht"** gewünscht (grün=frisch / gelb=lüften / rot=Gefahr); **1000 ppm** ist der De-facto-Trigger, 800 ppm präventiv. **Feuchte auf der Thermostat-Card** ist ein langjähriger, wiederholter Feature-Wunsch (Core-Frontend [Issue #4740](https://github.com/home-assistant/frontend/issues/4740); [Forum](https://community.home-assistant.io/t/humidity-information-on-the-thermostat-card/656123)). Nutzer wollen **eine** vereinheitlichte Anzeige statt drei Cards, mit konfigurierbaren Schwellen. Eine Thermostat-Card mit eingebautem Temp-/Feuchte-/CO₂-Verdict ist ein reales, unterversorgtes Niche.
+
+**Default-Wahl UBA statt EN als Standard:** absolut (kein Außensensor nötig — robust im Normalfall), deckt deutsche Nutzererwartung + die in der Community etablierte 1000-ppm-Lüftungslinie, sauberer 3-Stufen-Map. EN-16798-Offset als Opt-in für Anspruchsvolle mit Außen-CO₂.
+
+## Konsequenzen
+**Positiv:** einheitliches, normbelegtes At-a-glance-Verdict; null Recorder-Zusatzlast (card-seitig); CO₂-Anzeige ohne Regelungsanspruch (ADR-0048-konform); Card-Render-Tests schließen F21 an. **Negativ/Kosten:** neue optionale Config-Felder (CO₂-Sensor, Skalen-/Schema-Wahl, Schwellen) — über Progressive Disclosure gering gehalten; EN-16798-CO₂-Modus braucht einen Außen-CO₂-Wert (sonst ~420-ppm-Annahme, dokumentiert).
+
+## Verifizierung (Plan)
+Shadow-first **entfällt** (keine Aktuierung). Pure Verdict-Logik in `card/src` (Schwellen→Farbe je Größe, stille Fallbacks) **unit-getestet** (node --test, Card-Teststruktur — F21); Coordinator-Glue: CO₂-Sensor-Read + Veröffentlichung als Attribut (CI), `REDACT_KEYS`-Erweiterung (pure Diagnostics-Test); Config-Flow-Feld + i18n (de/en) für Sensor, Skalen-/Schema-Wahl, Schwellen-Labels. Card-Lockstep + Bundle-Build beim Versionsbump.
+
+## Compliance
+Generische Schwellen-/Anzeigelogik, eigenständig (G29/G30); Farben an Theme-Variablen (Barrierefreiheit, ADR-0040-Linie). CO₂ strikt monitor-only (ADR-0048).
+
+## Verknüpfungen
+**Setzt ADR-0048 um** (CO₂ Anzeige statt Steuerung); **erweitert ADR-0040/0016** (Card-/Entity-Vertrag um Feuchte/CO₂-Verdict); **ADR-0012** (Redaction des CO₂-Sensors). **Belege:** `air-quality-card`, Gauge/bar-card/mushroom/mini-graph/ApexCharts; UBA/REHVA/ASHRAE/BAuA; Core-Issue #4740 + HA-Forum.
