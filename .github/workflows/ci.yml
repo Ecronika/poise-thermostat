@@ -54,6 +54,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install HA test harness (pulls Home Assistant)
         run: pip install -r requirements-test.txt
+      - name: Guard — integration suite actually collected tests (no silent skip)
+        run: |
+          pytest tests/integration --co -q 2>/dev/null | grep -qE '::' \
+            || { echo "::error::tests/integration collected 0 tests — HA import failed or the whole dir was skipped; the glue suite must actually run on this Python/HA"; exit 1; }
       - name: Glue integration tests + coverage gate (config flow, setup/unload, live tick)
         run: >-
           pytest tests/integration
@@ -72,7 +76,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # >=22.6 so `node --test` runs the .ts card tests (type stripping).
+          # Node 20 silently discovered/ran ZERO card tests (review F21/F22).
+          node-version: "22"
           cache: npm
           cache-dependency-path: card/package-lock.json
       - name: Install (reproducible — lockfile)
