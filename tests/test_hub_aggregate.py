@@ -289,13 +289,20 @@ def test_group_call_for_heat() -> None:
     assert g == {"outdoor1": True, "outdoor2": False}
 
 
-def test_frost_override_fires_for_non_optin_zone() -> None:
-    # review #2: a freezing zone that is NOT opt-in must still fire the boiler
+def test_frost_override_requires_controls_boiler_zone() -> None:
+    # review P1/2.1 (SUPERSEDES review #2): a freezing zone that does NOT control
+    # the boiler must NOT fire it — a cooling-only or broken-sensor zone could
+    # otherwise pin the shared boiler on. An opt-in zone still fires + is surfaced.
     from custom_components.poise.control.hub_aggregate import aggregate_boiler_demand
 
-    z = _zone("cold", heating=False, frost=True, controls_boiler=False)
-    d = aggregate_boiler_demand([z], count_threshold=1)
-    assert d.active is True and d.frost_override is True
+    foreign = _zone("cold", heating=False, frost=True, controls_boiler=False)
+    d = aggregate_boiler_demand([foreign], count_threshold=1)
+    assert d.active is False and d.frost_override is False and d.frost_zone_id is None
+
+    own = _zone("bath", heating=False, frost=True, controls_boiler=True)
+    d2 = aggregate_boiler_demand([own], count_threshold=1)
+    assert d2.active is True and d2.frost_override is True
+    assert d2.frost_zone_id == "bath"
 
 
 def test_shedding_excludes_mould_health_zone() -> None:
@@ -468,14 +475,15 @@ def test_zone_request_frost_fires_boiler_end_to_end() -> None:
     z = zone_request_from_data(
         "cold",
         {"current_temperature": 5.0, "heat_sp": 7.0},
-        controls_boiler=False,
+        controls_boiler=True,
         declared_power=None,
         compressor_group=None,
         flow_temp_request=None,
         source_pref=None,
         mono_ts=0.0,
     )
-    assert aggregate_boiler_demand([z]).active is True
+    d = aggregate_boiler_demand([z])
+    assert d.active is True and d.frost_zone_id == "cold"
 
 
 def test_zone_request_health_from_mould_cause() -> None:
