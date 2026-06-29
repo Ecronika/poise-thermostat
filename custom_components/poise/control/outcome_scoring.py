@@ -13,7 +13,7 @@ persists the running stats. q_solar is Poise's normalised solar in [0, 1].
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 
@@ -212,3 +212,84 @@ class OutcomeStats:
             obs_n=int(d.get("obs_n", 0)),
             last_score=d.get("last_score"),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class FinishedSession:
+    """A just-completed heating session: its score and controller tag."""
+
+    score: float
+    controller: str
+
+
+@dataclass(frozen=True, slots=True)
+class OutcomeSession:
+    """Open heating-session state the coordinator advances each tick (ADR-0044 §3).
+
+    Locks the target at start; tracks peak and elapsed; on a real end (reached /
+    timeout / interrupt) it scores the session (discarding ones under
+    ``min_session_min``). Transient by design — not persisted, so a restart mid
+    heat-up simply starts fresh; the running A/B means in ``OutcomeStats`` persist.
+    """
+
+    active: bool = False
+    start_temp: float = 0.0
+    peak_temp: float = 0.0
+    target: float = 0.0
+    elapsed_min: float = 0.0
+    expected_minutes: float = 0.0
+    controller: str = "ts"
+
+
+def observe_session(
+    session: OutcomeSession,
+    *,
+    temp: float,
+    target: float,
+    heating: bool,
+    controlling: bool,
+    dt_min: float,
+    expected_minutes: float,
+    q_solar: float = 0.0,
+    outdoor: float = 10.0,
+    cfg: ScoreConfig = _DEFAULT,
+) -> tuple[OutcomeSession, FinishedSession | None]:
+    """Advance the session one tick; return ``(session, finished_or_None)``.
+
+    Starts a session when the room is meaningfully below target and the actuator
+    is actually heating; tags it ``ts`` while Poise is controlling, else ``obs``.
+    """
+    if not session.active:
+        if heating and (target - temp) > cfg.start_delta:
+            return (
+                OutcomeSession(
+                    active=True,
+                    start_temp=temp,
+                    peak_temp=temp,
+                    target=target,
+                    expected_minutes=max(0.0, expected_minutes),
+                    controller="ts" if controlling else "obs",
+                ),
+                None,
+            )
+        return session, None
+    elapsed = session.elapsed_min + dt_min
+    peak = max(session.peak_temp, temp)
+    reason = session_end_reason(temp, session.target, elapsed, heating, cfg)
+    if reason is None:
+        return replace(session, peak_temp=peak, elapsed_min=elapsed), None
+    if elapsed < cfg.min_session_min:
+        return OutcomeSession(), None  # too short -> discard (ThermoSmart <3 min)
+    score = outcome_score(
+        reason=reason,
+        start_temp=session.start_temp,
+        end_temp=temp,
+        peak_temp=peak,
+        target=session.target,
+        minutes_taken=elapsed,
+        expected_minutes=session.expected_minutes,
+        q_solar=q_solar,
+        outdoor=outdoor,
+        cfg=cfg,
+    )
+    return OutcomeSession(), FinishedSession(score=score, controller=session.controller)
