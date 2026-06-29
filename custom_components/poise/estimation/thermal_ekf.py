@@ -28,9 +28,12 @@ from typing import Any
 _T, _A, _BH, _BC, _BS, _BO = range(6)
 _N = 6
 
-# ---- tuning (ADR-0009, per-hour units) -------------------------------------
+# ---- tuning (ADR-0009) -----------------------------------------------------
 _R: float = 0.04  # measurement noise variance (~0.2 °C std)
-_Q = (0.01, 0.0005, 0.005, 0.005, 0.002, 0.002)  # process noise per step
+# process noise per *nominal* tick; predict() scales it by dt_h / _NOMINAL_DT_H so
+# a longer or shorter step injects proportionally more or less noise (review F7).
+_Q = (0.01, 0.0005, 0.005, 0.005, 0.002, 0.002)
+_NOMINAL_DT_H: float = 1.0 / 60.0  # 60 s reference tick for the Q scaling above
 _ANOMALY_SIGMA: float = 4.0
 _ANOMALY_INFLATE: float = 100.0
 _PSD_FLOOR: float = 1e-10
@@ -172,18 +175,21 @@ class ThermalEKF:
 
         # covariance: P = F P F^T + Q (Q mode-gated to observable params)
         self.p = _matmul(_matmul(f, self.p), _transpose(f))
-        self.p[_T][_T] += _Q[_T]
+        # F7: scale process noise by step length so variable ticks (a late/missed
+        # tick, a restart) inject the right amount; == _Q at the nominal tick.
+        q_scale = max(0.0, dt_h) / _NOMINAL_DT_H
+        self.p[_T][_T] += _Q[_T] * q_scale
         # damp alpha process noise near low excitation so it is not pulled
         # to its bound when the loss is poorly observable (ADR-0024)
-        self.p[_A][_A] += _Q[_A] * min(1.0, (alpha / _ALPHA_REF) ** 2)
+        self.p[_A][_A] += _Q[_A] * q_scale * min(1.0, (alpha / _ALPHA_REF) ** 2)
         if u_h > 0.0:
-            self.p[_BH][_BH] += _Q[_BH]
+            self.p[_BH][_BH] += _Q[_BH] * q_scale
         if u_c > 0.0:
-            self.p[_BC][_BC] += _Q[_BC]
+            self.p[_BC][_BC] += _Q[_BC] * q_scale
         if q_solar > 0.0:
-            self.p[_BS][_BS] += _Q[_BS]
+            self.p[_BS][_BS] += _Q[_BS] * q_scale
         if q_occ > 0.0:
-            self.p[_BO][_BO] += _Q[_BO]
+            self.p[_BO][_BO] += _Q[_BO] * q_scale
         self._enforce_psd()
 
     # -- measurement update --------------------------------------------------
