@@ -78,3 +78,11 @@ class PiCompensator:
 
     def reset(self) -> None:
         self._acc = 0.0
+
+    def apply_profile(self, *, kp: float, ki: float, offset_max: float) -> None:
+        """Retune in place for a device-dynamics profile (ADR-0052) — keeps the
+        integrator accumulator, so a profile refresh causes no transient reset.
+        """
+        self._kp = kp
+        self._ki = ki
+        self._offset_max = offset_max
