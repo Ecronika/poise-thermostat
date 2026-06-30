@@ -40,6 +40,7 @@ from .const import (
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_COOL_MIN_OUTDOOR,
+    CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
     CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
@@ -60,6 +61,7 @@ from .const import (
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
+    DEFAULT_DYNAMICS,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
@@ -80,7 +82,9 @@ from .control.cover_shading import (
     predict_peak_operative,
     shading_target_position,
 )
+from .control.dynamics import PROFILES, DeviceDynamics, classify_dynamics
 from .control.hdh_savings import HdhConfig, HdhSavings
+from .control.mpc import MpcParams
 from .control.mpc_shadow import evaluate_shadow
 from .control.optimal_start import (
     forecast_samples_from_response,
@@ -260,6 +264,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
             price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
         )
+        # ADR-0052: per-actuator dynamics profile (PI/MPC tuning by speed class).
+        self._dynamics_override: str = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
+        self._dynamics = DeviceDynamics.SLOW_HYDRONIC
+        self._mpc_params = MpcParams()
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
             data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
@@ -430,6 +438,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
             price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
         )
+        self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -914,6 +923,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             bypass=self._window_bypass,
         )
         can_heat, can_cool = self._capability()
+        # ADR-0052: retune the PI/MPC to the actuator's dynamics class so a fast
+        # split AC is not driven by a 2 h radiator integrator (which oscillates).
+        try:
+            _act_dyn = self.hass.states.get(self._actuator)
+            _modes_dyn = (
+                [str(m) for m in (_act_dyn.attributes.get("hvac_modes") or [])]
+                if _act_dyn
+                else []
+            )
+            self._dynamics = classify_dynamics(
+                domain=self._actuator.split(".", 1)[0],
+                can_cool=can_cool,
+                can_fan="fan_only" in _modes_dyn,
+                override=self._dynamics_override,
+            )
+            _prof = PROFILES[self._dynamics]
+            self._pi.apply_profile(
+                kp=_prof.pi_kp, ki=_prof.pi_ki, offset_max=_prof.offset_max
+            )
+            self._mpc_params = MpcParams(
+                horizon_blocks=_prof.mpc_horizon_blocks, dt_h=_prof.mpc_dt_h
+            )
+        except Exception:  # noqa: BLE001 - tuning refresh must never break the tick
+            _LOGGER.debug("Poise dynamics-profile refresh failed", exc_info=True)
         device_max = self._device_max()
 
         if should_learn(window_open=window_open, frozen=frozen):
@@ -1239,6 +1272,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 target=decision.heat_sp,
                 lower=decision.heat_sp,
                 upper=decision.cool_sp,
+                params=self._mpc_params,
             )
             # shadow direct-valve TPI duty (ADR-0036): computed + reported only.
             tpi = evaluate_tpi_shadow(
@@ -1391,6 +1425,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         return {
             "available": True,
             **outcome_diag,
+            "dynamics_profile": self._dynamics.value,
+            "pi_integral_time_h": round(PROFILES[self._dynamics].integral_time_h, 3),
             # H3/ADR-0038: monotonic stamp of when this snapshot was produced, so
             # the system hub can detect a silently stale zone (age-based staleness).
             "mono_ts": now,
