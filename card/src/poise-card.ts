@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import type { HomeAssistant, LovelaceCard } from "./ha-types.ts";
 import { buildBand } from "./comfort.ts";
+import { buildMonitor, type Lamp } from "./monitoring.ts";
 import type { PoiseCardConfig } from "./card-config.ts";
 import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
@@ -205,6 +206,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           ? nothing
           : html`${this._control(this._pending ?? setpoint, lang)}
               ${this._chart(num(a["comfort_low"]), num(a["comfort_high"]))}
+              ${this._monitor(a, band, lang)}
               ${this._chips(a, lang)}`}
         ${this._learn(a, lang)}
       </div>
@@ -416,6 +418,61 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     </div>`;
   }
 
+  // ADR-0049 room-condition traffic lights: temperature (always), humidity and
+  // CO₂ (only when the integration publishes them) get a green/yellow/red dot,
+  // computed card-side from the live state — no recorder load, no actuation.
+  private _monitor(
+    a: Record<string, unknown>,
+    band: ReturnType<typeof buildBand>,
+    lang?: string,
+  ) {
+    const lamps = buildMonitor(
+      {
+        temperature:
+          num(a["operative_temperature"]) ?? num(a["current_temperature"]),
+        comfortVerdict: band?.verdict ?? null,
+        humidity: num(a["humidity"]) ?? num(a["current_humidity"]),
+        co2: num(a["co2"]) ?? num(a["carbon_dioxide"]),
+      },
+      {
+        temperature_scale: this._config.temperature_scale,
+        humidity_thresholds: this._config.humidity_thresholds,
+        co2_scheme: this._config.co2_scheme,
+        co2_thresholds: this._config.co2_thresholds,
+        outdoor_co2: num(a["outdoor_co2"]),
+      },
+    );
+    // Show the row only when there is more than the always-present temperature
+    // lamp (humidity/CO₂ present), or when the ASR office overlay is explicitly
+    // chosen — otherwise a lone dot would just duplicate the band verdict text.
+    const meaningful =
+      lamps.length > 1 || this._config.temperature_scale === "asr_office";
+    if (!meaningful) return nothing;
+    return html`<div
+      class="monitor"
+      role="group"
+      aria-label=${t(lang, "air_quality")}
+    >
+      ${lamps.map((l) => this._lamp(l, lang))}
+    </div>`;
+  }
+
+  private _lamp(l: Lamp, lang?: string) {
+    const label = t(lang, l.key);
+    const lvl = t(lang, l.level === "unknown" ? "unknown" : "air_" + l.level);
+    let val = "—";
+    if (l.value != null) {
+      val =
+        l.key === "temperature" ? l.value.toFixed(1) : String(Math.round(l.value));
+    }
+    const desc = `${label}: ${val} ${l.unit} — ${lvl}`;
+    return html`<div class="lamp" title=${desc} aria-label=${desc}>
+      <span class="dot" style="background:${l.color}"></span>
+      <span class="lk">${label}</span>
+      <span class="lv">${val}<small>${l.unit}</small></span>
+    </div>`;
+  }
+
   private _learn(a: Record<string, unknown>, lang?: string) {
     const conf = num(a["confidence"]);
     const shadow =
@@ -483,6 +540,13 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .cop { fill: none; stroke: var(--primary-color, #2196f3); stroke-width: 2; vector-effect: non-scaling-stroke; }
     .csp { fill: none; stroke: var(--secondary-text-color, #888); stroke-width: 1.5; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
     .chips { cursor: pointer; }
+    .monitor { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 2px; }
+    .lamp { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+      border-radius: 14px; background: var(--secondary-background-color); font-size: 13px; }
+    .lamp .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .lamp .lk { color: var(--secondary-text-color); }
+    .lamp .lv { font-weight: 600; }
+    .lamp .lv small { font-weight: 400; color: var(--secondary-text-color); margin-left: 1px; }
     .dialwrap { position: relative; width: 100%; max-width: 230px; margin: 6px auto 2px; }
     .dial:focus, .ctrclick:focus, .chips:focus { outline: none; }
     .dial:focus-visible, .ctrclick:focus-visible, .chips:focus-visible {

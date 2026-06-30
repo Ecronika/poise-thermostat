@@ -35,6 +35,13 @@ const EN: Dict = {
   update_msg: "New Poise card version available — reload to update.",
   reload: "Reload",
   details: "Show details",
+  temperature: "Temperature",
+  humidity: "Humidity",
+  co2: "CO₂",
+  air_quality: "Room condition",
+  air_ok: "OK",
+  air_warn: "Elevated",
+  air_alert: "Critical",
 };
 const DE: Dict = {
   in_band: "Im Komfortband",
@@ -71,6 +78,13 @@ const DE: Dict = {
   update_msg: "Neue Poise-Karten-Version verfügbar — zum Aktualisieren neu laden.",
   reload: "Neu laden",
   details: "Details anzeigen",
+  temperature: "Temperatur",
+  humidity: "Feuchte",
+  co2: "CO₂",
+  air_quality: "Raumzustand",
+  air_ok: "OK",
+  air_warn: "Erhöht",
+  air_alert: "Kritisch",
 };
 
 export function t(lang: string | undefined, key: string): string {
