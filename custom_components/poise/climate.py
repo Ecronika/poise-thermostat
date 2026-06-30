@@ -151,6 +151,12 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
         return self._d.get("current_temperature")
 
     @property
+    def current_humidity(self) -> float | None:
+        # ADR-0049: publish the room humidity so the card's humidity lamp (and
+        # the native HA thermostat card) can read it. None when no RH sensor.
+        return self._d.get("current_humidity")
+
+    @property
     def target_temperature(self) -> float | None:
         return self._d.get("target_temperature")
 

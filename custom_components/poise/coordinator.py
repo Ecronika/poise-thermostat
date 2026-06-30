@@ -1495,6 +1495,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # the system hub can detect a silently stale zone (age-based staleness).
             "mono_ts": now,
             "current_temperature": round(room, 1),
+            "current_humidity": round(rh, 1) if rh is not None else None,
             "target_temperature": target,
             "operative_temperature": round(operative, 1),
             "t_rm": round(t_rm_eff, 1),
