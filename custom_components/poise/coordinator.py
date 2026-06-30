@@ -26,9 +26,11 @@ from . import actuator as actuator_mod
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
+from .comfort.humidity import humidity_decide
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
+from .comfort.thermal_shock import adaptive_cool_setpoint
 from .comfort.virtual_mrt import virtual_mrt
 from .const import (
     CONF_ACTUATOR,
@@ -268,6 +270,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._dynamics_override: str = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
         self._dynamics = DeviceDynamics.SLOW_HYDRONIC
         self._mpc_params = MpcParams()
+        # ADR-0050/0051: humidity dry-active hysteresis state (shadow).
+        self._dry_active = False
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
             data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
@@ -1079,6 +1083,42 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             mode = "heat"
             self._last_target = target
         act_state = self.hass.states.get(self._actuator)
+        # ADR-0050/0051 SHADOW (diagnostic only, no writes): heat-day cool raise
+        # + humidity action, composed against the *effective* (raised) band.
+        climate_diag: dict[str, object] = {}
+        try:
+            _modes_cl = (
+                [str(m) for m in (act_state.attributes.get("hvac_modes") or [])]
+                if act_state
+                else []
+            )
+            _ac = adaptive_cool_setpoint(
+                cool_sp_en=decision.cool_sp,
+                t_out_smooth=t_out_eff,
+                t_rm=t_rm_eff,
+                category=self._category,
+                device_max=device_max,
+            )
+            _hum = humidity_decide(
+                rh=rh,
+                too_warm=room > _ac.cool_sp_eff,
+                in_deadband=decision.heat_sp <= room <= _ac.cool_sp_eff,
+                can_dry="dry" in _modes_cl,
+                can_fan_only="fan_only" in _modes_cl,
+                prev_dry_active=self._dry_active,
+            )
+            self._dry_active = _hum.dry_active
+            climate_diag = {
+                "cool_sp_eff": _ac.cool_sp_eff,
+                "cool_raised": _ac.raised,
+                "cool_raise_reason": _ac.reason,
+                "en_cool_upper": _ac.en_upper,
+                "humidity_action": _hum.action,
+                "dry_active": _hum.dry_active,
+                "humidity_reason": _hum.reason,
+            }
+        except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
+            _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
         heating = self._enabled and not window_open and mode == "heat"
         # A1: the EKF heating-drive uses the actuator's *real* running state when
         # reported (TRVZB running_state -> hvac_action), else our heat intent.
@@ -1425,6 +1465,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         return {
             "available": True,
             **outcome_diag,
+            **climate_diag,
             "dynamics_profile": self._dynamics.value,
             "pi_integral_time_h": round(PROFILES[self._dynamics].integral_time_h, 3),
             # H3/ADR-0038: monotonic stamp of when this snapshot was produced, so
