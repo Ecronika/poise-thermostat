@@ -26,6 +26,7 @@ from . import actuator as actuator_mod
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
+from .comfort.free_running import free_running_widen
 from .comfort.humidity import humidity_decide
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
@@ -1108,6 +1109,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 prev_dry_active=self._dry_active,
             )
             self._dry_active = _hum.dry_active
+            # ADR-0023 §1 free-running widening (shadow): the EN adaptive band
+            # widens the dead-band only while the room floats in the fixed band.
+            _fr = free_running_widen(
+                heat_op=decision.heat_sp,
+                cool_op=decision.cool_sp,
+                room=room,
+                t_rm=t_rm_eff,
+                category=self._category,
+            )
             climate_diag = {
                 "cool_sp_eff": _ac.cool_sp_eff,
                 "cool_raised": _ac.raised,
@@ -1116,6 +1126,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "humidity_action": _hum.action,
                 "dry_active": _hum.dry_active,
                 "humidity_reason": _hum.reason,
+                "fr_active": _fr.active,
+                "fr_heat_sp": round(_fr.heat_op, 1),
+                "fr_cool_sp": round(_fr.cool_op, 1),
+                "fr_adaptive_lower": round(_fr.adaptive_lower, 1),
+                "fr_adaptive_upper": round(_fr.adaptive_upper, 1),
             }
         except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
             _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
