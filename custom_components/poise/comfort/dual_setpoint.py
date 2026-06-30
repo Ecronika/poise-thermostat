@@ -57,7 +57,8 @@ def decide(
     priority: float = 1.0,  # 0 = efficiency (wide band), 1 = comfort (tight band)
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
-    _ = t_rm  # regime indicator; fixed design bands govern when conditioning
+    _ = t_rm  # fixed design bands are t_rm-independent when conditioning; the
+    # ADR-0023 §1 free-running widening (uses t_rm) is shadow in free_running.py.
     # Both edges are anchored to the comfort centre (the cooling edge tracks the
     # user's target, it is NOT pinned to the absolute upper limit — review M1);
     # the comfort/efficiency priority widens the neutral dead-band.
