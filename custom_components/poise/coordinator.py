@@ -107,6 +107,7 @@ from .control.override import (
 )
 from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
+from .control.scoring_expectation import model_expected_minutes
 from .control.tick_resolve import (
     heat_drive_signal,
     needs_mode_nudge,
@@ -1457,7 +1458,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 heating=heating,
                 controlling=self._enabled,
                 dt_min=_tick_min,
-                expected_minutes=float(sched.minutes_to_comfort),
+                expected_minutes=model_expected_minutes(
+                    self._ekf.get_model() if self._ekf.identified else None,
+                    room=room,
+                    target=decision.heat_sp,
+                    t_out=t_out_eff,
+                    q_solar=q_solar,
+                    fallback=float(sched.minutes_to_comfort),
+                ),
                 q_solar=q_solar,
                 outdoor=t_out_eff,
             )
