@@ -27,6 +27,7 @@ from custom_components.poise.const import (
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
     CONF_ENTRY_TYPE,
+    CONF_HUMIDITY_SENSOR,
     CONF_NAME,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
@@ -149,3 +150,34 @@ async def test_system_hub_setup_creates_binary_sensor(hass: HomeAssistant) -> No
     reg = er.async_get(hass)
     domains = {e.domain for e in er.async_entries_for_config_entry(reg, entry.entry_id)}
     assert "binary_sensor" in domains
+
+
+async def test_current_humidity_published_for_card_lamp(hass: HomeAssistant) -> None:
+    """ADR-0049: with a humidity sensor the climate entity exposes
+    current_humidity, so the card's humidity lamp (and the native HA thermostat
+    card) is actually live — not just read internally."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_room_and_actuator(hass, room=21.0, sp=21.0)
+    hass.states.async_set(
+        "sensor.room_rh",
+        "54",
+        {"device_class": "humidity", "unit_of_measurement": "%"},
+    )
+    data = {**ROOM_DATA, CONF_HUMIDITY_SENSOR: "sensor.room_rh"}
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=data, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reg = er.async_get(hass)
+    climate_eid = next(
+        e.entity_id
+        for e in er.async_entries_for_config_entry(reg, entry.entry_id)
+        if e.domain == "climate"
+    )
+    state = hass.states.get(climate_eid)
+    assert state is not None
+    assert state.attributes.get("current_humidity") == 54.0
