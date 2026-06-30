@@ -70,7 +70,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0049](ADR-0049-Card-Monitoring-Ampel.md) | Card-Monitoring-Ampel (Temp/Feuchte/CO₂) + optionaler CO₂-Sensor (Anzeige) | Vorgeschlagen |
 | [0050](ADR-0050-Feuchte-Management-Dry-Pfad.md) | Feuchte-Management — Dry-Guard + aktive Entfeuchtung (shadow-first) | Vorgeschlagen |
 | [0051](ADR-0051-Thermoschock-Delta-Hitzetag-Kuehlband.md) | Thermoschock-Delta & Hitzetag-Kühlband (adaptiver Kühl-Sollwert) | Vorgeschlagen |
-| [0052](ADR-0052-Aktor-Dynamik-Profile.md) | Aktor-Dynamik-Profile — Regler-Zeitkonstanten je HVAC-Typ (PI/MPC) | Vorgeschlagen |
+| [0052](ADR-0052-Aktor-Dynamik-Profile.md) | Aktor-Dynamik-Profile — Regler-Zeitkonstanten je HVAC-Typ (PI/MPC) | In Arbeit (75 %) |
 | [0053](ADR-0053-Leerlauf-Belegt-Luefterumwaelzung.md) | Leerlauf-/Belegt-Lüfterumwälzung (Fan-Low im besetzten Totband) | Vorgeschlagen |
 
 ## Umsetzungsstand (gegen Code verifiziert)
