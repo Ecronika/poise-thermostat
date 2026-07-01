@@ -69,3 +69,18 @@ def test_apply_profile_retunes_pi_and_keeps_acc() -> None:
     sp, _ = pi.evaluate(target=24.0, room=18.0, external=18.0, dt_h=1.0 / 60.0)
     assert sp <= 24.0 + fast.offset_max + 1e-9
     assert sp >= 24.0 + 0.5
+
+
+def test_regulation_throttled() -> None:
+    from custom_components.poise.control.dynamics import regulation_throttled as rt
+
+    # a dumb setpoint actuator (period 0, e.g. TRV) is never throttled
+    assert rt(now_s=100.0, last_write_s=0.0, regulation_period_s=0.0) is False
+    # the first write (no previous stamp) always passes
+    assert rt(now_s=100.0, last_write_s=None, regulation_period_s=300.0) is False
+    # within the regulation period -> throttle the nudge
+    assert rt(now_s=100.0, last_write_s=0.0, regulation_period_s=300.0) is True
+    # period elapsed -> allow the write
+    assert rt(now_s=400.0, last_write_s=0.0, regulation_period_s=300.0) is False
+    # exactly at the boundary -> allowed (strict less-than)
+    assert rt(now_s=300.0, last_write_s=0.0, regulation_period_s=300.0) is False
