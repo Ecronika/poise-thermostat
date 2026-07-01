@@ -69,7 +69,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0048](ADR-0048-Abgrenzung-Luftqualitaet-und-Hygiene.md) | Abgrenzung Luftqualität & Hygiene (Nicht-Ziele); Nachträge 0027/0046 | Implementiert |
 | [0049](ADR-0049-Card-Monitoring-Ampel.md) | Card-Monitoring-Ampel (Temp/Feuchte/CO₂) + optionaler CO₂-Sensor (Anzeige) | In Arbeit (75 %) |
 | [0050](ADR-0050-Feuchte-Management-Dry-Pfad.md) | Feuchte-Management — Dry-Guard + aktive Entfeuchtung (shadow-first) | In Arbeit (50 %) |
-| [0051](ADR-0051-Thermoschock-Delta-Hitzetag-Kuehlband.md) | Thermoschock-Delta & Hitzetag-Kühlband (adaptiver Kühl-Sollwert) | In Arbeit (55 %) |
+| [0051](ADR-0051-Thermoschock-Delta-Hitzetag-Kuehlband.md) | Thermoschock-Delta & Hitzetag-Kühlband (adaptiver Kühl-Sollwert) | In Arbeit (80 %) |
 | [0052](ADR-0052-Aktor-Dynamik-Profile.md) | Aktor-Dynamik-Profile — Regler-Zeitkonstanten je HVAC-Typ (PI/MPC) | In Arbeit (75 %) |
 | [0053](ADR-0053-Leerlauf-Belegt-Luefterumwaelzung.md) | Leerlauf-/Belegt-Lüfterumwälzung (Fan-Low im besetzten Totband) | Vorgeschlagen |
 
