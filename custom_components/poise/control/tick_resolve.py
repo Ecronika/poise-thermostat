@@ -165,23 +165,22 @@ def needs_mode_nudge(
 ) -> bool:
     """True if the actuator must be commanded into ``desired_mode`` (H1).
 
-    A TRV left in ``off`` ignores our setpoint, and ``auto`` runs the device's own
-    weekly schedule (Sonoff TRVZB ``system_mode=auto``) — both override Poise, so
-    we nudge it into the mode that matches our write: ``cool`` when we cool, else
-    ``heat``. We *also* correct a device sitting in the **opposite active** mode —
-    e.g. an auto/seasonal heat-pump that autonomously switched to ``heat`` while we
-    now cool — because writing a cool setpoint into a heating device (or vice
-    versa) drives the room the wrong way (review H1 residual). We only assert a
-    mode the device *literally* offers (``supported`` from the actuator's real
-    ``hvac_modes``); otherwise the call is rejected and spams the log every tick
-    (review V1). A device already in ``desired_mode`` is left alone.
+    A TRV left in ``off`` ignores our setpoint, ``auto`` runs the device's own
+    weekly schedule (Sonoff TRVZB ``system_mode=auto``), and a device sitting in a
+    *different active* mode (an auto/seasonal heat-pump that switched to ``heat``
+    while we now cool, or an AC still in ``dry`` after the room has dried out) all
+    diverge from what we write — so we assert ``desired_mode`` whenever the device
+    is not already in it. The rule is simply "current ≠ desired": it subsumes the
+    old auto/off + opposite-mode cases and, since ADR-0050, also *leaves* the
+    ``dry`` mode once we no longer want it (a stuck ``dry`` keeps dehumidifying).
+    We only assert a mode the device *literally* offers (``supported`` from the
+    actuator's real ``hvac_modes``); otherwise the call is rejected and spams the
+    log every tick (review V1). An ``unknown`` current mode is left alone
+    (conservative — the device may be momentarily unavailable).
     """
-    if not supported:
+    if not supported or current_mode is None:
         return False
-    if current_mode in ("auto", "off"):
-        return True
-    opposite = {"cool": "heat", "heat": "cool"}.get(desired_mode)
-    return current_mode == opposite
+    return current_mode != desired_mode
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
