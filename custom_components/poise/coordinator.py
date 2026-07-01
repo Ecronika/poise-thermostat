@@ -94,7 +94,12 @@ from .control.cover_shading import (
     predict_peak_operative,
     shading_target_position,
 )
-from .control.dynamics import PROFILES, DeviceDynamics, classify_dynamics
+from .control.dynamics import (
+    PROFILES,
+    DeviceDynamics,
+    classify_dynamics,
+    regulation_throttled,
+)
 from .control.hdh_savings import HdhConfig, HdhSavings
 from .control.mpc import MpcParams
 from .control.mpc_shadow import evaluate_shadow
@@ -230,6 +235,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._prev_room_mono: float | None = None
         self._last_target: float | None = None
         self._last_written_mode: str | None = None
+        self._last_sp_write_ts: float | None = None  # ADR-0052 §4 nudge throttle
         self._last_fed: float | None = None
         self._dirty = False  # override/enabled/mode changed -> persist next save
         self._store = PoiseStore(hass, entry.entry_id)
@@ -1281,7 +1287,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # rounded echo doesn't trigger a write every tick (review R2)
             step = _num_attr(act_state, "target_temperature_step") or 0.1
             mode_changed = final_mode != self._last_written_mode
-            if should_write(
+            # ADR-0052 §4: a self-regulating climate entity (its own thermostat)
+            # is nudged at most once per its dynamics regulation period, so Poise
+            # does not thrash it (and its compressor) with per-tick comfort
+            # adjustments. Mode changes, an open window, an override and a frozen
+            # sensor bypass the throttle (safety/intent must be immediate). Dumb
+            # setpoint actuators (regulation_period_s == 0, e.g. TRVs) are never
+            # throttled -> heat-only test hardware is a no-op.
+            _wprof = PROFILES[self._dynamics]
+            _reg_throttled = (
+                _wprof.self_regulating
+                and not mode_changed
+                and not window_open
+                and self._override is None
+                and not frozen
+                and regulation_throttled(
+                    now_s=now,
+                    last_write_s=self._last_sp_write_ts,
+                    regulation_period_s=_wprof.regulation_period_s,
+                )
+            )
+            if not _reg_throttled and should_write(
                 actual_sp,
                 snap_to_step(target, step),
                 mode_changed=mode_changed,
@@ -1297,6 +1323,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 try:
                     await actuator_mod.write(self.hass, cmd)
                     self._last_written_mode = final_mode
+                    self._last_sp_write_ts = now
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
                         "Poise: actuator write failed for %s", self._actuator
@@ -1575,6 +1602,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             **climate_diag,
             "dynamics_profile": self._dynamics.value,
             "pi_integral_time_h": round(PROFILES[self._dynamics].integral_time_h, 3),
+            "reg_period_s": PROFILES[self._dynamics].regulation_period_s,
             # H3/ADR-0038: monotonic stamp of when this snapshot was produced, so
             # the system hub can detect a silently stale zone (age-based staleness).
             "mono_ts": now,
