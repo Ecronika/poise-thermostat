@@ -56,7 +56,7 @@ def test_dry_as_preset_uses_preset_kind() -> None:
     )
     dry = next(c for c in discover(snap) if c.axis is Axis.HUMIDITY)
     assert dry.command_kind == "preset_mode"
-    assert dry.mode_command == "dry"
+    assert dry.mode_command == "Dry"  # ADR-0050 §9: original device casing kept
 
 
 def test_fan_domain_is_air_movement() -> None:
