@@ -115,3 +115,22 @@ def profile_for(
             domain=domain, can_cool=can_cool, can_fan=can_fan, override=override
         )
     ]
+
+
+def regulation_throttled(
+    *, now_s: float, last_write_s: float | None, regulation_period_s: float
+) -> bool:
+    """True if a self-regulating setpoint nudge should be held back this tick.
+
+    A self-regulating climate entity has its own thermostat, so Poise writes its
+    target at most once per ``regulation_period_s`` (VTherm's "minimum regulation
+    period", ADR-0052 §4) instead of nudging it every tick — otherwise per-tick
+    comfort adjustments thrash the device (and its compressor). A dumb setpoint
+    actuator (``regulation_period_s == 0``, e.g. a TRV that Poise's PI drives) is
+    never throttled, and the first write (``last_write_s is None``) always
+    passes. The coordinator additionally bypasses this for mode changes / window
+    / override / frozen-sensor safety, so only routine comfort nudges throttle.
+    """
+    if regulation_period_s <= 0.0 or last_write_s is None:
+        return False
+    return (now_s - last_write_s) < regulation_period_s
