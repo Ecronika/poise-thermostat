@@ -26,6 +26,7 @@ from . import actuator as actuator_mod
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
+from .comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
 from .comfort.free_running import free_running_widen
 from .comfort.humidity import humidity_decide
 from .comfort.mode_seam import mode_arbitration
@@ -119,6 +120,7 @@ from .control.scoring_expectation import model_expected_minutes
 from .control.tick_resolve import (
     heat_drive_signal,
     needs_mode_nudge,
+    resolve_desired_mode,
     resolve_write_target,
     sanitize_override,
     select_mrt,
@@ -1082,6 +1084,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             priority=self._priority,
         )
 
+        act_state = self.hass.states.get(self._actuator)
         # ADR-0051 activation: on a hot day raise the cooling setpoint toward the
         # EN adaptive upper (capped; the default ASR-26 cap makes it a no-op
         # until the cap is raised), rate-limited <=0.5 K/tick. Cooling-only:
@@ -1102,7 +1105,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._cool_sp_eff_prev = eff_cool
         except Exception:  # noqa: BLE001 - the cool raise must never break the tick
             _LOGGER.debug("Poise cool-raise activation failed", exc_info=True)
-        cool_write = eff_cool if decision.mode == "cool" else decision.write_setpoint
+        # Finding 1 (v0.108.0): keep a reversible AC idling in its current cool
+        # mode (see resolve_desired_mode) instead of flipping it heat<->cool each
+        # cycle; its hold must then be the cool edge, not the heat idle-hold, or
+        # it would cool toward heat_sp (overcool). Heat-only TRVs are unchanged.
+        _idle_keep_cool = (
+            decision.mode == "idle"
+            and can_cool
+            and act_state is not None
+            and act_state.state == "cool"
+        )
+        cool_write = (
+            eff_cool
+            if (decision.mode == "cool" or _idle_keep_cool)
+            else decision.write_setpoint
+        )
         wt = resolve_write_target(
             window_open=window_open,
             override=self._override,
@@ -1123,7 +1140,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             target = frozen_safe_target(FROST_FLOOR_C, mold_min)
             mode = "heat"
             self._last_target = target
-        act_state = self.hass.states.get(self._actuator)
         # ADR-0050/0051 SHADOW (diagnostic only, no writes): heat-day cool raise
         # + humidity action, composed against the *effective* (raised) band.
         climate_diag: dict[str, object] = {}
@@ -1156,6 +1172,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 t_rm=t_rm_eff,
                 category=self._category,
             )
+            # ADR-0053 idle-recirculation SHADOW (preview, no writes): show what
+            # enabling would do on this device. No presence entity yet -> the
+            # presence-less opt-in path; policy forced on for the preview only.
+            _can_recirc = "fan_only" in _modes_cl or bool(
+                act_state and act_state.attributes.get("fan_modes")
+            )
+            _fan = fan_circulation(
+                occupied=None,
+                in_deadband=decision.heat_sp <= room <= eff_cool,
+                active_mode=mode,
+                window_open=window_open,
+                can_recirculate=_can_recirc,
+                policy=FAN_ONLY_LOW,
+                presence_optin=True,
+            )
             climate_diag = {
                 "cool_sp_eff": _cool_ac.cool_sp_eff if _cool_ac else decision.cool_sp,
                 "cool_sp_active": round(eff_cool, 1),
@@ -1170,6 +1201,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "fr_cool_sp": round(_fr.cool_op, 1),
                 "fr_adaptive_lower": round(_fr.adaptive_lower, 1),
                 "fr_adaptive_upper": round(_fr.adaptive_upper, 1),
+                "fan_circ_shadow": _fan.action,
+                "fan_circ_reason": _fan.reason,
             }
         except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
             _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
@@ -1216,12 +1249,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 humidity_action=_hum_action,
                 dry_ok="dry" in act_modes,
             )
-            if final_mode == "dry":
-                desired_hvac = "dry"
-            elif final_mode == "cool":
-                desired_hvac = "cool"
-            else:
-                desired_hvac = "heat"
+            desired_hvac = resolve_desired_mode(
+                final_mode=final_mode,
+                current_device_mode=act_state.state if act_state else None,
+                can_cool=can_cool,
+            )
             if needs_mode_nudge(
                 act_state.state if act_state else None,
                 desired_hvac,
