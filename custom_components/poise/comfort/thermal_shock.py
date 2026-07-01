@@ -5,7 +5,7 @@ at the door; health guidance is ~6-8 K under outdoor. This raises the cooling
 setpoint toward ``outdoor - ΔT`` but never above the EN-16798-1 adaptive upper
 edge (the norm anchor) nor a hard cap (ASR A3.5 office ceiling 26 °C, raising it
 is an employer policy opt-in), and never below the EN cooling setpoint. Pure and
-unit-tested; wired shadow-first (diagnostic only) before it drives a setpoint.
+unit-tested; the live raise is rate-limited (``rate_limit``) against churn.
 """
 
 from __future__ import annotations
@@ -64,3 +64,17 @@ def adaptive_cool_setpoint(
     return AdaptiveCool(
         round(eff, 1), raised, round(en_upper, 1), round(upper, 1), reason
     )
+
+
+def rate_limit(prev: float | None, target: float, max_step: float) -> float:
+    """Move ``prev`` toward ``target`` by at most ``max_step`` per call.
+
+    Anti-churn for the live cooling setpoint (ADR-0051 §4): a hot-day raise must
+    not jump the actuator's setpoint in one tick. ``prev=None`` (first sample) or
+    ``max_step<=0`` returns ``target`` unchanged.
+    """
+    if prev is None or max_step <= 0.0:
+        return target
+    if target > prev:
+        return min(target, prev + max_step)
+    return max(target, prev - max_step)
