@@ -64,9 +64,24 @@ def _first_present(candidates: tuple[str, ...], modes: set[str]) -> str | None:
     return None
 
 
+def _match_original(
+    candidates: tuple[str, ...], originals: tuple[str, ...]
+) -> str | None:
+    """Case-insensitive match returning the ORIGINAL casing (ADR-0050 §9).
+
+    HVAC modes are standard lowercase, but device presets keep their own casing
+    ("Dry"/"Dehumidify") and ``set_preset_mode`` needs that exact string — a
+    lowercased command would be rejected by the device.
+    """
+    lowered = {value.lower(): value for value in originals}
+    for token in candidates:
+        if token in lowered:
+            return lowered[token]
+    return None
+
+
 def discover_climate(snap: EntitySnapshot) -> list[DeviceCapability]:
     modes = {m.lower() for m in snap.hvac_modes}
-    presets = {p.lower() for p in snap.preset_modes}
     caps: list[DeviceCapability] = []
 
     heat_token = _first_present(_HEAT_MODES, modes)
@@ -102,7 +117,7 @@ def discover_climate(snap: EntitySnapshot) -> list[DeviceCapability]:
             )
         )
     else:
-        dry_preset = _first_present(("dry", "dehumidify"), presets)
+        dry_preset = _match_original(("dry", "dehumidify"), snap.preset_modes)
         if dry_preset is not None:
             caps.append(
                 DeviceCapability(
