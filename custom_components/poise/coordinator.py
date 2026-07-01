@@ -1086,8 +1086,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # until the cap is raised), rate-limited <=0.5 K/tick. Cooling-only:
         # decide_mode gates "cool" on can_cool, so a heat-only TRV never sees it.
         eff_cool = decision.cool_sp
+        _cool_ac = None
         try:
-            _ac0 = adaptive_cool_setpoint(
+            _cool_ac = adaptive_cool_setpoint(
                 cool_sp_en=decision.cool_sp,
                 t_out_smooth=t_out_eff,
                 t_rm=t_rm_eff,
@@ -1096,7 +1097,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 hard_cap=self._cool_hard_cap,
                 delta_k=self._thermal_shock_delta,
             )
-            eff_cool = rate_limit(self._cool_sp_eff_prev, _ac0.cool_sp_eff, 0.5)
+            eff_cool = rate_limit(self._cool_sp_eff_prev, _cool_ac.cool_sp_eff, 0.5)
             self._cool_sp_eff_prev = eff_cool
         except Exception:  # noqa: BLE001 - the cool raise must never break the tick
             _LOGGER.debug("Poise cool-raise activation failed", exc_info=True)
@@ -1131,17 +1132,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 if act_state
                 else []
             )
-            _ac = adaptive_cool_setpoint(
-                cool_sp_en=decision.cool_sp,
-                t_out_smooth=t_out_eff,
-                t_rm=t_rm_eff,
-                category=self._category,
-                device_max=device_max,
-            )
+            # ADR-0050/0051 coherence: compose humidity + diagnostics against the
+            # SAME config-based, rate-limited cool band that is actually written
+            # (_cool_ac / eff_cool), not a second default-config computation.
             _hum = humidity_decide(
                 rh=rh,
-                too_warm=room > _ac.cool_sp_eff,
-                in_deadband=decision.heat_sp <= room <= _ac.cool_sp_eff,
+                too_warm=room > eff_cool,
+                in_deadband=decision.heat_sp <= room <= eff_cool,
                 can_dry="dry" in _modes_cl,
                 can_fan_only="fan_only" in _modes_cl,
                 prev_dry_active=self._dry_active,
@@ -1157,11 +1154,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 category=self._category,
             )
             climate_diag = {
-                "cool_sp_eff": _ac.cool_sp_eff,
+                "cool_sp_eff": _cool_ac.cool_sp_eff if _cool_ac else decision.cool_sp,
                 "cool_sp_active": round(eff_cool, 1),
-                "cool_raised": _ac.raised,
-                "cool_raise_reason": _ac.reason,
-                "en_cool_upper": _ac.en_upper,
+                "cool_raised": _cool_ac.raised if _cool_ac else False,
+                "cool_raise_reason": _cool_ac.reason if _cool_ac else "n/a",
+                "en_cool_upper": _cool_ac.en_upper if _cool_ac else 0.0,
                 "humidity_action": _hum.action,
                 "dry_active": _hum.dry_active,
                 "humidity_reason": _hum.reason,
