@@ -215,6 +215,9 @@ def test_needs_mode_nudge_on_drift() -> None:
     assert needs_mode_nudge("dry", "cool", supported=True) is True  # leave dry
     assert needs_mode_nudge("cool", "dry", supported=False) is False  # unsupported
     assert needs_mode_nudge(None, "dry", supported=True) is False  # unknown → hold
+    # docstring promise: an unknown/unavailable HA state is left alone, not nudged
+    assert needs_mode_nudge("unknown", "heat", supported=True) is False
+    assert needs_mode_nudge("unavailable", "cool", supported=True) is False
 
 
 def test_device_max_never_undercuts_health_floor() -> None:
@@ -247,3 +250,24 @@ def test_device_max_never_undercuts_health_floor() -> None:
         device_max=22.0,
     )
     assert cool.target <= 22.0
+
+
+def test_resolve_desired_mode() -> None:
+    from custom_components.poise.control.tick_resolve import resolve_desired_mode as r
+
+    # (final_mode, current_device_mode, can_cool) -> expected nudge target
+    cases: list[tuple[str, str | None, bool, str]] = [
+        ("cool", "heat", True, "cool"),  # active modes map to themselves
+        ("heat", "cool", True, "heat"),
+        ("dry", "cool", True, "dry"),
+        ("idle", "cool", True, "cool"),  # Finding 1: reversible AC keeps cool
+        ("idle", "heat", True, "heat"),  # ...or keeps heat — no forced flip
+        ("manual", "cool", True, "cool"),
+        ("idle", "heat", False, "heat"),  # heat-only TRV unchanged
+        ("idle", "off", False, "heat"),
+        ("idle", "off", True, "heat"),  # off/auto -> heat to regain control
+        ("idle", None, True, "heat"),  # unknown -> heat
+    ]
+    for fm, cur, cc, expected in cases:
+        got = r(final_mode=fm, current_device_mode=cur, can_cool=cc)
+        assert got == expected, (fm, cur, cc)
