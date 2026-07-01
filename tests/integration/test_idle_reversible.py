@@ -52,9 +52,7 @@ def _data(actuator: str) -> dict[str, Any]:
 
 def _sensors(hass: HomeAssistant) -> None:
     # room clearly inside the dead-band (heat_sp ~20, cool_sp ~24) -> idle
-    hass.states.async_set(
-        "sensor.room_temp", "21.5", {"device_class": "temperature"}
-    )
+    hass.states.async_set("sensor.room_temp", "21.5", {"device_class": "temperature"})
     hass.states.async_set("sensor.outdoor", "18", {"device_class": "temperature"})
     hass.states.async_set("sensor.trm", "20", {"device_class": "temperature"})
 
