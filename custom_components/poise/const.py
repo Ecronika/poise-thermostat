@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.103.0"
+VERSION: Final = "0.104.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -81,6 +81,13 @@ DEFAULT_PRICE_EUR_KWH: Final = 0.30
 # class. "auto" derives it from the actuator's capabilities; override per zone.
 CONF_DYNAMICS: Final = "actuator_dynamics"
 DEFAULT_DYNAMICS: Final = "auto"
+
+# Heat-day cooling raise (ADR-0051): raise the cool setpoint toward outdoor-ΔT,
+# capped at the ASR office ceiling (raising the cap is an employer opt-in).
+# Defaults live in comfort/thermal_shock.py. With the default 26 °C cap the
+# raise is a no-op until the cap is raised.
+CONF_THERMAL_SHOCK_DELTA: Final = "thermal_shock_delta_k"
+CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30

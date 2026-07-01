@@ -31,7 +31,12 @@ from .comfort.humidity import humidity_decide
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
-from .comfort.thermal_shock import adaptive_cool_setpoint
+from .comfort.thermal_shock import (
+    DEFAULT_HARD_CAP_C,
+    DEFAULT_SHOCK_DELTA_K,
+    adaptive_cool_setpoint,
+    rate_limit,
+)
 from .comfort.virtual_mrt import virtual_mrt
 from .const import (
     CONF_ACTUATOR,
@@ -42,6 +47,7 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_COOL_HARD_CAP,
     CONF_COOL_MIN_OUTDOOR,
     CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
@@ -56,6 +62,7 @@ from .const import (
     CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
+    CONF_THERMAL_SHOCK_DELTA,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
@@ -274,6 +281,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._mpc_params = MpcParams()
         # ADR-0050/0051: humidity dry-active hysteresis state (shadow).
         self._dry_active = False
+        # ADR-0051: heat-day cooling raise (live, rate-limited, cooling-only).
+        self._thermal_shock_delta = float(
+            data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
+        )
+        self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
+        self._cool_sp_eff_prev: float | None = None
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
             data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
@@ -445,6 +458,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
         )
         self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
+        self._thermal_shock_delta = float(
+            data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
+        )
+        self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -1064,12 +1081,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             priority=self._priority,
         )
 
+        # ADR-0051 activation: on a hot day raise the cooling setpoint toward the
+        # EN adaptive upper (capped; the default ASR-26 cap makes it a no-op
+        # until the cap is raised), rate-limited <=0.5 K/tick. Cooling-only:
+        # decide_mode gates "cool" on can_cool, so a heat-only TRV never sees it.
+        eff_cool = decision.cool_sp
+        try:
+            _ac0 = adaptive_cool_setpoint(
+                cool_sp_en=decision.cool_sp,
+                t_out_smooth=t_out_eff,
+                t_rm=t_rm_eff,
+                category=self._category,
+                device_max=device_max,
+                hard_cap=self._cool_hard_cap,
+                delta_k=self._thermal_shock_delta,
+            )
+            eff_cool = rate_limit(self._cool_sp_eff_prev, _ac0.cool_sp_eff, 0.5)
+            self._cool_sp_eff_prev = eff_cool
+        except Exception:  # noqa: BLE001 - the cool raise must never break the tick
+            _LOGGER.debug("Poise cool-raise activation failed", exc_info=True)
+        cool_write = eff_cool if decision.mode == "cool" else decision.write_setpoint
         wt = resolve_write_target(
             window_open=window_open,
             override=self._override,
             heat_sp=decision.heat_sp,
-            cool_sp=decision.cool_sp,
-            write_setpoint=decision.write_setpoint,
+            cool_sp=eff_cool,
+            write_setpoint=cool_write,
             comfort_mode=decision.mode,
             frost_floor=FROST_FLOOR_C,
             mold_min=mold_min,
@@ -1121,6 +1158,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
             climate_diag = {
                 "cool_sp_eff": _ac.cool_sp_eff,
+                "cool_sp_active": round(eff_cool, 1),
                 "cool_raised": _ac.raised,
                 "cool_raise_reason": _ac.reason,
                 "en_cool_upper": _ac.en_upper,
