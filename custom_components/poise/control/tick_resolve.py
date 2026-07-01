@@ -175,12 +175,33 @@ def needs_mode_nudge(
     ``dry`` mode once we no longer want it (a stuck ``dry`` keeps dehumidifying).
     We only assert a mode the device *literally* offers (``supported`` from the
     actuator's real ``hvac_modes``); otherwise the call is rejected and spams the
-    log every tick (review V1). An ``unknown`` current mode is left alone
-    (conservative — the device may be momentarily unavailable).
+    log every tick (review V1). An ``unknown``/``unavailable`` current mode is
+    left alone (conservative — the device may be booting or briefly offline).
     """
-    if not supported or current_mode is None:
+    if not supported or current_mode in (None, "unknown", "unavailable"):
         return False
     return current_mode != desired_mode
+
+
+def resolve_desired_mode(
+    *, final_mode: str, current_device_mode: str | None, can_cool: bool
+) -> str:
+    """The hvac_mode to command this tick — the nudge target (review Finding 1).
+
+    ``heat``/``cool``/``dry`` map to themselves. On a passive ``idle``/``off``/
+    ``manual`` tick we do NOT force a mode flip on a reversible device: keep its
+    current active mode so a cooling AC idles in ``cool`` instead of ping-ponging
+    ``cool`` → ``heat`` → ``cool`` at the compressor each cycle (reversing-valve
+    thrash). Fall back to ``heat`` only when the device cannot cool (heat-only
+    TRV — unchanged) or is off/auto/unknown (regain setpoint control). The
+    coordinator pairs this with a cool-matched idle hold, so a kept-cool device
+    holds the cool edge instead of cooling toward the (low) heat hold.
+    """
+    if final_mode in ("heat", "cool", "dry"):
+        return final_mode
+    if can_cool and current_device_mode in ("heat", "cool"):
+        return current_device_mode
+    return "heat"
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
