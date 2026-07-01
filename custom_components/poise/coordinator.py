@@ -28,6 +28,7 @@ from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.free_running import free_running_widen
 from .comfort.humidity import humidity_decide
+from .comfort.mode_seam import mode_arbitration
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
@@ -1126,6 +1127,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # ADR-0050/0051 SHADOW (diagnostic only, no writes): heat-day cool raise
         # + humidity action, composed against the *effective* (raised) band.
         climate_diag: dict[str, object] = {}
+        _hum_action = "idle"  # ADR-0050 S2c: drives the live dry mode-nudge below
         try:
             _modes_cl = (
                 [str(m) for m in (act_state.attributes.get("hvac_modes") or [])]
@@ -1144,6 +1146,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 prev_dry_active=self._dry_active,
             )
             self._dry_active = _hum.dry_active
+            _hum_action = _hum.action
             # ADR-0023 §1 free-running widening (shadow): the EN adaptive band
             # widens the dead-band only while the room floats in the fixed band.
             _fr = free_running_widen(
@@ -1201,10 +1204,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # H1/A2: keep a controllable actuator in the mode that matches our
             # write — cool when we cool, heat otherwise — so it follows our
             # setpoint instead of its own off/auto schedule (TRVZB system_mode).
-            desired_hvac = "cool" if mode == "cool" else "heat"
             act_modes = (
                 (act_state.attributes.get("hvac_modes") or []) if act_state else []
             )
+            # ADR-0050 S2c: fold active drying into the mode — dry wins ONLY when
+            # idle (temp in band) + humidity asks + the device can dry; heat/cool/
+            # off/manual pass through (temperature + safety primary). Capability-
+            # gated: a heat-only TRV has no "dry" mode -> dry_ok False -> no-op.
+            final_mode = mode_arbitration(
+                base_mode=mode,
+                humidity_action=_hum_action,
+                dry_ok="dry" in act_modes,
+            )
+            if final_mode == "dry":
+                desired_hvac = "dry"
+            elif final_mode == "cool":
+                desired_hvac = "cool"
+            else:
+                desired_hvac = "heat"
             if needs_mode_nudge(
                 act_state.state if act_state else None,
                 desired_hvac,
@@ -1231,7 +1248,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # snap our target to the device's setpoint step so a coarse TRV's
             # rounded echo doesn't trigger a write every tick (review R2)
             step = _num_attr(act_state, "target_temperature_step") or 0.1
-            mode_changed = mode != self._last_written_mode
+            mode_changed = final_mode != self._last_written_mode
             if should_write(
                 actual_sp,
                 snap_to_step(target, step),
@@ -1242,12 +1259,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     actuator_id=self._actuator,
                     path=ActuatorPath.SETPOINT,
                     value=target,
-                    hvac_mode=mode,
+                    hvac_mode=final_mode,
                     reason="tick",
                 )
                 try:
                     await actuator_mod.write(self.hass, cmd)
-                    self._last_written_mode = mode
+                    self._last_written_mode = final_mode
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
                         "Poise: actuator write failed for %s", self._actuator
