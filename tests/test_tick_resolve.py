@@ -206,6 +206,15 @@ def test_needs_mode_nudge_on_drift() -> None:
     assert needs_mode_nudge("auto", "cool", supported=False) is False
     assert needs_mode_nudge("off", "heat", supported=False) is False
     assert needs_mode_nudge("heat", "cool", supported=False) is False
+    # ADR-0050 S2c: a special mode (dry) is asserted when absent AND left when
+    # no longer wanted; a stuck dry keeps dehumidifying.
+    assert needs_mode_nudge("cool", "dry", supported=True) is True  # cool -> dry
+    assert needs_mode_nudge("heat", "dry", supported=True) is True  # heat -> dry
+    assert needs_mode_nudge("dry", "dry", supported=True) is False  # already drying
+    assert needs_mode_nudge("dry", "heat", supported=True) is True  # leave dry
+    assert needs_mode_nudge("dry", "cool", supported=True) is True  # leave dry
+    assert needs_mode_nudge("cool", "dry", supported=False) is False  # unsupported
+    assert needs_mode_nudge(None, "dry", supported=True) is False  # unknown → hold
 
 
 def test_device_max_never_undercuts_health_floor() -> None:
