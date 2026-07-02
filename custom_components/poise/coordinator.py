@@ -126,6 +126,7 @@ from .control.override import (
 )
 from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
+from .control.regulation_quality import RegulationQuality
 from .control.scoring_expectation import model_expected_minutes
 from .control.tick_resolve import (
     frost_rescue_target,
@@ -290,6 +291,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         # ADR-0044 outcome scoring + ADR-0045 efficiency report (diagnostic only)
         self._outcome_stats = OutcomeStats()
+        self._regq = RegulationQuality()  # ADR-0055 M1 control-quality (shadow)
         self._outcome_session = OutcomeSession()
         self._hdh = HdhSavings()
         self._hdh_cfg = HdhConfig(
@@ -429,6 +431,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     )
                 if isinstance(data.get("outcome_stats"), dict):
                     self._outcome_stats = OutcomeStats.from_dict(data["outcome_stats"])
+                if isinstance(data.get("regulation_quality"), dict):
+                    self._regq = RegulationQuality.from_dict(data["regulation_quality"])
                 if isinstance(data.get("hdh_savings"), dict):
                     self._hdh = HdhSavings.from_dict(data["hdh_savings"])
                 self._window_bypass = bool(data.get("window_bypass", False))
@@ -811,6 +815,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "window_auto": self._window_auto.to_dict(),
             "multi_lifecycle": _lifecycle.to_dict(self._multi_lifecycle),
             "outcome_stats": self._outcome_stats.to_dict(),
+            "regulation_quality": self._regq.to_dict(),
             "hdh_savings": self._hdh.to_dict(),
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
@@ -1715,6 +1720,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._outcome_stats = self._outcome_stats.observe(
                     _fin.score, _fin.controller
                 )
+            # ADR-0055 M1 regulation-quality metric (EN 15500-1 CA), SHADOW:
+            # score only unmasked comfort ticks (room_decide vs the effective
+            # band); the metric gates nothing yet — it must earn trust first.
+            if (
+                self._enabled
+                and not window_open
+                and self._override is None
+                and sched.is_comfort
+            ):
+                self._regq = self._regq.observe(
+                    room=room_decide,
+                    heat_sp=decision.heat_sp,
+                    cool_sp=eff_cool,
+                    mode=mode,
+                    dt_min=_tick_min,
+                )
             _rep = self._hdh.report(self._hdh_cfg)
             outcome_diag = {
                 "outcome_last_score": self._outcome_stats.last_score,
@@ -1724,6 +1745,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "savings_kwh_month": _rep["kwh"],
                 "savings_eur_month": _rep["eur"],
                 "savings_pct": _rep["pct"],
+                "ca_deviation_k": round(self._regq.deviation_k, 3),
+                "ca_time_in_band": self._regq.time_in_band_pct,
+                "ca_cycles_per_h": round(self._regq.cycles_per_hour, 2),
+                "ca_minutes": round(self._regq.minutes, 0),
             }
         except Exception:  # noqa: BLE001 - diagnostics must never break control
             _LOGGER.debug("Poise outcome/savings diagnostics failed", exc_info=True)

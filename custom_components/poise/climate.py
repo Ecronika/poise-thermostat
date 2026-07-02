@@ -117,6 +117,10 @@ _ATTRS = (
     "pmv",
     "ppd",
     "pmv_category",
+    "ca_deviation_k",
+    "ca_time_in_band",
+    "ca_cycles_per_h",
+    "ca_minutes",
 )
 
 
