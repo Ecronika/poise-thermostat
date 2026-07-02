@@ -126,6 +126,7 @@ from .control.scoring_expectation import model_expected_minutes
 from .control.tick_resolve import (
     frost_rescue_target,
     heat_drive_signal,
+    idle_park,
     needs_mode_nudge,
     resolve_desired_mode,
     resolve_write_target,
@@ -1127,21 +1128,26 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._cool_sp_eff_prev = eff_cool
         except Exception:  # noqa: BLE001 - the cool raise must never break the tick
             _LOGGER.debug("Poise cool-raise activation failed", exc_info=True)
-        # Finding 1 (v0.108.0): keep a reversible AC idling in its current cool
-        # mode (see resolve_desired_mode) instead of flipping it heat<->cool each
-        # cycle; its hold must then be the cool edge, not the heat idle-hold, or
-        # it would cool toward heat_sp (overcool). Heat-only TRVs are unchanged.
-        _idle_keep_cool = (
-            decision.mode == "idle"
-            and can_cool
-            and act_state is not None
-            and act_state.state == "cool"
-        )
-        cool_write = (
-            eff_cool
-            if (decision.mode == "cool" or _idle_keep_cool)
-            else decision.write_setpoint
-        )
+        # Finding 1 follow-up (idle-park): when idle, park toward the edge the room
+        # is closest to — a warm reversible AC parks in cool at the cool edge, not
+        # in heat at the low heat idle-hold (which needs a many-K drop to act and
+        # never responds to a warming room). ONE decision drives both the written
+        # value and the mode nudge (idle_park_mode below) so they never disagree; a
+        # heat-only TRV always parks in heat (can_cool False -> unchanged).
+        _idle_park_mode: str | None = None
+        if decision.mode == "cool":
+            cool_write = eff_cool
+        elif decision.mode == "idle":
+            _idle_park_mode, cool_write = idle_park(
+                room=room_decide,
+                heat_sp=decision.heat_sp,
+                cool_sp=eff_cool,
+                can_heat=can_heat,
+                can_cool=can_cool,
+                current_mode=act_state.state if act_state else None,
+            )
+        else:
+            cool_write = decision.write_setpoint
         wt = resolve_write_target(
             window_open=window_open,
             override=self._override,
@@ -1281,12 +1287,19 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 current_device_mode=act_state.state if act_state else None,
                 can_cool=can_cool,
                 can_heat=can_heat,
+                idle_park_mode=_idle_park_mode,
             )
-            if needs_mode_nudge(
+            # A device hvac_mode change this tick must carry its setpoint with it,
+            # so it bypasses the §4 setpoint throttle below: a mode nudge without
+            # its matching setpoint would e.g. flip an AC to cool while it still
+            # holds the heat idle-hold (17.5) and overcool until the throttle clears
+            # (idle-park heat->cool transition).
+            _mode_nudge = needs_mode_nudge(
                 act_state.state if act_state else None,
                 desired_hvac,
                 supported=desired_hvac in act_modes,
-            ):
+            )
+            if _mode_nudge:
                 try:
                     await self.hass.services.async_call(
                         "climate",
@@ -1320,6 +1333,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _reg_throttled = (
                 _wprof.self_regulating
                 and not mode_changed
+                and not _mode_nudge
                 and not window_open
                 and self._override is None
                 and not frozen
