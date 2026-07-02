@@ -18,6 +18,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.helpers import selector
 
+from .config_reconcile import reconfigure_options
 from .const import (
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
@@ -429,9 +430,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         schema = _system_schema() if is_system else _schema()
         if user_input is not None:
             if is_system:
+                # V7: full replace (not merge) so a cleared optional field is
+                # actually removed; keep the ENTRY_TYPE tag.
                 return self.async_update_reload_and_abort(
                     entry,
-                    data_updates={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
+                    data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
                 )
             # 1.1/1.2: the actuator is a zone's unique_id. Re-validate on
             # reconfigure so a changed actuator can't silently collide with
@@ -443,12 +446,23 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     and other.unique_id == self.unique_id
                 ):
                     return self.async_abort(reason="already_configured")
+            # V7: fully REPLACE data (a cleared optional sensor is really removed,
+            # not merged over) and drop from options any key the form now owns so a
+            # stale option can no longer shadow the new data value (the coordinator
+            # reads {**data, **options}); options-only tuning is preserved.
             return self.async_update_reload_and_abort(
-                entry, unique_id=self.unique_id, data_updates=user_input
+                entry,
+                unique_id=self.unique_id,
+                data=user_input,
+                options=reconfigure_options(user_input, entry.options),
             )
+        # Pre-fill from the EFFECTIVE current values (data overlaid by options), so a
+        # field last changed via the options flow shows its real value, not the stale
+        # data value (review V7 climate_mode restore).
+        current = {**entry.data, **entry.options}
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(schema, entry.data),
+            data_schema=self.add_suggested_values_to_schema(schema, current),
         )
 
 
