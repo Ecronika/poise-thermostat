@@ -51,3 +51,35 @@ def free_running_widen(
     new_heat = min(heat_op, ab.lower)  # widen down; NEVER raise the heat edge
     new_cool = max(cool_op, ab.upper)  # widen up toward the adaptive upper
     return FreeRunningBand(new_heat, new_cool, True, ab.lower, ab.upper)
+
+
+def adaptive_cool_edge(
+    *,
+    fixed_cool_op: float,
+    t_rm: float,
+    category: Category = Category.II,
+    cap: float = 26.0,
+    enabled: bool = False,
+    can_cool: bool = False,
+) -> tuple[float, bool]:
+    """Cooling operative edge raised to the EN adaptive upper (ADR-0023 §1 live).
+
+    The fixed design cooling range (COOLING_LOWER/UPPER) is a winter / fully-
+    conditioned band; in a warm free-running summer it cools far below the
+    adaptive comfort (e.g. to 23 C operative while the running mean allows
+    ~26-27). When enabled on a cool-capable zone and the adaptive model is valid
+    (10..30 C T_rm), raise the cooling edge to ``min(adaptive_upper, cap)`` — but
+    only when that is ABOVE the fixed edge (never cool MORE aggressively than the
+    design band) and never above the ASR ceiling ``cap`` (at a high T_rm the
+    adaptive upper reaches ~31 C, so the cap keeps cooling kicking in by ~26 and
+    avoids over-suppression). Returns ``(cool_op, raised)``. Never touches heat.
+    """
+    if not (enabled and can_cool):
+        return fixed_cool_op, False
+    ab = adaptive_band(t_rm, category)
+    if ab.extrapolated:  # T_rm outside [10, 30] -> adaptive model not valid
+        return fixed_cool_op, False
+    edge = min(ab.upper, cap)
+    if edge <= fixed_cool_op:  # never lower the cooling edge below the design band
+        return fixed_cool_op, False
+    return round(edge, 1), True

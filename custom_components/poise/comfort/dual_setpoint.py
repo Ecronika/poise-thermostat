@@ -18,6 +18,7 @@ from .en16798 import (
     HEATING_UPPER,
     Category,
 )
+from .free_running import adaptive_cool_edge
 from .operative import operative_to_air
 
 _EFFICIENCY_WIDEN_K = 1.5  # max dead-band widening per side at full efficiency
@@ -56,13 +57,15 @@ def decide(
     dewpoint: float | None = None,
     priority: float = 1.0,  # 0 = efficiency (wide band), 1 = comfort (tight band)
     occupied: bool = True,  # False during an unoccupied setback (review V3)
+    adaptive_cool: bool = False,  # ADR-0023 §1: EN adaptive cooling edge (opt-in)
+    adaptive_cap: float = 26.0,  # ASR office ceiling for the adaptive cool edge
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
-    _ = t_rm  # fixed design bands are t_rm-independent when conditioning; the
-    # ADR-0023 §1 free-running widening (uses t_rm) is shadow in free_running.py.
-    # Both edges are anchored to the comfort centre (the cooling edge tracks the
-    # user's target, it is NOT pinned to the absolute upper limit — review M1);
-    # the comfort/efficiency priority widens the neutral dead-band.
+    # The fixed design bands are anchored to the comfort centre (heat/cool edges
+    # from comfort_base +/- the neutral dead-band, widened by the efficiency
+    # priority — review M1). When ``adaptive_cool`` is enabled the cooling edge is
+    # then lifted to the EN 16798 adaptive upper for the running mean (ADR-0023
+    # §1), so a warm free-running summer is not over-cooled toward the fixed band.
     widen = (1.0 - _clamp(priority, 0.0, 1.0)) * _EFFICIENCY_WIDEN_K
     # Clamp each edge into its EN-16798 category band AFTER widening, so a wide
     # efficiency band can never breach the comfort category lower/upper (review
@@ -80,6 +83,18 @@ def decide(
         COOLING_LOWER[category],
         COOLING_UPPER[category],
     )
+    # ADR-0023 §1 (live, opt-in): in the cooling season lift the cooling edge from
+    # the fixed summer band to the EN adaptive upper (capped at the ASR ceiling),
+    # so a room within the adaptive comfort band is not over-cooled toward 23 °C.
+    if adaptive_cool:
+        cool_op, _raised = adaptive_cool_edge(
+            fixed_cool_op=cool_op,
+            t_rm=t_rm,
+            category=category,
+            cap=adaptive_cap,
+            enabled=True,
+            can_cool=can_cool,
+        )
 
     # operative -> air
     heat_sp = operative_to_air(heat_op, t_mrt, velocity)
