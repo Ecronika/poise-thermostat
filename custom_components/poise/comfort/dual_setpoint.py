@@ -55,6 +55,7 @@ def decide(
     mold_min: float | None = None,
     dewpoint: float | None = None,
     priority: float = 1.0,  # 0 = efficiency (wide band), 1 = comfort (tight band)
+    occupied: bool = True,  # False during an unoccupied setback (review V3)
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
     _ = t_rm  # fixed design bands are t_rm-independent when conditioning; the
@@ -66,9 +67,14 @@ def decide(
     # Clamp each edge into its EN-16798 category band AFTER widening, so a wide
     # efficiency band can never breach the comfort category lower/upper (review
     # M2). The norm limits act as guardrails (clamp), never as the setpoint.
-    heat_op = _clamp(
-        comfort_base - widen, HEATING_LOWER[category], HEATING_UPPER[category]
-    )
+    # V3: the EN band is an *occupied*-comfort guardrail. During an unoccupied
+    # night/away setback the room is meant to drift below the comfort lower toward
+    # the health floor, so the lower clamp relaxes to the frost floor — otherwise a
+    # setback target below HEATING_LOWER is silently clamped back up and the whole
+    # setback is neutralised. The air-side frost/mould floor is re-applied below,
+    # so protection is never weakened; only the comfort lower is waived.
+    heat_lower = HEATING_LOWER[category] if occupied else frost_floor
+    heat_op = _clamp(comfort_base - widen, heat_lower, HEATING_UPPER[category])
     cool_op = _clamp(
         comfort_base + _NEUTRAL_DEADBAND_K + widen,
         COOLING_LOWER[category],
