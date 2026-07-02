@@ -123,6 +123,7 @@ from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
 from .control.scoring_expectation import model_expected_minutes
 from .control.tick_resolve import (
+    frost_rescue_target,
     heat_drive_signal,
     needs_mode_nudge,
     resolve_desired_mode,
@@ -1088,6 +1089,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             mold_min=mold_min,
             dewpoint=dewpoint,
             priority=self._priority,
+            occupied=sched.is_comfort or preheating,
         )
 
         act_state = self.hass.states.get(self._actuator)
@@ -1140,11 +1142,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
         if frozen:
-            # C3/Ü3: the room sensor is stale -> do not chase a comfort target on
-            # a dead value; degrade to the health floor and let the actuator hold
-            # it with its own sensor (fail toward warmth).
-            target = frozen_safe_target(FROST_FLOOR_C, mold_min)
-            mode = "heat"
+            # C3/Ü3 + review V1: the room sensor is stale -> do not chase a comfort
+            # target on a dead value. A heat-capable device degrades to the health
+            # floor in heat (frost protection, held by the actuator's own sensor,
+            # fail toward warmth); a cool-only device must NOT be pinned to the
+            # floor in cool (it would cool the room to ~7 C) -> command off.
+            if can_heat:
+                target = frozen_safe_target(FROST_FLOOR_C, mold_min)
+                mode = "heat"
+            else:
+                mode = "off"
             self._last_target = target
         # ADR-0050/0051 SHADOW (diagnostic only, no writes): heat-day cool raise
         # + humidity action, composed against the *effective* (raised) band.
@@ -1259,6 +1266,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 final_mode=final_mode,
                 current_device_mode=act_state.state if act_state else None,
                 can_cool=can_cool,
+                can_heat=can_heat,
             )
             if needs_mode_nudge(
                 act_state.state if act_state else None,
@@ -1372,6 +1380,46 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             _LOGGER.exception(
                                 "Poise: external-temp write failed for %s", ext_num
                             )
+        else:
+            # review V4: a disabled zone still gets unconditional frost/mould
+            # protection (README promise) — but rescue-only, so a reasonable
+            # manual setpoint above the floor is never fought; a cool-only device
+            # has no frost duty and is left alone (frost_rescue_target -> None).
+            rescue = frost_rescue_target(
+                can_heat=can_heat,
+                actual_sp=_num_attr(act_state, "temperature"),
+                device_state=act_state.state if act_state else None,
+                frost_floor=FROST_FLOOR_C,
+                mold_min=mold_min,
+                deadband=WRITE_DEADBAND_C,
+            )
+            if rescue is not None:
+                _rmodes = (
+                    (act_state.attributes.get("hvac_modes") or []) if act_state else []
+                )
+                _cur = act_state.state if act_state else None
+                try:
+                    if _cur != "heat" and "heat" in _rmodes:
+                        await self.hass.services.async_call(
+                            "climate",
+                            "set_hvac_mode",
+                            {"entity_id": self._actuator, "hvac_mode": "heat"},
+                            blocking=False,
+                        )
+                    await actuator_mod.write(
+                        self.hass,
+                        ActuatorCommand(
+                            actuator_id=self._actuator,
+                            path=ActuatorPath.SETPOINT,
+                            value=rescue,
+                            hvac_mode="heat",
+                            reason="frost_rescue",
+                        ),
+                    )
+                except Exception:  # noqa: BLE001 - frost rescue is best-effort
+                    _LOGGER.exception(
+                        "Poise: frost rescue write failed for %s", self._actuator
+                    )
 
         await self._maybe_save()
 

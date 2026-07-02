@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.110.0"
+VERSION: Final = "0.113.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -111,7 +111,7 @@ CONF_BOILER_KEEPALIVE: Final = "boiler_keepalive_s"
 CONF_BOILER_MIN_ON: Final = "boiler_min_on_s"
 CONF_BOILER_MIN_OFF: Final = "boiler_min_off_s"
 DEFAULT_BOILER_ACTIVATION_DELAY_S: Final = 0.0
-DEFAULT_BOILER_KEEPALIVE_S: Final = 0.0
+DEFAULT_BOILER_KEEPALIVE_S: Final = 300.0  # review V2c: self-healing on by default
 DEFAULT_BOILER_MIN_ON_S: Final = 300.0
 DEFAULT_BOILER_MIN_OFF_S: Final = 300.0
 

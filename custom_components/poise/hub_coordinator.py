@@ -66,6 +66,7 @@ from .control.hub_aggregate import (
     aggregate_boiler_demand,
     group_call_for_heat,
     parse_service_action,
+    reconcile_boiler_on,
     resolve_flow_temperature,
     resolve_load_shedding,
     resolve_source_policy,
@@ -111,6 +112,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._min_on = float(d.get(CONF_BOILER_MIN_ON, DEFAULT_BOILER_MIN_ON_S))
         self._min_off = float(d.get(CONF_BOILER_MIN_OFF, DEFAULT_BOILER_MIN_OFF_S))
         self._boiler = BoilerState()
+        self._reconciled = False  # review V2b: reconcile vs real boiler once
         # S3 load shedding + S4 compressor groups (shadow stage)
         self._max_power_sensor = d.get(CONF_MAX_POWER_SENSOR)
         self._current_power_sensor = d.get(CONF_CURRENT_POWER_SENSOR)
@@ -244,6 +246,21 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             return False
 
     async def _actuate(self, demand_active: bool, now: float) -> None:
+        # review V2b: after a restart our BoilerState starts off; reconcile it
+        # once against the real actuator entity so a boiler left physically on
+        # (with demand since cleared) is switched off, not wrongly believed off.
+        if not self._reconciled and self._action_on is not None:
+            ent = self._action_on.data.get("entity_id")
+            st = self.hass.states.get(ent) if ent else None
+            real = reconcile_boiler_on(st.state if st is not None else None)
+            if real is not None:
+                self._boiler = BoilerState(
+                    on=real,
+                    last_switch_mono=self._boiler.last_switch_mono,
+                    demand_true_since=self._boiler.demand_true_since,
+                    last_keepalive_mono=self._boiler.last_keepalive_mono,
+                )
+                self._reconciled = True
         step = step_boiler(
             self._boiler,
             demand=demand_active,
@@ -253,14 +270,16 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             min_off_s=self._min_off,
             keepalive_s=self._keepalive,
         )
-        # Safety (review 2.3): never record the boiler OFF internally while it may
-        # still be physically on. If the OFF call fails, keep the previous state so
-        # the next tick re-issues OFF (the keep-alive also re-asserts it).
-        if step.call == "off" and self._action_off is not None:
-            if not await self._call(self._action_off):
-                return
-        elif step.call == "on" and self._action_on is not None:
-            await self._call(self._action_on)
+        # Safety (review 2.3 + V2a): never commit a boiler state whose service
+        # call failed. On an ON *or* OFF call, keep the previous state on failure
+        # so the next tick re-issues it (the keep-alive also re-asserts).
+        action = None
+        if step.call == "off":
+            action = self._action_off
+        elif step.call == "on":
+            action = self._action_on
+        if action is not None and not await self._call(action):
+            return
         self._boiler = step.state
 
     def _zone_name(self, zone_id: str) -> str:

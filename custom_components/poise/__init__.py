@@ -126,3 +126,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # final save + repair-issue/notification cleanup (no learning loss)
         await entry.runtime_data.async_persist_and_cleanup()
     return bool(unloaded)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Deleting the hub: switch its boiler off so it is not left running (V2b)."""
+    if not _is_system(entry):
+        return
+    import logging
+
+    from .const import CONF_BOILER_OFF_ACTION
+    from .control.hub_aggregate import parse_service_action
+
+    off = parse_service_action(entry.data.get(CONF_BOILER_OFF_ACTION))
+    if off is None:
+        return
+    try:
+        await hass.services.async_call(
+            off.domain, off.service, dict(off.data), blocking=False
+        )
+    except Exception:  # noqa: BLE001 - best-effort OFF on hub removal
+        logging.getLogger(__name__).exception(
+            "Poise: boiler OFF on hub removal failed"
+        )
