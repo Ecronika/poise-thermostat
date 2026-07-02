@@ -255,19 +255,49 @@ def test_device_max_never_undercuts_health_floor() -> None:
 def test_resolve_desired_mode() -> None:
     from custom_components.poise.control.tick_resolve import resolve_desired_mode as r
 
-    # (final_mode, current_device_mode, can_cool) -> expected nudge target
-    cases: list[tuple[str, str | None, bool, str]] = [
-        ("cool", "heat", True, "cool"),  # active modes map to themselves
-        ("heat", "cool", True, "heat"),
-        ("dry", "cool", True, "dry"),
-        ("idle", "cool", True, "cool"),  # Finding 1: reversible AC keeps cool
-        ("idle", "heat", True, "heat"),  # ...or keeps heat — no forced flip
-        ("manual", "cool", True, "cool"),
-        ("idle", "heat", False, "heat"),  # heat-only TRV unchanged
-        ("idle", "off", False, "heat"),
-        ("idle", "off", True, "heat"),  # off/auto -> heat to regain control
-        ("idle", None, True, "heat"),  # unknown -> heat
+    # (final_mode, current, can_cool, can_heat) -> expected nudge target
+    cases: list[tuple[str, str | None, bool, bool, str]] = [
+        ("cool", "heat", True, True, "cool"),  # active modes pass through
+        ("heat", "cool", True, True, "heat"),
+        ("dry", "cool", True, True, "dry"),
+        # V1: a window / safety "off" must never keep a cooling device in cool
+        ("off", "cool", True, True, "heat"),  # reversible -> heat (frost, idles)
+        ("off", "cool", True, False, "off"),  # cool-only -> off (never cool to floor)
+        ("off", "heat", False, True, "heat"),  # heat-only -> heat (frost floor)
+        # Finding 1 preserved: idle/manual keep the current active mode
+        ("idle", "cool", True, True, "cool"),
+        ("idle", "heat", True, True, "heat"),
+        ("manual", "cool", True, True, "cool"),
+        ("idle", "heat", False, True, "heat"),  # heat-only TRV unchanged
+        ("idle", "off", True, True, "heat"),  # off/auto -> heat to regain control
+        ("idle", None, True, True, "heat"),  # unknown -> heat
     ]
-    for fm, cur, cc, expected in cases:
-        got = r(final_mode=fm, current_device_mode=cur, can_cool=cc)
-        assert got == expected, (fm, cur, cc)
+    for fm, cur, cc, ch, expected in cases:
+        got = r(final_mode=fm, current_device_mode=cur, can_cool=cc, can_heat=ch)
+        assert got == expected, (fm, cur, cc, ch)
+
+
+def test_frost_rescue_target() -> None:
+    from custom_components.poise.control.tick_resolve import frost_rescue_target as f
+
+    def r(
+        sp: float | None,
+        st: str | None,
+        can_heat: bool = True,
+        floor: float = 7.0,
+        mold: float | None = None,
+    ) -> float | None:
+        return f(
+            can_heat=can_heat,
+            actual_sp=sp,
+            device_state=st,
+            frost_floor=floor,
+            mold_min=mold,
+            deadband=0.2,
+        )
+
+    assert r(3.0, "cool", can_heat=False) is None  # cool-only: no frost duty
+    assert r(3.0, "heat") == 7.0  # below floor -> rescue
+    assert r(None, "off") == 7.0  # off / no setpoint -> rescue
+    assert r(19.0, "heat") is None  # reasonable manual setpoint -> hands-off
+    assert r(10.0, "heat", mold=14.0) == 14.0  # mould floor raises the target

@@ -638,3 +638,14 @@ def test_unknown_power_does_not_trip_power_threshold() -> None:
         aggregate_boiler_demand(zones, count_threshold=1, power_threshold=0.5).active
         is True
     )
+
+
+def test_reconcile_boiler_on() -> None:
+    from custom_components.poise.control.hub_aggregate import reconcile_boiler_on
+
+    assert reconcile_boiler_on("on") is True
+    assert reconcile_boiler_on("heat") is True  # a climate boiler in an active mode
+    assert reconcile_boiler_on("off") is False
+    assert reconcile_boiler_on(None) is None  # no entity -> keep prior belief
+    assert reconcile_boiler_on("unknown") is None
+    assert reconcile_boiler_on("unavailable") is None
