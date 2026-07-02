@@ -29,6 +29,7 @@ class WindowAutoConfig:
     open_factor: float = 1.8  # adaptive open threshold = factor * natural cooling
     open_threshold_min: float = 2.0  # floor for the adaptive open threshold (degC/h)
     open_threshold_max: float = 12.0  # cap for the adaptive open threshold (degC/h)
+    min_step: float = 0.05  # a move below this (half a 0.1 K quantum) reads as flat
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +84,41 @@ def adaptive_open_threshold(
         cfg.open_threshold_max,
         max(cfg.open_threshold_min, cfg.open_factor * natural),
     )
+
+
+def quantized_slope(
+    *,
+    room: float,
+    ref_room: float | None,
+    ref_s: float | None,
+    now_s: float,
+    min_step: float = 0.05,
+) -> tuple[float | None, float, float]:
+    """Room cooling rate (degC/h) robust to sensor quantization (review V6).
+
+    A 0.1 K-quantized sensor steps once every few minutes while drifting; measuring
+    dT/dt per coordinator tick reads that single 0.1 K step as a steep drop (0.1 K
+    over ~60 s ≈ 6 degC/h) and would falsely open the window. Instead the slope is
+    measured over the interval since the room last moved a full quantum: a slow
+    natural drift (a 0.1 K step every ~10 min) reads ≈0.6 degC/h (gentle, no open),
+    while a real open window that steps every tick reads the true steep rate.
+
+    Until the room has moved at least ``min_step`` the rate is the (decaying) value
+    since the reference — 0 while genuinely flat — so a flat room contributes no
+    cooling evidence and the reference is held; on a real move the slope is taken
+    over the true elapsed interval and the reference re-anchors. Returns
+    ``(slope_or_None, new_ref_room, new_ref_s)``; ``ref_room is None`` seeds the
+    reference and yields ``None`` (no slope yet).
+    """
+    if ref_room is None or ref_s is None:
+        return None, room, now_s
+    dt_s = now_s - ref_s
+    if dt_s <= 0.0:
+        return None, ref_room, ref_s
+    slope = (room - ref_room) / (dt_s / 3600.0)
+    if abs(room - ref_room) >= min_step:
+        return slope, room, now_s
+    return slope, ref_room, ref_s
 
 
 def step_window_auto(
