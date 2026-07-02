@@ -16,7 +16,9 @@ from custom_components.poise.const import (
     CONF_COMFORT_BASE,
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
+    CONF_COOL_MIN_OUTDOOR,
     CONF_ENTRY_TYPE,
+    CONF_MRT_SENSOR,
     CONF_NAME,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
@@ -126,3 +128,52 @@ async def test_reconfigure_updates_room(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_COMFORT_BASE] == 22.5
+
+
+async def test_reconfigure_overrides_stale_option(hass: HomeAssistant) -> None:
+    """A shared field changed via reconfigure takes effect even if it was last set
+    via the options flow — the stale option must not shadow it (review V7 b/c)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={CONF_CLIMATE_MODE: "cool_only", CONF_COOL_MIN_OUTDOOR: 10.0},
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**ROOM_INPUT, CONF_CLIMATE_MODE: "heat_only"}
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_CLIMATE_MODE] == "heat_only"
+    assert CONF_CLIMATE_MODE not in entry.options  # no longer shadows data
+    assert entry.options[CONF_COOL_MIN_OUTDOOR] == 10.0  # options-only survives
+
+
+async def test_reconfigure_full_replace_drops_cleared_field(
+    hass: HomeAssistant,
+) -> None:
+    """Reconfigure fully replaces data, so an optional field omitted on re-submit
+    is really removed, not merged over (review V7 a)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data={**ROOM_INPUT, CONF_MRT_SENSOR: "sensor.mrt"},
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], dict(ROOM_INPUT)
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert CONF_MRT_SENSOR not in entry.data
