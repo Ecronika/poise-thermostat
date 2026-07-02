@@ -228,27 +228,34 @@ def idle_park(
     """Where to park a device idling in the neutral dead-band (Finding 1 follow-up).
 
     An idle reversible AC must not sit in ``heat`` at the low heat edge through the
-    cooling season — the room would have to fall many kelvin before anything
-    happens and a *warming* room triggers nothing. Instead pre-position toward the
-    edge the room is closest to: a room in the upper half that can cool parks in
-    ``cool`` at the cool edge (a further rise then starts cooling), otherwise it
-    parks in ``heat`` at the heat edge (or ``cool`` if it cannot heat). A
-    ``hysteresis`` dead-zone around the midpoint keeps the current park, so a room
-    hovering at mid does not flutter heat<->cool on 0.1 K sensor noise. Returns
-    ``(mode, setpoint)`` so the coordinator drives the mode nudge AND the written
-    value from ONE decision — they can never disagree. A heat-only TRV always parks
-    in ``heat`` (``can_cool`` False); a cool-only device always parks in ``cool``.
+    cooling season — the room would have to fall many kelvin before anything happens
+    and a *warming* room triggers nothing. Rules, in order:
+
+    * a heat-only TRV always parks in ``heat`` (``can_cool`` False); a cool-only
+      device always parks in ``cool``;
+    * a device **already cooling** keeps cooling and idles at the cool edge. When
+      the tick is idle the room is by definition at/above the heat setpoint (else
+      the decision would be ``heat``), so there is no heat demand and flipping to
+      heat would only thrash the compressor (Finding 1). The warm-room flip below
+      is one-way and sticky — the next tick sees ``current_mode == "cool"`` — so it
+      never ping-pongs;
+    * otherwise (heat / off / auto / unknown) park toward the edge the room is
+      closest to: a clearly warm room (upper half, beyond the ``hysteresis`` buffer
+      that keeps 0.1 K sensor noise from flipping it) parks in ``cool`` at the cool
+      edge instead of the low heat idle-hold (the idle-park fix); a neutral or cool
+      room holds ``heat``.
+
+    Returns ``(mode, setpoint)`` so the coordinator drives the mode nudge AND the
+    written value from ONE decision — they can never disagree.
     """
     if not can_cool:
         return "heat", heat_sp
     if not can_heat:
         return "cool", cool_sp
-    mid = (heat_sp + cool_sp) / 2.0
-    if room >= mid + hysteresis:
+    if current_mode == "cool":
         return "cool", cool_sp
-    if room <= mid - hysteresis:
-        return "heat", heat_sp
-    return ("cool", cool_sp) if current_mode == "cool" else ("heat", heat_sp)
+    mid = (heat_sp + cool_sp) / 2.0
+    return ("cool", cool_sp) if room > mid + hysteresis else ("heat", heat_sp)
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
