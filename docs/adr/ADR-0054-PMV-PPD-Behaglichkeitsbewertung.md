@@ -1,0 +1,50 @@
+# ADR-0054: PMV/PPD-Behaglichkeitsbewertung (ISO 7730) — Diagnose + begrenzter Sollwert-Offset
+
+**Status:** In Arbeit (Shadow, Stufe 1, ~35 %) · **Datum:** 2026-07-02 · **Bezug:** Roadmap M6 (PMV/PPD-Diagnose) + M3 (Fan-Cooling-Effect); ADR-0017 (Operativ→Luft, „eine Stelle"), ADR-0023 (Dual-Setpoint/adaptiv), ADR-0026/0033 (Shadow-first), ADR-0035 (Präzedenz-Solver), ADR-0050/0051 (Feuchte-/Thermoschock-Guardrails), M1 (Regelgüte-Gate für Shadow→live) · **Verifizierung:** Ist-Stand code-verifiziert (v0.122.0, s. Abschnitt Verifizierung); ISO 7730 / EN 16798-1 Anhang B; CBE Comfort Tool / `pythermalcomfort` als Testvektor-Quelle
+
+## Umsetzungsstand (v0.125.0 — Stufe 1 Shadow)
+**Implementiert (pure + Shadow-Diagnose, getestet):** pures `comfort/pmv.py` — `pmv_ppd(t_air, t_mrt, rh, velocity, clo, met) → ComfortIndex(pmv, ppd, category)` (ISO 7730 Fanger, iterative Bekleidungs-Oberflächentemperatur, stdlib-only) + `seasonal_clo`. **Gegen ISO-7730-Annex-D verifiziert:** PMV ≈ 0 bei 24,5 °C/0,5 clo (−0,06) und 22 °C/1,0 clo (+0,10); PPD-Minimum 5,1 %; monoton in T; Feuchte hebt PMV (0,82→1,16 @28 °C); Luftbewegung senkt PMV (0,99→0,40 @0,8 m/s — kohärent mit M3). 8 Unit-Tests grün; ruff/format/mypy --strict clean. **Coordinator-SHADOW (keine Writes):** je Tick `pmv`/`ppd`/`pmv_category` aus `room`/`t_mrt` (Fallback = Luft)/`rh` (Fallback 50 %)/`seasonal_clo(t_rm)` als Diagnose + Entitäts-Attribut (`_ATTRS`), defensiv im bestehenden Shadow-try. **Offen:** Stufe 2 (±1 K-Offset — Referenzrahmen-Cleanup erledigt v0.124.0, jetzt nur noch M1-Gate); Stufe 3 (fan-CE-`v` koppeln); optional Config für clo/met + Card-Anzeige.
+
+## Kontext
+Behaglichkeit ist faktisch die Regelgröße von Poise — aber ausschließlich über **Temperatur-Stellvertreter**: operative Temperatur (ADR-0017), EN-16798-Kategoriebänder (ADR-0023), Komfort-vs-Energie-Gewicht, und Einzel-Guardrails (Taupunkt, Thermoschock, Feuchte-Hysterese, Schimmelfloor). Ein **integrierter Behaglichkeitsindex (PMV/PPD nach ISO 7730)** existiert nirgends. Konkrete Folgen: Feuchte fließt nicht in die Komfort*bewertung* ein (nur als separate Grenzwertlogik) — 24 °C bei 65 % und bei 35 % r. F. gelten als gleich behaglich; die Luftgeschwindigkeit ist im gesamten decide-Pfad fix 0,1 m/s (ein laufender Ventilator ändert die Bewertung nicht); clo/met sind implizit ~1,2 met fixiert; es gibt keinen Messwert „aktuelle Behaglichkeit / PPD %", auf den man schauen oder den man optimieren könnte.
+
+Poise ist für die Lücke **architektonisch ungewöhnlich gut vorbereitet:** alle vier physikalischen PMV-Größen liegen bereits im Datenfluss — Lufttemperatur, MRT (virtuell `virtual_mrt.py` oder Sensor), relative Feuchte (optionaler Sensor), Luftgeschwindigkeit (heute Konstante, mit dem Fan-Pfad ableitbar). Nur clo/met müssen als saisonale Defaults angenommen werden — genau wie EN 16798-1 Anhang B und das CBE Comfort Tool es tun.
+
+## Entscheidungstreiber
+Behaglichkeit **messbar** und **sichtbar** machen (Langzeit-Bewertung, EN-16798-Anhang-C-Statistik); Energie sparen (trockene Winterluft → weniger heizen) und Sommerkomfort verbessern (schwüle Luft → etwas tiefer) **ohne** die bewährte Band-Architektur anzutasten; strikte Shadow-first-Doktrin; **PMV nicht zur direkten Regelgröße machen** (clo/met unmessbar, ein springender Index würde den Aktor thrashen); Konsistenz mit dem Fan-Kühleffekt (M3, dieselbe v).
+
+## Betrachtete Optionen (mit Quelle)
+1. **Status quo — nur Temperatur-Proxies.** Verworfen als Endzustand: Feuchte/Luftbewegung bleiben unbewertet; kein Komfort-Messwert; die ISO-7730-Lücke bleibt offen (im Review als Norm-Lücke dokumentiert).
+2. **PMV als direkte Regelgröße** (auf PMV = 0 regeln). **Verworfen:** clo/met sind nicht messbar (nur Annahmen), ein je Tick springender Index würde den Aktor thrashen, PMV-Regelung im Wohn-/Büroraum ist Über-Engineering. Beleg: keine Mainstream-HA-Integration regelt PMV direkt; `pythermalcomfort` ist ein Bewertungs-, kein Regelwerkzeug.
+3. **PMV/PPD als Bewertung + begrenzter, langsamer Temperatur-Offset** — **gewählt.** Temperaturband bleibt Regelgröße; PMV liefert (a) die sichtbare Bewertung und (b) einen gedeckelten Korrektur-Offset. Präzedenz: EN 16798-1 (adaptiv/PMV je Gebäudetyp), CBE Comfort Tool (SET/PMV-Rechner mit saisonalem clo).
+
+## Entscheidung
+Dreistufig, jede Stufe eigenständig lieferbar:
+
+1. **Stufe 1 — PMV/PPD als Shadow-Diagnose (ISO 7730).** Pures `comfort/pmv.py` (stdlib-only): PMV aus (T_air, T_mrt, v, RH, clo, met) nach ISO 7730; PPD = 100 − 95·exp(−(0,03353·PMV⁴ + 0,2179·PMV²)); Testvektoren aus `pythermalcomfort`/Norm-Tabellen. clo/met als **saisonale Defaults** (Winter 1,0 clo / Sommer 0,5 clo nach EN 16798-1 Anhang B; met 1,2 sitzend). Der Coordinator berechnet je Tick `pmv`/`ppd`/Kategorie-Verortung (I |PMV|<0,2 / II <0,5 / III <0,7) als **Diagnose, keine Writes**. v = 0,1 m/s solange kein Fan-Signal (konsistent mit dem heutigen operative-Default).
+2. **Stufe 2 — PMV-korrigiertes Temperaturziel (begrenzter Offset).** Nicht PMV regeln, sondern **invertieren**: „welche operative Temperatur ergibt bei aktueller Feuchte/v/clo/met PMV = 0?" → Differenz zum bestehenden Komfort-Sollwert = **gedeckelter Offset (±1 K, normbandgeklemmt)** als weiterer Eingang in `dual_setpoint.decide`; der Präzedenz-Solver (ADR-0035) klemmt ihn wie jeden anderen Constraint. Effekt: schwüle Sommerluft → etwas tiefer kühlen; trockene Winterluft → etwas weniger heizen.
+3. **Stufe 3 — Ventilator-Kühleffekt koppeln (= M3).** Läuft der Fan, wird v ≈ 0,3–0,8 m/s statt 0,1 angesetzt → der ASHRAE-55-Cooling-Effect hebt die Kühlkante (bereits als Shadow `fan_ce_k`/`fan_cool_sp_shadow` gebaut). **Dieselbe v** speist Stufe 1/2 und Stufe 3 → konsistente Bewertung.
+
+**Non-Goals:** PMV als direkte Regelgröße; lokale Unbehaglichkeit (Zugluft-DR, Strahlungsasymmetrie, vertikaler Temperaturgradient) — bewusst nicht bewertet (keine Sensorik); clo/met-Messung (bleiben Annahmen).
+
+## Begründung
+Option 3 schließt die Norm-Lücke, ohne die Regelarchitektur zu destabilisieren. **Stufe 1** ist billig (~100–150 Z. pure + zwei Diagnosewerte), risikofrei (Shadow) und macht Behaglichkeit erstmals messbar — und liefert damit ein natürliches Komfort-Signal für die **M1-Regelgüte-Metrik**, die ohnehin alle Shadow→live-Flips gaten soll (daher aus M6 in M2 vorziehbar, unabhängig von den P0-Fixes). **Stufe 2** ist der eigentliche Energiegewinn (Winter) bzw. Komfortgewinn (Sommer), bleibt aber durch die ±1-K-Klemmung und den Präzedenz-Solver harmlos. Gegen Option 2 (PMV-Direktregelung): clo/met sind nicht messbar und ein springender Index thrasht den Aktor — der langsame ±1-K-Offset ist die konservative Alternative. Gegen Option 1 (Status quo): unbewertete Feuchte/Luftbewegung sind eine reale, im Review dokumentierte Norm-Lücke.
+
+## Konsequenzen
+**Positiv:** Behaglichkeit messbar/sichtbar (PPD-%-Diagnose, Langzeitstatistik, Kategorie-Verortung); Feuchte **und** Luftbewegung erstmals in der Komfortbewertung; Energie-/Komfortgewinn über den Stufe-2-Offset; unterfüttert die M1-Metrik; nutzt die vorhandenen vier PMV-Eingänge (kleiner Eingriff); dependency-frei.
+**Negativ/Kosten:** clo/met sind Annahmen (saisonale Defaults, keine Messung) → PMV ist eine **Schätzung**, kein Messwert (klar zu kommunizieren); Stufe 2 setzt den Referenzrahmen-Cleanup voraus (s. Verifizierung); ohne Feuchtesensor fällt die Feuchte-Komponente auf eine Annahme zurück (PMV dann v. a. temperaturgetrieben); zusätzliche Diagnose-Attribute erhöhen die Recorder-Last leicht (konsistent mit der bestehenden Attribut-Menge).
+
+## Verifizierung (Ist-Stand code-belegt + Plan)
+**Ist-Stand v0.122.0 (verifiziert):** kein PMV/PPD/ISO-7730 im Code (nur Textreferenz in `comfort/fan_cooling.py`); `comfort/operative.py` blendet ISO-7726 `a·T_air+(1−a)·T_mrt` (a=0,5 bei 0,1 m/s); v ist im decide/operative-Pfad **fix 0,1** (`operative.py`, `dual_setpoint.py`), `_fan_air_speed=0,6` speist nur den M3-Shadow; Guardrails separat (`dual_setpoint.py` Taupunkt+2K/Schimmelfloor, `thermal_shock.py` ΔT=7K, `humidity.py` 60/55); MPC-Kosten asymmetrisch (overshoot ×8, `mpc.py`).
+
+**Korrektur zum Ausgangsbefund:** das adaptive Modell (0,33·T_rm+18,8) ist **nicht** nur Shadow — `free_running.adaptive_cool_edge` läuft **live opt-in** in `dual_setpoint.decide` und erzeugte am Büro `comfort_high = 27,4` (was fan-CE aktuell auf 0 kappt). Nur `free_running_widen` (`fr_*`) ist Shadow.
+
+**Prerequisite für Stufe 2 (verifiziert, latent):** Referenzrahmen-Mix — `humidity_decide`, `free_running_widen`, `fan_circulation` vergleichen rohe Luft `room` gegen operativ→Luft-Sollwerte, während `decide`/`idle_park` `room_decide` nutzen (operativ nur bei aktivem `operative_input`/Extern-Temp-TRV). Heute latent (Büro-AC im Luftrahmen), aber **vor** dem PMV-Offset zu vereinheitlichen, sonst korrigiert der Offset auf inkonsistenter Bezugsgröße (ADR-0017-Folge).
+
+**Testplan:** Stufe 1 PMV/PPD gegen ISO-7730-/`pythermalcomfort`-Referenzvektoren (Vorzeichen, PPD-Symmetrie, Kategorie-Schwellen); Stufe 2 Offset-Klemmung (±1K, Bandgrenzen, Solver-Präzedenz); alle Stufen /tmp-Gate (ruff/format/mypy --strict/pytest), Coordinator-Glue CI-verdrahtet.
+
+## Compliance
+ISO-7730-Methode nachimplementiert (die Gleichungen sind Norm-Allgemeingut; Testvektoren aus der offenen `pythermalcomfort`-Referenz — **kein** Code-Copy); stdlib-only, dependency-frei (ADR-0022, im Gegensatz zu numpy/scipy-ziehenden Wettbewerbern); generisch, keine gerätespezifischen Sonderwege im Kern (G29/G30); saisonale clo/met = EN-16798-1-Anhang-B-Konvention.
+
+## Verknüpfungen
+**M6** (PMV/PPD-Diagnose = Stufe 1/2), **M3** (Fan-CE = Stufe 3, shadow-live v0.122). **Voraussetzungen:** Referenzrahmen-Vereinheitlichung (ADR-0017-Folge) + **M1-Regelgüte-Gate** für die Aktivierung von Stufe 2/3. Erweitert **ADR-0023** (Offset als weiterer decide-Eingang, vom Solver ADR-0035 geklemmt); nutzt **ADR-0026/0033** (Shadow-first); orthogonal zu **ADR-0050** (Feuchte-Guardrail bleibt; PMV bewertet Feuchte zusätzlich im Komfort). **Folge-ADR** falls Stufe 2 live geht: eigener Aktivierungs-ADR nach bestandenem M1-Gate.

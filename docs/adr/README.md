@@ -72,6 +72,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0051](ADR-0051-Thermoschock-Delta-Hitzetag-Kuehlband.md) | Thermoschock-Delta & Hitzetag-Kühlband (adaptiver Kühl-Sollwert) | In Arbeit (80 %) |
 | [0052](ADR-0052-Aktor-Dynamik-Profile.md) | Aktor-Dynamik-Profile — Regler-Zeitkonstanten je HVAC-Typ (PI/MPC) | In Arbeit (75 %) |
 | [0053](ADR-0053-Leerlauf-Belegt-Luefterumwaelzung.md) | Leerlauf-/Belegt-Lüfterumwälzung (Fan-Low im besetzten Totband) | Vorgeschlagen |
+| [0054](ADR-0054-PMV-PPD-Behaglichkeitsbewertung.md) | PMV/PPD-Behaglichkeitsbewertung (ISO 7730) — Diagnose + begrenzter Offset | In Arbeit (35 %) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
