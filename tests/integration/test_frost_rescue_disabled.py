@@ -1,6 +1,10 @@
 """Review V4: even DISABLED, a zone keeps the unconditional frost/mould floor —
 but rescue-only, so a reasonable manual setpoint above the floor is never fought,
 and a cool-only device (no frost duty) is left alone. Glue, CI-only.
+
+Mirrors the proven config + helpers of test_entity_actions (ROOM_DATA, no outdoor
+/ TRM entities) so the disabled second tick stays socket-free, exactly like the
+existing test_disabled_skips_actuator_write.
 """
 
 from __future__ import annotations
@@ -23,36 +27,56 @@ from custom_components.poise.const import (
     CONF_NAME,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
-    CONF_OUTDOOR_SENSOR,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
-    CONF_TRM_SENSOR,
     DOMAIN,
 )
 
-
-def _data(actuator: str) -> dict[str, Any]:
-    return {
-        CONF_NAME: "Zone",
-        CONF_TEMP_SENSOR: "sensor.room_temp",
-        CONF_ACTUATOR: actuator,
-        CONF_OUTDOOR_SENSOR: "sensor.outdoor",
-        CONF_TRM_SENSOR: "sensor.trm",
-        CONF_CATEGORY: "II",
-        CONF_COMFORT_BASE: 21.0,
-        CONF_CLIMATE_MODE: "auto",
-        CONF_COMFORT_WEIGHT: 70,
-        CONF_SETBACK_DELTA: 3.0,
-        CONF_OPTIMAL_START: True,
-        CONF_OPERATIVE_INPUT: False,
-        CONF_CONTROLS_BOILER: False,
-    }
+ROOM_DATA: dict[str, Any] = {
+    CONF_NAME: "Test Room",
+    CONF_TEMP_SENSOR: "sensor.room_temp",
+    CONF_ACTUATOR: "climate.trv",
+    CONF_CATEGORY: "II",
+    CONF_COMFORT_BASE: 21.0,
+    CONF_CLIMATE_MODE: "auto",
+    CONF_COMFORT_WEIGHT: 70,
+    CONF_SETBACK_DELTA: 3.0,
+    CONF_OPTIMAL_START: True,
+    CONF_OPERATIVE_INPUT: False,
+    CONF_CONTROLS_BOILER: False,
+}
 
 
-def _cold(hass: HomeAssistant) -> None:
-    hass.states.async_set("sensor.room_temp", "5", {"device_class": "temperature"})
-    hass.states.async_set("sensor.outdoor", "-2", {"device_class": "temperature"})
-    hass.states.async_set("sensor.trm", "3", {"device_class": "temperature"})
+def _actuator(
+    hass: HomeAssistant, *, state: str, sp: float, modes: list[str], room: float = 18.0
+) -> None:
+    hass.states.async_set(
+        "sensor.room_temp",
+        str(room),
+        {"device_class": "temperature", "unit_of_measurement": "°C"},
+    )
+    hass.states.async_set(
+        "climate.trv",
+        state,
+        {
+            "hvac_modes": modes,
+            "temperature": sp,
+            "current_temperature": room,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+
+
+async def _setup(hass: HomeAssistant) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_DATA, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
 
 
 async def _disable_and_tick(hass: HomeAssistant, entry: MockConfigEntry) -> None:
@@ -69,25 +93,8 @@ async def test_disabled_heat_device_below_floor_gets_frost_rescue(
     nudged to heat (the README 'unconditional safety floor' promise)."""
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
-    _cold(hass)
-    hass.states.async_set(
-        "climate.trv",
-        "off",
-        {
-            "hvac_modes": ["heat", "off"],
-            "temperature": 5.0,
-            "current_temperature": 5.0,
-            "target_temperature_step": 0.5,
-            "min_temp": 5,
-            "max_temp": 30,
-        },
-    )
-    entry = MockConfigEntry(
-        domain=DOMAIN, unique_id="climate.trv", data=_data("climate.trv"), title="Zone"
-    )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    _actuator(hass, state="off", sp=5.0, modes=["heat", "off"])
+    entry = await _setup(hass)
     set_temp.clear()
     set_mode.clear()
 
@@ -103,25 +110,8 @@ async def test_disabled_reasonable_setpoint_not_fought(hass: HomeAssistant) -> N
     """Disabled zone with a sane manual setpoint above the floor -> hands-off."""
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    _cold(hass)
-    hass.states.async_set(
-        "climate.trv",
-        "heat",
-        {
-            "hvac_modes": ["heat", "off"],
-            "temperature": 19.0,
-            "current_temperature": 18.0,
-            "target_temperature_step": 0.5,
-            "min_temp": 5,
-            "max_temp": 30,
-        },
-    )
-    entry = MockConfigEntry(
-        domain=DOMAIN, unique_id="climate.trv", data=_data("climate.trv"), title="Zone"
-    )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    _actuator(hass, state="heat", sp=19.0, modes=["heat", "off"])
+    entry = await _setup(hass)
     set_temp.clear()
 
     await _disable_and_tick(hass, entry)
@@ -133,25 +123,8 @@ async def test_disabled_cool_only_device_left_alone(hass: HomeAssistant) -> None
     """Disabled zone, cool-only device below the floor -> no frost duty, no write."""
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    _cold(hass)
-    hass.states.async_set(
-        "climate.ac",
-        "off",
-        {
-            "hvac_modes": ["cool", "off"],
-            "temperature": 5.0,
-            "current_temperature": 5.0,
-            "target_temperature_step": 0.5,
-            "min_temp": 16,
-            "max_temp": 32,
-        },
-    )
-    entry = MockConfigEntry(
-        domain=DOMAIN, unique_id="climate.ac", data=_data("climate.ac"), title="Zone"
-    )
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    _actuator(hass, state="off", sp=5.0, modes=["cool", "off"])
+    entry = await _setup(hass)
     set_temp.clear()
 
     await _disable_and_tick(hass, entry)
