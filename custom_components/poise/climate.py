@@ -94,6 +94,29 @@ _ATTRS = (
     "mpc_weight",
     "mpc_setpoint",
     "mpc_regime",
+    # climate-band shadow diagnostics (observe-only; not a control input):
+    # ADR-0051 cool raise, ADR-0050 humidity/dry, ADR-0023 free-running,
+    # ADR-0053 fan circulation + roadmap M3 fan cooling-effect.
+    "cool_sp_eff",
+    "cool_sp_active",
+    "cool_raised",
+    "cool_raise_reason",
+    "en_cool_upper",
+    "humidity_action",
+    "dry_active",
+    "humidity_reason",
+    "fr_active",
+    "fr_heat_sp",
+    "fr_cool_sp",
+    "fr_adaptive_lower",
+    "fr_adaptive_upper",
+    "fan_circ_shadow",
+    "fan_circ_reason",
+    "fan_ce_k",
+    "fan_cool_sp_shadow",
+    "pmv",
+    "ppd",
+    "pmv_category",
 )
 
 

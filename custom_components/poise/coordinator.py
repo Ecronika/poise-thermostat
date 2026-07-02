@@ -33,6 +33,7 @@ from .comfort.humidity import humidity_decide
 from .comfort.mode_seam import mode_arbitration
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
+from .comfort.pmv import pmv_ppd, seasonal_clo
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.thermal_shock import (
     DEFAULT_HARD_CAP_C,
@@ -1211,8 +1212,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # (_cool_ac / eff_cool), not a second default-config computation.
             _hum = humidity_decide(
                 rh=rh,
-                too_warm=room > eff_cool,
-                in_deadband=decision.heat_sp <= room <= eff_cool,
+                too_warm=room_decide > eff_cool,
+                in_deadband=decision.heat_sp <= room_decide <= eff_cool,
                 can_dry="dry" in _modes_cl,
                 can_fan_only="fan_only" in _modes_cl,
                 prev_dry_active=self._dry_active,
@@ -1224,7 +1225,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _fr = free_running_widen(
                 heat_op=decision.heat_sp,
                 cool_op=decision.cool_sp,
-                room=room,
+                room=room_decide,
                 t_rm=t_rm_eff,
                 category=self._category,
             )
@@ -1236,7 +1237,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
             _fan = fan_circulation(
                 occupied=None,
-                in_deadband=decision.heat_sp <= room <= eff_cool,
+                in_deadband=decision.heat_sp <= room_decide <= eff_cool,
                 active_mode=mode,
                 window_open=window_open,
                 can_recirculate=_can_recirc,
@@ -1252,6 +1253,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 air_speed=self._fan_air_speed,
                 fan_running=_can_recirc,
                 upper_cap=self._cool_hard_cap,
+            )
+            # ADR-0054 stage 1 SHADOW: ISO 7730 PMV/PPD — humidity + (still-air)
+            # velocity finally enter the comfort evaluation; diagnostic only, no
+            # writes (the norm temperature band stays the control variable).
+            _pmv = pmv_ppd(
+                t_air=room,
+                t_mrt=t_mrt if t_mrt is not None else room,
+                rh=rh if rh is not None else 50.0,
+                clo=seasonal_clo(t_rm_eff),
             )
             climate_diag = {
                 "cool_sp_eff": _cool_ac.cool_sp_eff if _cool_ac else decision.cool_sp,
@@ -1271,6 +1281,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "fan_ce_k": _fan_ce,
                 "fan_cool_sp_shadow": _fan_cool_sp,
                 "fan_circ_reason": _fan.reason,
+                "pmv": _pmv.pmv,
+                "ppd": _pmv.ppd,
+                "pmv_category": _pmv.category,
             }
         except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
             _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
