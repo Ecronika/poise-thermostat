@@ -185,6 +185,9 @@ _LOGGER = logging.getLogger(__name__)
 # known — mirrors control.mpc_controller._FALLBACK_T_OUT_C (a cold-ish day keeps
 # heating engaged rather than mild-locking it out).
 _FALLBACK_OUTDOOR_C = 5.0
+# A hung weather.get_forecasts call must not stall the tick: it runs under the
+# coordinator lock, so bound it and degrade to the constant outdoor (review V8).
+_WEATHER_CALL_TIMEOUT_S = 10.0
 # Comfort mode -> thermal-arbitration direction (ADR-0046 P1 shadow). "idle" and
 # any other value map to None (no thermal demand).
 _THERMAL_DIR: dict[str, Direction] = {"heat": Direction.HEAT, "cool": Direction.COOL}
@@ -672,13 +675,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         now = self._clock.monotonic()
         if self._forecast_at is None or (now - self._forecast_at) >= FORECAST_TTL_S:
             try:
-                resp = await self.hass.services.async_call(
-                    "weather",
-                    "get_forecasts",
-                    {"type": "hourly", "entity_id": self._weather},
-                    blocking=True,
-                    return_response=True,
-                )
+                async with asyncio.timeout(_WEATHER_CALL_TIMEOUT_S):
+                    resp = await self.hass.services.async_call(
+                        "weather",
+                        "get_forecasts",
+                        {"type": "hourly", "entity_id": self._weather},
+                        blocking=True,
+                        return_response=True,
+                    )
                 self._forecast = forecast_samples_from_response(
                     resp, self._weather, dt_util.utcnow()
                 )
