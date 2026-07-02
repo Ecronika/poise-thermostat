@@ -984,7 +984,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
         if should_learn(window_open=window_open, frozen=frozen):
             self._learn(room, t_out_eff)
-        self._observe_seasonless(room, t_out_eff)
+            self._observe_seasonless(room, t_out_eff)
+        else:
+            # V5: while learning is paused (open window / frozen sensor) drop the
+            # time anchors, so the first step after resumption re-anchors from that
+            # tick instead of integrating the whole contaminated interval. A short
+            # Stoßlüften would otherwise poison the EKF with a real-looking sub-hour
+            # dt (the 0<dt<1h guard only rejects long gaps). ADR-0024.
+            self._last_mono = None
+            self._prev_room = None
+            self._prev_room_mono = None
         self._observe_window_auto(room, t_out_eff)
 
         # mould floor + dewpoint cap from humidity
