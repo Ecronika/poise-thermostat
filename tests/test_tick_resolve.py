@@ -276,6 +276,93 @@ def test_resolve_desired_mode() -> None:
         got = r(final_mode=fm, current_device_mode=cur, can_cool=cc, can_heat=ch)
         assert got == expected, (fm, cur, cc, ch)
 
+    # Finding 1 follow-up: an explicit idle-park mode wins over the current-mode
+    # fallback for an idle tick (a warm reversible AC in heat parks in cool), but
+    # only for idle — manual and active modes ignore it.
+    assert (
+        r(
+            final_mode="idle",
+            current_device_mode="heat",
+            can_cool=True,
+            can_heat=True,
+            idle_park_mode="cool",
+        )
+        == "cool"
+    )
+    assert (
+        r(
+            final_mode="idle",
+            current_device_mode="cool",
+            can_cool=True,
+            can_heat=True,
+            idle_park_mode="heat",
+        )
+        == "heat"
+    )
+    # manual keeps current mode even with a park hint (park is idle-only)
+    assert (
+        r(
+            final_mode="manual",
+            current_device_mode="cool",
+            can_cool=True,
+            can_heat=True,
+            idle_park_mode="heat",
+        )
+        == "cool"
+    )
+
+
+def test_idle_park() -> None:
+    from custom_components.poise.control.tick_resolve import idle_park as p
+
+    # reversible AC, warm room (upper half) -> park cool at the cool edge so a
+    # further rise starts cooling (not heat at the low idle-hold).
+    assert p(room=25.0, heat_sp=17.5, cool_sp=26.7, can_heat=True, can_cool=True) == (
+        "cool",
+        26.7,
+    )
+    # cool room (lower half) -> park heat at the heat edge
+    assert p(room=19.0, heat_sp=17.5, cool_sp=26.7, can_heat=True, can_cool=True) == (
+        "heat",
+        17.5,
+    )
+    # heat-only TRV always parks heat, cool-only always parks cool
+    assert p(room=25.0, heat_sp=21.0, cool_sp=26.0, can_heat=True, can_cool=False) == (
+        "heat",
+        21.0,
+    )
+    assert p(room=19.0, heat_sp=21.0, cool_sp=26.0, can_heat=False, can_cool=True) == (
+        "cool",
+        26.0,
+    )
+    # midpoint hysteresis (mid = 22): within +/-0.5 K keep the current park so a
+    # room hovering at mid does not flutter on 0.1 K sensor noise.
+    assert p(
+        room=22.1,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        can_heat=True,
+        can_cool=True,
+        current_mode="cool",
+    ) == ("cool", 24.0)
+    assert p(
+        room=22.1,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        can_heat=True,
+        can_cool=True,
+        current_mode="heat",
+    ) == ("heat", 20.0)
+    # outside the dead-zone, room position wins regardless of current mode
+    assert p(
+        room=23.0,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        can_heat=True,
+        can_cool=True,
+        current_mode="heat",
+    ) == ("cool", 24.0)
+
 
 def test_frost_rescue_target() -> None:
     from custom_components.poise.control.tick_resolve import frost_rescue_target as f
