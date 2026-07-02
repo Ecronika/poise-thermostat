@@ -3,8 +3,8 @@ but rescue-only, so a reasonable manual setpoint above the floor is never fought
 and a cool-only device (no frost duty) is left alone. Glue, CI-only.
 
 Mirrors the proven config + helpers of test_entity_actions (ROOM_DATA, no outdoor
-/ TRM entities) so the disabled second tick stays socket-free, exactly like the
-existing test_disabled_skips_actuator_write.
+/ TRM entities, ``before``-count assertions) so the disabled second tick behaves
+exactly like the passing test_disabled_skips_actuator_write.
 """
 
 from __future__ import annotations
@@ -89,21 +89,26 @@ async def _disable_and_tick(hass: HomeAssistant, entry: MockConfigEntry) -> None
 async def test_disabled_heat_device_below_floor_gets_frost_rescue(
     hass: HomeAssistant,
 ) -> None:
-    """Disabled zone, heat-capable device below the floor -> floor written and
-    nudged to heat (the README 'unconditional safety floor' promise)."""
+    """Disabled zone, heat-capable device off/below the floor -> the frost floor is
+    still written and the device nudged to heat (README safety-floor promise)."""
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, state="off", sp=5.0, modes=["heat", "off"])
     entry = await _setup(hass)
-    set_temp.clear()
-    set_mode.clear()
+    coord: Any = entry.runtime_data
+    before_t, before_m = len(set_temp), len(set_mode)
 
     await _disable_and_tick(hass, entry)
 
-    modes = [c.data.get("hvac_mode") for c in set_mode]
-    assert set_temp, "disabled zone must still rescue a device below the frost floor"
-    assert all(c.data.get("temperature") >= 7.0 for c in set_temp)
-    assert "heat" in modes, "frost rescue must nudge the device into heat"
+    new_temps = [c.data.get("temperature") for c in set_temp[before_t:]]
+    new_modes = [c.data.get("hvac_mode") for c in set_mode[before_m:]]
+    assert new_temps, (
+        "no frost rescue write while disabled "
+        f"(can_heat={coord._capability()[0]}, enabled={coord.enabled}, "
+        f"available={(coord.data or {}).get('available')}, nudges={new_modes})"
+    )
+    assert all(t >= 7.0 for t in new_temps)
+    assert "heat" in new_modes
 
 
 async def test_disabled_reasonable_setpoint_not_fought(hass: HomeAssistant) -> None:
@@ -112,11 +117,11 @@ async def test_disabled_reasonable_setpoint_not_fought(hass: HomeAssistant) -> N
     async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, state="heat", sp=19.0, modes=["heat", "off"])
     entry = await _setup(hass)
-    set_temp.clear()
+    before_t = len(set_temp)
 
     await _disable_and_tick(hass, entry)
 
-    assert not set_temp, "a reasonable setpoint above the floor must not be overwritten"
+    assert len(set_temp) == before_t, "a reasonable setpoint above the floor is kept"
 
 
 async def test_disabled_cool_only_device_left_alone(hass: HomeAssistant) -> None:
@@ -125,8 +130,8 @@ async def test_disabled_cool_only_device_left_alone(hass: HomeAssistant) -> None
     async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, state="off", sp=5.0, modes=["cool", "off"])
     entry = await _setup(hass)
-    set_temp.clear()
+    before_t = len(set_temp)
 
     await _disable_and_tick(hass, entry)
 
-    assert not set_temp, "a cool-only device has no frost duty when disabled"
+    assert len(set_temp) == before_t, "a cool-only device has no frost duty"
