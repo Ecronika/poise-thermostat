@@ -143,6 +143,7 @@ from .control.window_auto import (
     WindowAutoState,
     adaptive_open_threshold,
     effective_window_open,
+    quantized_slope,
     step_window_auto,
 )
 from .devices.capability import classify_number_entity, climate_capability
@@ -229,8 +230,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # decoupled prev-sample so it observes regardless of heating.
         self._window_auto = WindowAutoState()
         self._window_auto_cfg = WindowAutoConfig()
-        self._wa_prev_room: float | None = None
-        self._wa_prev_mono: float | None = None
+        self._wa_ref_room: float | None = None  # last distinct-move reference (V6)
+        self._wa_ref_mono: float | None = None
+        self._wa_prev_mono: float | None = None  # last tick, for the minutes_open dt
         self._window_bypass: bool = False  # ignore window reaction (ADR-0041 stage 2)
         self._wa_open_threshold: float = self._window_auto_cfg.open_threshold
         self._pi = PiCompensator()
@@ -724,14 +726,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             cfg = replace(cfg, open_threshold=self._wa_open_threshold)
         else:
             self._wa_open_threshold = cfg.open_threshold
-        if self._wa_prev_room is not None and self._wa_prev_mono is not None:
-            dt_h = (now - self._wa_prev_mono) / 3600.0
-            if 0.0 < dt_h < 1.0:
-                slope = (room - self._wa_prev_room) / dt_h
+        # V6: measure the slope over the interval since the room last moved a full
+        # sensor quantum, not per tick — a single 0.1 K quantization step on a short
+        # tick would otherwise read as a steep drop and falsely open the window.
+        slope, self._wa_ref_room, self._wa_ref_mono = quantized_slope(
+            room=room,
+            ref_room=self._wa_ref_room,
+            ref_s=self._wa_ref_mono,
+            now_s=now,
+            min_step=cfg.min_step,
+        )
+        if self._wa_prev_mono is not None:
+            dt_min = (now - self._wa_prev_mono) / 60.0
+            if 0.0 < dt_min < 60.0:
                 self._window_auto = step_window_auto(
-                    self._window_auto, slope, dt_h * 60.0, cfg
+                    self._window_auto, slope, dt_min, cfg
                 )
-        self._wa_prev_room = room
         self._wa_prev_mono = now
 
     def _observe_seasonless(self, room: float, t_out: float) -> None:
