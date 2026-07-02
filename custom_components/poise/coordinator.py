@@ -27,6 +27,7 @@ from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
+from .comfort.fan_cooling import fan_cool_setpoint
 from .comfort.free_running import free_running_widen
 from .comfort.humidity import humidity_decide
 from .comfort.mode_seam import mode_arbitration
@@ -54,6 +55,7 @@ from .const import (
     CONF_COOL_MIN_OUTDOOR,
     CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
+    CONF_FAN_AIR_SPEED,
     CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
@@ -75,6 +77,7 @@ from .const import (
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_DYNAMICS,
+    DEFAULT_FAN_AIR_SPEED_MS,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
@@ -304,6 +307,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
+        self._fan_air_speed = float(
+            data.get(CONF_FAN_AIR_SPEED, DEFAULT_FAN_AIR_SPEED_MS)
+        )
         self._cool_sp_eff_prev: float | None = None
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
@@ -481,6 +487,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
+        self._fan_air_speed = float(
+            data.get(CONF_FAN_AIR_SPEED, DEFAULT_FAN_AIR_SPEED_MS)
+        )
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -1234,6 +1243,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 policy=FAN_ONLY_LOW,
                 presence_optin=True,
             )
+            # Roadmap M3 (ASHRAE 55 elevated air speed) SHADOW: what a running fan
+            # (at the configured air speed) would let the cooling setpoint rise to —
+            # comfort-preserving and ASR/EN-capped. Fan-capable device = the preview
+            # basis; no writes yet (activation is a follow-up after validation).
+            _fan_cool_sp, _fan_ce = fan_cool_setpoint(
+                cool_sp=eff_cool,
+                air_speed=self._fan_air_speed,
+                fan_running=_can_recirc,
+                upper_cap=self._cool_hard_cap,
+            )
             climate_diag = {
                 "cool_sp_eff": _cool_ac.cool_sp_eff if _cool_ac else decision.cool_sp,
                 "cool_sp_active": round(eff_cool, 1),
@@ -1249,6 +1268,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "fr_adaptive_lower": round(_fr.adaptive_lower, 1),
                 "fr_adaptive_upper": round(_fr.adaptive_upper, 1),
                 "fan_circ_shadow": _fan.action,
+                "fan_ce_k": _fan_ce,
+                "fan_cool_sp_shadow": _fan_cool_sp,
                 "fan_circ_reason": _fan.reason,
             }
         except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick

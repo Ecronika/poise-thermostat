@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.121.0"
+VERSION: Final = "0.122.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -92,6 +92,11 @@ CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
 # at the ASR ceiling above) instead of the fixed summer band, so a warm
 # free-running room is not over-cooled toward 23 °C.
 CONF_ADAPTIVE_COOL: Final = "adaptive_cool"
+# Roadmap M3 (ASHRAE 55 elevated air speed): the air speed [m/s] a running fan
+# provides; credits a comfort-preserving cooling-effect setpoint raise ("cooling
+# without the compressor"). Shadow-first. 0.6 m/s ~ a typical ceiling/pedestal fan.
+CONF_FAN_AIR_SPEED: Final = "fan_air_speed_ms"
+DEFAULT_FAN_AIR_SPEED_MS: Final = 0.6
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30
@@ -132,11 +137,4 @@ CONF_FLOW_HYSTERESIS: Final = "flow_hysteresis"
 DEFAULT_MAX_FLOW_TEMP_C: Final = 60.0
 DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5
 
-# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise routes
-CONF_SOURCE_POLICY: Final = "source_policy"
-CONF_DEFAULT_SOURCE: Final = "default_heat_source"
-DEFAULT_HEAT_SOURCE: Final = "radiator"
-
-# Bundled Lovelace card, served + auto-registered by the integration (ADR-0040)
-CARD_URL_BASE: Final = "/poise"
-CARD_MODULES: Final = ({"name": "Poise Card", "filename": "poise-card.js"},)
+# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise rou
