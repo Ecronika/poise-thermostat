@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.115.0"
+VERSION: Final = "0.116.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -88,6 +88,10 @@ DEFAULT_DYNAMICS: Final = "auto"
 # raise is a no-op until the cap is raised.
 CONF_THERMAL_SHOCK_DELTA: Final = "thermal_shock_delta_k"
 CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
+# ADR-0023 §1 (opt-in per zone): use the EN adaptive cooling edge (capped
+# at the ASR ceiling above) instead of the fixed summer band, so a warm
+# free-running room is not over-cooled toward 23 °C.
+CONF_ADAPTIVE_COOL: Final = "adaptive_cool"
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30

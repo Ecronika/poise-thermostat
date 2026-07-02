@@ -42,6 +42,7 @@ from .comfort.thermal_shock import (
 from .comfort.virtual_mrt import virtual_mrt
 from .const import (
     CONF_ACTUATOR,
+    CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
@@ -296,6 +297,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
+        self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
         self._cool_sp_eff_prev: float | None = None
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
@@ -472,6 +474,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
+        self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -1099,6 +1102,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             dewpoint=dewpoint,
             priority=self._priority,
             occupied=sched.is_comfort or preheating,
+            adaptive_cool=self._adaptive_cool,
+            adaptive_cap=self._cool_hard_cap,
         )
 
         act_state = self.hass.states.get(self._actuator)
@@ -1407,14 +1412,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     (act_state.attributes.get("hvac_modes") or []) if act_state else []
                 )
                 _cur = act_state.state if act_state else None
-                try:
-                    if _cur != "heat" and "heat" in _rmodes:
+                # Nudge and write are INDEPENDENT: a failed mode-nudge must never
+                # skip the safety setpoint write (the floor still has to be sent).
+                if _cur != "heat" and "heat" in _rmodes:
+                    try:
                         await self.hass.services.async_call(
                             "climate",
                             "set_hvac_mode",
                             {"entity_id": self._actuator, "hvac_mode": "heat"},
                             blocking=False,
                         )
+                    except Exception:  # noqa: BLE001 - nudge is best-effort
+                        _LOGGER.exception(
+                            "Poise: frost rescue nudge failed for %s", self._actuator
+                        )
+                try:
                     await actuator_mod.write(
                         self.hass,
                         ActuatorCommand(
@@ -1425,7 +1437,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             reason="frost_rescue",
                         ),
                     )
-                except Exception:  # noqa: BLE001 - frost rescue is best-effort
+                except Exception:  # noqa: BLE001 - frost rescue write is best-effort
                     _LOGGER.exception(
                         "Poise: frost rescue write failed for %s", self._actuator
                     )
@@ -1688,6 +1700,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "comfort_high": decision.cool_sp,
             "binding_lower_cause": binding,
             "category": self._category.value,
+            "adaptive_cool": self._adaptive_cool,
             "heating": heating,
             "window_open": window_open,
             "window_auto_detected": self._window_auto.open,

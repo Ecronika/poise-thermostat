@@ -20,6 +20,7 @@ from homeassistant.helpers import selector
 
 from .const import (
     CONF_ACTUATOR,
+    CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
     CONF_BOILER_ACTIVATION_DELAY,
     CONF_BOILER_COUNT_THRESHOLD,
@@ -152,6 +153,7 @@ def _schema() -> vol.Schema:
                 )
             ),
             vol.Required(CONF_OPTIMAL_START, default=True): selector.BooleanSelector(),
+            vol.Required(CONF_ADAPTIVE_COOL, default=False): selector.BooleanSelector(),
             vol.Optional(CONF_WEATHER): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="weather")
             ),
@@ -363,6 +365,7 @@ def _options_schema() -> vol.Schema:
                 )
             ),
             vol.Required(CONF_OPTIMAL_START): selector.BooleanSelector(),
+            vol.Required(CONF_ADAPTIVE_COOL, default=False): selector.BooleanSelector(),
             vol.Required(CONF_OPERATIVE_INPUT): selector.BooleanSelector(),
             vol.Optional(
                 CONF_ANNUAL_KWH, default=DEFAULT_ANNUAL_KWH
