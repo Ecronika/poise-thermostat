@@ -469,3 +469,19 @@ def resolve_source_policy(
         pref = (r.source_pref or "auto").lower()
         out[r.zone_id] = pref if pref in ("radiator", "heat_pump") else default_source
     return out
+
+
+def reconcile_boiler_on(state: str | None) -> bool | None:
+    """Best-effort boiler on/off from the actuator entity's state (review V2).
+
+    After a restart Poise's in-memory ``BoilerState`` starts ``off``; if the real
+    boiler is still on and demand has since cleared, the state machine would see
+    ``off -> off`` and never send OFF, leaving the boiler running unbounded.
+    Reading the actuator entity's real state and reconciling our belief once at
+    startup closes that gap. ``off`` -> False; any definite active state
+    (``on``/``heat``/...) -> True; ``unknown``/``unavailable``/missing -> None
+    (indeterminate; keep the prior belief and try again next tick).
+    """
+    if state is None or state in ("unknown", "unavailable"):
+        return None
+    return state != "off"

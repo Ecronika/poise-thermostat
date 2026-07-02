@@ -184,21 +184,27 @@ def needs_mode_nudge(
 
 
 def resolve_desired_mode(
-    *, final_mode: str, current_device_mode: str | None, can_cool: bool
+    *,
+    final_mode: str,
+    current_device_mode: str | None,
+    can_cool: bool,
+    can_heat: bool,
 ) -> str:
-    """The hvac_mode to command this tick — the nudge target (review Finding 1).
+    """The hvac_mode to command this tick — the nudge target (review Finding 1, V1).
 
-    ``heat``/``cool``/``dry`` map to themselves. On a passive ``idle``/``off``/
-    ``manual`` tick we do NOT force a mode flip on a reversible device: keep its
-    current active mode so a cooling AC idles in ``cool`` instead of ping-ponging
-    ``cool`` → ``heat`` → ``cool`` at the compressor each cycle (reversing-valve
-    thrash). Fall back to ``heat`` only when the device cannot cool (heat-only
-    TRV — unchanged) or is off/auto/unknown (regain setpoint control). The
-    coordinator pairs this with a cool-matched idle hold, so a kept-cool device
-    holds the cool edge instead of cooling toward the (low) heat hold.
+    ``heat``/``cool``/``dry`` map to themselves. A window / safety ``off`` must
+    NOT leave a cooling device in ``cool`` — it would cool toward the frost floor
+    (review V1). So ``off`` maps to ``heat`` on a heat-capable device (it holds
+    the frost floor by heating minimally) and to a real ``off`` on a cool-only
+    device (stop, never cool). On a passive ``idle``/``manual`` tick we keep the
+    device's current active mode so a cooling AC idles in ``cool`` instead of
+    ping-ponging cool<->heat at the compressor (Finding 1); a heat-only or
+    off/unknown device falls back to ``heat``.
     """
     if final_mode in ("heat", "cool", "dry"):
         return final_mode
+    if final_mode == "off":
+        return "heat" if can_heat else "off"
     if can_cool and current_device_mode in ("heat", "cool"):
         return current_device_mode
     return "heat"
@@ -213,3 +219,30 @@ def sanitize_override(target: float | None, lo: float, hi: float) -> float | Non
     if target is None or not math.isfinite(target):
         return None
     return min(hi, max(lo, target))
+
+
+def frost_rescue_target(
+    *,
+    can_heat: bool,
+    actual_sp: float | None,
+    device_state: str | None,
+    frost_floor: float,
+    mold_min: float | None,
+    deadband: float,
+) -> float | None:
+    """The health floor to write when Poise is DISABLED for a zone (review V4).
+
+    Even disabled, the frost/mould floor is unconditional (README promise), but a
+    disabled zone must not fight a reasonable manual setpoint. Rescue-only: return
+    the floor only when a heat-capable device sits below it (or is off / unknown /
+    reports no setpoint); otherwise ``None`` (hands-off). A cool-only device has no
+    frost duty and always returns ``None``.
+    """
+    if not can_heat:
+        return None
+    floor = round(
+        max(frost_floor, mold_min if mold_min is not None else frost_floor), 1
+    )
+    inactive = device_state in (None, "off", "unknown", "unavailable")
+    below = actual_sp is None or actual_sp < floor - deadband
+    return floor if (inactive or below) else None
