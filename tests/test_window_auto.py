@@ -137,3 +137,54 @@ def test_stuck_open_recovers_on_flat_slope() -> None:
     assert st.open is True
     st = _feed([-0.001, -0.001, -0.001, -0.001], state=st)  # flat, barely negative
     assert st.open is False
+
+
+def test_quantized_slope_units() -> None:
+    from custom_components.poise.control.window_auto import quantized_slope
+
+    # first sample seeds the reference, no slope yet
+    s, rr, rs = quantized_slope(room=21.5, ref_room=None, ref_s=None, now_s=0.0)
+    assert s is None and rr == 21.5 and rs == 0.0
+    # genuinely flat -> 0 degC/h, reference held
+    s, rr, rs = quantized_slope(room=21.5, ref_room=21.5, ref_s=0.0, now_s=60.0)
+    assert s == 0.0 and rr == 21.5 and rs == 0.0
+    # one 0.1 K step over 600 s (natural drift) -> gentle -0.6 degC/h, re-anchored
+    s, rr, rs = quantized_slope(room=21.4, ref_room=21.5, ref_s=0.0, now_s=600.0)
+    assert abs(s - (-0.6)) < 1e-9 and rr == 21.4 and rs == 600.0
+    # the SAME step measured per tick (60 s) would read -6 degC/h (the V6 bug)
+    s, _, _ = quantized_slope(room=21.4, ref_room=21.5, ref_s=0.0, now_s=60.0)
+    assert abs(s - (-6.0)) < 1e-9
+
+
+def _run_quantized(true_rate_s: float, n_ticks: int) -> tuple[WindowAutoState, bool]:
+    """Feed a 0.1 K-quantized room cooling one quantum every ``true_rate_s`` seconds
+    through quantized_slope + step_window_auto, one 60 s tick at a time."""
+    from custom_components.poise.control.window_auto import quantized_slope
+
+    st = WindowAutoState()
+    ref_room = ref_s = prev = None
+    opened = False
+    for i in range(n_ticks):
+        now = i * 60.0
+        room = round(round((21.5 - 0.1 * (now / true_rate_s)) / 0.1) * 0.1, 1)
+        slope, ref_room, ref_s = quantized_slope(
+            room=room, ref_room=ref_room, ref_s=ref_s, now_s=now
+        )
+        if prev is not None:
+            st = step_window_auto(st, slope, (now - prev) / 60.0, CFG)
+            opened = opened or st.open
+        prev = now
+    return st, opened
+
+
+def test_quantized_slope_no_false_open_on_natural_drift() -> None:
+    # -0.6 degC/h natural drift (one 0.1 K step every 600 s): must NOT open. The old
+    # per-tick slope spiked to -6 on each step and falsely opened (review V6).
+    _st, opened = _run_quantized(true_rate_s=600.0, n_ticks=60)
+    assert opened is False
+
+
+def test_quantized_slope_opens_on_real_window() -> None:
+    # a real open window steps 0.1 K every ~45 s (~-8 degC/h): must open.
+    _st, opened = _run_quantized(true_rate_s=45.0, n_ticks=20)
+    assert opened is True
