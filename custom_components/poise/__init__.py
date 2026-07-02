@@ -145,6 +145,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             off.domain, off.service, dict(off.data), blocking=False
         )
     except Exception:  # noqa: BLE001 - best-effort OFF on hub removal
-        logging.getLogger(__name__).exception(
-            "Poise: boiler OFF on hub removal failed"
-        )
+        logging.getLogger(__name__).exception("Poise: boiler OFF on hub removal failed")
