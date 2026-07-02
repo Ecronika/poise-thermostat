@@ -118,3 +118,47 @@ def test_configurable_cool_lockout_threads_through() -> None:
     # ...and the default 16 keeps the cold-outside lockout (regression).
     gated = decide(t_rm=20.0, room=29.0, can_heat=False, can_cool=True, t_out=8.0)
     assert gated.mode == "idle"
+
+
+def test_unoccupied_setback_is_not_clamped_to_comfort_band() -> None:
+    # review V3: a night/away setback (comfort_base lowered to 18) must survive.
+    # Occupied: the EN Cat II lower (20) is enforced. Unoccupied: it is waived so
+    # the setback is honoured instead of being silently clamped back up to 20.
+    occupied = decide(t_rm=4.0, room=18.0, comfort_base=18.0, can_heat=True, t_out=4.0)
+    setback = decide(
+        t_rm=4.0,
+        room=18.0,
+        comfort_base=18.0,
+        can_heat=True,
+        t_out=4.0,
+        occupied=False,
+    )
+    assert occupied.heat_sp == 20.0  # occupied: comfort band enforced
+    assert setback.heat_sp == 18.0  # unoccupied: setback honoured, not clamped up
+
+
+def test_unoccupied_setback_still_frost_protected() -> None:
+    # a deep setback below the frost floor is still clamped up to the floor.
+    d = decide(
+        t_rm=2.0,
+        room=6.0,
+        comfort_base=5.0,
+        can_heat=True,
+        t_out=2.0,
+        occupied=False,
+    )
+    assert d.heat_sp == 7.0  # frost floor holds even when unoccupied
+
+
+def test_unoccupied_setback_still_mould_protected() -> None:
+    # the mould floor is re-applied air-side, so it survives the relaxed clamp.
+    d = decide(
+        t_rm=2.0,
+        room=12.0,
+        comfort_base=10.0,
+        can_heat=True,
+        t_out=2.0,
+        mold_min=16.0,
+        occupied=False,
+    )
+    assert d.heat_sp == 16.0  # mould floor holds even when unoccupied
