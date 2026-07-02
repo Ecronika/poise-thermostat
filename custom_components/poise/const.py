@@ -137,4 +137,11 @@ CONF_FLOW_HYSTERESIS: Final = "flow_hysteresis"
 DEFAULT_MAX_FLOW_TEMP_C: Final = 60.0
 DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5
 
-# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise rou
+# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise routes
+CONF_SOURCE_POLICY: Final = "source_policy"
+CONF_DEFAULT_SOURCE: Final = "default_heat_source"
+DEFAULT_HEAT_SOURCE: Final = "radiator"
+
+# Bundled Lovelace card, served + auto-registered by the integration (ADR-0040)
+CARD_URL_BASE: Final = "/poise"
+CARD_MODULES: Final = ({"name": "Poise Card", "filename": "poise-card.js"},)
