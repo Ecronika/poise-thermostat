@@ -91,10 +91,15 @@ async def test_disabled_heat_device_below_floor_gets_frost_rescue(
 ) -> None:
     """Disabled zone, heat-capable device off/below the floor -> the frost floor is
     still written and the device nudged to heat (README safety-floor promise)."""
-    set_temp = async_mock_service(hass, "climate", "set_temperature")
-    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, state="off", sp=5.0, modes=["heat", "off"])
     entry = await _setup(hass)
+    # Mock the climate services AFTER setup: forwarding to the climate platform
+    # re-registers the real set_temperature/set_hvac_mode handlers, which would
+    # clobber a pre-setup mock, so the rescue write would be dispatched to the
+    # real (no-op for a bare mock state) handler and never observed. Mocking here
+    # captures the disabled-tick writes (harness finding 2026-07-02).
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     coord: Any = entry.runtime_data
     before_t, before_m = len(set_temp), len(set_mode)
 
@@ -116,10 +121,10 @@ async def test_disabled_heat_device_below_floor_gets_frost_rescue(
 
 async def test_disabled_reasonable_setpoint_not_fought(hass: HomeAssistant) -> None:
     """Disabled zone with a sane manual setpoint above the floor -> hands-off."""
-    set_temp = async_mock_service(hass, "climate", "set_temperature")
-    async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, state="heat", sp=19.0, modes=["heat", "off"])
     entry = await _setup(hass)
+    set_temp = async_mock_service(hass, "climate", "set_temperature")  # after setup
+    async_mock_service(hass, "climate", "set_hvac_mode")
     before_t = len(set_temp)
 
     await _disable_and_tick(hass, entry)
@@ -129,10 +134,10 @@ async def test_disabled_reasonable_setpoint_not_fought(hass: HomeAssistant) -> N
 
 async def test_disabled_cool_only_device_left_alone(hass: HomeAssistant) -> None:
     """Disabled zone, cool-only device below the floor -> no frost duty, no write."""
-    set_temp = async_mock_service(hass, "climate", "set_temperature")
-    async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, state="off", sp=5.0, modes=["cool", "off"])
     entry = await _setup(hass)
+    set_temp = async_mock_service(hass, "climate", "set_temperature")  # after setup
+    async_mock_service(hass, "climate", "set_hvac_mode")
     before_t = len(set_temp)
 
     await _disable_and_tick(hass, entry)
