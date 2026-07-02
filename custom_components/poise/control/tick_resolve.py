@@ -189,6 +189,7 @@ def resolve_desired_mode(
     current_device_mode: str | None,
     can_cool: bool,
     can_heat: bool,
+    idle_park_mode: str | None = None,
 ) -> str:
     """The hvac_mode to command this tick — the nudge target (review Finding 1, V1).
 
@@ -196,18 +197,58 @@ def resolve_desired_mode(
     NOT leave a cooling device in ``cool`` — it would cool toward the frost floor
     (review V1). So ``off`` maps to ``heat`` on a heat-capable device (it holds
     the frost floor by heating minimally) and to a real ``off`` on a cool-only
-    device (stop, never cool). On a passive ``idle``/``manual`` tick we keep the
-    device's current active mode so a cooling AC idles in ``cool`` instead of
-    ping-ponging cool<->heat at the compressor (Finding 1); a heat-only or
-    off/unknown device falls back to ``heat``.
+    device (stop, never cool). On a passive ``idle`` tick we take the room-position
+    park (``idle_park_mode``) so a warm reversible AC parks in ``cool`` at the cool
+    edge instead of ``heat`` at the low idle-hold (Finding 1 follow-up); when no
+    park is supplied we keep the device's current active mode so a cooling AC still
+    idles in ``cool`` instead of ping-ponging cool<->heat at the compressor.
+    ``manual`` and off/unknown fall back to the current mode or ``heat``.
     """
     if final_mode in ("heat", "cool", "dry"):
         return final_mode
     if final_mode == "off":
         return "heat" if can_heat else "off"
+    if final_mode == "idle" and idle_park_mode in ("heat", "cool"):
+        return idle_park_mode
     if can_cool and current_device_mode in ("heat", "cool"):
         return current_device_mode
     return "heat"
+
+
+def idle_park(
+    *,
+    room: float,
+    heat_sp: float,
+    cool_sp: float,
+    can_heat: bool,
+    can_cool: bool,
+    current_mode: str | None = None,
+    hysteresis: float = 0.5,
+) -> tuple[str, float]:
+    """Where to park a device idling in the neutral dead-band (Finding 1 follow-up).
+
+    An idle reversible AC must not sit in ``heat`` at the low heat edge through the
+    cooling season — the room would have to fall many kelvin before anything
+    happens and a *warming* room triggers nothing. Instead pre-position toward the
+    edge the room is closest to: a room in the upper half that can cool parks in
+    ``cool`` at the cool edge (a further rise then starts cooling), otherwise it
+    parks in ``heat`` at the heat edge (or ``cool`` if it cannot heat). A
+    ``hysteresis`` dead-zone around the midpoint keeps the current park, so a room
+    hovering at mid does not flutter heat<->cool on 0.1 K sensor noise. Returns
+    ``(mode, setpoint)`` so the coordinator drives the mode nudge AND the written
+    value from ONE decision — they can never disagree. A heat-only TRV always parks
+    in ``heat`` (``can_cool`` False); a cool-only device always parks in ``cool``.
+    """
+    if not can_cool:
+        return "heat", heat_sp
+    if not can_heat:
+        return "cool", cool_sp
+    mid = (heat_sp + cool_sp) / 2.0
+    if room >= mid + hysteresis:
+        return "cool", cool_sp
+    if room <= mid - hysteresis:
+        return "heat", heat_sp
+    return ("cool", cool_sp) if current_mode == "cool" else ("heat", heat_sp)
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
