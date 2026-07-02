@@ -335,8 +335,9 @@ def test_idle_park() -> None:
         "cool",
         26.0,
     )
-    # midpoint hysteresis (mid = 22): within +/-0.5 K keep the current park so a
-    # room hovering at mid does not flutter on 0.1 K sensor noise.
+    # a device already cooling keeps cool regardless of room (Finding 1, robust);
+    # a heating device holds heat in a neutral room and flips to cool only when
+    # clearly warm (room > mid + hysteresis). mid = (20 + 24) / 2 = 22.
     assert p(
         room=22.1,
         heat_sp=20.0,
