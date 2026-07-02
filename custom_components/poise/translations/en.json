@@ -23,6 +23,7 @@
           "comfort_end": "Comfort window end",
           "setback_delta": "Night setback (K)",
           "optimal_start": "Optimal start (pre-heat)",
+          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
           "weather_entity": "Weather entity (forecast)",
           "irradiance_sensor": "Solar irradiance sensor (W/m²)",
           "trv_external_temp_input": "TRV external-temperature input",
@@ -54,6 +55,7 @@
           "comfort_end": "Comfort window end",
           "setback_delta": "Night setback (K)",
           "optimal_start": "Optimal start (pre-heat)",
+          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
           "weather_entity": "Weather entity (forecast)",
           "irradiance_sensor": "Solar irradiance sensor (W/m²)",
           "trv_external_temp_input": "TRV external-temperature input",
@@ -212,6 +214,7 @@
           "comfort_end": "Comfort window end",
           "setback_delta": "Night setback (K)",
           "optimal_start": "Optimal start (pre-heat)",
+          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
           "operative_input": "Control operative temperature",
           "annual_heating_kwh": "Annual heating energy (kWh) — for the savings estimate",
           "price_eur_kwh": "Energy price (€/kWh) — for the savings estimate"

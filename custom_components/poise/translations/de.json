@@ -23,6 +23,7 @@
           "comfort_end": "Komfortfenster Ende",
           "setback_delta": "Nachtabsenkung (K)",
           "optimal_start": "Optimal-Start (Vorheizen)",
+          "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
           "weather_entity": "Wetter-Entität (Prognose)",
           "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
           "trv_external_temp_input": "TRV-Eingang externe Temperatur",
@@ -54,6 +55,7 @@
           "comfort_end": "Komfortfenster Ende",
           "setback_delta": "Nachtabsenkung (K)",
           "optimal_start": "Optimal-Start (Vorheizen)",
+          "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
           "weather_entity": "Wetter-Entität (Prognose)",
           "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
           "trv_external_temp_input": "TRV-Eingang externe Temperatur",
@@ -212,6 +214,7 @@
           "comfort_end": "Komfortfenster Ende",
           "setback_delta": "Nachtabsenkung (K)",
           "optimal_start": "Optimal-Start (Vorheizen)",
+          "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
           "operative_input": "Operative Temperatur regeln",
           "annual_heating_kwh": "Jährliche Heizenergie (kWh) — für die Einsparungsschätzung",
           "price_eur_kwh": "Energiepreis (€/kWh) — für die Einsparungsschätzung"
