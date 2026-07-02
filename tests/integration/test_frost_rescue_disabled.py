@@ -102,10 +102,14 @@ async def test_disabled_heat_device_below_floor_gets_frost_rescue(
 
     new_temps = [c.data.get("temperature") for c in set_temp[before_t:]]
     new_modes = [c.data.get("hvac_mode") for c in set_mode[before_m:]]
+    _aid = coord._actuator
+    _act = hass.states.get(_aid)
     assert new_temps, (
-        "no frost rescue write while disabled "
-        f"(can_heat={coord._capability()[0]}, enabled={coord.enabled}, "
-        f"available={(coord.data or {}).get('available')}, nudges={new_modes})"
+        f"no rescue: actuator={_aid!r} "
+        f"state={_act.state if _act else 'NONE'} "
+        f"temp={_act.attributes.get('temperature') if _act else None} "
+        f"last_ok={coord.last_update_success} "
+        f"mode={(coord.data or {}).get('mode')} nudges={new_modes}"
     )
     assert all(t >= 7.0 for t in new_temps)
     assert "heat" in new_modes
