@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildMonitor,
+  caVerdict,
   co2Thresholds,
   co2Verdict,
   humidityVerdict,
   levelColor,
+  pmvVerdict,
+  ppdFromPmv,
   tempVerdictAsrOffice,
   tempVerdictComfort,
 } from "../src/monitoring.ts";
@@ -116,4 +119,60 @@ test("buildMonitor comfort scale uses the band verdict, not ASR heat", () => {
     co2: null,
   });
   assert.equal(lamps[0].level, "ok");
+});
+
+test("ppdFromPmv matches ISO 7730 (0 -> 5 %, 0.5 -> ~10 %)", () => {
+  assert.ok(Math.abs(ppdFromPmv(0) - 5) < 0.01);
+  assert.ok(Math.abs(ppdFromPmv(0.5) - 10) < 0.5);
+});
+
+test("pmvVerdict: PPD thresholds 10/15, PMV fallback", () => {
+  assert.equal(pmvVerdict(null, null), "unknown");
+  assert.equal(pmvVerdict(0, 5), "ok");
+  assert.equal(pmvVerdict(null, 8), "ok");
+  assert.equal(pmvVerdict(null, 10), "warn");
+  assert.equal(pmvVerdict(null, 14), "warn");
+  assert.equal(pmvVerdict(null, 15), "alert");
+  assert.equal(pmvVerdict(null, 30), "alert");
+  assert.equal(pmvVerdict(0, null), "ok"); // PMV 0 -> PPD 5
+  assert.equal(pmvVerdict(0.9, null), "alert"); // |PMV| 0.9 -> PPD ~22
+});
+
+test("caVerdict: worst of deviation / cycles / time-in-band", () => {
+  const none = { deviationK: null, timeInBand: null, cyclesPerH: null };
+  assert.equal(caVerdict(none), "unknown");
+  assert.equal(caVerdict({ deviationK: 0.3, timeInBand: 0.95, cyclesPerH: 1 }), "ok");
+  assert.equal(caVerdict({ deviationK: 0.6, timeInBand: 0.95, cyclesPerH: 1 }), "warn");
+  assert.equal(caVerdict({ deviationK: 0.3, timeInBand: 0.95, cyclesPerH: 7 }), "alert");
+  assert.equal(caVerdict({ deviationK: 0.3, timeInBand: 0.5, cyclesPerH: 1 }), "alert");
+  // time-in-band accepts a fraction (0.92) or an already-percent value (92)
+  assert.equal(caVerdict({ deviationK: 0.3, timeInBand: 92, cyclesPerH: 1 }), "ok");
+});
+
+test("buildMonitor appends pmv and ca lamps only when present", () => {
+  const base = buildMonitor({
+    temperature: 22,
+    comfortVerdict: "in_band",
+    humidity: null,
+    co2: null,
+  });
+  assert.equal(base.length, 1); // no pmv/ca fields -> just temperature
+
+  const full = buildMonitor({
+    temperature: 22,
+    comfortVerdict: "in_band",
+    humidity: null,
+    co2: null,
+    pmv: 0.2,
+    ppd: 8,
+    ca: { deviationK: 0.4, timeInBand: 0.92, cyclesPerH: 1 },
+  });
+  assert.deepEqual(
+    full.map((l) => l.key),
+    ["temperature", "pmv", "ca"],
+  );
+  assert.equal(full[1].value, 8); // PPD %
+  assert.equal(full[1].level, "ok");
+  assert.equal(full[2].value, 92); // time-in-band normalised to %
+  assert.equal(full[2].level, "ok");
 });
