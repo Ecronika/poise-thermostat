@@ -58,6 +58,7 @@ class WriteTarget:
     mode: str
     norm_binding: str | None
     binding_precedence: str | None = None
+    override_clamped: bool = False
 
 
 def resolve_write_target(
@@ -75,12 +76,20 @@ def resolve_write_target(
     """Final write target: window/override/comfort → setpoint + mode, then the
     unconditional norm envelope (ASR cap + frost/mould floor, skipped when
     cooling) and the device max (ADR-0023/0027).
+
+    ``override_clamped`` reports when a manual setpoint was silently limited by
+    the comfort band ``[heat_sp, cool_sp]`` (review V10) — true only when the
+    override lies outside it. Inside the comfort window the band is tight so a
+    far-off manual value is capped without feedback; the flag surfaces that.
     """
     floor = max(frost_floor, mold_min if mold_min is not None else frost_floor)
+    override_clamped = False
     if window_open:
         target, mode = round(floor, 1), "off"
     elif override is not None:
-        target, mode = round(min(max(override, heat_sp), cool_sp), 1), "manual"
+        clamped = min(max(override, heat_sp), cool_sp)
+        override_clamped = clamped != override
+        target, mode = round(clamped, 1), "manual"
     else:
         target, mode = round(write_setpoint, 1), comfort_mode
 
@@ -208,7 +217,7 @@ def resolve_desired_mode(
         return final_mode
     if final_mode == "off":
         return "heat" if can_heat else "off"
-    if final_mode == "idle" and idle_park_mode in ("heat", "cool"):
+    if final_mode == "idle" and idle_park_mode in ("heat", "cool", "fan_only"):
         return idle_park_mode
     if can_cool and current_device_mode in ("heat", "cool"):
         return current_device_mode
@@ -222,6 +231,7 @@ def idle_park(
     cool_sp: float,
     can_heat: bool,
     can_cool: bool,
+    can_fan_only: bool = False,
     current_mode: str | None = None,
     hysteresis: float = 0.5,
 ) -> tuple[str, float]:
@@ -229,7 +239,11 @@ def idle_park(
 
     An idle reversible AC must not sit in ``heat`` at the low heat edge through the
     cooling season — the room would have to fall many kelvin before anything happens
-    and a *warming* room triggers nothing. Rules, in order:
+    and a *warming* room triggers nothing. A **fan_only-capable** device circulates
+    in the dead-band instead of holding the cool edge (holding ``cool`` compressor-
+    cools against the device's own warmer sensor and dries the room — the office-AC
+    finding); the rules below are the legacy park for devices without a fan_only
+    mode (``can_fan_only`` False → byte-identical to the old behaviour). Rules:
 
     * a heat-only TRV always parks in ``heat`` (``can_cool`` False); a cool-only
       device always parks in ``cool``;
@@ -250,11 +264,21 @@ def idle_park(
     """
     if not can_cool:
         return "heat", heat_sp
+    mid = (heat_sp + cool_sp) / 2.0
+    # Over-dry fix (office-AC finding): a fan_only-capable device *circulates* in
+    # the dead-band instead of holding the cool edge. Holding ``cool`` makes the
+    # device compressor-cool against its OWN (often warmer, ceiling/return-air)
+    # sensor and dry the room out even while Poise reads it at or below the edge.
+    # Only on the clearly cool side does a heat-capable device stay heat-ready (no
+    # draft); the compressor re-engages the instant decide() calls for real
+    # cooling. A device WITHOUT a fan_only mode keeps the legacy Finding-1 park —
+    # ``can_fan_only`` defaults False, so the old behaviour is byte-identical.
+    if can_fan_only and not (can_heat and room < mid - hysteresis):
+        return "fan_only", cool_sp
     if not can_heat:
         return "cool", cool_sp
     if current_mode == "cool":
         return "cool", cool_sp
-    mid = (heat_sp + cool_sp) / 2.0
     return ("cool", cool_sp) if room > mid + hysteresis else ("heat", heat_sp)
 
 

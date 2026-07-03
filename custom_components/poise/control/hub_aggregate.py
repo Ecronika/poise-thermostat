@@ -59,12 +59,22 @@ def zone_request_from_data(
     temperature — the binding-cause string never carries "frost" (the frost
     floor is the lowest bound and never binds the lower cause), so the old
     cause-string derivation was always False (review #2). ``health_active`` is
-    read from the mould binding cause, which the coordinator does publish.
+    read from the mould binding cause, which the coordinator does publish. A
+    ``sensor_frozen`` zone has its ``heating``/``heat_demand`` forced to
+    off/zero (V9) — a dead sensor must not pin the shared boiler; genuine
+    anti-freeze survives because ``frost_active`` is derived independently.
     """
-    heating = bool(data.get("heating"))
+    # V9: a frozen (stale) room sensor must not call for the shared boiler — its
+    # ``heating`` chases a dead value (the zone locally degrades to the frost
+    # floor, held by the actuator's own sensor). Frost safety is preserved: a
+    # last-plausible cold reading still trips ``frost_active`` below, so a
+    # genuinely freezing zone keeps firing the boiler via the frost override,
+    # while a comfort heat-call on a dead sensor no longer pins it on forever.
+    frozen = bool(data.get("sensor_frozen"))
+    heating = bool(data.get("heating")) and not frozen
     cause = str(data.get("binding_lower_cause") or "").lower()
     duty = _num(data.get("tpi_duty"))
-    heat_demand = duty if duty is not None else (1.0 if heating else 0.0)
+    heat_demand = 0.0 if frozen else (duty if duty is not None else float(heating))
     room = _num(data.get("current_temperature"))
     sp = _num(data.get("heat_sp"))
     gap = (sp - room) if room is not None and sp is not None else 0.0
@@ -87,6 +97,7 @@ def zone_request_from_data(
         flow_temp_request=flow_temp_request,
         source_pref=source_pref,
         health_active=health_active,
+        frozen=frozen,
     )
 
 
