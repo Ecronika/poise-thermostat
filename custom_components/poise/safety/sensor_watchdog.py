@@ -23,6 +23,21 @@ def is_frozen(age_s: float | None, threshold_s: float) -> bool:
     return age_s >= threshold_s
 
 
+def unavailable_safe_engaged(unavailable_s: float | None, threshold_s: float) -> bool:
+    """True once the room sensor has been *unavailable* for at least ``threshold_s``.
+
+    A brief drop-out is tolerated (hold the last state); a sustained loss must
+    degrade to the same safe state as a frozen sensor — command the frost/mould
+    floor so a heat-capable actuator protects the room with its own sensor
+    (fail toward warmth). This matters most in external-feed mode, where the lost
+    sensor is the room's only signal (review #7). ``None`` (not currently
+    unavailable) and a non-positive threshold read as not engaged.
+    """
+    if unavailable_s is None or threshold_s <= 0.0:
+        return False
+    return unavailable_s >= threshold_s
+
+
 def sensor_at_heat_source(
     tau_hours: float, identified: bool, *, min_plausible_tau_h: float
 ) -> bool:
