@@ -171,6 +171,21 @@ def heat_drive_signal(hvac_action: str | None, *, fallback_heating: bool) -> flo
     return 1.0 if hvac_action == "heating" else 0.0
 
 
+def cool_drive_signal(hvac_action: str | None, *, fallback_cooling: bool) -> float:
+    """EKF cooling-drive input (0/1): the β_c counterpart of heat_drive_signal.
+
+    ``beta_c`` (cooling responsivity) is only observable when the cooling input
+    ``u_c`` is actually excited (ADR-0024). Prefer the actuator's real running
+    state — an AC reporting ``hvac_action == "cooling"`` is ground truth — and
+    fall back to Poise's own cool intent so a device that reports no
+    ``hvac_action`` still excites β_c during the cooling season instead of
+    leaving ``cooling_identified`` False forever.
+    """
+    if not hvac_action:
+        return 1.0 if fallback_cooling else 0.0
+    return 1.0 if hvac_action == "cooling" else 0.0
+
+
 def needs_mode_nudge(
     current_mode: str | None, desired_mode: str, *, supported: bool
 ) -> bool:
