@@ -75,6 +75,41 @@ def test_write_target_override_clamped_into_band_and_norm() -> None:
         device_max=30.0,
     )
     assert wt.target == 24.0 and wt.mode == "manual"
+    assert wt.override_clamped is True  # V10: silently limited by cool_sp
+
+
+def test_write_target_override_within_band_not_flagged() -> None:
+    # V10: a manual setpoint inside [heat_sp, cool_sp] is honoured verbatim and
+    # override_clamped stays False — there is no silent limiting to report.
+    wt = resolve_write_target(
+        window_open=False,
+        override=22.0,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        write_setpoint=20.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=30.0,
+    )
+    assert wt.target == 22.0 and wt.override_clamped is False
+
+
+def test_write_target_override_below_band_flagged() -> None:
+    # V10: an override below the comfort floor is clamped up to heat_sp and the
+    # silent limiting is surfaced via override_clamped (the review V10 gap).
+    wt = resolve_write_target(
+        window_open=False,
+        override=15.0,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        write_setpoint=20.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=30.0,
+    )
+    assert wt.target == 20.0 and wt.override_clamped is True
 
 
 def test_write_target_norm_cap_applies_when_heating() -> None:
@@ -310,6 +345,70 @@ def test_resolve_desired_mode() -> None:
         )
         == "cool"
     )
+    # 0.131.0: idle-park may request fan_only (dead-band circulation) for a
+    # fan_only-capable AC — passed straight through on an idle tick.
+    assert (
+        r(
+            final_mode="idle",
+            current_device_mode="cool",
+            can_cool=True,
+            can_heat=True,
+            idle_park_mode="fan_only",
+        )
+        == "fan_only"
+    )
+
+
+def test_idle_park_fan_only_circulation() -> None:
+    # 0.131.0 over-dry fix: a fan_only-capable device circulates in the dead-band
+    # instead of holding the cool edge (which compressor-cools against its own
+    # warmer sensor and dries the room out — the office-AC finding).
+    from custom_components.poise.control.tick_resolve import idle_park as p
+
+    # warm-side reversible AC -> fan_only (was "cool")
+    assert p(
+        room=25.3,
+        heat_sp=16.0,
+        cool_sp=25.7,
+        can_heat=True,
+        can_cool=True,
+        can_fan_only=True,
+    ) == ("fan_only", 25.7)
+    # neutral / already-cooling reversible AC -> fan_only (no compressor hold)
+    assert p(
+        room=21.0,
+        heat_sp=16.0,
+        cool_sp=25.7,
+        can_heat=True,
+        can_cool=True,
+        can_fan_only=True,
+        current_mode="cool",
+    ) == ("fan_only", 25.7)
+    # clearly cool side -> stay heat-ready (avoid draft); mid = (16 + 25.7)/2 = 20.85
+    assert p(
+        room=18.0,
+        heat_sp=16.0,
+        cool_sp=25.7,
+        can_heat=True,
+        can_cool=True,
+        can_fan_only=True,
+    ) == ("heat", 16.0)
+    # cool-only + fan_only -> circulate, never dry-hold the edge
+    assert p(
+        room=25.3,
+        heat_sp=16.0,
+        cool_sp=25.7,
+        can_heat=False,
+        can_cool=True,
+        can_fan_only=True,
+    ) == ("fan_only", 25.7)
+    # WITHOUT a fan_only mode the legacy park is byte-identical (regression guard)
+    assert p(
+        room=25.3, heat_sp=16.0, cool_sp=25.7, can_heat=True, can_cool=True
+    ) == ("cool", 25.7)
+    assert p(
+        room=18.0, heat_sp=16.0, cool_sp=25.7, can_heat=False, can_cool=True
+    ) == ("cool", 25.7)
 
 
 def test_idle_park() -> None:

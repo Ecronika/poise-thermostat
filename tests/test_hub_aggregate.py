@@ -486,6 +486,69 @@ def test_zone_request_frost_fires_boiler_end_to_end() -> None:
     assert d.active is True and d.frost_zone_id == "cold"
 
 
+def test_frozen_zone_does_not_call_for_heat() -> None:
+    # V9: a stale room sensor must not call for the shared boiler — heating and
+    # heat_demand are forced off/zero, and the degradation is flagged on the
+    # contract (charter G15: degradation is never hidden).
+    from custom_components.poise.control.hub_aggregate import zone_request_from_data
+
+    z = zone_request_from_data(
+        "z",
+        {
+            "current_temperature": 19.0,
+            "heat_sp": 21.0,
+            "heating": True,
+            "tpi_duty": 0.6,
+            "sensor_frozen": True,
+        },
+        controls_boiler=True,
+        declared_power=1.5,
+        compressor_group=None,
+        flow_temp_request=None,
+        source_pref=None,
+        mono_ts=0.0,
+    )
+    assert z.frozen is True
+    assert z.heating is False and z.heat_demand == 0.0
+
+
+def test_frozen_comfort_call_does_not_pin_boiler_but_frost_survives() -> None:
+    # V9 end-to-end: a frozen zone mid-heating with a comfortable last reading no
+    # longer pins the shared boiler on forever; but a frozen zone whose LAST
+    # reading was in the frost band still fires it via the frost override
+    # (fail-toward-warmth on the last trustworthy value).
+    from custom_components.poise.control.hub_aggregate import (
+        aggregate_boiler_demand,
+        zone_request_from_data,
+    )
+
+    def _frozen(temp: float) -> ZoneRequest:
+        return zone_request_from_data(
+            "z",
+            {
+                "current_temperature": temp,
+                "heat_sp": 21.0,
+                "heating": True,
+                "sensor_frozen": True,
+            },
+            controls_boiler=True,
+            declared_power=None,
+            compressor_group=None,
+            flow_temp_request=None,
+            source_pref=None,
+            mono_ts=0.0,
+        )
+
+    warm = _frozen(19.0)
+    assert warm.heating is False
+    assert aggregate_boiler_demand([warm]).active is False
+
+    cold = _frozen(6.0)
+    assert cold.heating is False  # the comfort call is still suppressed
+    d = aggregate_boiler_demand([cold])
+    assert d.active is True and d.frost_override is True and d.frost_zone_id == "z"
+
+
 def test_zone_request_health_from_mould_cause() -> None:
     from custom_components.poise.control.hub_aggregate import zone_request_from_data
 
