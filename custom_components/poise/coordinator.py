@@ -29,7 +29,7 @@ from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
 from .comfort.fan_cooling import fan_cool_setpoint, fan_velocity
 from .comfort.free_running import free_running_widen
-from .comfort.humidity import humidity_decide
+from .comfort.humidity import humidity_decide, rh_high_for_category
 from .comfort.mode_seam import mode_arbitration
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
@@ -165,6 +165,7 @@ from .devices.model_fixes import (
     looks_like_valve_steps,
 )
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
+from .estimation.psychrometrics import humidity_ratio
 from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.thermal_ekf import ThermalEKF
@@ -1240,6 +1241,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # ADR-0050/0051 coherence: compose humidity + diagnostics against the
             # SAME config-based, rate-limited cool band that is actually written
             # (_cool_ac / eff_cool), not a second default-config computation.
+            _w = (
+                humidity_ratio(room, rh)
+                if rh is not None and room is not None
+                else None
+            )
             _hum = humidity_decide(
                 rh=rh,
                 too_warm=room_decide > eff_cool,
@@ -1247,6 +1253,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 can_dry="dry" in _modes_cl,
                 can_fan_only="fan_only" in _modes_cl,
                 prev_dry_active=self._dry_active,
+                category=self._category,
+                abs_humidity_gkg=_w,
             )
             self._dry_active = _hum.dry_active
             _hum_action = _hum.action
@@ -1312,6 +1320,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "humidity_action": _hum.action,
                 "dry_active": _hum.dry_active,
                 "humidity_reason": _hum.reason,
+                "abs_humidity_gkg": (round(_w, 1) if _w is not None else None),
+                "rh_high_used": rh_high_for_category(self._category),
                 "fr_active": _fr.active,
                 "fr_heat_sp": round(_fr.heat_op, 1),
                 "fr_cool_sp": round(_fr.cool_op, 1),

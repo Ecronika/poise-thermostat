@@ -105,6 +105,8 @@ _ATTRS = (
     "humidity_action",
     "dry_active",
     "humidity_reason",
+    "abs_humidity_gkg",
+    "rh_high_used",
     "fr_active",
     "fr_heat_sp",
     "fr_cool_sp",
