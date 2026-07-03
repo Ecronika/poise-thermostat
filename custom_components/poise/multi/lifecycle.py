@@ -217,3 +217,49 @@ def from_dict(d: Mapping[str, Any], *, now: float) -> DeviceLifecycle:
         expected_echo=dict(d.get("expected_echo") or {}),
         health=str(d.get("health", DeviceHealth.OK.value)),
     )
+
+
+_CONDITIONING_MODES = ("cool", "dry")
+_ACTIVE_ACTIONS = ("cooling", "drying", "heating")
+
+
+def compressor_conditioning(mode: str | None) -> bool:
+    """True if the hvac_mode runs the compressor for cooling/drying (cool|dry)."""
+    return mode in _CONDITIONING_MODES
+
+
+def compressor_running(hvac_action: str | None, intended_mode: str | None) -> bool:
+    """Whether the compressor is (intended to be) running: prefer the device's
+    real ``hvac_action``; fall back to Poise's intended mode when the device
+    reports none (mirrors the EKF cool-drive fallback for silent ACs, ADR-0024).
+    """
+    if hvac_action is not None:
+        return hvac_action in _ACTIVE_ACTIONS
+    return intended_mode in ("cool", "dry", "heat")
+
+
+def mode_nudge_block_reason(
+    *,
+    desired: str,
+    current: str | None,
+    min_off_remaining_s: float,
+    mode_hold_remaining_s: float,
+    is_safety: bool,
+) -> str | None:
+    """Anti-short-cycle gate for a single-AC hvac_mode nudge (ADR-0046 §8).
+
+    Returns a suppression reason when the nudge should be held back to protect
+    the compressor, else ``None``. It only ever blocks *starting* the compressor
+    (entering cool/dry) or *flipping* between the two conditioning modes; it
+    never forces continued running (no min-on) and never blocks a safety action
+    or a stop (``want`` False).
+    """
+    if is_safety:
+        return None
+    want = compressor_conditioning(desired)
+    have = compressor_conditioning(current)
+    if want and not have and min_off_remaining_s > 0.0:
+        return f"min-off {min_off_remaining_s:.0f}s"
+    if want and have and desired != current and mode_hold_remaining_s > 0.0:
+        return f"mode-hold {mode_hold_remaining_s:.0f}s"
+    return None
