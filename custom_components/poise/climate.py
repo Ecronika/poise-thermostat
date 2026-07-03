@@ -123,6 +123,10 @@ _ATTRS = (
     "ca_cycles_per_h",
     "ca_minutes",
     "override_clamped",
+    "ref_offset",
+    "ref_offset_dev",
+    "ref_offset_trusted",
+    "cool_sp_compensated",
 )
 
 
