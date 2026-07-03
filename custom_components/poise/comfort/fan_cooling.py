@@ -64,3 +64,48 @@ def fan_cool_setpoint(
     raised = min(cool_sp + ce, upper_cap)
     raised = max(raised, cool_sp)  # a low cap never lowers the setpoint
     return round(raised, 1), round(raised - cool_sp, 2)
+
+
+# Occupied-zone air-speed estimate [m/s] by fan stage, credited only while the
+# indoor fan is actually running (device/geometry-dependent — an estimate, not a
+# measurement). Below the 0.2 m/s threshold cooling_effect() credits nothing.
+_FAN_SPEED_MS: dict[str, float] = {
+    "silent": 0.25,
+    "quiet": 0.25,
+    "low": 0.25,
+    "min": 0.25,
+    "medium": 0.40,
+    "mid": 0.40,
+    "high": 0.65,
+    "strong": 0.65,
+    "focus": 0.65,
+    "turbo": 0.85,
+    "powerful": 0.85,
+    "max": 0.85,
+    "auto": 0.35,
+}
+_FAN_SPEED_RUNNING_DEFAULT = 0.30  # running, but an unrecognised stage label
+# hvac_action values in which the indoor fan is actually moving air.
+_MOVING_ACTIONS = frozenset({"cooling", "drying", "dry", "fan", "fan_only", "heating"})
+
+
+def fan_velocity(
+    *,
+    fan_mode: str | None,
+    hvac_action: str | None,
+    can_recirculate: bool = True,
+) -> float:
+    """Estimated occupied-zone air speed [m/s] from the actuator's fan state.
+
+    Returns the still-air baseline unless the indoor fan is *actually* running —
+    ``hvac_action`` shows active conditioning/fan on a fan-capable device — so a
+    fan-off idle (e.g. ``fan_mode=auto`` with the compressor off) is never
+    credited with movement. Conservative by design (under-crediting is the safe
+    direction for a shadow that informs a later live raise); the per-stage speeds
+    are estimates, not measurements.
+    """
+    if not can_recirculate:
+        return STILL_AIR_MS
+    if (hvac_action or "").lower() not in _MOVING_ACTIONS:
+        return STILL_AIR_MS
+    return _FAN_SPEED_MS.get((fan_mode or "").lower(), _FAN_SPEED_RUNNING_DEFAULT)
