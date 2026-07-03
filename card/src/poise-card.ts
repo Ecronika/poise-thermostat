@@ -1,8 +1,13 @@
-import { LitElement, css, html, nothing, type PropertyValues } from "lit";
+import { LitElement, css, html, nothing, svg, type PropertyValues } from "lit";
 import type { HomeAssistant, LovelaceCard } from "./ha-types.ts";
 import { buildBand } from "./comfort.ts";
 import { buildMonitor, type Lamp } from "./monitoring.ts";
-import type { PoiseCardConfig } from "./card-config.ts";
+import {
+  type PoiseCardConfig,
+  type ResolvedConfig,
+  type ChipKey,
+  resolveConfig,
+} from "./card-config.ts";
 import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
 import "./poise-system-card.ts";
@@ -42,6 +47,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   private _dragging = false;
   private _pending: number | null = null;
   private _dialCfg: DialConfig = DIAL;
+  private _r!: ResolvedConfig;
 
   static getConfigElement(): HTMLElement {
     return document.createElement("poise-card-editor");
@@ -61,6 +67,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (config.entity && !config.entity.startsWith("climate."))
       throw new Error("Poise card: entity must be a climate entity");
     this._config = { show_shadow: true, ...config };
+    this._r = resolveConfig(this._config);
   }
 
   getCardSize(): number {
@@ -68,12 +75,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   }
 
   getGridOptions() {
-    // Default to natural height (rows:"auto" → HA sizes the cell to content).
-    // min_rows is a *floor*: the user may still drag the card larger in the
-    // Sections editor, but HA clamps any numeric rows up to this minimum, so
-    // it can never be shrunk small enough to clip the content — and a stale
-    // override saved into the dashboard (e.g. an old rows:8) is healed too.
-    return this._config?.compact
+    return this._r?.density === "compact"
       ? { columns: 6, rows: "auto", min_columns: 4, min_rows: 6 }
       : { columns: 12, rows: "auto", min_columns: 6, min_rows: 9 };
   }
@@ -103,7 +105,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   protected updated(): void {
     if (this.hass) void checkCardVersion(this, this.hass);
     const id = this._config?.entity;
-    if (id && this.hass && this._histFor !== id) {
+    if (id && this.hass && this._r?.history.show && this._histFor !== id) {
       this._histFor = id;
       void this._loadHistory(id);
     }
@@ -111,8 +113,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   private async _loadHistory(id: string): Promise<void> {
     if (!this.hass.connection) return;
+    const hours = this._r?.history.hours ?? 24;
     const end = new Date();
-    const start = new Date(end.getTime() - 24 * 3600 * 1000);
+    const start = new Date(end.getTime() - hours * 3600 * 1000);
     try {
       const resp = await this.hass.connection.sendMessagePromise<
         Record<string, Array<Record<string, unknown>>>
@@ -195,19 +198,22 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       category: (a["category"] as string) ?? null,
     });
 
+    const r = this._r;
     return html`<ha-card .header=${a["friendly_name"] ?? "Poise"}>
-      <div class="wrap ${this._config.compact ? "compact" : ""}">
+      <div class="wrap ${r.density === "compact" ? "compact" : ""}">
         ${this._dial(a, lang)}
         <div class="verdict">
           ${band ? t(lang, band.verdict) : t(lang, "unknown")}
           ${band?.category ? html`<span class="cat">Kat. ${band.category}</span>` : nothing}
         </div>
-        ${this._config.compact
-          ? nothing
-          : html`${this._control(this._pending ?? setpoint, lang)}
-              ${this._chart(num(a["comfort_low"]), num(a["comfort_high"]))}
-              ${this._monitor(a, band, lang)}
-              ${this._chips(a, lang)}`}
+        ${r.controls === "buttons"
+          ? this._control(this._pending ?? setpoint, lang)
+          : nothing}
+        ${this._presets(a, lang)}
+        ${r.history.show
+          ? this._chart(num(a["comfort_low"]), num(a["comfort_high"]))
+          : nothing}
+        ${this._monitor(a, band, lang)} ${this._chips(a, lang)}
         ${this._learn(a, lang)}
       </div>
     </ha-card>`;
@@ -216,8 +222,6 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   private _dial(a: Record<string, unknown>, lang?: string) {
     const op = num(a["operative_temperature"]) ?? num(a["current_temperature"]);
     const actualSp = num(a["heat_sp"]) ?? num(a["temperature"]);
-    // Scale the dial to the device's own setpoint range, not a hard [16,28]
-    // (M12). Never invent a 16 °C setpoint — fall back to the operative reading.
     const cfg: DialConfig = {
       min: num(a["min_temp"]) ?? DIAL.min,
       max: num(a["max_temp"]) ?? DIAL.max,
@@ -245,12 +249,24 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const h = polar(cx, cy, r, valueToAngle(sp, this._dialCfg));
     const opA =
       op != null ? polar(cx, cy, r, valueToAngle(op, this._dialCfg)) : null;
+    // ADR-0057: mould-protection floor as an orange tick on the dial, drawn only
+    // when the value is inside the visible arc (silently skipped otherwise).
+    const mould = num(a["mould_floor"]);
+    const showMould =
+      mould != null &&
+      mould > this._dialCfg.min &&
+      mould < this._dialCfg.max;
+    const mAng = showMould ? valueToAngle(mould as number, this._dialCfg) : 0;
+    const mIn = showMould ? polar(cx, cy, r - 9, mAng) : null;
+    const mOut = showMould ? polar(cx, cy, r + 9, mAng) : null;
+    const mLbl = showMould ? polar(cx, cy, r + 17, mAng) : null;
+    const interactive = this._r.controls === "dial";
     return html`<div class="dialwrap">
       <svg
-        class="dial"
+        class="dial ${interactive ? "" : "ro"}"
         viewBox="0 0 200 200"
-        role="slider"
-        tabindex="0"
+        role=${interactive ? "slider" : "img"}
+        tabindex=${interactive ? 0 : -1}
         aria-label=${t(lang, "setpoint")}
         aria-valuemin=${this._dialCfg.min}
         aria-valuemax=${this._dialCfg.max}
@@ -264,6 +280,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       >
         <path class="track" d=${track}></path>
         <path class="bandarc" d=${bandArc}></path>
+        ${showMould && mIn && mOut && mLbl
+          ? svg`<line class="mould" x1=${mIn.x.toFixed(1)} y1=${mIn.y.toFixed(1)} x2=${mOut.x.toFixed(1)} y2=${mOut.y.toFixed(1)}><title>${t(lang, "mould")} ${(mould as number).toFixed(1)}°</title></line><text class="mlbl" x=${mLbl.x.toFixed(1)} y=${mLbl.y.toFixed(1)}>${(mould as number).toFixed(0)}°</text>`
+          : nothing}
         <circle
           class="opdot"
           cx=${(opA?.x ?? 0).toFixed(1)}
@@ -304,7 +323,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   }
 
   private _onDown(ev: PointerEvent): void {
-    if (!this._config.entity) return;
+    if (!this._config.entity || this._r.controls !== "dial") return;
     ev.preventDefault();
     const svg = ev.currentTarget as SVGSVGElement;
     svg.setPointerCapture(ev.pointerId);
@@ -330,11 +349,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     this.requestUpdate();
   }
 
-  // Keyboard control for the dial slider (a11y, D2): arrows/page/home/end step
-  // the setpoint; everything else is left to the browser.
   private _onKey(ev: KeyboardEvent): void {
     const id = this._config.entity;
-    if (!id) return;
+    if (!id || this._r.controls !== "dial") return;
     const st = this.hass.states[id];
     if (!st) return;
     const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
@@ -351,7 +368,6 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     });
   }
 
-  // Enter/Space activate a div given button semantics (more-info targets).
   private _onActivateKey(ev: KeyboardEvent): void {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
@@ -374,32 +390,67 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     </div>`;
   }
 
+  private _setPreset(mode: string): void {
+    const id = this._config.entity;
+    if (!id || !this.hass) return;
+    this.hass.callService("climate", "set_preset_mode", {
+      entity_id: id,
+      preset_mode: mode,
+    });
+  }
+
+  // ADR-0057: optional preset row from the entity's own preset_modes, calling
+  // climate.set_preset_mode. Hidden when the section is off or no presets exist.
+  private _presets(a: Record<string, unknown>, lang?: string) {
+    if (!this._r.presets) return nothing;
+    const modes = a["preset_modes"];
+    if (!Array.isArray(modes) || !modes.length) return nothing;
+    const cur = a["preset_mode"] == null ? null : String(a["preset_mode"]);
+    return html`<div class="presets" role="group" aria-label=${t(lang, "presets")}>
+      ${modes.map((m) => {
+        const key = String(m);
+        return html`<button
+          class="preset ${cur === key ? "on" : ""}"
+          aria-pressed=${cur === key ? "true" : "false"}
+          @click=${() => this._setPreset(key)}
+        >
+          <ha-icon icon=${presetIcon(key.toLowerCase())}></ha-icon>
+          <span>${t(lang, key.toLowerCase()) || key}</span>
+        </button>`;
+      })}
+    </div>`;
+  }
+
   private _chips(a: Record<string, unknown>, lang?: string) {
+    const r = this._r;
     const chips = [];
-    if (a["preheating"])
-      chips.push(this._chip("mdi:fire-circle", t(lang, "preheating"), a["minutes_to_comfort"], lang));
-    if (a["coasting"])
-      chips.push(this._chip("mdi:coffee", t(lang, "coasting"), a["minutes_to_setback"], lang));
-    if (a["window_open"])
-      chips.push(
-        this._chip(
-          "mdi:window-open",
-          t(lang, a["window_auto_detected"] ? "window_auto" : "window"),
-        ),
-      );
-    if (a["window_bypass"])
-      chips.push(this._chip("mdi:window-closed-variant", t(lang, "bypass")));
-    const preset = a["preset"] == null ? "none" : String(a["preset"]);
-    if (preset !== "none")
-      chips.push(this._chip(presetIcon(preset), t(lang, preset) || preset));
-    if (a["heating_failure"]) chips.push(this._chip("mdi:alert", t(lang, "failure")));
-    if (a["override_clamped"])
-      chips.push(
-        this._chip("mdi:arrow-collapse-vertical", t(lang, "override_clamped")),
-      );
-    const cause = a["binding_lower_cause"];
-    if (cause && cause !== "en16798")
-      chips.push(this._chip("mdi:shield-alert", String(cause)));
+    if (r.chips.has("hvac")) {
+      if (a["preheating"])
+        chips.push(this._chip("mdi:fire-circle", t(lang, "preheating"), a["minutes_to_comfort"], lang));
+      if (a["coasting"])
+        chips.push(this._chip("mdi:coffee", t(lang, "coasting"), a["minutes_to_setback"], lang));
+      // Preset chip only when the dedicated preset section is off (else it duplicates).
+      const preset = a["preset"] == null ? "none" : String(a["preset"]);
+      if (preset !== "none" && !r.presets)
+        chips.push(this._chip(presetIcon(preset), t(lang, preset) || preset));
+      if (a["heating_failure"]) chips.push(this._chip("mdi:alert", t(lang, "failure")));
+      if (a["override_clamped"])
+        chips.push(this._chip("mdi:arrow-collapse-vertical", t(lang, "override_clamped")));
+      const cause = a["binding_lower_cause"];
+      if (cause && cause !== "en16798")
+        chips.push(this._chip("mdi:shield-alert", String(cause)));
+    }
+    if (r.chips.has("window")) {
+      if (a["window_open"])
+        chips.push(
+          this._chip(
+            "mdi:window-open",
+            t(lang, a["window_auto_detected"] ? "window_auto" : "window"),
+          ),
+        );
+      if (a["window_bypass"])
+        chips.push(this._chip("mdi:window-closed-variant", t(lang, "bypass")));
+    }
     return chips.length
       ? html`<div
           class="chips"
@@ -422,9 +473,6 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     </div>`;
   }
 
-  // ADR-0049 room-condition traffic lights: temperature (always), humidity and
-  // CO₂ (only when the integration publishes them) get a green/yellow/red dot,
-  // computed card-side from the live state — no recorder load, no actuation.
   private _monitor(
     a: Record<string, unknown>,
     band: ReturnType<typeof buildBand>,
@@ -453,18 +501,20 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         outdoor_co2: num(a["outdoor_co2"]),
       },
     );
-    // Show the row only when there is more than the always-present temperature
-    // lamp (humidity/CO₂ present), or when the ASR office overlay is explicitly
-    // chosen — otherwise a lone dot would just duplicate the band verdict text.
-    const meaningful =
-      lamps.length > 1 || this._config.temperature_scale === "asr_office";
-    if (!meaningful) return nothing;
+    // ADR-0057: honour the per-element section toggles. The pmv lamp has its own
+    // switch; every other lamp is gated by the chips set. Unknown keys are kept
+    // (defensive) so a future lamp is visible until explicitly hidden.
+    const r = this._r;
+    const shown = lamps.filter((l) =>
+      l.key === "pmv" ? r.pmv : r.chips.has(l.key as ChipKey),
+    );
+    if (!shown.length) return nothing;
     return html`<div
       class="monitor"
       role="group"
       aria-label=${t(lang, "air_quality")}
     >
-      ${lamps.map((l) => this._lamp(l, lang))}
+      ${shown.map((l) => this._lamp(l, lang))}
     </div>`;
   }
 
@@ -486,9 +536,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   private _learn(a: Record<string, unknown>, lang?: string) {
     const conf = num(a["confidence"]);
+    const showBar = this._r.learning && conf != null;
     const shadow =
-      this._config.show_shadow &&
+      this._r.shadowPill &&
       (a["mpc_active"] || a["tpi_active"] || a["pi_active"]);
+    if (!showBar && !shadow) return nothing;
     const sp = num(a["pi_setpoint"]);
     const mp = num(a["mpc_setpoint"]);
     const would = a["tpi_active"]
@@ -499,11 +551,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           ? `MPC ${mp.toFixed(1)}°`
           : "";
     return html`<div class="learn">
-      ${conf != null
+      ${showBar
         ? html`<div class="bar">
-            <i style="width:${(conf * 100).toFixed(0)}%"></i>
+            <i style="width:${((conf ?? 0) * 100).toFixed(0)}%"></i>
           </div>
-          <span>${t(lang, "learning")} ${(conf * 100).toFixed(0)}%</span>`
+          <span>${t(lang, "learning")} ${((conf ?? 0) * 100).toFixed(0)}%</span>`
         : nothing}
       ${shadow
         ? html`<div class="pill">
@@ -578,6 +630,22 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .dialctr .op span { font-size: 16px; color: var(--secondary-text-color); }
     .dialctr .soll { font-size: 13px; color: var(--secondary-text-color); margin-top: 4px; }
     .empty { padding: 24px 16px; color: var(--secondary-text-color); }
+    .mould { stroke: var(--warning-color, #ff9800); stroke-width: 3; stroke-linecap: round; }
+    .mlbl { fill: var(--warning-color, #ff9800); font-size: 11px; font-weight: 600;
+      text-anchor: middle; dominant-baseline: middle; }
+    .dial.ro { cursor: default; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 2px; }
+    .preset { display: inline-flex; align-items: center; gap: 4px; padding: 5px 12px;
+      border: 1px solid var(--divider-color, #e0e0e0); border-radius: 16px;
+      background: var(--card-background-color, transparent);
+      color: var(--primary-text-color); font: inherit; font-size: 13px; cursor: pointer; }
+    .preset ha-icon { --mdc-icon-size: 16px; }
+    .preset.on { background: var(--primary-color, #2196f3);
+      color: var(--text-primary-color, #fff); border-color: var(--primary-color, #2196f3); }
+    .preset:focus-visible { outline: 2px solid var(--primary-color, #2196f3); outline-offset: 2px; }
+    .wrap.compact { padding: 6px 12px 12px; }
+    .wrap.compact .dialctr .op { font-size: 30px; }
+    .wrap.compact .presets, .wrap.compact .monitor, .wrap.compact .chips { gap: 4px; }
   `;
 }
 
