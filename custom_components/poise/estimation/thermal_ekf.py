@@ -332,8 +332,10 @@ class ThermalEKF:
         """Whether beta_c (cooling responsivity) is trustworthy (review B1).
 
         beta_c is only observable if the cooling input u_c is actually excited.
-        The live coordinator never feeds u_c, so this stays False and downstream
-        (MPC / optimal-stop / TPI) must not trust beta_c -- it stays at prior.
+        Since v0.133 the coordinator feeds u_c during the cooling season (ADR-0024,
+        cool_drive_signal), so this becomes True once n_uc reaches the active gate;
+        until then downstream (MPC / optimal-stop / TPI) must not trust beta_c --
+        it stays at prior.
         """
         return self.identified and self._n_uc >= _ACTIVE_GATE
 
