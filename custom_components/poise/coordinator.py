@@ -56,7 +56,6 @@ from .const import (
     CONF_COOL_MIN_OUTDOOR,
     CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
-    CONF_FAN_AIR_SPEED,
     CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
@@ -78,7 +77,6 @@ from .const import (
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_DYNAMICS,
-    DEFAULT_FAN_AIR_SPEED_MS,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
@@ -237,6 +235,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # Sensorless open-window detection (shadow, ADR-0041): slope-based,
         # decoupled prev-sample so it observes regardless of heating.
         self._window_auto = WindowAutoState()
+        self._was_cooling = False  # last tick cooled -> gate the window slope
         self._window_auto_cfg = WindowAutoConfig()
         self._wa_ref_room: float | None = None  # last distinct-move reference (V6)
         self._wa_ref_mono: float | None = None
@@ -311,9 +310,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
-        self._fan_air_speed = float(
-            data.get(CONF_FAN_AIR_SPEED, DEFAULT_FAN_AIR_SPEED_MS)
-        )
         self._cool_sp_eff_prev: float | None = None
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
@@ -493,9 +489,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
-        self._fan_air_speed = float(
-            data.get(CONF_FAN_AIR_SPEED, DEFAULT_FAN_AIR_SPEED_MS)
-        )
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -726,7 +719,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         finally:
             self._last_mono = now
 
-    def _observe_window_auto(self, room: float, t_out: float) -> None:
+    def _observe_window_auto(
+        self, room: float, t_out: float, *, cooling: bool = False
+    ) -> None:
         """Feed the sensorless slope detector (ADR-0041).
 
         Skipped when a window sensor exists (measured > estimated, ADR-0012).
@@ -758,8 +753,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         if self._wa_prev_mono is not None:
             dt_min = (now - self._wa_prev_mono) / 60.0
             if 0.0 < dt_min < 60.0:
+                # active cooling explains a drop -> neutralise the slope so it
+                # cannot false-open (and still closes an earlier detection).
                 self._window_auto = step_window_auto(
-                    self._window_auto, slope, dt_min, cfg
+                    self._window_auto, 0.0 if cooling else slope, dt_min, cfg
                 )
         self._wa_prev_mono = now
 
@@ -1028,7 +1025,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._last_mono = None
             self._prev_room = None
             self._prev_room_mono = None
-        self._observe_window_auto(room, t_out_eff)
+        self._observe_window_auto(room, t_out_eff, cooling=self._was_cooling)
 
         # mould floor + dewpoint cap from humidity
         mold_min = None
@@ -1116,6 +1113,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         else:
             room_decide = room
             t_mrt_decide = t_mrt
+        # Away = nobody here -> full unoccupied setback (the EN band lower relaxes
+        # to the frost floor), not just the ~1 K preset offset that the category
+        # clamp would otherwise cap it at (review).
+        _away = self._preset is OverrideMode.AWAY
+        _occupied = (sched.is_comfort or preheating) and not _away
         decision = comfort_decide(
             t_rm=t_rm_eff,
             room=room_decide,
@@ -1132,7 +1134,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             mold_min=mold_min,
             dewpoint=dewpoint,
             priority=self._priority,
-            occupied=sched.is_comfort or preheating,
+            occupied=_occupied,
             adaptive_cool=self._adaptive_cool,
             adaptive_cap=self._cool_hard_cap,
         )
@@ -1305,6 +1307,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
             _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
         heating = self._enabled and not window_open and mode == "heat"
+        self._was_cooling = mode == "cool"  # gate the window slope next tick
         # A1: the EKF heating-drive uses the actuator's *real* running state when
         # reported (TRVZB running_state -> hvac_action), else our heat intent.
         self._last_u_h = heat_drive_signal(

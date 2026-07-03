@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.128.0"
+VERSION: Final = "0.129.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -92,11 +92,6 @@ CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
 # at the ASR ceiling above) instead of the fixed summer band, so a warm
 # free-running room is not over-cooled toward 23 °C.
 CONF_ADAPTIVE_COOL: Final = "adaptive_cool"
-# Roadmap M3 (ASHRAE 55 elevated air speed): the air speed [m/s] a running fan
-# provides; credits a comfort-preserving cooling-effect setpoint raise ("cooling
-# without the compressor"). Shadow-first. 0.6 m/s ~ a typical ceiling/pedestal fan.
-CONF_FAN_AIR_SPEED: Final = "fan_air_speed_ms"
-DEFAULT_FAN_AIR_SPEED_MS: Final = 0.6
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30
