@@ -12,6 +12,9 @@ from enum import Enum
 
 T_RM_MIN: float = 10.0
 T_RM_MAX: float = 30.0
+# EN 16798-1: the lower operative-limit line is only defined for 15 <= T_rm; the
+# upper line extends down to 10. Below 15 the lower bound is extrapolated.
+T_RM_LOWER_MIN: float = 15.0
 
 
 class Category(Enum):
@@ -32,7 +35,8 @@ class ComfortBand:
     comfort: float  # neutral operative comfort temperature [°C]
     lower: float  # lower operative limit [°C]
     upper: float  # upper operative limit [°C]
-    extrapolated: bool  # True if T_rm was clamped to the [10, 30] validity range
+    extrapolated: bool  # T_rm outside [10, 30] -> comfort/upper line extrapolated
+    extrapolated_lower: bool  # T_rm < 15 -> lower operative limit extrapolated
 
 
 def comfort_temperature(t_rm: float) -> float:
@@ -49,6 +53,7 @@ def adaptive_band(t_rm: float, category: Category = Category.II) -> ComfortBand:
         lower=comfort - _LOWER[category],
         upper=comfort + _UPPER[category],
         extrapolated=clamped != t_rm,
+        extrapolated_lower=t_rm < T_RM_LOWER_MIN,
     )
 
 
@@ -68,12 +73,12 @@ HEATING_UPPER: dict[Category, float] = {
     Category.III: 25.0,
 }
 COOLING_LOWER: dict[Category, float] = {
-    Category.I: 23.0,
+    Category.I: 23.5,
     Category.II: 23.0,
     Category.III: 22.0,
 }
 COOLING_UPPER: dict[Category, float] = {
-    Category.I: 25.0,
+    Category.I: 25.5,
     Category.II: 26.0,
     Category.III: 27.0,
 }
