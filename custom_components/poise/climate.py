@@ -55,6 +55,8 @@ _ATTRS = (
     "heating_failure",
     "heat_sp",
     "cool_sp",
+    "mould_floor",
+    "dewpoint",
     "mode",
     "identified",
     "identification_progress",

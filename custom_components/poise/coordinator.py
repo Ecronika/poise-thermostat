@@ -2009,6 +2009,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "window_auto_slope": self._window_auto.ema_slope,
             "heating_failure": failed,
             "mold_capped": mold_capped,  # F15: mould floor clipped at 24 °C
+            # ADR-0057: publish the mould-protection floor + dewpoint so the card
+            # can draw the "Schimmel" tick on the dial (display only, no control).
+            "mould_floor": round(mold_min, 1) if mold_min is not None else None,
+            "dewpoint": round(dewpoint, 1) if dewpoint is not None else None,
             "source": reading.source.value,
             "tau_hours": round(self._ekf.tau_hours, 1),
             "confidence": round(self._ekf.confidence, 2),
