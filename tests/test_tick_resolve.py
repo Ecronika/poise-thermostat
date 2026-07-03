@@ -225,6 +225,21 @@ def test_heat_drive_falls_back_without_action() -> None:
     assert heat_drive_signal("", fallback_heating=False) == 0.0
 
 
+def test_cool_drive_uses_actuator_running_state() -> None:
+    from custom_components.poise.control.tick_resolve import cool_drive_signal
+
+    assert cool_drive_signal("cooling", fallback_cooling=False) == 1.0  # real cool
+    assert cool_drive_signal("idle", fallback_cooling=True) == 0.0  # unit idle wins
+    assert cool_drive_signal("heating", fallback_cooling=True) == 0.0  # not cooling
+
+
+def test_cool_drive_falls_back_without_action() -> None:
+    from custom_components.poise.control.tick_resolve import cool_drive_signal
+
+    assert cool_drive_signal(None, fallback_cooling=True) == 1.0
+    assert cool_drive_signal("", fallback_cooling=False) == 0.0
+
+
 def test_needs_mode_nudge_on_drift() -> None:
     from custom_components.poise.control.tick_resolve import needs_mode_nudge
 

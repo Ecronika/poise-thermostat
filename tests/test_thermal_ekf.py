@@ -174,8 +174,10 @@ def test_from_dict_non_finite_recovers() -> None:
 
 
 def test_beta_c_beta_o_not_identified_in_live_wiring() -> None:
-    # B1: the live wiring never feeds u_c / q_occ, so the cooling/occupancy gains
-    # are structurally unobservable and must report as not identified.
+    # B1: without u_c / q_occ excitation the cooling/occupancy gains are
+    # structurally unobservable and must report as not identified. (Since v0.133
+    # the live wiring DOES feed u_c during cooling, but this heating-only run
+    # still leaves beta_c unidentified — the property under test.)
     from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 
     ekf = ThermalEKF()
