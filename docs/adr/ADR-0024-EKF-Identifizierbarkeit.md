@@ -35,3 +35,12 @@ Parametrisierungen allgemeiner Filter-Verfahren; eigenständig nachimplementiert
 
 ## Verknüpfungen
 Vertieft ADR-0002 (EKF) und ADR-0009 (Gating/Konfidenz). Liefert das `identified`-Gate, das der MPC (ADR-0001) vor dem Scharfschalten der Ventilmodulation braucht.
+
+## Nachtrag (2026-07-03, v0.133.0): β_c-Anregung verdrahtet
+**Befund:** Der EKF konnte `u_c` seit jeher (Zustand `beta_c`, `predict(..., u_c=...)`, `n_cooling`-Zähler, `cooling_identified = identified ∧ n_uc ≥ 20`). Der **Coordinator fütterte `u_c` aber nie** — er übergab nur `u_h`. Folge: außerhalb jeder Kühl-Anregung blieb `n_cooling = 0`, `cooling_identified` **dauerhaft False**, und der Sommer-MPC hing am β_c-Prior statt am gelernten Kühl-Gewinn. Das Heiz-Analogon (`u_h` aus `hvac_action == "heating"`) war längst verdrahtet — die Kühlseite war schlicht die vergessene Hälfte.
+
+**Entscheidung:** Pures `cool_drive_signal(hvac_action, *, fallback_cooling) -> float` (Spiegel von `heat_drive_signal`): `1.0` bei `hvac_action == "cooling"`, sonst `0.0`; ohne gemeldete `hvac_action` fällt es auf die **Kühl-Absicht** zurück (`fallback_cooling = enabled ∧ ¬window_open ∧ mode == "cool"`). Der Coordinator hält `self._last_u_c` und übergibt es an `predict(..., u_c=self._last_u_c)`.
+
+**Warum Intent-Fallback vertretbar:** Die Büro-AC meldet real **keine** `hvac_action` und **0 W** (ADR-0056-Kontext). Ohne Fallback bliebe die Kühl-ID auch im Sommer tot. Der v0.117.0-`idle_park`-Fix macht `mode == "cool"` ⇔ AC kühlt wirklich (im Totband idlet sie an der Kühlkante statt in `heat`), sodass die Absicht ein belastbarer u_c-Proxy ist. Meldet die AC später doch `hvac_action`, hat der reale Wert Vorrang.
+
+**Grenze:** Verbessert nur die **Beobachtbarkeit** (Anregung), nicht die Gates. `cooling_identified` verlangt weiterhin `n_uc ≥ _ACTIVE_GATE (20)` **echte** Kühl-Ticks + `identified` — es kippt also erst nach hinreichender Sommer-Anregung, nicht sofort. Reine Schätz-Diagnose, kein Write. Feldverifikation der Kühl-Identifikation über das Sommerfenster steht aus.
