@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.126.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.128.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -19,7 +19,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 
 ### ✅ Active (drives control / visible today)
 
-- **Norm-based comfort** — active heating/cooling holds the configured comfort base within fixed EN 16798-1 design bands (Cat. I–III), the norm-correct choice for a conditioned room. A real running-mean `T_rm` drives the diagnostics, the seasonless heat-rate prior and optimal-start/stop timing (adaptive free-running bands are computed but are not the live setpoint).
+- **Norm-based comfort** — active heating/cooling holds the configured comfort base within fixed EN 16798-1 design bands (Cat. I–III), the norm-correct choice for a conditioned room. A real running-mean `T_rm` drives the diagnostics, the seasonless heat-rate prior and optimal-start/stop timing. In the cooling season the **adaptive cooling edge runs live (opt-in)** — the cool setpoint is lifted to the EN adaptive upper for the running mean (ASR-capped) so a warm room is not over-cooled toward the fixed band; the free-running *heating* widening stays a shadow diagnostic.
 - **Operative temperature / MRT** — controls what the room *feels* like (air + mean radiant), via a virtual-MRT estimator that a real MRT/globe sensor overrides when present.
 - **Self-learning physics** — mode-gated Extended Kalman Filter learns each room's time constant, losses and solar/heating response; confidence and identification are real sensor entities.
 - **Optimal Start & Optimal Stop** — forecast-aware pre-heating to the comfort deadline and coast-down to the lower comfort edge at window end; advisory (re-entry-free) and gated on an *identified* model.
@@ -27,6 +27,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Solar accounting** — measured global irradiance as a learned disturbance feeding the MRT/comfort path — counted once.
 - **Precedence constraint solver** — every bound (frost/mould/ASR cap/device max) is composed with explicit precedence into exactly one safe command per actuator.
 - **Cooling decision & modes** — capability-aware dual setpoints; `COOL` is surfaced as an HVAC mode **only when the actuator supports cooling** (heat-only TRVs stay HEAT/OFF).
+- **Humidity (dry) & hot-day cooling** — capability-gated and live: a `dry`-capable AC lowers humidity through the dead-band (cool-first, dew-point-guarded, 60 / 55 % hysteresis), and on hot days the cooling edge is raised toward the EN / ASR ceiling (rate-limited ≤ 0.5 K/tick); heat-only TRVs are unaffected (ADR-0050/0051).
 - **Open-window reaction (sensor *or* sensorless)** — a configured window sensor or the **slope detector** (open threshold adapted to the learned time constant τ) drops the room to the frost/mould floor through the solver and pauses learning; a per-zone **bypass switch** overrides it. The sensor wins when present.
 - **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks.
 - **Bundled Lovelace cards** — Poise ships its own cards inside the integration and **auto-registers** them (no separate HACS plugin, no manual resource URL). `poise-card` puts the **EN 16798 comfort band** front and centre — operative temperature & setpoint as markers in the live band, a 24 h history graph, clickable status chips, learning confidence and a **shadow pill that shows what the engine *would* do** (TPI %/PI/MPC). `poise-system-card` surfaces the multi-zone hub (boiler demand, heating zones, flow target, load shedding). Self-contained Lit/TS, only `lit` bundled (ADR-0040).
@@ -38,6 +39,9 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Direct-valve TPI** — for a device with a writable valve-open entity (e.g. Sonoff TRVZB `valve_opening_degree`), the TPI valve duty is computed live and exposed as `tpi_*` diagnostics. The valve is **not written** yet — closed-loop validated in the harness, live actuation gated on cold-season validation (ADR-0036).
 - **PI-compensated setpoint** — for a setpoint-only TRV (no writable valve), the PI-compensated setpoint that would cancel the device's steady-state droop is computed and exposed as `pi_*` diagnostics (not written); harness-validated (ADR-0037). Every device thus gets exactly one matching shadow: valve → TPI, otherwise → PI.
 - **Multi-zone boiler demand** — an optional *Poise System* hub aggregates the call-for-heat across opt-in zones into one frost-safe, device-granular boiler-demand `binary_sensor`. Diagnostic by default (wire your own automation off it); **opt-in actuation** switches a configured boiler service with activation delay, keep-alive and min on/off cycling — the write path stays off unless you set the actions (ADR-0038/0039).
+- **Comfort index (PMV/PPD)** — ISO 7730 predicted-mean-vote and %-dissatisfied from air / MRT / humidity with seasonal clo / met, exposed as `pmv` / `ppd` / category — humidity (and, staged, air velocity) finally enter the comfort *evaluation*; the norm band stays the control variable (ADR-0054).
+- **Regulation-quality metric (EN 15500-1 CA)** — continuous, bilateral control accuracy: mean Kelvin outside the comfort band, time-in-band and a regime-change ("hunting") rate, time-weighted and persisted (`ca_*`). This is the measurable acceptance gate that will authorise each shadow→live flip — today it only measures (ADR-0055).
+- **Fan cooling-effect** — the ASHRAE-55 elevated-air-speed credit a running fan would allow on the cooling setpoint (`fan_ce_k`), diagnostic only (ADR-0054 stage 3 / roadmap M3).
 
 ### 🗺️ Roadmap (built or designed, not in the active path)
 
@@ -98,6 +102,9 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Weather / irradiance | no | — | Forecast for optimal-start; measured solar gain. |
 | External-temperature input | no | — | TRV number entity Poise feeds the true room temperature to (operative mode). |
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
+| Adaptive cooling edge | no | off | Lift the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band (ADR-0023 §1). |
+| Outdoor cooling / heating lockout | no | 16 / 22 °C | Suppress cooling below / heating above these outdoor temperatures (ADR-0047). |
+| Annual consumption · tariff | no | — | Baseline for the heating-degree-hour → kWh / € savings estimate. |
 | Controls boiler | no | off | This zone contributes to the *Poise System* boiler-demand aggregate. |
 | Compressor group · declared power · design flow temp · source policy | no | — | Multi-zone resource-coordination hints (shadow stage). |
 
@@ -107,7 +114,7 @@ A single *Poise System* entry aggregates the call-for-heat of opt-in zones into 
 
 ## Entities created
 
-**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), plus diagnostic `sensor` entities for operative temperature, `T_rm`, MRT, solar gain, β_s, time constant τ, confidence, identification progress, learning phase, and the shadow `mpc_*` (and per-device `tpi_*` / `pi_*`) values; and a per-zone **`switch`** that toggles the open-window bypass.
+**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), plus diagnostic `sensor` entities for operative temperature, `T_rm`, MRT, solar gain, β_s, time constant τ, confidence, identification progress, learning phase, the comfort index (`pmv` / `ppd`), the EN 15500-1 control-accuracy metric (`ca_*`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `fr_*`, `fan_ce_k`), and the shadow `mpc_*` (and per-device `tpi_*` / `pi_*`) values; and a per-zone **`switch`** that toggles the open-window bypass.
 
 **System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow target and load-shedding attributes).
 
