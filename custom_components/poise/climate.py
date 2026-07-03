@@ -122,6 +122,7 @@ _ATTRS = (
     "ca_time_in_band",
     "ca_cycles_per_h",
     "ca_minutes",
+    "override_clamped",
 )
 
 

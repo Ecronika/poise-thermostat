@@ -1176,6 +1176,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 cool_sp=eff_cool,
                 can_heat=can_heat,
                 can_cool=can_cool,
+                can_fan_only=(
+                    act_state is not None
+                    and "fan_only" in (act_state.attributes.get("hvac_modes") or [])
+                ),
                 current_mode=act_state.state if act_state else None,
             )
         else:
@@ -1193,6 +1197,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
+        # V10: surface a silently band-clamped manual override (moot when frozen,
+        # where the frost floor below replaces the override target entirely).
+        override_clamped = wt.override_clamped and not frozen
         if frozen:
             # C3/Ü3 + review V1: the room sensor is stale -> do not chase a comfort
             # target on a dead value. A heat-capable device degrades to the health
@@ -1819,6 +1826,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
             "override_active": self._override is not None,
+            "override_clamped": override_clamped,
             "cover_predicted_peak": round(_cover_peak, 1),
             "cover_would_shade": _cover_pos > 0,
             "cover_shade_position": _cover_pos,

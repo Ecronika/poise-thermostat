@@ -180,6 +180,7 @@ class ZoneRequest:
     source_pref: str | None = None  # energy-aware source policy (Deliverable 4)
     compressor_group: str | None = None
     health_active: bool = False  # mould/health floor binding (excluded from shed)
+    frozen: bool = False  # room sensor stale — call-for-heat not trusted (V9)
 
 
 @dataclass(frozen=True, slots=True)
