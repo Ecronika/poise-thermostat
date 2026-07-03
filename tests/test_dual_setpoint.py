@@ -167,7 +167,7 @@ def test_unoccupied_setback_still_mould_protected() -> None:
 def test_adaptive_cool_lifts_summer_cooling_edge() -> None:
     """Büro-Technik over-cooling fix: warm running mean + cool-capable device.
     Without the adaptive edge the cool setpoint sits at the fixed Cat-I summer
-    floor (23) and a mild-warm room is cooled; with it the edge lifts toward the
+    floor (23.5) and a mild-warm room is cooled; with it the edge lifts toward the
     EN adaptive upper (capped at ASR 26), so the room is within comfort -> idle."""
     fixed = decide(
         t_rm=21.0,
@@ -189,6 +189,6 @@ def test_adaptive_cool_lifts_summer_cooling_edge() -> None:
         adaptive_cool=True,
     )
     assert fixed.mode == "cool"  # fixed band over-cools the mild-warm room
-    assert fixed.cool_sp == 23.0
+    assert fixed.cool_sp == 23.5
     assert adaptive.cool_sp == 26.0  # lifted to the ASR-capped adaptive upper
     assert adaptive.mode == "idle"  # room is inside the adaptive band -> no cooling
