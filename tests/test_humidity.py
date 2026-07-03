@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from custom_components.poise.comfort.humidity import humidity_decide
+from custom_components.poise.comfort.en16798 import Category
+from custom_components.poise.comfort.humidity import (
+    humidity_decide,
+    rh_high_for_category,
+)
 
 
 def test_no_sensor_graceful() -> None:
@@ -70,3 +74,82 @@ def test_within_band_idle() -> None:
     d = humidity_decide(rh=50.0, too_warm=False, in_deadband=True, can_dry=True)
     assert d.action == "idle"
     assert d.dry_active is False
+
+
+def test_category_one_lowers_ceiling_to_50() -> None:
+    d = humidity_decide(
+        rh=52.0, too_warm=False, in_deadband=True, can_dry=True, category=Category.I
+    )
+    assert d.action == "dry"
+    assert d.dry_active is True
+
+
+def test_category_two_keeps_60_default() -> None:
+    d = humidity_decide(
+        rh=52.0, too_warm=False, in_deadband=True, can_dry=True, category=Category.II
+    )
+    assert d.action == "idle"
+
+
+def test_category_three_raises_ceiling_to_70() -> None:
+    d = humidity_decide(
+        rh=65.0, too_warm=False, in_deadband=True, can_dry=True, category=Category.III
+    )
+    assert d.action == "idle"
+
+
+def test_rh_high_for_category_mapping() -> None:
+    assert rh_high_for_category(Category.I) == 50.0
+    assert rh_high_for_category(Category.II) == 60.0
+    assert rh_high_for_category(Category.III) == 70.0
+    assert rh_high_for_category(None) == 60.0  # Cat II fallback
+
+
+def test_absolute_cap_triggers_when_rh_acceptable() -> None:
+    # RH 55 < Cat II 60, but 12.5 g/kg exceeds the 12 g/kg absolute ceiling.
+    d = humidity_decide(
+        rh=55.0, too_warm=False, in_deadband=True, can_dry=True, abs_humidity_gkg=12.5
+    )
+    assert d.action == "dry"
+    assert "g/kg" in d.reason
+
+
+def test_absolute_cap_hysteresis_holds() -> None:
+    # latched, RH below its exit (55) but w still >= abs exit (11) -> keep drying
+    d = humidity_decide(
+        rh=50.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        prev_dry_active=True,
+        abs_humidity_gkg=11.5,
+    )
+    assert d.action == "dry"
+
+
+def test_absolute_cap_hysteresis_exits() -> None:
+    d = humidity_decide(
+        rh=50.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        prev_dry_active=True,
+        abs_humidity_gkg=10.5,
+    )
+    assert d.action == "idle"
+    assert d.dry_active is False
+
+
+def test_absolute_cap_never_overrides_dry_guard() -> None:
+    # RH below the dry-guard floor wins even if absolute moisture is high.
+    d = humidity_decide(
+        rh=35.0, too_warm=False, in_deadband=True, can_dry=True, abs_humidity_gkg=13.0
+    )
+    assert d.action == "dry_guard"
+
+
+def test_too_warm_precedes_absolute_cap() -> None:
+    d = humidity_decide(
+        rh=55.0, too_warm=True, in_deadband=False, can_dry=True, abs_humidity_gkg=13.0
+    )
+    assert d.action == "cool"
