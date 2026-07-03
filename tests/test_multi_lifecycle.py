@@ -3,11 +3,14 @@ from __future__ import annotations
 from custom_components.poise.multi.lifecycle import (
     DeviceLifecycle,
     LifecyclePolicy,
+    compressor_conditioning,
+    compressor_running,
     from_dict,
     is_external_override,
     min_off_remaining,
     min_on_remaining,
     mode_hold_remaining,
+    mode_nudge_block_reason,
     observe,
     policy_for,
     starts_in_last_hour,
@@ -180,3 +183,106 @@ def test_policy_for_reads_device_limits() -> None:
     assert pol.min_off_s == 888.0
     assert pol.min_mode_hold_s == 77.0
     assert pol.max_starts_per_h == 4
+
+
+# --- compressor protection gate (ADR-0046 §8, single-AC dry nudge) ----------
+
+
+def test_compressor_conditioning_only_cool_and_dry() -> None:
+    assert compressor_conditioning("cool") is True
+    assert compressor_conditioning("dry") is True
+    assert compressor_conditioning("heat") is False
+    assert compressor_conditioning("fan_only") is False
+    assert compressor_conditioning("off") is False
+    assert compressor_conditioning(None) is False
+
+
+def test_compressor_running_prefers_action_else_intent() -> None:
+    assert compressor_running("cooling", "idle") is True
+    assert compressor_running("drying", None) is True
+    # a device that reports its action wins over intent
+    assert compressor_running("idle", "cool") is False
+    # a silent AC (no hvac_action) falls back to Poise's intended mode
+    assert compressor_running(None, "cool") is True
+    assert compressor_running(None, "dry") is True
+    assert compressor_running(None, "idle") is False
+    assert compressor_running(None, None) is False
+
+
+def test_gate_blocks_compressor_start_within_min_off() -> None:
+    r = mode_nudge_block_reason(
+        desired="cool",
+        current="off",
+        min_off_remaining_s=120.0,
+        mode_hold_remaining_s=0.0,
+        is_safety=False,
+    )
+    assert r is not None and "min-off" in r
+
+
+def test_gate_allows_start_when_min_off_elapsed() -> None:
+    r = mode_nudge_block_reason(
+        desired="dry",
+        current="idle",
+        min_off_remaining_s=0.0,
+        mode_hold_remaining_s=0.0,
+        is_safety=False,
+    )
+    assert r is None
+
+
+def test_gate_blocks_cool_dry_flip_within_mode_hold() -> None:
+    r = mode_nudge_block_reason(
+        desired="dry",
+        current="cool",
+        min_off_remaining_s=0.0,
+        mode_hold_remaining_s=200.0,
+        is_safety=False,
+    )
+    assert r is not None and "mode-hold" in r
+
+
+def test_gate_no_block_on_same_mode() -> None:
+    r = mode_nudge_block_reason(
+        desired="cool",
+        current="cool",
+        min_off_remaining_s=999.0,
+        mode_hold_remaining_s=999.0,
+        is_safety=False,
+    )
+    assert r is None
+
+
+def test_gate_never_blocks_a_stop() -> None:
+    # leaving cool -> idle must never be suppressed, even deep in a lock
+    r = mode_nudge_block_reason(
+        desired="idle",
+        current="cool",
+        min_off_remaining_s=999.0,
+        mode_hold_remaining_s=999.0,
+        is_safety=False,
+    )
+    assert r is None
+
+
+def test_gate_safety_is_exempt() -> None:
+    r = mode_nudge_block_reason(
+        desired="cool",
+        current="off",
+        min_off_remaining_s=999.0,
+        mode_hold_remaining_s=999.0,
+        is_safety=True,
+    )
+    assert r is None
+
+
+def test_gate_heat_start_is_not_a_cool_compressor_start() -> None:
+    # entering heat is not a cool/dry start -> the cool-compressor gate is silent
+    r = mode_nudge_block_reason(
+        desired="heat",
+        current="off",
+        min_off_remaining_s=999.0,
+        mode_hold_remaining_s=999.0,
+        is_safety=False,
+    )
+    assert r is None
