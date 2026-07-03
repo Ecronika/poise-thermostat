@@ -119,7 +119,9 @@ def resolve_write_target(
         else None
     )
     precedence = res.binding.precedence.name.lower() if res.binding else None
-    return WriteTarget(round(res.value, 1), mode, norm_binding, precedence)
+    return WriteTarget(
+        round(res.value, 1), mode, norm_binding, precedence, override_clamped
+    )
 
 
 def should_write(
