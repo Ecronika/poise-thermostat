@@ -403,12 +403,14 @@ def test_idle_park_fan_only_circulation() -> None:
         can_fan_only=True,
     ) == ("fan_only", 25.7)
     # WITHOUT a fan_only mode the legacy park is byte-identical (regression guard)
-    assert p(
-        room=25.3, heat_sp=16.0, cool_sp=25.7, can_heat=True, can_cool=True
-    ) == ("cool", 25.7)
-    assert p(
-        room=18.0, heat_sp=16.0, cool_sp=25.7, can_heat=False, can_cool=True
-    ) == ("cool", 25.7)
+    assert p(room=25.3, heat_sp=16.0, cool_sp=25.7, can_heat=True, can_cool=True) == (
+        "cool",
+        25.7,
+    )
+    assert p(room=18.0, heat_sp=16.0, cool_sp=25.7, can_heat=False, can_cool=True) == (
+        "cool",
+        25.7,
+    )
 
 
 def test_idle_park() -> None:
