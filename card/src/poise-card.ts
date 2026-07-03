@@ -393,6 +393,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (preset !== "none")
       chips.push(this._chip(presetIcon(preset), t(lang, preset) || preset));
     if (a["heating_failure"]) chips.push(this._chip("mdi:alert", t(lang, "failure")));
+    if (a["override_clamped"])
+      chips.push(
+        this._chip("mdi:arrow-collapse-vertical", t(lang, "override_clamped")),
+      );
     const cause = a["binding_lower_cause"];
     if (cause && cause !== "en16798")
       chips.push(this._chip("mdi:shield-alert", String(cause)));
@@ -433,6 +437,13 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         comfortVerdict: band?.verdict ?? null,
         humidity: num(a["humidity"]) ?? num(a["current_humidity"]),
         co2: num(a["co2"]) ?? num(a["carbon_dioxide"]),
+        pmv: num(a["pmv"]),
+        ppd: num(a["ppd"]),
+        ca: {
+          deviationK: num(a["ca_deviation_k"]),
+          timeInBand: num(a["ca_time_in_band"]),
+          cyclesPerH: num(a["ca_cycles_per_h"]),
+        },
       },
       {
         temperature_scale: this._config.temperature_scale,

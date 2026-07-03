@@ -124,12 +124,76 @@ export function tempVerdictAsrOffice(
   return "ok";
 }
 
+// --- Comfort quality: PMV / PPD (ISO 7730, ADR-0054) ---
+// PPD (predicted % dissatisfied) is the intuitive single number; ISO 7730
+// category targets are Cat I <=6, Cat II <=10, Cat III <=15 %. Green within the
+// Cat II target, warn up to Cat III, alert beyond. Falls back to PMV via the PPD
+// relation when PPD is absent. Silent on missing input (ADR-0049 §6).
+export const DEFAULT_PPD_THRESHOLDS: readonly [number, number] = [10, 15];
+
+export function ppdFromPmv(pmv: number): number {
+  return 100 - 95 * Math.exp(-(0.03353 * pmv ** 4 + 0.2179 * pmv ** 2));
+}
+
+export function pmvVerdict(
+  pmv: number | null,
+  ppd: number | null,
+  thresholds?: readonly number[],
+): Level {
+  const [warn, alert] = pairOr(thresholds, DEFAULT_PPD_THRESHOLDS);
+  const p = isNum(ppd) ? ppd : isNum(pmv) ? ppdFromPmv(pmv) : null;
+  if (p == null) return "unknown";
+  if (p >= alert) return "alert";
+  if (p >= warn) return "warn";
+  return "ok";
+}
+
+// --- Regulation quality: control accuracy (EN 15500-1, ADR-0055) ---
+// Combines band deviation [K], time-in-band (fraction 0..1 or %) and the
+// short-cycle rate [cycles/h]; the worst single metric sets the level.
+export interface CaInput {
+  deviationK: number | null;
+  timeInBand: number | null;
+  cyclesPerH: number | null;
+}
+export const DEFAULT_CA_DEVIATION: readonly [number, number] = [0.5, 1.0]; // K
+export const DEFAULT_CA_CYCLES: readonly [number, number] = [3, 6]; // per hour
+export const DEFAULT_CA_TIME_IN_BAND: readonly [number, number] = [85, 60]; // %
+
+export function timeInBandPct(v: number): number {
+  return v <= 1 ? v * 100 : v;
+}
+
+const _RANK: Record<Level, number> = { unknown: -1, ok: 0, warn: 1, alert: 2 };
+
+export function caVerdict(input: CaInput): Level {
+  const levels: Level[] = [];
+  if (isNum(input.deviationK)) {
+    const [w, a] = DEFAULT_CA_DEVIATION;
+    levels.push(input.deviationK >= a ? "alert" : input.deviationK >= w ? "warn" : "ok");
+  }
+  if (isNum(input.cyclesPerH)) {
+    const [w, a] = DEFAULT_CA_CYCLES;
+    levels.push(input.cyclesPerH >= a ? "alert" : input.cyclesPerH >= w ? "warn" : "ok");
+  }
+  if (isNum(input.timeInBand)) {
+    const p = timeInBandPct(input.timeInBand);
+    const [w, a] = DEFAULT_CA_TIME_IN_BAND;
+    levels.push(p < a ? "alert" : p < w ? "warn" : "ok");
+  }
+  if (!levels.length) return "unknown";
+  return levels.reduce((x, y) => (_RANK[y] > _RANK[x] ? y : x), "ok" as Level);
+}
+
 // --- Assemble the lamps for the card (capability-gated by presence) ---
 export interface MonitorInput {
   temperature: number | null;
   comfortVerdict?: Verdict | null;
   humidity: number | null;
   co2: number | null;
+  pmv?: number | null;
+  ppd?: number | null;
+  ca?: CaInput | null;
 }
 
 export interface MonitorConfig {
@@ -142,7 +206,7 @@ export interface MonitorConfig {
 }
 
 export interface Lamp {
-  key: "temperature" | "humidity" | "co2";
+  key: "temperature" | "humidity" | "co2" | "pmv" | "ca";
   value: number | null;
   unit: string;
   level: Level;
@@ -184,6 +248,27 @@ export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[
       unit: "ppm",
       level: c,
       color: levelColor(c),
+    });
+  }
+  if (isNum(input.pmv) || isNum(input.ppd)) {
+    const p = pmvVerdict(input.pmv ?? null, input.ppd ?? null);
+    lamps.push({
+      key: "pmv",
+      value: isNum(input.ppd) ? input.ppd : null,
+      unit: "%",
+      level: p,
+      color: levelColor(p),
+    });
+  }
+  const ca = input.ca;
+  if (ca && (isNum(ca.deviationK) || isNum(ca.timeInBand) || isNum(ca.cyclesPerH))) {
+    const q = caVerdict(ca);
+    lamps.push({
+      key: "ca",
+      value: isNum(ca.timeInBand) ? timeInBandPct(ca.timeInBand) : null,
+      unit: "%",
+      level: q,
+      color: levelColor(q),
     });
   }
   return lamps;
