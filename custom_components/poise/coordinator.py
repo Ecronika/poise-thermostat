@@ -132,6 +132,7 @@ from .control.reference_offset import (
 from .control.regulation_quality import RegulationQuality
 from .control.scoring_expectation import model_expected_minutes
 from .control.tick_resolve import (
+    cool_drive_signal,
     frost_rescue_target,
     heat_drive_signal,
     idle_park,
@@ -259,6 +260,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._failure = HeatingFailureDetector()
         self._last_mono: float | None = None
         self._last_u_h: float = 0.0
+        self._last_u_c: float = 0.0
         self._last_q_solar: float = 0.0
         self._save_counter = 0
         self._failure_notified = False
@@ -720,6 +722,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                         dt_h,
                         t_out=t_out,
                         u_h=self._last_u_h,
+                        u_c=self._last_u_c,
                         q_solar=self._last_q_solar,
                     )
                     self._ekf.update(room)
@@ -1326,12 +1329,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
             _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
         heating = self._enabled and not window_open and mode == "heat"
+        cooling = self._enabled and not window_open and mode == "cool"
         self._was_cooling = mode == "cool"  # gate the window slope next tick
         # A1: the EKF heating-drive uses the actuator's *real* running state when
         # reported (TRVZB running_state -> hvac_action), else our heat intent.
         self._last_u_h = heat_drive_signal(
             act_state.attributes.get("hvac_action") if act_state else None,
             fallback_heating=heating,
+        )
+        # β_c excitation (ADR-0024): the cooling counterpart, so cooling_identified
+        # can leave False during the cooling season. Real hvac_action when reported
+        # (AC "cooling"), else Poise's cool intent.
+        self._last_u_c = cool_drive_signal(
+            act_state.attributes.get("hvac_action") if act_state else None,
+            fallback_cooling=cooling,
         )
         self._last_q_solar = q_solar
         self._last_target = target
