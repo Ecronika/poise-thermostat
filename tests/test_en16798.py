@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 
 from custom_components.poise.comfort.en16798 import (
+    COOLING_LOWER,
+    COOLING_UPPER,
     Category,
     adaptive_band,
     comfort_temperature,
@@ -38,3 +40,25 @@ def test_below_validity_is_clamped_and_flagged() -> None:
 def test_bands_are_asymmetric() -> None:
     band = adaptive_band(18.0, Category.II)
     assert (band.upper - band.comfort) < (band.comfort - band.lower)
+
+
+def test_lower_limit_extrapolated_below_15() -> None:
+    # EN 16798-1: the lower operative limit line is only defined for T_rm >= 15.
+    assert not adaptive_band(15.0, Category.II).extrapolated_lower  # boundary
+    b14 = adaptive_band(14.0, Category.II)
+    assert b14.extrapolated_lower and not b14.extrapolated  # 14 still in [10, 30]
+    assert not adaptive_band(20.0, Category.II).extrapolated_lower
+
+
+def test_deep_cold_flags_both_limits() -> None:
+    b = adaptive_band(5.0, Category.II)
+    assert b.extrapolated and b.extrapolated_lower
+
+
+def test_cooling_band_category_i_matches_norm() -> None:
+    # EN 16798-1 mechanically-cooled design range: Cat I 23.5-25.5.
+    assert COOLING_LOWER[Category.I] == 23.5
+    assert COOLING_UPPER[Category.I] == 25.5
+    # Cat II / III were already norm-correct -- guard against regressions.
+    assert (COOLING_LOWER[Category.II], COOLING_UPPER[Category.II]) == (23.0, 26.0)
+    assert (COOLING_LOWER[Category.III], COOLING_UPPER[Category.III]) == (22.0, 27.0)

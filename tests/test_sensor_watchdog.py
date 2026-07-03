@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from custom_components.poise.safety.sensor_watchdog import is_frozen
+from custom_components.poise.safety.sensor_watchdog import (
+    is_frozen,
+    unavailable_safe_engaged,
+)
 
 
 def test_fresh_change_is_not_frozen() -> None:
@@ -14,6 +17,14 @@ def test_old_change_is_frozen() -> None:
 
 def test_unknown_age_is_not_frozen() -> None:
     assert is_frozen(None, 1800.0) is False
+
+
+def test_unavailable_safe_engaged() -> None:
+    assert unavailable_safe_engaged(None, 600.0) is False  # not currently lost
+    assert unavailable_safe_engaged(120.0, 600.0) is False  # brief drop-out tolerated
+    assert unavailable_safe_engaged(600.0, 600.0) is True  # sustained -> safe state
+    assert unavailable_safe_engaged(1200.0, 600.0) is True
+    assert unavailable_safe_engaged(1200.0, 0.0) is False  # threshold 0 disables
 
 
 def test_nonpositive_threshold_disables() -> None:
