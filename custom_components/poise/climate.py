@@ -114,6 +114,7 @@ _ATTRS = (
     "fan_circ_reason",
     "fan_ce_k",
     "fan_cool_sp_shadow",
+    "fan_velocity_ms",
     "pmv",
     "ppd",
     "pmv_category",

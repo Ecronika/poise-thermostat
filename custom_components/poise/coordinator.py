@@ -27,7 +27,7 @@ from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
 from .comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
-from .comfort.fan_cooling import fan_cool_setpoint
+from .comfort.fan_cooling import fan_cool_setpoint, fan_velocity
 from .comfort.free_running import free_running_widen
 from .comfort.humidity import humidity_decide
 from .comfort.mode_seam import mode_arbitration
@@ -292,6 +292,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # ADR-0044 outcome scoring + ADR-0045 efficiency report (diagnostic only)
         self._outcome_stats = OutcomeStats()
         self._regq = RegulationQuality()  # ADR-0055 M1 control-quality (shadow)
+        self._ca_last_mono: float | None = None  # real dt for the CA metric
         self._outcome_session = OutcomeSession()
         self._hdh = HdhSavings()
         self._hdh_cfg = HdhConfig(
@@ -1253,19 +1254,29 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # (at the configured air speed) would let the cooling setpoint rise to —
             # comfort-preserving and ASR/EN-capped. Fan-capable device = the preview
             # basis; no writes yet (activation is a follow-up after validation).
+            # Estimate the occupied-zone air speed from the actuator's real fan
+            # state (still air unless the indoor fan is actually moving air),
+            # instead of the fan-capability proxy — feeds the fan-CE + PMV SHADOW
+            # only; the write path (operative.py / decide) keeps the 0.1 baseline.
+            _fan_mode = act_state.attributes.get("fan_mode") if act_state else None
+            _hvac_act = act_state.attributes.get("hvac_action") if act_state else None
+            _fan_v = fan_velocity(
+                fan_mode=_fan_mode, hvac_action=_hvac_act, can_recirculate=_can_recirc
+            )
             _fan_cool_sp, _fan_ce = fan_cool_setpoint(
                 cool_sp=eff_cool,
-                air_speed=self._fan_air_speed,
+                air_speed=_fan_v,
                 fan_running=_can_recirc,
                 upper_cap=self._cool_hard_cap,
             )
-            # ADR-0054 stage 1 SHADOW: ISO 7730 PMV/PPD — humidity + (still-air)
+            # ADR-0054 SHADOW: ISO 7730 PMV/PPD — humidity and the (estimated) fan
             # velocity finally enter the comfort evaluation; diagnostic only, no
             # writes (the norm temperature band stays the control variable).
             _pmv = pmv_ppd(
                 t_air=room,
                 t_mrt=t_mrt if t_mrt is not None else room,
                 rh=rh if rh is not None else 50.0,
+                velocity=_fan_v,
                 clo=seasonal_clo(t_rm_eff),
             )
             climate_diag = {
@@ -1285,6 +1296,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "fan_circ_shadow": _fan.action,
                 "fan_ce_k": _fan_ce,
                 "fan_cool_sp_shadow": _fan_cool_sp,
+                "fan_velocity_ms": round(_fan_v, 2),
                 "fan_circ_reason": _fan.reason,
                 "pmv": _pmv.pmv,
                 "ppd": _pmv.ppd,
@@ -1726,15 +1738,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             if (
                 self._enabled
                 and not window_open
+                and not frozen
                 and self._override is None
                 and sched.is_comfort
             ):
+                # review finding 2: real elapsed (event-driven refreshes book
+                # < 60 s, not a flat tick), capped so a masked gap adds ~2 ticks.
+                if self._ca_last_mono is not None:
+                    _dt = (now - self._ca_last_mono) / 60.0
+                    _ca_dt = min(max(_dt, 0.0), 2.0 * _tick_min)
+                else:
+                    _ca_dt = _tick_min
+                self._ca_last_mono = now
                 self._regq = self._regq.observe(
                     room=room_decide,
                     heat_sp=decision.heat_sp,
                     cool_sp=eff_cool,
                     mode=mode,
-                    dt_min=_tick_min,
+                    dt_min=_ca_dt,
                 )
             _rep = self._hdh.report(self._hdh_cfg)
             outcome_diag = {
