@@ -193,6 +193,10 @@
       "title": "Poise: room sensor frozen",
       "description": "The room temperature sensor `{entity}` has not changed for a long time and may be stuck (dead battery, stalled integration). Poise paused learning for this room; control continues on the last value. The issue clears once the sensor updates again."
     },
+    "mould_protection_inactive": {
+      "title": "Poise: mould protection inactive",
+      "description": "The configured humidity sensor `{entity}` is unavailable, so Poise cannot compute the mould-avoidance minimum temperature for this room. Frost protection still applies, but mould protection is off until the sensor returns. Check the humidity sensor; this issue clears automatically."
+    },
     "device_schedule": {
       "title": "Poise: thermostat's own schedule is active",
       "description": "The controlled thermostat `{entity}` has its built-in weekly schedule switched on. It will fight Poise's control. Turn the device schedule off; Poise then owns the setpoint."

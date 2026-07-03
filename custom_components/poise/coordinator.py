@@ -90,6 +90,7 @@ from .const import (
     MIN_PLAUSIBLE_TAU_H,
     SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
+    UNAVAILABLE_SAFE_AFTER_S,
     WRITE_DEADBAND_C,
 )
 from .contracts import ActuatorCommand, ActuatorPath
@@ -186,6 +187,7 @@ from .safety.sensor_watchdog import (
     sensor_age_seconds,
     sensor_at_heat_source,
     should_learn,
+    unavailable_safe_engaged,
     valve_stuck,
 )
 from .storage import PoiseStore
@@ -263,6 +265,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._last_u_h: float = 0.0
         self._last_u_c: float = 0.0
         self._last_q_solar: float = 0.0
+        self._unavailable_since: float | None = None  # review #7: sustained loss
         self._save_counter = 0
         self._failure_notified = False
         # Silver log-when-unavailable: log the loss/recovery of the room sensor
@@ -929,6 +932,56 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         return frozen, sched_active, fault_active, heat_source_suspect
 
+    async def _write_unavailable_safe_state(self) -> None:
+        """Command the frost/mould floor after a sustained room-sensor loss.
+
+        A heat-capable actuator degrades to the health floor in heat (frost
+        protection held by its own sensor -- fail toward warmth); a cool-only
+        actuator is commanded off (it must not cool the room to the floor).
+        Mirrors the frozen-sensor safe state (C3/Ü3) for a fully unavailable
+        sensor. The floor is clamped up to the device ``min_temp`` so a high-min
+        AC does not thrash on an echo it cannot honour. Best-effort + idempotent;
+        a failure must never break the tick (review #7).
+        """
+        act = self.hass.states.get(self._actuator)
+        modes = (
+            [str(m) for m in (act.attributes.get("hvac_modes") or [])] if act else []
+        )
+        try:
+            if "heat" in modes:
+                target = frozen_safe_target(FROST_FLOOR_C, None)
+                device_min = _num_attr(act, "min_temp")
+                if device_min is not None:
+                    target = max(target, device_min)
+                already = (
+                    act is not None
+                    and act.state == "heat"
+                    and _num_attr(act, "temperature") == target
+                )
+                if already:
+                    return  # already holding the safe floor -> no re-write
+                await actuator_mod.write(
+                    self.hass,
+                    ActuatorCommand(
+                        actuator_id=self._actuator,
+                        path=ActuatorPath.SETPOINT,
+                        value=target,
+                        hvac_mode="heat",
+                        reason="unavailable_safe",
+                    ),
+                )
+                self._last_written_mode = "heat"
+                self._last_target = target
+            elif act is not None and act.state not in ("off", "unavailable"):
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_hvac_mode",
+                    {"entity_id": self._actuator, "hvac_mode": "off"},
+                    blocking=False,
+                )
+        except Exception:  # noqa: BLE001 - safe-state write must never kill the tick
+            _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
+
     async def _run_once(self) -> dict[str, Any]:
         air = self._read(self._temp)
         self._issue(
@@ -938,6 +991,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             placeholders={"entity": self._temp},
         )
         if air is None:
+            now_mono = self._clock.monotonic()
+            if self._unavailable_since is None:
+                self._unavailable_since = now_mono
             if not self._unavailable_logged:
                 _LOGGER.warning(
                     "Poise %s: room temperature sensor %s is unavailable; "
@@ -946,7 +1002,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._temp,
                 )
                 self._unavailable_logged = True
+            # review #7: a sustained loss must not hold a stale comfort setpoint
+            # indefinitely (critical in external-feed mode). After the timeout,
+            # degrade to the frost/mould floor -- the same safe state as a frozen
+            # sensor (fail toward warmth).
+            if unavailable_safe_engaged(
+                now_mono - self._unavailable_since, UNAVAILABLE_SAFE_AFTER_S
+            ):
+                await self._write_unavailable_safe_state()
+                return {"available": False, "unavailable_safe": True}
             return {"available": False}
+        self._unavailable_since = None
         if self._unavailable_logged:
             _LOGGER.info(
                 "Poise %s: room temperature sensor %s is back; resuming control",
@@ -1054,6 +1120,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # F15: surface when the required floor is clipped at 24 °C -- the room
             # really needs dehumidification there, so protection is insufficient.
             mold_min, mold_capped = mold_min_air_temperature_detail(t_out_eff, rh, room)
+        # review #7: a configured humidity sensor that dropped out silently
+        # disables mould protection (no floor computed) -> surface it.
+        self._issue(
+            f"mould_protection_inactive_{self._entry_id}",
+            self._humidity is not None and rh is None,
+            translation_key="mould_protection_inactive",
+            placeholders={"entity": self._humidity or ""},
+        )
 
         # schedule: night setback + optimal-start preheat (ADR-0025).
         # Resolve the forecast outdoor (I/O) here, then let the pure planner

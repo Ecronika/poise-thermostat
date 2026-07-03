@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.135.0"
+VERSION: Final = "0.136.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -33,6 +33,10 @@ TEMP_PLAUSIBLE_MAX_C: Final = 60.0
 SENSOR_FREEZE_AFTER_S: Final = (
     7200.0  # 2 h: last_changed-based (F1), avoids false alarms on stable rooms
 )
+# After this long fully unavailable (not just frozen), degrade to the frost/mould
+# floor like a frozen sensor -- fail toward warmth (review #7). Longer than a tick
+# so brief drop-outs / restarts just hold the last state.
+UNAVAILABLE_SAFE_AFTER_S: Final = 1800.0  # 30 min
 LOW_BATTERY_PCT: Final = 15.0
 # Below this learned time constant a sensor is likely on/near the heat source
 MIN_PLAUSIBLE_TAU_H: Final = 1.0
