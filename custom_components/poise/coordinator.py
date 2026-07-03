@@ -1665,9 +1665,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # wall-clock basis, then derive the resolver's min-off / health gate.
             _now_wall = dt_util.utcnow().timestamp()
             _act_action = act_state.attributes.get("hvac_action") if act_state else None
+            # ADR-0046 §8 compressor protection (SHADOW): would the anti-short-cycle
+            # lifecycle suppress this tick's mode nudge? Evaluated against the
+            # pre-observe lifecycle (this tick's run-state is folded in just below),
+            # so it mirrors what a live gate would decide. Diagnostic ONLY for now —
+            # the mode nudge above still fired; live suppression is the follow-up.
+            _comp_pol = _lifecycle.LifecyclePolicy()
+            _comp_block = _lifecycle.mode_nudge_block_reason(
+                desired=desired_hvac,
+                current=act_state.state if act_state else None,
+                min_off_remaining_s=_lifecycle.min_off_remaining(
+                    self._multi_lifecycle, _now_wall, _comp_pol
+                ),
+                mode_hold_remaining_s=_lifecycle.mode_hold_remaining(
+                    self._multi_lifecycle, _now_wall, _comp_pol
+                ),
+                is_safety=window_open or frozen or self._override is not None,
+            )
+            # Fix the conditioning signal: an AC that reports no hvac_action (many
+            # ESPHome/IR bridges) would otherwise read as permanently off and never
+            # accrue a min-off lock. Fall back to Poise's intended mode (ADR-0024
+            # cool-drive parity).
             self._multi_lifecycle = _lifecycle.observe(
                 self._multi_lifecycle,
-                conditioning=_act_action in ("heating", "cooling"),
+                conditioning=_lifecycle.compressor_running(_act_action, final_mode),
                 mode=act_state.state if (act_state and _act_avail) else None,
                 now=_now_wall,
                 health=(
@@ -1704,6 +1725,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     )
                 ),
                 "multi_device_health": self._multi_lifecycle.health,
+                "compressor_gate_would_block": _comp_block or "",
+                "compressor_mode_hold_remaining": round(
+                    _lifecycle.mode_hold_remaining(
+                        self._multi_lifecycle, _now_wall, _comp_pol
+                    )
+                ),
                 "tpi_active": tpi.active,
                 "tpi_duty": tpi.duty,
                 "tpi_valve_percent": tpi.valve_percent,

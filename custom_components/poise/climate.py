@@ -107,6 +107,8 @@ _ATTRS = (
     "humidity_reason",
     "abs_humidity_gkg",
     "rh_high_used",
+    "compressor_gate_would_block",
+    "compressor_mode_hold_remaining",
     "fr_active",
     "fr_heat_sp",
     "fr_cool_sp",
