@@ -71,7 +71,7 @@ jobs:
           -o asyncio_mode=auto
           -o asyncio_default_fixture_loop_scope=function
           --cov --cov-config=tests/integration/coverage_glue.ini
-          --cov-report=term-missing --cov-fail-under=83
+          --cov-report=term-missing --cov-fail-under=95
 
   card:
     name: Card (build + verify)
