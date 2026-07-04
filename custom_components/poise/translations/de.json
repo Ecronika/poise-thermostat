@@ -143,6 +143,18 @@
       },
       "mpc_weight": {
         "name": "MPC-Gewicht"
+      },
+      "ca_deviation_k": {
+        "name": "Regelgüte — Abweichung (K)"
+      },
+      "ca_cycles_per_h": {
+        "name": "Regelgüte — Zyklen pro Stunde"
+      },
+      "ca_time_in_band": {
+        "name": "Regelgüte — Zeit im Band"
+      },
+      "compressor_guard_blocked": {
+        "name": "Kompressorschutz blockiert (0/1)"
       }
     },
     "binary_sensor": {
