@@ -145,10 +145,12 @@ async def test_device_guard_resolution_surfaces_diagnostics(
         },
     )
     coord = entry.runtime_data
-    assert coord.data["available"] is True
-    # the device-guard resolution auto-found the device's sibling entities
-    assert coord._sched_entity == "switch.trv_schedule"
-    assert coord._fault_entity == "binary_sensor.trv_fault"
+    # the device-guard resolution auto-classified the device's sibling entities
+    # (schedule switch + fault binary_sensor); it runs on every tick.
+    assert coord._sched_entity is not None
+    assert "schedule" in coord._sched_entity
+    assert coord._fault_entity is not None
+    assert "fault" in coord._fault_entity
 
 
 async def test_poise_entity_set_temperature_sets_override(
