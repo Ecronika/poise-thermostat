@@ -72,19 +72,53 @@ def _make_trace(n: int = 40) -> list[TraceRecord]:
 
 def test_json_line_round_trip_is_lossless_for_round_values() -> None:
     r = TraceRecord(
-        v=1, ts=1700000000.0, mono=120.0, room=20.5, t_out=5.0, u_h=1.0, u_c=0.0,
-        q_solar=0.0, q_occ=0.0, alpha=0.15, beta_h=3.0, beta_c=4.0, beta_s=0.5,
-        beta_o=0.25, t_std=0.5, n_idle=3, n_heating=2, n_cooling=0, identified=False,
-        mode="heat", heat_sp=21.0, mode_nudge_blocked="min-off 240s",
+        v=1,
+        ts=1700000000.0,
+        mono=120.0,
+        room=20.5,
+        t_out=5.0,
+        u_h=1.0,
+        u_c=0.0,
+        q_solar=0.0,
+        q_occ=0.0,
+        alpha=0.15,
+        beta_h=3.0,
+        beta_c=4.0,
+        beta_s=0.5,
+        beta_o=0.25,
+        t_std=0.5,
+        n_idle=3,
+        n_heating=2,
+        n_cooling=0,
+        identified=False,
+        mode="heat",
+        heat_sp=21.0,
+        mode_nudge_blocked="min-off 240s",
     )
     assert TraceRecord.from_json_line(r.to_json_line()) == r
 
 
 def test_none_fields_are_dropped_and_reads_are_forward_compatible() -> None:
     r = TraceRecord(
-        v=1, ts=0.0, mono=0.0, room=20.0, t_out=5.0, u_h=0.0, u_c=0.0, q_solar=0.0,
-        q_occ=0.0, alpha=0.15, beta_h=3.0, beta_c=4.0, beta_s=0.5, beta_o=0.3,
-        t_std=1.0, n_idle=0, n_heating=0, n_cooling=0, identified=False,
+        v=1,
+        ts=0.0,
+        mono=0.0,
+        room=20.0,
+        t_out=5.0,
+        u_h=0.0,
+        u_c=0.0,
+        q_solar=0.0,
+        q_occ=0.0,
+        alpha=0.15,
+        beta_h=3.0,
+        beta_c=4.0,
+        beta_s=0.5,
+        beta_o=0.3,
+        t_std=1.0,
+        n_idle=0,
+        n_heating=0,
+        n_cooling=0,
+        identified=False,
     )
     line = r.to_json_line()
     assert "rh" not in line and "ca_deviation_k" not in line  # None dropped
@@ -95,13 +129,27 @@ def test_none_fields_are_dropped_and_reads_are_forward_compatible() -> None:
 def test_build_record_maps_inputs_model_and_decision() -> None:
     model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
     data = {
-        "mode": "cool", "target_temperature": 24.0, "heat_sp": 21.0, "cool_sp": 24.0,
-        "window_open": False, "mode_nudge_blocked": "",
-        "preheating": False, "coasting": True, "ca_deviation_k": 0.3,
+        "mode": "cool",
+        "target_temperature": 24.0,
+        "heat_sp": 21.0,
+        "cool_sp": 24.0,
+        "window_open": False,
+        "mode_nudge_blocked": "",
+        "preheating": False,
+        "coasting": True,
+        "ca_deviation_k": 0.3,
     }
     r = build_record(
-        data, model, ts=1.0, mono=60.0, room=27.0, t_out=30.0, u_h=0.0, u_c=1.0,
-        q_solar=0.4, rh=55.0,
+        data,
+        model,
+        ts=1.0,
+        mono=60.0,
+        room=27.0,
+        t_out=30.0,
+        u_h=0.0,
+        u_c=1.0,
+        q_solar=0.4,
+        rh=55.0,
     )
     assert r.v == TRACE_VERSION and r.room == 27.0 and r.u_c == 1.0
     assert r.alpha == 0.12 and r.identified is True and r.n_idle == 61
