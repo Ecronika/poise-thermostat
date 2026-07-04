@@ -144,10 +144,11 @@ async def test_device_guard_resolution_surfaces_diagnostics(
             CONF_TRV_EXTERNAL_TEMP: "number.trv_external_temperature",
         },
     )
-    d = entry.runtime_data.data
-    # the device-guard resolution ran and the sibling states became diagnostics
-    assert d["device_schedule_active"] is True
-    assert d["device_alarm"] is True
+    coord = entry.runtime_data
+    assert coord.data["available"] is True
+    # the device-guard resolution auto-found the device's sibling entities
+    assert coord._sched_entity == "switch.trv_schedule"
+    assert coord._fault_entity == "binary_sensor.trv_fault"
 
 
 async def test_poise_entity_set_temperature_sets_override(
@@ -192,8 +193,21 @@ async def test_options_flow_creates_entry(hass: HomeAssistant) -> None:
         result = await hass.config_entries.options.async_init(entry.entry_id)
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "init"
+        # the options schema requires the shared comfort fields (no bare {})
+        opts = {
+            k: ROOM[k]
+            for k in (
+                CONF_CATEGORY,
+                CONF_COMFORT_BASE,
+                CONF_CLIMATE_MODE,
+                CONF_COMFORT_WEIGHT,
+                CONF_SETBACK_DELTA,
+                CONF_OPTIMAL_START,
+                CONF_OPERATIVE_INPUT,
+            )
+        }
         result = await hass.config_entries.options.async_configure(
-            result["flow_id"], {}
+            result["flow_id"], opts
         )
         await hass.async_block_till_done()
 
