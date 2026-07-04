@@ -334,6 +334,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         # ADR-0050/0051: humidity dry-active hysteresis state (shadow).
         self._dry_active = False
+        # ADR-0025/0034: optimal-start/stop anti-chatter latch — the prior tick's
+        # engage state, so the planner holds preheat/coast until the room crosses
+        # target instead of flapping at the boundary. Not persisted (re-latches).
+        self._was_preheating = False
+        self._was_coasting = False
         # ADR-0051: heat-day cooling raise (live, rate-limited, cooling-only).
         self._thermal_shock_delta = float(
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
@@ -1201,11 +1206,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             optimal_stop_enabled=self._optimal_stop,
             minutes_to_setback=float(sched.minutes_to_setback),
             coast_lower=lo,
+            was_preheating=self._was_preheating,
+            was_coasting=self._was_coasting,
         )
         base = plan.base
         preheating = plan.preheating
         preheat_outdoor = plan.preheat_outdoor
         coasting = plan.coasting
+        # ADR-0025/0034 latch: carry this tick's engage state to the next tick so
+        # the planner can hold instead of re-chattering at the deadline boundary.
+        self._was_preheating = preheating
+        self._was_coasting = coasting
 
         # operative TRV-input mode (ADR-0029): write the operative target and feed
         # the operative temperature, IF the thermostat can be calibrated to an
