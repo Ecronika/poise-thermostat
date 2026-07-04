@@ -6,6 +6,7 @@ from custom_components.poise.multi.lifecycle import (
     compressor_conditioning,
     compressor_running,
     from_dict,
+    guard_block_reason,
     is_external_override,
     min_off_remaining,
     min_on_remaining,
@@ -13,6 +14,7 @@ from custom_components.poise.multi.lifecycle import (
     mode_nudge_block_reason,
     observe,
     policy_for,
+    resolve_guard_policy,
     starts_in_last_hour,
     to_dict,
     to_runtime,
@@ -286,3 +288,94 @@ def test_gate_heat_start_is_not_a_cool_compressor_start() -> None:
         is_safety=False,
     )
     assert r is None
+
+
+# --- live guard: policy resolution + block verdict (ADR-0046 §8 live) --------
+
+_GUARD_POL = LifecyclePolicy(min_off_s=300.0, min_mode_hold_s=300.0)
+
+
+def test_resolve_guard_policy_off_or_incapable_is_none() -> None:
+    # kill switch off -> no gate at all
+    assert (
+        resolve_guard_policy(
+            enabled=False, can_condition=True, min_off_s=300.0, mode_hold_s=300.0
+        )
+        is None
+    )
+    # a heat-only / hydronic actuator (cannot cool or dry) never gets a gate
+    assert (
+        resolve_guard_policy(
+            enabled=True, can_condition=False, min_off_s=300.0, mode_hold_s=300.0
+        )
+        is None
+    )
+
+
+def test_resolve_guard_policy_uses_zone_timers_no_starts_cap() -> None:
+    pol = resolve_guard_policy(
+        enabled=True, can_condition=True, min_off_s=300.0, mode_hold_s=240.0
+    )
+    assert pol is not None
+    assert pol.min_off_s == 300.0
+    assert pol.min_mode_hold_s == 240.0
+    assert pol.max_starts_per_h is None  # single AC: min-off bounds the start rate
+
+
+def test_guard_block_reason_none_policy_never_blocks() -> None:
+    just_off = DeviceLifecycle(is_on=False, last_off_wall=1000.0)
+    assert (
+        guard_block_reason(
+            None, just_off, 1000.0, desired="cool", current="off", is_safety=False
+        )
+        is None
+    )
+
+
+def test_guard_block_reason_blocks_start_then_allows_after_min_off() -> None:
+    """The regression the reviewer flagged: a blocked dry/cool start must fire
+    once — and exactly once — the min-off lock elapses (dry_active = intent)."""
+    just_off = DeviceLifecycle(is_on=False, last_off_wall=1000.0)
+    # 0 s after the stop: a cool start is held back (min-off 300 s)
+    blocked = guard_block_reason(
+        _GUARD_POL, just_off, 1000.0, desired="cool", current="off", is_safety=False
+    )
+    assert blocked is not None and "min-off" in blocked
+    # 300 s later the lock has elapsed and the same start is allowed
+    assert (
+        guard_block_reason(
+            _GUARD_POL,
+            just_off,
+            1300.0,
+            desired="cool",
+            current="off",
+            is_safety=False,
+        )
+        is None
+    )
+
+
+def test_guard_block_reason_blocks_cool_dry_flip_within_mode_hold() -> None:
+    flipped = DeviceLifecycle(is_on=True, mode_changed_wall=1000.0, last_mode="cool")
+    r = guard_block_reason(
+        _GUARD_POL, flipped, 1100.0, desired="dry", current="cool", is_safety=False
+    )
+    assert r is not None and "mode-hold" in r
+
+
+def test_guard_block_reason_never_blocks_stop_or_safety() -> None:
+    just_off = DeviceLifecycle(is_on=False, last_off_wall=1000.0)
+    # a stop (leaving cool) is never suppressed
+    assert (
+        guard_block_reason(
+            _GUARD_POL, just_off, 1000.0, desired="off", current="cool", is_safety=False
+        )
+        is None
+    )
+    # a safety action bypasses the gate entirely
+    assert (
+        guard_block_reason(
+            _GUARD_POL, just_off, 1000.0, desired="cool", current="off", is_safety=True
+        )
+        is None
+    )
