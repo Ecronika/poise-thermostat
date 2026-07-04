@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import replace
 from datetime import timedelta
 from typing import Any
@@ -140,6 +141,7 @@ from .control.reference_offset import (
 )
 from .control.regulation_quality import RegulationQuality
 from .control.scoring_expectation import model_expected_minutes
+from .control.tick_budget import TickBudget
 from .control.tick_resolve import (
     cool_drive_signal,
     frost_rescue_target,
@@ -305,6 +307,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._trace_enabled: bool = bool(data.get(CONF_TRACE_RECORDING, False))
         self._trace_recorder: TraceRecorder | None = None
         self._trace_slug: str = entry.entry_id
+        self._tick_budget = TickBudget()  # ADR-0020 per-tick compute-time budget
         self._temp: str = data[CONF_TEMP_SENSOR]
         self._actuator: str = data[CONF_ACTUATOR]
         self._trm: str | None = data.get(CONF_TRM_SENSOR)
@@ -978,7 +981,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
     async def _async_update_data(self) -> dict[str, Any]:
         async with self._lock:
-            return await self._run_once()
+            _t0 = time.perf_counter()
+            data = await self._run_once()
+            # ADR-0020: the tick's wall-time (it holds the lock across the forecast
+            # and any trace append) against the budget — an early scaling signal.
+            self._tick_budget.observe((time.perf_counter() - _t0) * 1000.0)
+            data["tick_ms"] = round(self._tick_budget.last_ms, 1)
+            data["tick_ms_ewma"] = round(self._tick_budget.ewma_ms, 1)
+            data["tick_ms_max"] = round(self._tick_budget.max_ms, 1)
+            data["tick_over_budget"] = self._tick_budget.over_budget
+            return data
 
     def _emit_health_issues(self) -> tuple[bool, bool, bool, bool]:
         """Raise/clear device-health repair issues; return the status flags."""

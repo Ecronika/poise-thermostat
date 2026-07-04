@@ -197,6 +197,16 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=lambda d: 1.0 if d.get("mode_nudge_blocked") else 0.0,
     ),
+    # ADR-0020: per-zone tick wall-time (smoothed) — the performance-budget signal.
+    PoiseSensorDescription(
+        key="tick_duration_ms",
+        translation_key="tick_duration_ms",
+        native_unit_of_measurement="ms",
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=1,
+        value_fn=_scaled("tick_ms_ewma", digits=1),
+    ),
 )
 
 

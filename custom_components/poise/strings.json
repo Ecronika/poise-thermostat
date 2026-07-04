@@ -183,6 +183,9 @@
       },
       "compressor_guard_blocked": {
         "name": "Compressor guard blocked (0/1)"
+      },
+      "tick_duration_ms": {
+        "name": "Tick duration (ms)"
       }
     },
     "binary_sensor": {

@@ -56,6 +56,7 @@ _ATTRS = (
     "heat_sp",
     "cool_sp",
     "mode_nudge_blocked",
+    "tick_over_budget",
     "mould_floor",
     "dewpoint",
     "mode",
