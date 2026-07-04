@@ -95,7 +95,10 @@ async def test_remove_system_hub_switches_boiler_off(hass: HomeAssistant) -> Non
     hub = MockConfigEntry(
         domain=DOMAIN,
         unique_id="poise_system",
-        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, CONF_BOILER_OFF_ACTION: "switch.boiler/switch.turn_off"},
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM,
+            CONF_BOILER_OFF_ACTION: "switch.boiler/switch.turn_off",
+        },
         title="Poise System",
     )
     hub.add_to_hass(hass)
@@ -104,7 +107,9 @@ async def test_remove_system_hub_switches_boiler_off(hass: HomeAssistant) -> Non
 
 
 async def test_remove_zone_entry_is_noop(hass: HomeAssistant) -> None:
-    zone = MockConfigEntry(domain=DOMAIN, unique_id="climate.trv", data=_base(), title="Z")
+    zone = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=_base(), title="Z"
+    )
     zone.add_to_hass(hass)
     await async_remove_entry(hass, zone)  # not a system hub -> early return
 
@@ -128,7 +133,10 @@ async def test_remove_hub_swallows_off_failure(hass: HomeAssistant) -> None:
     hub = MockConfigEntry(
         domain=DOMAIN,
         unique_id="poise_system",
-        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, CONF_BOILER_OFF_ACTION: "switch.boiler/switch.turn_off"},
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM,
+            CONF_BOILER_OFF_ACTION: "switch.boiler/switch.turn_off",
+        },
         title="Poise System",
     )
     hub.add_to_hass(hass)

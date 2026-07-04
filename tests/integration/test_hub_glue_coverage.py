@@ -75,7 +75,9 @@ async def test_hub_power_reader_parses_sensor_states(hass: HomeAssistant) -> Non
 async def test_hub_zone_name_resolves_entry_title(hass: HomeAssistant) -> None:
     """``_zone_name`` maps a zone entry_id to its title (frost-issue text),
     falling back to the id when the entry is gone."""
-    zone = MockConfigEntry(domain=DOMAIN, unique_id="climate.z1", data={}, title="Living Room")
+    zone = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.z1", data={}, title="Living Room"
+    )
     zone.add_to_hass(hass)
     hub = await _setup_hub(hass)
     assert hub._zone_name(zone.entry_id) == "Living Room"
@@ -167,8 +169,8 @@ async def test_hub_shadow_computes_groups_and_shedding(hass: HomeAssistant) -> N
 async def test_hub_collect_skips_snapshotless_zone(hass: HomeAssistant) -> None:
     """A zone entry present but not yet set up (no published snapshot) is skipped
     by ``_collect_requests`` rather than crashing the hub tick."""
-    MockConfigEntry(domain=DOMAIN, unique_id="climate.z2", data={}, title="Z2").add_to_hass(
-        hass
-    )
+    MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.z2", data={}, title="Z2"
+    ).add_to_hass(hass)
     hub = await _setup_hub(hass)
     assert hub._collect_requests() == []
