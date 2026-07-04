@@ -144,11 +144,15 @@ async def test_device_guard_resolution_surfaces_diagnostics(
             CONF_TRV_EXTERNAL_TEMP: "number.trv_external_temperature",
         },
     )
-    # A device-linked actuator drives the guard-resolution path (iterate the
-    # device's sibling entities, classify schedule/fault/battery/valve/…) on every
-    # setup tick. The value here is that this path runs end-to-end without crashing
-    # on the device/registry lookup; assert the coordinator produced a snapshot.
-    assert isinstance(entry.runtime_data.data, dict)
+    # The device-guard resolution iterated the actuator's sibling entities and
+    # picked up the fault binary_sensor: its "on" state surfaces as device_alarm,
+    # which in turn drives the tick into the heating-failure notify path. With the
+    # notify service unregistered here, that path's persistent_notification call
+    # must be swallowed so setup still completes — a regression guard, since the
+    # unguarded call used to raise ServiceNotFound and crash the whole tick.
+    d = entry.runtime_data.data
+    assert d["device_alarm"] is True  # fault sibling auto-resolved from the device
+    assert d["heating_failure"] is True  # -> notify path reached, tick survived it
 
 
 async def test_poise_entity_set_temperature_sets_override(
