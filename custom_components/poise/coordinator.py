@@ -74,6 +74,7 @@ from .const import (
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     CONF_THERMAL_SHOCK_DELTA,
+    CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
@@ -86,6 +87,7 @@ from .const import (
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
+    DEFAULT_TRACE_MAX_BYTES,
     DEVICE_MAX_C,
     DOMAIN,
     EKF_SAVE_EVERY_TICKS,
@@ -198,6 +200,8 @@ from .safety.sensor_watchdog import (
     valve_stuck,
 )
 from .storage import PoiseStore
+from .trace.recorder import TraceRecorder
+from .trace.schema import ModelSnapshot, build_record
 
 _LOGGER = logging.getLogger(__name__)
 # Conservative outdoor default when neither a sensor nor the running mean is
@@ -297,6 +301,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # inputs (sensors/actuator) live only in data.
         data = {**entry.data, **entry.options}
         self.zone_name: str = data[CONF_NAME]
+        # opt-in field-trace recorder (ADR-0011 golden-file replay); default off.
+        self._trace_enabled: bool = bool(data.get(CONF_TRACE_RECORDING, False))
+        self._trace_recorder: TraceRecorder | None = None
+        self._trace_slug: str = entry.entry_id
         self._temp: str = data[CONF_TEMP_SENSOR]
         self._actuator: str = data[CONF_ACTUATOR]
         self._trm: str | None = data.get(CONF_TRM_SENSOR)
@@ -531,6 +539,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comp_min_off_opt = float(_cmo) if _cmo is not None else None
         _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
         self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
+        self._trace_enabled = bool(data.get(CONF_TRACE_RECORDING, False))
         self._thermal_shock_delta = float(
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
@@ -829,6 +838,58 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
         self._prev_room = room
         self._prev_room_mono = now
+
+    async def _maybe_record_trace(
+        self,
+        data: dict[str, Any],
+        *,
+        room: float,
+        t_out: float,
+        rh: float | None,
+        t_rm: float | None,
+        now: float,
+    ) -> None:
+        """Append this tick to the opt-in field trace (ADR-0011 golden-file
+        replay). Best-effort pure observation (ADR-0026): the EKF drive inputs +
+        model snapshot make it replay-sufficient, and any failure is swallowed so
+        trace capture can never disturb control."""
+        if not self._trace_enabled:
+            return
+        try:
+            if self._trace_recorder is None:
+                path = self.hass.config.path("poise_traces", f"{self._trace_slug}.jsonl")
+                self._trace_recorder = TraceRecorder(
+                    self.hass, path, DEFAULT_TRACE_MAX_BYTES
+                )
+            ekf = self._ekf
+            snapshot = ModelSnapshot(
+                alpha=ekf.x[1],
+                beta_h=ekf.x[2],
+                beta_c=ekf.x[3],
+                beta_s=ekf.x[4],
+                beta_o=ekf.x[5],
+                t_std=ekf.temperature_std,
+                n_idle=ekf.n_idle,
+                n_heating=ekf.n_heating,
+                n_cooling=ekf.n_cooling,
+                identified=ekf.identified,
+            )
+            record = build_record(
+                data,
+                snapshot,
+                ts=dt_util.utcnow().timestamp(),
+                mono=now,
+                room=room,
+                t_out=t_out,
+                u_h=self._last_u_h,
+                u_c=self._last_u_c,
+                q_solar=self._last_q_solar,
+                rh=rh,
+                t_rm=t_rm,
+            )
+            await self._trace_recorder.append(record.to_json_line())
+        except Exception:  # noqa: BLE001 - trace capture must never break the tick
+            _LOGGER.debug("Poise trace capture failed", exc_info=True)
 
     async def _notify_failure(self, failed: bool) -> None:
         action = failure_notification_action(failed, self._failure_notified)
@@ -2032,7 +2093,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             }
         except Exception:  # noqa: BLE001 - diagnostics must never break control
             _LOGGER.debug("Poise outcome/savings diagnostics failed", exc_info=True)
-        return {
+        _tick_data: dict[str, Any] = {
             "available": True,
             **outcome_diag,
             **climate_diag,
@@ -2129,3 +2190,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 else None
             ),
         }
+        await self._maybe_record_trace(
+            _tick_data, room=room, t_out=t_out_eff, rh=rh, t_rm=t_rm_eff, now=now
+        )
+        return _tick_data

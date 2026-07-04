@@ -65,6 +65,7 @@ from .const import (
     CONF_SETBACK_DELTA,
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
+    CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
@@ -382,6 +383,10 @@ def _options_schema() -> vol.Schema:
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
+            # ADR-0011: opt-in field-trace recorder (one JSONL line per tick).
+            vol.Optional(
+                CONF_TRACE_RECORDING, default=False
+            ): selector.BooleanSelector(),
             vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER

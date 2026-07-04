@@ -125,7 +125,8 @@
           "price_eur_kwh": "Energy price (€/kWh) — for the savings estimate",
           "compressor_guard": "Compressor guard (single AC) — hold cool/dry starts + flips that would short-cycle the compressor",
           "compressor_min_off_s": "Compressor min-off (s) — wait after a stop before a restart (blank = 300)",
-          "compressor_mode_hold_s": "Compressor mode-hold (s) — wait before a cool↔dry flip (blank = 300)"
+          "compressor_mode_hold_s": "Compressor mode-hold (s) — wait before a cool↔dry flip (blank = 300)",
+          "trace_recording": "Field-trace recording — one JSONL line per tick for offline replay analysis (advanced)"
         }
       }
     }

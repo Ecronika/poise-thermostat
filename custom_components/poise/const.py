@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.145.0"
+VERSION: Final = "0.146.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -100,6 +100,10 @@ COMPRESSOR_GUARD_AUTO: Final = "auto"
 COMPRESSOR_GUARD_OFF: Final = "off"
 DEFAULT_COMPRESSOR_MIN_OFF_S: Final = 300.0
 DEFAULT_COMPRESSOR_MODE_HOLD_S: Final = 300.0
+
+# Field-trace recorder (ADR-0011 golden-file replay); opt-in, default off.
+CONF_TRACE_RECORDING: Final = "trace_recording"
+DEFAULT_TRACE_MAX_BYTES: Final = 20 * 1024 * 1024
 
 # Heat-day cooling raise (ADR-0051): raise the cool setpoint toward outdoor-ΔT,
 # capped at the ASR office ceiling (raising the cap is an employer opt-in).
