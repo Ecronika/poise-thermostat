@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.145.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.146.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -104,6 +104,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
 | Adaptive cooling edge | no | off | Lift the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band (ADR-0023 §1). |
 | Compressor guard · min-off · mode-hold | no | on · 300 s · 300 s | Single-AC anti-short-cycle (Tuning options): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
+| Field-trace recording | no | off | Advanced/diagnostic: append one compact JSONL line per tick to `config/poise_traces/<id>.jsonl` (EKF drive inputs + model snapshot + decision), rotated at ~20 MB. For offline golden-file replay analysis (ADR-0011); pure observation, never touches control. |
 | Outdoor cooling / heating lockout | no | 16 / 22 °C | Suppress cooling below / heating above these outdoor temperatures (ADR-0047). |
 | Annual consumption · tariff | no | — | Baseline for the heating-degree-hour → kWh / € savings estimate. |
 | Controls boiler | no | off | This zone contributes to the *Poise System* boiler-demand aggregate. |
