@@ -171,6 +171,7 @@ from .devices.model_fixes import (
     looks_like_internal_schedule,
     looks_like_valve_steps,
 )
+from .estimation.heatup_rate import HeatupAccumulator, sample_heatup_rate
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.psychrometrics import humidity_ratio
 from .estimation.running_mean import RunningMeanTracker
@@ -260,6 +261,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._pi = PiCompensator()
         self._prev_room: float | None = None
         self._prev_room_mono: float | None = None
+        # anti-quantization anchor for the seasonless heat-up rate (ADR-0004/0009)
+        self._heatup_acc = HeatupAccumulator()
         self._last_target: float | None = None
         self._last_written_mode: str | None = None
         self._last_sp_write_ts: float | None = None  # ADR-0052 §4 nudge throttle
@@ -806,21 +809,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._wa_prev_mono = now
 
     def _observe_seasonless(self, room: float, t_out: float) -> None:
-        """Record a normalised heat-up rate while heating (shadow, ADR-0004/0026)."""
+        """Record a normalised heat-up rate while heating (shadow, ADR-0004/0026).
+
+        The rate is sampled with an anchored accumulator (``heatup_rate``) instead
+        of a per-tick delta: on a quantized sensor a per-tick ``(room-prev)/dt``
+        with the ``rate>0`` filter keeps only the quantum up-crossings and biases
+        the pooled rate — hence the beta_h cold-start seed — high. The accumulator
+        divides a real accumulated rise by the full elapsed interval (flat ticks
+        included), which is unbiased regardless of the sensor quantum.
+        """
         now = self._clock.monotonic()
-        if (
-            self._prev_room is not None
-            and self._prev_room_mono is not None
-            and self._last_target is not None
-            and self._last_u_h > 0.5  # heating drove the just-elapsed interval
-        ):
-            dt_h = (now - self._prev_room_mono) / 3600.0
-            if 0.0 < dt_h < 1.0:
-                rate = (room - self._prev_room) / dt_h
-                if rate > 0.0:
-                    self._seasonless.observe(
-                        rate, self._last_target, t_out, dt_util.now().toordinal()
-                    )
+        heating = self._last_target is not None and self._last_u_h > 0.5
+        rate = sample_heatup_rate(
+            self._heatup_acc, heating=heating, room=room, mono=now
+        )
+        if rate is not None and rate > 0.0 and self._last_target is not None:
+            self._seasonless.observe(
+                rate, self._last_target, t_out, dt_util.now().toordinal()
+            )
         self._prev_room = room
         self._prev_room_mono = now
 
@@ -1141,6 +1147,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._last_mono = None
             self._prev_room = None
             self._prev_room_mono = None
+            self._heatup_acc.reset()  # drop the heat-up anchor across the pause too
         self._observe_window_auto(room, t_out_eff, cooling=self._was_cooling)
 
         # mould floor + dewpoint cap from humidity
