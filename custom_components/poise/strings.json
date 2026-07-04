@@ -170,6 +170,18 @@
       },
       "mpc_weight": {
         "name": "MPC weight"
+      },
+      "ca_deviation_k": {
+        "name": "Control accuracy — deviation (K)"
+      },
+      "ca_cycles_per_h": {
+        "name": "Control accuracy — cycles per hour"
+      },
+      "ca_time_in_band": {
+        "name": "Control accuracy — time in band"
+      },
+      "compressor_guard_blocked": {
+        "name": "Compressor guard blocked (0/1)"
       }
     },
     "binary_sensor": {

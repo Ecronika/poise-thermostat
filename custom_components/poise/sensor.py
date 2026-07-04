@@ -156,6 +156,47 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=_scaled("mpc_weight", 100.0, 0),
     ),
+    # ADR-0055 M1 (Phase-3 baseline): the EN-15500-1 control-accuracy signals as
+    # measurement sensors so long-term statistics capture the pre-flip distribution
+    # the winter threshold calibration (Phase 4) needs — the climate attributes
+    # alone only live in the recorder's short-term history (~10 days).
+    PoiseSensorDescription(
+        key="ca_deviation_k",
+        translation_key="ca_deviation_k",
+        native_unit_of_measurement=UnitOfTemperature.KELVIN,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=2,
+        value_fn=_scaled("ca_deviation_k", digits=2),
+    ),
+    PoiseSensorDescription(
+        key="ca_cycles_per_h",
+        translation_key="ca_cycles_per_h",
+        native_unit_of_measurement="/h",
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=2,
+        value_fn=_scaled("ca_cycles_per_h", digits=2),
+    ),
+    PoiseSensorDescription(
+        key="ca_time_in_band",
+        translation_key="ca_time_in_band",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=0,
+        value_fn=_scaled("ca_time_in_band", digits=0),
+    ),
+    # ADR-0046 §8: the live compressor-guard suppression as 0/1 so its LTS mean is
+    # the block fraction — watch it stays near zero (a rising fraction is a finding).
+    PoiseSensorDescription(
+        key="compressor_guard_blocked",
+        translation_key="compressor_guard_blocked",
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=0,
+        value_fn=lambda d: 1.0 if d.get("mode_nudge_blocked") else 0.0,
+    ),
 )
 
 
