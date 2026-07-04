@@ -154,6 +154,8 @@ def plan_preheat(
     optimal_stop_enabled: bool = False,
     minutes_to_setback: float = 0.0,
     coast_lower: float | None = None,
+    was_preheating: bool = False,
+    was_coasting: bool = False,
 ) -> PreheatPlan:
     """Decide the effective comfort base, applying night setback + optimal start.
 
@@ -179,7 +181,11 @@ def plan_preheat(
                 t_out=t_out_lead,
                 minutes_to_setback=minutes_to_setback,
             )
-            if coast_advice.stop_now:
+            # Latch (anti-chatter, ADR-0034): engage on stop_now, then HOLD until
+            # the room has coasted down to coast_lower. The coastdown lead shrinks
+            # as the room cools, so without the latch the transient flip would put
+            # the base back up and re-chatter the heater on/off every tick.
+            if coast_advice.stop_now or (was_coasting and room > coast_lower):
                 return PreheatPlan(coast_lower, False, round(t_out_lead, 1), True)
         return PreheatPlan(comfort_base, False, None)
     base = comfort_base + setback_offset
@@ -194,7 +200,11 @@ def plan_preheat(
         minutes_to_comfort=minutes_to_comfort,
     )
     used_outdoor = round(t_out_lead, 1)
-    if advice.start_now:
+    # Latch (anti-chatter, ADR-0025): engage on start_now, then HOLD until the
+    # room reaches target. Warming lowers heatup_minutes, so without the latch the
+    # transient lead-drop would drop the base back to setback and re-chatter — the
+    # heater flapping on/off across the preheat window.
+    if advice.start_now or (was_preheating and room < target):
         return PreheatPlan(comfort_base, True, used_outdoor)
     return PreheatPlan(base, False, used_outdoor)
 
