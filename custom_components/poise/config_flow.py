@@ -20,6 +20,8 @@ from homeassistant.helpers import selector
 
 from .config_reconcile import reconfigure_options
 from .const import (
+    COMPRESSOR_GUARD_AUTO,
+    COMPRESSOR_GUARD_OFF,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
@@ -38,6 +40,9 @@ from .const import (
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_COMPRESSOR_GROUP,
+    CONF_COMPRESSOR_GUARD,
+    CONF_COMPRESSOR_MIN_OFF,
+    CONF_COMPRESSOR_MODE_HOLD,
     CONF_CONTROLS_BOILER,
     CONF_COOL_MIN_OUTDOOR,
     CONF_CURRENT_POWER_SENSOR,
@@ -346,6 +351,34 @@ def _options_schema() -> vol.Schema:
                     max=45.0,
                     step=0.5,
                     unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            # ADR-0046 §8: single-AC compressor guard (kill switch + timers). Blank
+            # timers fall back to the dynamics-profile default (fast_air 300 s).
+            vol.Optional(
+                CONF_COMPRESSOR_GUARD, default=COMPRESSOR_GUARD_AUTO
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[COMPRESSOR_GUARD_AUTO, COMPRESSOR_GUARD_OFF],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(CONF_COMPRESSOR_MIN_OFF): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=1200,
+                    step=30,
+                    unit_of_measurement="s",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(CONF_COMPRESSOR_MODE_HOLD): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0,
+                    max=1200,
+                    step=30,
+                    unit_of_measurement="s",
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
