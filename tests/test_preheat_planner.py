@@ -80,6 +80,52 @@ def test_forecast_outdoor_feeds_the_lead() -> None:
     assert cold.preheating or (not warm.preheating)
 
 
+# --- anti-chatter latch (ADR-0025/0034) ------------------------------------
+
+
+def test_preheat_latch_holds_through_a_transient_no_start() -> None:
+    """Once preheating, a tick whose start_now would be False (warming shrank the
+    heat-up lead) must NOT fall back to setback — the latch holds until target."""
+    # Far deadline -> start_now is False on its own; but already preheating and
+    # the room is still below target, so the latch keeps the base cancelled.
+    p = _plan(minutes_to_comfort=600.0, was_preheating=True)
+    assert p.preheating
+    assert p.base == 21.0  # held at comfort base, not dropped to setback (18)
+
+
+def test_preheat_latch_releases_when_target_reached() -> None:
+    # The room has warmed to target -> the latch releases (no perpetual preheat).
+    p = _plan(minutes_to_comfort=600.0, was_preheating=True, room=22.0)
+    assert not p.preheating
+    assert p.base == 18.0  # setback resumes
+
+
+def test_coast_latch_holds_through_a_transient_no_stop() -> None:
+    p = _plan(
+        is_comfort=True,
+        optimal_stop_enabled=True,
+        coast_lower=20.0,
+        minutes_to_setback=600.0,  # far deadline -> stop_now False on its own
+        room=22.0,
+        was_coasting=True,
+    )
+    assert p.coasting
+    assert p.base == 20.0  # held at coast_lower, not back up to comfort base
+
+
+def test_coast_latch_releases_when_coast_target_reached() -> None:
+    p = _plan(
+        is_comfort=True,
+        optimal_stop_enabled=True,
+        coast_lower=20.0,
+        minutes_to_setback=600.0,
+        room=19.0,  # already at/below coast_lower -> latch releases
+        was_coasting=True,
+    )
+    assert not p.coasting
+    assert p.base == 21.0  # comfort base resumes
+
+
 _BASE = datetime.fromisoformat("2026-01-10T06:00:00+00:00")
 
 
