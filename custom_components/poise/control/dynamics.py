@@ -32,6 +32,11 @@ class DynamicsProfile:
     mpc_horizon_blocks: int
     regulation_period_s: float  # min seconds between setpoint nudges (fast path)
     self_regulating: bool  # has its own thermostat -> nudge, not a slow loop
+    # Compressor-guard defaults for this class (ADR-0046 §8); a per-zone option
+    # overrides. Only ever applied to a cool/dry-capable device (capability-gated),
+    # so the slow-hydronic values are inert (a TRV never runs a compressor).
+    compressor_min_off_s: float = 300.0
+    compressor_mode_hold_s: float = 300.0
 
     @property
     def integral_time_h(self) -> float:
