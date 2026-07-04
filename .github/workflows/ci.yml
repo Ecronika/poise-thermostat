@@ -115,6 +115,18 @@ jobs:
         run: |
           git diff --exit-code -- ../custom_components/poise/frontend/poise-card.js \
             || { echo "::error::poise-card.js is stale — run 'node build.mjs' in card/ and commit the result"; exit 1; }
+      - name: Guard — card options are documented in the card README (ADR-0057)
+        run: |
+          # doc-drift guard: every user-facing card option must appear in
+          # card/README.md, so new layout/display keys can't land only in the ADR.
+          missing=""
+          for key in density controls history sections chips shadow_pill learning pmv presets; do
+            grep -qw "$key" README.md || missing="$missing $key"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::card options missing from card/README.md:$missing — document them (ADR-0057)."
+            exit 1
+          fi
 
   # M7: a single required check that proves validate + quality + integration +
   # card all passed *in the same run* (the per-job gates are no longer decoupled).
