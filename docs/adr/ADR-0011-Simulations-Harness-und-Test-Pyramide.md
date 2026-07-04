@@ -36,3 +36,13 @@ Testmuster allgemeingültig; eigenständig umgesetzt. Keine realen Nutzerdaten i
 
 ## Verknüpfungen
 Verifiziert ADR-0001 (Solver), ADR-0002 (EKF-Trennung), ADR-0009 (Überblendung), ADR-0010 (Solar-Invariante). Setzt ADR-0005 (testbare Schichten) und ADR-0006 (injizierbare Uhr) voraus.
+
+## Nachtrag (2026-07-04, v0.146.0): Feld-Trace-Recorder + Real-Trajektorien-Replay
+
+Punkt 3 (»gespeicherte reale Trajektorien einspielen, gegen Golden-Output prüfen«) war bisher nur gegen die synthetische `RCPlant` umgesetzt (`tests/harness/replay.py` = Forward-Sim, `closed_loop.py`). Ergänzt um die **Echte-Trajektorien-Seite**:
+
+- **Pure `custom_components/poise/trace/schema.py`** — `TraceRecord` (versioniert, `TRACE_VERSION`) + `build_record`: eine Tick-Aufnahme in **replay-suffizienter** Form — EKF-Drive (`room/t_out/u_h/u_c/q_solar/q_occ`) + `mono` als dt-Quelle + Modell-Snapshot (alpha/betas/t_std/n_*/identified) + Entscheidungskontext — als eine kompakte JSONL-Zeile je Tick; `from_dict` ignoriert unbekannte Keys (vorwärtskompatibel).
+- **Pure `tests/harness/trace_replay.py`** — `load_trace` + `replay_ekf`: ein frischer Schätzer wird deterministisch aus der Aufnahme nachgefahren (ADR-0014). **Golden-Regression** `tests/test_trace.py` (5 Tests): Replay reproduziert das aufgezeichnete Modell exakt (`replay_ekf(loaded).alpha == records[-1].alpha`), Serialisierung verlustfrei, Replay-Suffizienz (u_c wird konsumiert).
+- **Glue `trace/recorder.py`** — best-effort Executor-Schreiber (blockiert den Loop nie), 2-Datei-Rotation bei 20 MB, OSError-safe. Der Coordinator ruft `_maybe_record_trace` am Tick-Ende; **opt-in, default off** (`CONF_TRACE_RECORDING`), reine Beobachtung (ADR-0026), kann die Regelung nie brechen; Datei `config/poise_traces/<entry_id>.jsonl`.
+
+Zweck: Kandidat-Algorithmen (τ-Settle-Konfidenz, CA-Schwellen-Kalibrierung) gegen **echte** Feldbahnen scoren statt nur gegen die synthetische Plant; Kalender-Vorlauf, weil Traces über Wochen/Wetterlagen wachsen müssen (Phase-4-Abnahmebasis). Offen: committed Golden-Fixture aus echten Traces + Eval-/Scoring-Schicht (Folge-Increment).
