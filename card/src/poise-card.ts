@@ -436,6 +436,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       if (a["heating_failure"]) chips.push(this._chip("mdi:alert", t(lang, "failure")));
       if (a["override_clamped"])
         chips.push(this._chip("mdi:arrow-collapse-vertical", t(lang, "override_clamped")));
+      // ADR-0046 §8: compressor guard is holding a cool/dry start or flip.
+      if (a["mode_nudge_blocked"])
+        chips.push(
+          this._chip("mdi:timer-sand", `${t(lang, "compressor_guard")}: ${a["mode_nudge_blocked"]}`),
+        );
       const cause = a["binding_lower_cause"];
       if (cause && cause !== "en16798")
         chips.push(this._chip("mdi:shield-alert", String(cause)));
