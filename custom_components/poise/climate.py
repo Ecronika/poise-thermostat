@@ -55,6 +55,7 @@ _ATTRS = (
     "heating_failure",
     "heat_sp",
     "cool_sp",
+    "mode_nudge_blocked",
     "mould_floor",
     "dewpoint",
     "mode",

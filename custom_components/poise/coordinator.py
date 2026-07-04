@@ -44,6 +44,8 @@ from .comfort.thermal_shock import (
 )
 from .comfort.virtual_mrt import virtual_mrt
 from .const import (
+    COMPRESSOR_GUARD_AUTO,
+    COMPRESSOR_GUARD_OFF,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
@@ -53,6 +55,9 @@ from .const import (
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
+    CONF_COMPRESSOR_GUARD,
+    CONF_COMPRESSOR_MIN_OFF,
+    CONF_COMPRESSOR_MODE_HOLD,
     CONF_COOL_HARD_CAP,
     CONF_COOL_MIN_OUTDOOR,
     CONF_DYNAMICS,
@@ -316,6 +321,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._dynamics_override: str = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
         self._dynamics = DeviceDynamics.SLOW_HYDRONIC
         self._mpc_params = MpcParams()
+        # ADR-0046 §8 (live): single-AC compressor guard — kill switch + timers
+        # (option over the dynamics-profile default). Also re-read in apply_options.
+        self._compressor_guard: str = str(
+            data.get(CONF_COMPRESSOR_GUARD, COMPRESSOR_GUARD_AUTO)
+        )
+        _cmo = data.get(CONF_COMPRESSOR_MIN_OFF)
+        self._comp_min_off_opt: float | None = float(_cmo) if _cmo is not None else None
+        _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
+        self._comp_mode_hold_opt: float | None = (
+            float(_cmh) if _cmh is not None else None
+        )
         # ADR-0050/0051: humidity dry-active hysteresis state (shadow).
         self._dry_active = False
         # ADR-0051: heat-day cooling raise (live, rate-limited, cooling-only).
@@ -500,6 +516,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
         )
         self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
+        self._compressor_guard = str(
+            data.get(CONF_COMPRESSOR_GUARD, COMPRESSOR_GUARD_AUTO)
+        )
+        _cmo = data.get(CONF_COMPRESSOR_MIN_OFF)
+        self._comp_min_off_opt = float(_cmo) if _cmo is not None else None
+        _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
+        self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
         self._thermal_shock_delta = float(
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
@@ -1454,6 +1477,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         await self._notify_failure(failed)
 
+        _mode_nudge_blocked = ""  # ADR-0046 §8: compressor-guard suppression reason
         if self._enabled:
             # H1/A2: keep a controllable actuator in the mode that matches our
             # write — cool when we cool, heat otherwise — so it follows our
@@ -1487,6 +1511,40 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 desired_hvac,
                 supported=desired_hvac in act_modes,
             )
+            # ADR-0046 §8 (live): hold back a mode nudge that would short-cycle the
+            # compressor — start it within min-off, or flip cool<->dry within
+            # mode-hold. Capability-gated (cool/dry only) + kill switch; never a
+            # stop and never a safety action. The comfort request stands and
+            # re-fires once the lock clears, so _mode_nudge_blocked reads as intent
+            # (a blocked dry entry keeps dry_active latched, surfaced on the card).
+            _guard_prof = PROFILES[self._dynamics]
+            _g_min_off = (
+                self._comp_min_off_opt
+                if self._comp_min_off_opt is not None
+                else _guard_prof.compressor_min_off_s
+            )
+            _g_mode_hold = (
+                self._comp_mode_hold_opt
+                if self._comp_mode_hold_opt is not None
+                else _guard_prof.compressor_mode_hold_s
+            )
+            _guard_pol = _lifecycle.resolve_guard_policy(
+                enabled=self._compressor_guard != COMPRESSOR_GUARD_OFF,
+                can_condition=can_cool or "dry" in act_modes,
+                min_off_s=_g_min_off,
+                mode_hold_s=_g_mode_hold,
+            )
+            _guard_block = _lifecycle.guard_block_reason(
+                _guard_pol,
+                self._multi_lifecycle,
+                dt_util.utcnow().timestamp(),
+                desired=desired_hvac,
+                current=act_state.state if act_state else None,
+                is_safety=window_open or frozen or self._override is not None,
+            )
+            if _mode_nudge and _guard_block:
+                _mode_nudge = False  # compressor protection: hold this tick's nudge
+                _mode_nudge_blocked = _guard_block
             if _mode_nudge:
                 try:
                     await self.hass.services.async_call(
@@ -1745,23 +1803,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # wall-clock basis, then derive the resolver's min-off / health gate.
             _now_wall = dt_util.utcnow().timestamp()
             _act_action = act_state.attributes.get("hvac_action") if act_state else None
-            # ADR-0046 §8 compressor protection (SHADOW): would the anti-short-cycle
-            # lifecycle suppress this tick's mode nudge? Evaluated against the
-            # pre-observe lifecycle (this tick's run-state is folded in just below),
-            # so it mirrors what a live gate would decide. Diagnostic ONLY for now —
-            # the mode nudge above still fired; live suppression is the follow-up.
-            _comp_pol = _lifecycle.LifecyclePolicy()
-            _comp_block = _lifecycle.mode_nudge_block_reason(
-                desired=desired_hvac,
-                current=act_state.state if act_state else None,
-                min_off_remaining_s=_lifecycle.min_off_remaining(
-                    self._multi_lifecycle, _now_wall, _comp_pol
-                ),
-                mode_hold_remaining_s=_lifecycle.mode_hold_remaining(
-                    self._multi_lifecycle, _now_wall, _comp_pol
-                ),
-                is_safety=window_open or frozen or self._override is not None,
+            # ADR-0046 §8 compressor protection (LIVE): the same decision the write
+            # path above already applied (_guard_block) — surfaced here as a
+            # diagnostic. Evaluated against the pre-observe lifecycle (this tick's
+            # run-state is folded in just below). The display policy uses the
+            # effective timers so the remaining-time attributes match the live gate.
+            _comp_pol = _guard_pol or _lifecycle.LifecyclePolicy(
+                min_off_s=_g_min_off, min_mode_hold_s=_g_mode_hold
             )
+            _comp_block = _guard_block
             # Fix the conditioning signal: an AC that reports no hvac_action (many
             # ESPHome/IR bridges) would otherwise read as permanently off and never
             # accrue a min-off lock. Fall back to Poise's intended mode (ADR-0024
@@ -1971,6 +2021,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "dynamics_profile": self._dynamics.value,
             "pi_integral_time_h": round(PROFILES[self._dynamics].integral_time_h, 3),
             "reg_period_s": PROFILES[self._dynamics].regulation_period_s,
+            # ADR-0046 §8 (live): the compressor-guard suppression reason this tick
+            # ("" = not blocked). When set, dry_active reads as intent (queued),
+            # not "drying now" — the card shows "drying soon (compressor guard)".
+            "mode_nudge_blocked": _mode_nudge_blocked,
             # H3/ADR-0038: monotonic stamp of when this snapshot was produced, so
             # the system hub can detect a silently stale zone (age-based staleness).
             "mono_ts": now,

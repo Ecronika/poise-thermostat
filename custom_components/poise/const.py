@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.139.0"
+VERSION: Final = "0.140.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -85,6 +85,21 @@ DEFAULT_PRICE_EUR_KWH: Final = 0.30
 # class. "auto" derives it from the actuator's capabilities; override per zone.
 CONF_DYNAMICS: Final = "actuator_dynamics"
 DEFAULT_DYNAMICS: Final = "auto"
+
+# Single-AC compressor guard (ADR-0046 §8, live). Hold back a mode nudge that
+# would short-cycle the compressor: start it after a recent stop (min-off) or
+# flip cool<->dry (mode-hold). The device firmware already enforces ~180 s, so
+# this is wear/efficiency hygiene on top — 300/300 by default (not the 600 s hub
+# group value). Zone options override the dynamics-profile default; "off" is the
+# kill switch. Capability-gated (a heat-only TRV never gets a gate) and it never
+# blocks a stop or a safety action (frost / window / frozen / unavailable-safe).
+CONF_COMPRESSOR_GUARD: Final = "compressor_guard"
+CONF_COMPRESSOR_MIN_OFF: Final = "compressor_min_off_s"
+CONF_COMPRESSOR_MODE_HOLD: Final = "compressor_mode_hold_s"
+COMPRESSOR_GUARD_AUTO: Final = "auto"
+COMPRESSOR_GUARD_OFF: Final = "off"
+DEFAULT_COMPRESSOR_MIN_OFF_S: Final = 300.0
+DEFAULT_COMPRESSOR_MODE_HOLD_S: Final = 300.0
 
 # Heat-day cooling raise (ADR-0051): raise the cool setpoint toward outdoor-ΔT,
 # capped at the ASR office ceiling (raising the cap is an employer opt-in).
