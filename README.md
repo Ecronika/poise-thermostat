@@ -112,6 +112,41 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 
 A single *Poise System* entry aggregates the call-for-heat of opt-in zones into one boiler-demand sensor. **Boiler actuation is opt-in:** leave the on/off actions empty and the hub stays purely diagnostic (wire your own automation off the sensor); set them to switch a boiler with activation delay, keep-alive and minimum on/off cycling. Options: boiler count / power thresholds, on/off actions, activation-delay · keep-alive · min-on · min-off, max-power & current-power sensors, max flow temperature, flow hysteresis, and default heat source.
 
+### Card (dashboard display)
+
+Poise ships its own Lovelace card (auto-registered — no separate install). Add it via *Add card → Poise* and configure it in the **visual editor**, or in YAML. Everything here is display-only; unknown values fall back to sane defaults (ADR-0057).
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `entity` | — | The Poise `climate` entity to display. |
+| `density` | `comfortable` | `comfortable` or `compact` (tighter spacing for small cards). |
+| `controls` | `dial` | `dial` (drag to set), `buttons` (+/− steppers), or `none` (display-only — e.g. a locked wall tablet). |
+| `history` | `{ show: true, hours: 24 }` | Temperature history graph; `hours` is `12` / `24` / `48`; `false` hides it. |
+| `sections.chips` | all | Condition chips to show, a subset of `[hvac, window, temperature, humidity, co2, ca]` (`false` = none). |
+| `sections.pmv` | `true` | Comfort (PMV / PPD) lamp. |
+| `sections.shadow_pill` | `true` | Shadow-mode detail pill (`show_shadow` is the legacy alias). |
+| `sections.learning` | `true` | Learning-progress / confidence line. |
+| `sections.presets` | `true` | HA preset buttons (Eco / Comfort / Boost / Away …). |
+| `temperature_scale` · `humidity_thresholds` · `co2_scheme` · `co2_thresholds` | comfort · — · `uba` · — | Room-condition traffic-light thresholds (ADR-0049; card-side verdict, no recorder load). |
+
+The dial also draws a **mould-limit tick** at the anti-condensation floor whenever a humidity sensor is configured, so the safe lower bound stays visible.
+
+```yaml
+type: custom:poise-card
+entity: climate.wohnzimmer
+density: comfortable
+controls: dial            # dial | buttons | none
+history:
+  show: true
+  hours: 24
+sections:
+  chips: [hvac, window, humidity, co2]
+  pmv: true
+  shadow_pill: true
+  learning: true
+  presets: true
+```
+
 ## Entities created
 
 **Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), plus diagnostic `sensor` entities for operative temperature, `T_rm`, MRT, solar gain, β_s, time constant τ, confidence, identification progress, learning phase, the comfort index (`pmv` / `ppd`), the EN 15500-1 control-accuracy metric (`ca_*`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`), and the shadow `mpc_*` (and per-device `tpi_*` / `pi_*`) values; and a per-zone **`switch`** that toggles the open-window bypass.
