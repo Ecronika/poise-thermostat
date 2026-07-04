@@ -1,6 +1,6 @@
 # ADR-0020: Performance-Budget & Skalierung
 
-**Status:** In Arbeit (60 %) · **Datum:** 2026-06-18 · **Bezug:** E28 · **Verifizierung:** Code-Review RoomMind/BT/ThermoSmart/Vesta/Versatile (Thema M)
+**Status:** In Arbeit (80 %) · **Datum:** 2026-06-18 · **Bezug:** E28 · **Verifizierung:** Code-Review RoomMind/BT/ThermoSmart/Vesta/Versatile (Thema M)
 
 ## Kontext
 Der MPC-Pfad (ADR-0001) ist die teuerste Komponente und läuft je Zone. Offen: Tick-Budget, Caching, Skalierungsstrategie.
@@ -33,3 +33,9 @@ Allgemeine Performance-Muster; eigenständig umgesetzt.
 
 ## Verknüpfungen
 Setzt ADR-0006 (Tick/Events) und ADR-0001/0009 (Solver/Gate) voraus. Budget-Benchmark gehört zu ADR-0011. Caching berührt ADR-0010 (Solar-Serie).
+
+## Nachtrag (2026-07-04, v0.147.0): Tick-Dauer-Messung live (Entscheidung §5, Messteil)
+
+Der Messteil von §5 ist geshippt: pure `control/tick_budget.py` (`TickBudget` — EWMA + Session-Max + `over_count`/`over_budget` gegen `DEFAULT_TICK_BUDGET_MS = 50`, transient — ein Neustart re-misst) + 5 Tests. Der Coordinator misst die **Wall-Time** von `_run_once` unter dem Lock (inkl. Forecast- und optionalem Trace-Append, für die der Lock gehalten wird) via `time.perf_counter` und exponiert `tick_ms`/`tick_ms_ewma`/`tick_ms_max`/`tick_over_budget` im Return-Dict; LTS-Measurement-Sensor `tick_duration_ms` (geglätteter EWMA) + `tick_over_budget` in den climate-`_ATTRS`. Damit ist die reale Per-Zone-Tickzeit im Feld sichtbar, **bevor** Phase 4 Regelarbeit hinzufügt. 50 ms/Zone ist bewusst großzügig (flaggt echte Regression / Skalierungswand, kein Jitter) und lässt bei 60-s-Ticks reichlich Luft für viele Zonen.
+
+**Offen (§5-Rest):** der nicht-flaky Harness-CPU-Benchmark des reinen Kerns (braucht die A-1-Pure-Tick-Extraktion, nutzerseitig zurückgestellt — Regelpfad-Risiko) und die **Zonen-Staffelung** bei Überschreitung statt hartem Limit (erst bei echter Mehrzonenlast relevant → Phase 7). Status daher In Arbeit (80 %).
