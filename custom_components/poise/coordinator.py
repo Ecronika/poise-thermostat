@@ -857,7 +857,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             return
         try:
             if self._trace_recorder is None:
-                path = self.hass.config.path("poise_traces", f"{self._trace_slug}.jsonl")
+                path = self.hass.config.path(
+                    "poise_traces", f"{self._trace_slug}.jsonl"
+                )
                 self._trace_recorder = TraceRecorder(
                     self.hass, path, DEFAULT_TRACE_MAX_BYTES
                 )
