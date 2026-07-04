@@ -263,3 +263,55 @@ def mode_nudge_block_reason(
     if want and have and desired != current and mode_hold_remaining_s > 0.0:
         return f"mode-hold {mode_hold_remaining_s:.0f}s"
     return None
+
+
+def resolve_guard_policy(
+    *,
+    enabled: bool,
+    can_condition: bool,
+    min_off_s: float,
+    mode_hold_s: float,
+) -> LifecyclePolicy | None:
+    """The effective single-AC compressor-guard policy, or ``None`` for no gate.
+
+    ``None`` — no gate at all — when the kill switch is off (``enabled`` False) or
+    the actuator cannot run a compressor (no cool/dry capability): a heat-only TRV
+    or hydronic actuator never gets a gate. Otherwise the resolved per-zone timers
+    (option over the dynamics-profile default) form the policy; a single AC gets
+    no starts cap — min-off structurally bounds the start rate and
+    ``max_starts_per_h`` stays hub-group territory (ADR-0046 §8).
+    """
+    if not enabled or not can_condition:
+        return None
+    return LifecyclePolicy(
+        min_off_s=min_off_s,
+        min_mode_hold_s=mode_hold_s,
+        max_starts_per_h=None,
+    )
+
+
+def guard_block_reason(
+    policy: LifecyclePolicy | None,
+    state: DeviceLifecycle,
+    now: float,
+    *,
+    desired: str,
+    current: str | None,
+    is_safety: bool,
+) -> str | None:
+    """Live compressor-guard verdict for this tick's mode nudge (ADR-0046 §8).
+
+    A ``None`` policy (gate disabled / not a compressor) never blocks. Otherwise
+    defers to :func:`mode_nudge_block_reason` with the device's live min-off /
+    mode-hold remaining. Only ever suppresses a compressor *start* or a cool<->dry
+    *flip*; never a stop, and never a safety action.
+    """
+    if policy is None:
+        return None
+    return mode_nudge_block_reason(
+        desired=desired,
+        current=current,
+        min_off_remaining_s=min_off_remaining(state, now, policy),
+        mode_hold_remaining_s=mode_hold_remaining(state, now, policy),
+        is_safety=is_safety,
+    )
