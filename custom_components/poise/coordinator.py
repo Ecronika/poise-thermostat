@@ -18,6 +18,7 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
+from homeassistant.exceptions import ServiceNotFound
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -799,26 +800,31 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         action = failure_notification_action(failed, self._failure_notified)
         if action == "create":
             self._failure_notified = True
-            await self.hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": f"Poise: heating failure — {self.zone_name}",
-                    "message": (
-                        f"{self.zone_name} is not warming up despite a heating "
-                        "demand. Check the valve, radiator or boiler."
-                    ),
-                    "notification_id": self._notif_id,
-                },
-                blocking=False,
-            )
+            data: dict[str, Any] = {
+                "title": f"Poise: heating failure — {self.zone_name}",
+                "message": (
+                    f"{self.zone_name} is not warming up despite a heating "
+                    "demand. Check the valve, radiator or boiler."
+                ),
+                "notification_id": self._notif_id,
+            }
         elif action == "dismiss":
             self._failure_notified = False
+            data = {"notification_id": self._notif_id}
+        else:
+            return
+        # A persistent notification is best-effort user feedback. If the notify
+        # service is unavailable (e.g. a startup/shutdown race where the
+        # persistent_notification integration isn't registered yet), it must
+        # never propagate and take down the safety-critical control tick.
+        try:
             await self.hass.services.async_call(
-                "persistent_notification",
-                "dismiss",
-                {"notification_id": self._notif_id},
-                blocking=False,
+                "persistent_notification", action, data, blocking=False
+            )
+        except ServiceNotFound:
+            _LOGGER.debug(
+                "persistent_notification.%s unavailable; skipping notification",
+                action,
             )
 
     def _save_payload(self) -> dict[str, Any]:
