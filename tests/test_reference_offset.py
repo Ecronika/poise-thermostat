@@ -79,3 +79,41 @@ def test_roundtrip_restore_conservative() -> None:
     assert abs(r.offset - e.offset) < 1e-9
     assert abs(r.minutes - e.minutes) < 1e-9
     assert r.trusted is False  # never compensate straight after restore
+
+
+def test_not_conditioning_holds_prev() -> None:
+    # Task 351: an idle tick (device not conditioning) freezes the estimate —
+    # nothing folded in, no minutes accrued, so the warm-up counts real
+    # conditioning time (the internal sensor only carries the bias under airflow).
+    e = update_offset(None, actuator_temp=26.0, room_temp=25.0, dt_min=1.0)
+    assert e is not None
+    held = update_offset(
+        e, actuator_temp=26.0, room_temp=25.0, dt_min=5.0, conditioning=False
+    )
+    assert held is e  # identity: nothing changed while idle
+
+
+def test_not_conditioning_never_seeds() -> None:
+    # a first sample taken while idle must not even seed an estimate
+    assert (
+        update_offset(
+            None, actuator_temp=26.0, room_temp=25.0, dt_min=1.0, conditioning=False
+        )
+        is None
+    )
+
+
+def test_warmup_counts_only_conditioning_time() -> None:
+    # 8×5 min of conditioning interleaved with long idle holds (absurd 99 K reads)
+    # warms up in exactly 40 conditioning-minutes and the idle reads never pollute
+    # the EWMA — the whole point of the gate.
+    e = None
+    for _ in range(8):
+        e = update_offset(e, actuator_temp=26.2, room_temp=25.0, dt_min=5.0)
+        e = update_offset(
+            e, actuator_temp=99.0, room_temp=25.0, dt_min=30.0, conditioning=False
+        )
+    assert e is not None
+    assert e.minutes == 40.0  # idle ticks did not advance the clock
+    assert e.trusted is True
+    assert 1.0 < e.offset <= 1.2  # the 99 K idle reads never entered the average
