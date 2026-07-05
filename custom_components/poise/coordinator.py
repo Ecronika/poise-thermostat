@@ -139,7 +139,6 @@ from .control.reference_offset import (
     compensated_setpoint,
     update_offset,
 )
-from .estimation.tau_settle import TauSettle, settle_confidence, update_settle
 from .control.regulation_quality import RegulationQuality
 from .control.scoring_expectation import model_expected_minutes
 from .control.tick_budget import TickBudget
@@ -181,6 +180,7 @@ from .estimation.psychrometrics import dewpoint as psychro_dewpoint
 from .estimation.psychrometrics import humidity_ratio
 from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
+from .estimation.tau_settle import TauSettle, settle_confidence, update_settle
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature, parse_finite
 from .multi import lifecycle as _lifecycle
