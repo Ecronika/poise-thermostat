@@ -35,7 +35,7 @@ def test_home_false_is_away_even_with_preheat() -> None:
     # the home gate is outermost: preheat must NOT preheat an empty house
     assert _resolve(home=False) is PresenceLevel.AWAY
     assert _resolve(home=False, preheating=True) is PresenceLevel.AWAY
-    assert _resolve(home=False, is_comfort=True, room_absent_min=99) is PresenceLevel.AWAY
+    assert _resolve(home=False, room_absent_min=99) is PresenceLevel.AWAY
 
 
 def test_home_unavailable_or_unset_is_present() -> None:
