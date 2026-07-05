@@ -38,7 +38,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0017](ADR-0017-Operativ-zu-Luft-Transformation.md) | Operativ→Luft-Transformation (eine Stelle, geglättet) | Implementiert |
 | [0018](ADR-0018-Versionierung-Semver-Deprecation.md) | SemVer + kumulative Migration + Deprecation | In Arbeit (60 %) |
 | [0019](ADR-0019-KNX-Norm-Expose.md) | KNX-/Norm-Expose als optionales Status-Modul | Vorgeschlagen |
-| [0020](ADR-0020-Performance-Budget.md) | Performance-Budget: 60 s + eventgetrieben + Caching | In Arbeit (60 %) |
+| [0020](ADR-0020-Performance-Budget.md) | Performance-Budget: 60 s + eventgetrieben + Caching | In Arbeit (80 %) |
 | [0021](ADR-0021-i18n-und-Einheiten.md) | strings.json-Quelle, generierte Sprachen, Einheiten | In Arbeit (70 %) |
 | [0022](ADR-0022-Security-und-Supply-Chain.md) | Null schwere Deps, lokal, anonymisiert, redigiert | In Arbeit (75 %) |
 | [0023](ADR-0023-Komfort-Dual-Setpoint-Totband.md) | Capability-aware Dual-Setpoint + Totband + Priorität | Implementiert |
@@ -74,7 +74,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0053](ADR-0053-Leerlauf-Belegt-Luefterumwaelzung.md) | Leerlauf-/Belegt-Lüfterumwälzung (Fan-Low im besetzten Totband) | Vorgeschlagen |
 | [0054](ADR-0054-PMV-PPD-Behaglichkeitsbewertung.md) | PMV/PPD-Behaglichkeitsbewertung (ISO 7730) — Diagnose + begrenzter Offset | In Arbeit (35 %) |
 | [0055](ADR-0055-Regelguete-Metrik-Control-Accuracy.md) | M1 Regelgüte-Metrik (EN 15500-1 CA) — Komfortabweichung + Pendel-Detektor als Flip-Gate | In Arbeit (40 %) |
-| [0056](ADR-0056-Referenzrahmen-Abgleich-Aktor-Raum.md) | Referenzrahmen-Abgleich Aktor-Interntemperatur ↔ Raumfühler (Offset-Kompensation self-regulating) | In Arbeit (15 %) |
+| [0056](ADR-0056-Referenzrahmen-Abgleich-Aktor-Raum.md) | Referenzrahmen-Abgleich Aktor-Interntemperatur ↔ Raumfühler (Offset-Kompensation self-regulating) | In Arbeit (25 %) |
 | [0057](ADR-0057-Card-Layout-Konfiguration.md) | Card-Layout & Konfiguration (Dichte, Bedienung dial/buttons/none, Abschnitte, Schimmel-Tick, UI-Editor) | Implementiert (v0.138.0) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
@@ -83,7 +83,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 
 **In Arbeit — prädiktiver Kern läuft durchgängig als Shadow** (berechnet & diagnostisch ausgegeben, schreibt aber den Aktor **nicht**, aktiv gated auf Kaltsaison-Validierung): MPC-Solver & Live-Verdrahtung (0001/0009/0033), TPI-Direktventil (0004/0036), PI-Sollwert-Kompensator (0037), prädiktive Verschattung (0043). Mehrzonen-Shedding/Vorlauf/Verdichter (0013) ist teils Shadow. Querschnittsthemen teilweise offen: Migration/Deprecation (0007/0018), Config-Auto-Discovery (0008), Performance-Budget (0020), i18n-Vollständigkeit (0021), anonymisierter Export (0022).
 
-**Befund (Ehrlichkeit):** **ADR-0044 (Outcome-Scoring)** und **ADR-0045 (Effizienz-Report)** behaupten im Text eine Coordinator-Verdrahtung samt Diagnose-Attributen, die im Code **nicht existiert** — vorhanden sind nur die reinen Module + Tests, nicht verdrahtet (→ je „In Arbeit (35 %)"). **ADR-0046 (Multi-Aktor)** ist mit dem reinen P0-Paket `custom_components/poise/multi/` begonnen (nicht verdrahtet) → „In Arbeit (10 %)". **ADR-0019 (KNX-Expose)** ist nicht begonnen (im ADR als P2/optional markiert) → „Vorgeschlagen".
+**Befund (Ehrlichkeit, Stand v0.148.0):** Die frühere Warnung zu **ADR-0044/0045** ist erledigt — beide sind seit v0.97.0 im Coordinator verdrahtet (Outcome-/Savings-Diagnose live) → „Implementiert". **ADR-0046 (Multi-Aktor)** ist über P0–P2 (Thermal-Shadow + Per-Device-Lifecycle) plus **live** Verdichterschutz (§8, v0.141) fortgeschritten → „In Arbeit (30 %)". Neu als Shadow-Messschicht (berechnet/diagnostisch, keine Writes, gated): Regelgüte-Metrik (0055), PMV/PPD (0054), Referenzrahmen-Offset inkl. Laufzustands-Konditionierung (0056), Aktor-Dynamik-Profile (0052), Feuchte/Thermoschock (0050/0051). **ADR-0019 (KNX-Expose)** weiter nicht begonnen (P2/optional) → „Vorgeschlagen".
 
 ## Verifizierungs-Notizen (Wettbewerber, in ADRs eingearbeitet)
 
