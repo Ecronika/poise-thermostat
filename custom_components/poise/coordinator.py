@@ -139,6 +139,7 @@ from .control.reference_offset import (
     compensated_setpoint,
     update_offset,
 )
+from .estimation.tau_settle import TauSettle, settle_confidence, update_settle
 from .control.regulation_quality import RegulationQuality
 from .control.scoring_expectation import model_expected_minutes
 from .control.tick_budget import TickBudget
@@ -325,6 +326,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._ca_last_mono: float | None = None  # real dt for the CA metric
         self._ref_offset: OffsetEstimate | None = None  # ADR-0056 actuator↔room
         self._ref_last_mono: float | None = None  # real dt for the offset EWMA
+        self._tau_settle: TauSettle | None = None  # settle-based τ-confidence (T343)
+        self._tau_last_mono: float | None = None  # real dt for the τ settle EWMA
         self._outcome_session = OutcomeSession()
         self._hdh = HdhSavings()
         self._hdh_cfg = HdhConfig(
@@ -481,6 +484,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._regq = RegulationQuality.from_dict(data["regulation_quality"])
                 if isinstance(data.get("ref_offset"), dict):
                     self._ref_offset = OffsetEstimate.from_dict(data["ref_offset"])
+                if isinstance(data.get("tau_settle"), dict):
+                    self._tau_settle = TauSettle.from_dict(data["tau_settle"])
                 if isinstance(data.get("hdh_savings"), dict):
                     self._hdh = HdhSavings.from_dict(data["hdh_savings"])
                 self._window_bypass = bool(data.get("window_bypass", False))
@@ -938,6 +943,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "regulation_quality": self._regq.to_dict(),
             "ref_offset": (
                 self._ref_offset.to_dict() if self._ref_offset is not None else None
+            ),
+            "tau_settle": (
+                self._tau_settle.to_dict() if self._tau_settle is not None else None
             ),
             "hdh_savings": self._hdh.to_dict(),
             "window_bypass": self._window_bypass,
@@ -2082,6 +2090,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 dt_min=_ref_dt,
                 conditioning=_ref_conditioning,
             )
+            # Task 343 SHADOW: settle-based τ-confidence — has α (=1/τ) actually
+            # converged, not just been counted (ADR-0024)? Fed only on learn-active
+            # ticks (the same excitation signal, where α can move); diagnostic only,
+            # no writes, until it clamps the preheat lead live (Phase 4, ADR-0055).
+            if self._tau_last_mono is not None:
+                _td = (now - self._tau_last_mono) / 60.0
+                _tau_dt = min(max(_td, 0.0), 2.0 * _tick_min)
+            else:
+                _tau_dt = _tick_min
+            self._tau_last_mono = now
+            self._tau_settle = update_settle(
+                self._tau_settle,
+                alpha=self._ekf.x[1],
+                dt_min=_tau_dt,
+                learn_active=_ref_conditioning,
+            )
             _rep = self._hdh.report(self._hdh_cfg)
             outcome_diag = {
                 "outcome_last_score": self._outcome_stats.last_score,
@@ -2109,6 +2133,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._ref_offset.trusted if self._ref_offset is not None else None
                 ),
                 "ref_offset_conditioning": _ref_conditioning,
+                "tau_confidence": round(settle_confidence(self._tau_settle), 3),
+                "tau_settled": (
+                    self._tau_settle.settled if self._tau_settle is not None else None
+                ),
+                "tau_settle_minutes": (
+                    round(self._tau_settle.minutes, 0)
+                    if self._tau_settle is not None
+                    else None
+                ),
                 "cool_sp_compensated": (
                     compensated_setpoint(eff_cool, self._ref_offset, enabled=True)
                     if self._ref_offset is not None

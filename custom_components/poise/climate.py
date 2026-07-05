@@ -135,6 +135,8 @@ _ATTRS = (
     "ref_offset_dev",
     "ref_offset_trusted",
     "ref_offset_conditioning",
+    "tau_confidence",
+    "tau_settled",
     "cool_sp_compensated",
 )
 
