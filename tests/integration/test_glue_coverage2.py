@@ -12,6 +12,7 @@ CI-only: needs a modern HA runtime (see conftest); the sandbox HA 2023.7 skips.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
@@ -42,6 +43,7 @@ from custom_components.poise.const import (
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
 )
+from custom_components.poise.trace.schema import TraceRecord
 
 
 def _base(**extra: Any) -> dict[str, Any]:
@@ -227,3 +229,30 @@ async def test_hub_actuates_boiler_on_zone_demand(hass: HomeAssistant) -> None:
     assert "boiler_demand" in d
     assert "flow_target" in d
     assert "shed_count" in d
+
+
+async def test_trace_recording_appends_a_replay_line(hass: HomeAssistant) -> None:
+    """With opt-in field-trace recording on, a healthy tick appends one
+    replay-sufficient JSONL record (ADR-0011) and never disturbs control."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _room_and_actuator(hass, room=20.0, sp=21.0, modes=["heat", "off"], state="heat")
+    entry = await _setup(hass, _base())
+    coord = entry.runtime_data
+
+    coord._trace_enabled = True  # opt-in recorder, default off (ADR-0011)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    # capture is pure observation: the tick still produced a normal payload
+    assert coord.data["available"] is True
+    path = Path(hass.config.path("poise_traces", f"{entry.entry_id}.jsonl"))
+    assert path.exists()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) >= 1
+    # the appended line is replay-sufficient: it round-trips through the schema
+    # and its model snapshot matches the coordinator's post-tick EKF state
+    # (the writer rounds floats to 4 dp, so compare at that precision).
+    record = TraceRecord.from_json_line(lines[-1])
+    assert record.room is not None
+    assert record.alpha == round(coord._ekf.x[1], 4)
