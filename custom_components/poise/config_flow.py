@@ -22,6 +22,7 @@ from .config_reconcile import reconfigure_options
 from .const import (
     COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
+    CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
@@ -58,9 +59,11 @@ from .const import (
     CONF_MAX_POWER_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_OCCUPANCY_SENSOR,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
     CONF_SOURCE_POLICY,
@@ -70,6 +73,7 @@ from .const import (
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
@@ -387,6 +391,30 @@ def _options_schema() -> vol.Schema:
             vol.Optional(
                 CONF_TRACE_RECORDING, default=False
             ): selector.BooleanSelector(),
+            # ADR-0058: presence coupling. Both entities optional -> today's
+            # behaviour (fail-safe present), so the feature is zero-regression.
+            vol.Optional(CONF_PRESENCE_HOME): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain=["person", "device_tracker", "binary_sensor", "group"],
+                )
+            ),
+            vol.Optional(CONF_OCCUPANCY_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="binary_sensor",
+                    device_class=["occupancy", "motion", "presence"],
+                )
+            ),
+            vol.Optional(
+                CONF_ABSENCE_AFTER_MIN, default=DEFAULT_ABSENCE_AFTER_MIN
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=5,
+                    max=240,
+                    step=5,
+                    unit_of_measurement="min",
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
             vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER

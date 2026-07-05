@@ -105,6 +105,13 @@ DEFAULT_COMPRESSOR_MODE_HOLD_S: Final = 300.0
 CONF_TRACE_RECORDING: Final = "trace_recording"
 DEFAULT_TRACE_MAX_BYTES: Final = 20 * 1024 * 1024
 
+# Presence coupling (ADR-0058): optional home/room entities feed `occupied`
+# hierarchically; absent both -> today's behaviour, zero regression.
+CONF_PRESENCE_HOME: Final = "presence_home"  # person/device_tracker/group
+CONF_OCCUPANCY_SENSOR: Final = "occupancy_sensor"  # binary_sensor motion/occupancy
+CONF_ABSENCE_AFTER_MIN: Final = "absence_after_min"
+DEFAULT_ABSENCE_AFTER_MIN: Final = 30.0
+
 # Heat-day cooling raise (ADR-0051): raise the cool setpoint toward outdoor-ΔT,
 # capped at the ASR office ceiling (raising the cap is an employer opt-in).
 # Defaults live in comfort/thermal_shock.py. With the default 26 °C cap the
