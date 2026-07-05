@@ -986,10 +986,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # ADR-0020: the tick's wall-time (it holds the lock across the forecast
             # and any trace append) against the budget — an early scaling signal.
             self._tick_budget.observe((time.perf_counter() - _t0) * 1000.0)
-            data["tick_ms"] = round(self._tick_budget.last_ms, 1)
-            data["tick_ms_ewma"] = round(self._tick_budget.ewma_ms, 1)
-            data["tick_ms_max"] = round(self._tick_budget.max_ms, 1)
-            data["tick_over_budget"] = self._tick_budget.over_budget
+            # Attach the timing diagnostics to a normal payload only; the minimal
+            # degraded/safe-state dicts ({"available": False, ...}) stay a pristine
+            # contract that the entity availability gate and its tests rely on.
+            if data.get("available", True) is not False:
+                data["tick_ms"] = round(self._tick_budget.last_ms, 1)
+                data["tick_ms_ewma"] = round(self._tick_budget.ewma_ms, 1)
+                data["tick_ms_max"] = round(self._tick_budget.max_ms, 1)
+                data["tick_over_budget"] = self._tick_budget.over_budget
             return data
 
     def _emit_health_issues(self) -> tuple[bool, bool, bool, bool]:
