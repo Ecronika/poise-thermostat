@@ -72,6 +72,7 @@ def update_offset(
     actuator_temp: float | None,
     room_temp: float | None,
     dt_min: float,
+    conditioning: bool = True,
     horizon_min: float = DEFAULT_HORIZON_MIN,
     cap: float = DEFAULT_CAP_K,
     noise_max: float = DEFAULT_NOISE_MAX_K,
@@ -82,11 +83,16 @@ def update_offset(
     ``dt_min`` is the real elapsed time since the last update (caller-supplied,
     monotonic — the EKF pattern). A missing actuator/room reading holds the prior
     estimate unchanged (no decay: the offset is a slow physical property of the
-    sensor placement). The trust gate requires BOTH a warm-up and a low
+    sensor placement). The same hold applies while the actuator is not
+    actively conditioning (``conditioning=False``): the internal sensor only
+    carries the placement bias while the device drives air/heat past it, so idle
+    ticks would pull the offset toward zero — they are skipped, and the warm-up
+    therefore counts real conditioning time.
+    The trust gate requires BOTH a warm-up and a low
     short-term deviation, so a noisy or sign-flipping sensor never enables
     compensation (ADR-0056).
     """
-    if actuator_temp is None or room_temp is None:
+    if not conditioning or actuator_temp is None or room_temp is None:
         return prev
     raw = actuator_temp - room_temp
     if prev is None:
