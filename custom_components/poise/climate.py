@@ -134,6 +134,7 @@ _ATTRS = (
     "ref_offset",
     "ref_offset_dev",
     "ref_offset_trusted",
+    "ref_offset_conditioning",
     "cool_sp_compensated",
 )
 

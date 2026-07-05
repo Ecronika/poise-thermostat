@@ -2054,10 +2054,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     mode=mode,
                     dt_min=_ca_dt,
                 )
-            # ADR-0056 SHADOW: actuator<->room reference-frame offset (no writes,
-            # every tick — the offset exists regardless of the comfort window).
-            # The compensated setpoint is a diagnostic only; the write path stays
-            # room-referenced until this is flip-gated live (ADR-0055 metric).
+            # ADR-0056 SHADOW: actuator<->room reference-frame offset (no writes).
+            # Task 351: fold in a sample only while the actuator is actually
+            # conditioning — its internal sensor carries the placement bias only
+            # under active airflow/heat, so idle ticks would drag the offset toward
+            # zero. Reuse the EKF drive signal (real hvac_action, intent fallback);
+            # the warm-up therefore counts real conditioning time. Diagnostic only:
+            # the write path stays room-referenced until flip-gated live (ADR-0055).
             if self._ref_last_mono is not None:
                 _rd = (now - self._ref_last_mono) / 60.0
                 _ref_dt = min(max(_rd, 0.0), 2.0 * _tick_min)
@@ -2071,11 +2074,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 _act_f = float(_act_raw) if _act_raw is not None else None
             except (TypeError, ValueError):
                 _act_f = None
+            _ref_conditioning = self._last_u_h > 0.0 or self._last_u_c > 0.0
             self._ref_offset = update_offset(
                 self._ref_offset,
                 actuator_temp=_act_f,
                 room_temp=room,
                 dt_min=_ref_dt,
+                conditioning=_ref_conditioning,
             )
             _rep = self._hdh.report(self._hdh_cfg)
             outcome_diag = {
@@ -2103,6 +2108,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "ref_offset_trusted": (
                     self._ref_offset.trusted if self._ref_offset is not None else None
                 ),
+                "ref_offset_conditioning": _ref_conditioning,
                 "cool_sp_compensated": (
                     compensated_setpoint(eff_cool, self._ref_offset, enabled=True)
                     if self._ref_offset is not None
