@@ -59,6 +59,8 @@ def decide(
     occupied: bool = True,  # False during an unoccupied setback (review V3)
     adaptive_cool: bool = False,  # ADR-0023 §1: EN adaptive cooling edge (opt-in)
     adaptive_cap: float = 26.0,  # ASR office ceiling for the adaptive cool edge
+    eco_widen: float = 0.0,  # ADR-0058: presence Eco band-widening (both edges)
+    cool_ceiling_override: float | None = None,  # ADR-0058: unoccupied cool ceiling
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
     # The fixed design bands are anchored to the comfort centre (heat/cool edges
@@ -77,11 +79,23 @@ def decide(
     # setback is neutralised. The air-side frost/mould floor is re-applied below,
     # so protection is never weakened; only the comfort lower is waived.
     heat_lower = HEATING_LOWER[category] if occupied else frost_floor
-    heat_op = _clamp(comfort_base - widen, heat_lower, HEATING_UPPER[category])
+    heat_op = _clamp(
+        comfort_base - widen - eco_widen, heat_lower, HEATING_UPPER[category]
+    )
+    # ADR-0058: presence Eco widens both edges symmetrically (heat down, cool up);
+    # the unoccupied cool ceiling relaxes from COOLING_UPPER to the caller's
+    # override (ROOM_ECO -> cool_hard_cap, AWAY -> device_max). eco_widen is baked
+    # into the FIXED edge before the adaptive lift below, so max(fixed+eco,
+    # adaptive) holds — the adaptive edge can never undo an Eco relaxation.
+    cool_ceiling = (
+        cool_ceiling_override
+        if cool_ceiling_override is not None
+        else COOLING_UPPER[category]
+    )
     cool_op = _clamp(
-        comfort_base + _NEUTRAL_DEADBAND_K + widen,
+        comfort_base + _NEUTRAL_DEADBAND_K + widen + eco_widen,
         COOLING_LOWER[category],
-        COOLING_UPPER[category],
+        cool_ceiling,
     )
     # ADR-0023 §1 (live, opt-in): in the cooling season lift the cooling edge from
     # the fixed summer band to the EN adaptive upper (capped at the ASR ceiling),
