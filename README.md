@@ -104,6 +104,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
 | Adaptive cooling edge | no | off | Lift the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band (ADR-0023 §1). |
 | Compressor guard · min-off · mode-hold | no | on · 300 s · 300 s | Single-AC anti-short-cycle (Tuning options): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
+| Actuator dynamics | no | auto | Controller time constants per actuator class — `auto` (classify from the learned model) or force `fast_air` / `slow_hydronic` / `very_slow`; faster profiles retune the PI/MPC and throttle setpoint nudges for self-regulating climate entities (ADR-0052). |
 | Field-trace recording | no | off | Advanced/diagnostic: append one compact JSONL line per tick to `config/poise_traces/<id>.jsonl` (EKF drive inputs + model snapshot + decision), rotated at ~20 MB. For offline golden-file replay analysis (ADR-0011); pure observation, never touches control. |
 | Outdoor cooling / heating lockout | no | 16 / 22 °C | Suppress cooling below / heating above these outdoor temperatures (ADR-0047). |
 | Annual consumption · tariff | no | — | Baseline for the heating-degree-hour → kWh / € savings estimate. |
@@ -151,7 +152,7 @@ sections:
 
 ## Entities created
 
-**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), plus diagnostic `sensor` entities for operative temperature, `T_rm`, MRT, solar gain, β_s, time constant τ, confidence, identification progress, learning phase, the comfort index (`pmv` / `ppd`), the EN 15500-1 control-accuracy metric (`ca_*`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`), and the shadow `mpc_*` (and per-device `tpi_*` / `pi_*`) values; and a per-zone **`switch`** that toggles the open-window bypass.
+**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), plus diagnostic `sensor` entities for operative temperature, `T_rm`, MRT, solar gain, β_s, time constant τ, confidence, identification progress, learning phase, the comfort index (`pmv` / `ppd`), the EN 15500-1 control-accuracy metric (`ca_*`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`, `fan_velocity_ms`), the actuator↔room reference-frame offset (`ref_offset`, `ref_offset_dev`, `ref_offset_trusted`, `ref_offset_conditioning`, `cool_sp_compensated`), the single-AC compressor guard (`compressor_guard_blocked`), the per-tick compute budget (`tick_duration_ms`, `tick_over_budget`), the transparency flags (`override_clamped`, `mould_floor`, `dewpoint`), and the shadow `mpc_*` (and per-device `tpi_*` / `pi_*`) values; and a per-zone **`switch`** that toggles the open-window bypass.
 
 **System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow target and load-shedding attributes).
 
