@@ -236,7 +236,10 @@
           "compressor_guard": "Kompressorschutz (Einzel-AC) — hält Kühl-/Trocken-Starts + Flips zurück, die den Kompressor kurzschließen würden",
           "compressor_min_off_s": "Kompressor-Mindest-Aus-Zeit (s) — warten nach Stopp vor Neustart (leer = 300)",
           "compressor_mode_hold_s": "Kompressor-Modus-Haltezeit (s) — warten vor Kühlen↔Trocknen-Wechsel (leer = 300)",
-          "trace_recording": "Feld-Trace-Aufzeichnung — eine JSONL-Zeile je Tick für Offline-Replay-Analyse (fortgeschritten)"
+          "trace_recording": "Feld-Trace-Aufzeichnung — eine JSONL-Zeile je Tick für Offline-Replay-Analyse (fortgeschritten)",
+          "presence_home": "Anwesenheit Zuhause (optional) — person/device_tracker/group; bei 'nicht zuhause' geht die Zone in die Abwesenheits-Absenkung und heizt nicht vor. Leer = aus.",
+          "occupancy_sensor": "Raumbelegung (optional) — Bewegungs-/Belegungs-binary_sensor; ein leerer Raum geht nach der Verzögerung unten auf Eco. Leer = aus.",
+          "absence_after_min": "Verzögerung (min) bis Eco — wie lange der Raum leer messen muss, bevor abgesenkt wird (Standard 30)"
         }
       }
     }
