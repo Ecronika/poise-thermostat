@@ -25,6 +25,7 @@ tracker must never cool or heat-down the house. Pure and HA-free (ADR-0005/0011)
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
@@ -80,3 +81,21 @@ def resolve_presence(
     if is_comfort and room_absent_min >= cfg.absence_after_min:
         return PresenceLevel.ROOM_ECO
     return PresenceLevel.COMFORT
+
+
+def any_present(values: Iterable[bool | None]) -> bool | None:
+    """OR-reduce presence tri-states across several entities (ADR-0058).
+
+    Any entity resolving *present* wins (``True``). Only when every entity
+    resolves and all are *absent* is the result ``False``. An empty set — or any
+    unresolved (``None``) entity with no present one — yields ``None``: fail-safe
+    present, matching the single-entity gate, so a dead tracker never closes the
+    house gate. Used for both the house-presence set and the room-occupancy set
+    (both fail-safe to present).
+    """
+    vals = list(values)
+    if any(v is True for v in vals):
+        return True
+    if vals and all(v is False for v in vals):
+        return False
+    return None
