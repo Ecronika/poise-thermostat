@@ -36,6 +36,12 @@ from .comfort.mode_seam import mode_arbitration
 from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
 from .comfort.pmv import pmv_ppd, seasonal_clo
+from .comfort.presence import (
+    PresenceConfig,
+    PresenceLevel,
+    resolve_presence,
+    step_room_absence,
+)
 from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.thermal_shock import (
     DEFAULT_HARD_CAP_C,
@@ -47,6 +53,7 @@ from .comfort.virtual_mrt import virtual_mrt
 from .const import (
     COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
+    CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
@@ -68,9 +75,11 @@ from .const import (
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_OCCUPANCY_SENSOR,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
@@ -80,6 +89,7 @@ from .const import (
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
@@ -315,6 +325,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._outdoor: str | None = data.get(CONF_OUTDOOR_SENSOR)
         self._humidity: str | None = data.get(CONF_HUMIDITY_SENSOR)
         self._mrt: str | None = data.get(CONF_MRT_SENSOR)
+        # ADR-0058 presence coupling (optional; both None -> today's behaviour).
+        self._presence_home_entity: str | None = data.get(CONF_PRESENCE_HOME)
+        self._occupancy_entity: str | None = data.get(CONF_OCCUPANCY_SENSOR)
+        self._presence_cfg = PresenceConfig(
+            absence_after_min=float(
+                data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
+            ),
+            eco_delta=self._override_cfg.eco_offset,
+        )
+        self._room_absent_since: float | None = None  # transient; restart->present
         self._window: str | None = data.get(CONF_WINDOW_SENSOR)
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._comfort_base: float = float(
@@ -548,6 +568,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
         self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
         self._trace_enabled = bool(data.get(CONF_TRACE_RECORDING, False))
+        self._presence_home_entity = data.get(CONF_PRESENCE_HOME)
+        self._occupancy_entity = data.get(CONF_OCCUPANCY_SENSOR)
+        self._presence_cfg = PresenceConfig(
+            absence_after_min=float(
+                data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
+            ),
+            eco_delta=self._override_cfg.eco_offset,
+        )
         self._thermal_shock_delta = float(
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
@@ -1282,14 +1310,36 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         else:
             t_out_lead, model = t_out_eff, None
         lo, hi = HEATING_LOWER[self._category], HEATING_UPPER[self._category]
+
+        # ADR-0058 presence coupling. Resolve the house gate BEFORE the preheat
+        # plan: an empty house (home is False) or a manual Away preset means
+        # "away", whose depth is carried by the Eco band-widen below (not a base
+        # shift), so we feed a NEUTRAL preset base into the plan to avoid a
+        # cooling-edge double-dip, and an empty house is never preheated.
+        def _tristate(entity_id: str | None) -> bool | None:
+            if not entity_id:
+                return None
+            st = self.hass.states.get(entity_id)
+            if st is None or st.state in ("unknown", "unavailable"):
+                return None
+            s = st.state.lower()
+            if s in ("home", "on", "true"):
+                return True
+            if s in ("not_home", "off", "false", "away"):
+                return False
+            return None
+
+        _home = _tristate(self._presence_home_entity)
+        _is_away = self._preset is OverrideMode.AWAY or _home is False
+        _base_preset = OverrideMode.NONE if _is_away else self._preset
         plan = plan_preheat(
             comfort_base=mode_comfort_base(
-                self._preset, self._comfort_base, self._override_cfg
+                _base_preset, self._comfort_base, self._override_cfg
             ),
             is_comfort=sched.is_comfort,
             setback_offset=sched.setback_offset,
             minutes_to_comfort=float(sched.minutes_to_comfort),
-            optimal_start_enabled=self._optimal_start,
+            optimal_start_enabled=self._optimal_start and not _is_away,
             can_heat=can_heat,
             identified=self._ekf.identified,
             model=model,
@@ -1337,11 +1387,43 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         else:
             room_decide = room
             t_mrt_decide = t_mrt
-        # Away = nobody here -> full unoccupied setback (the EN band lower relaxes
-        # to the frost floor), not just the ~1 K preset offset that the category
-        # clamp would otherwise cap it at (review).
-        _away = self._preset is OverrideMode.AWAY
-        _occupied = (sched.is_comfort or preheating) and not _away
+        # ADR-0058: resolve the presence level (the house gate is already folded
+        # into _is_away above). Room-absence only modulates inside the comfort
+        # window and never overrides a preheat. Level -> (occupied, eco_widen,
+        # cool ceiling): COMFORT keeps today's behaviour; ROOM_ECO widens by the
+        # Eco delta capped at the cool hard cap; AWAY widens by the away offset up
+        # to the device max. No base shift -- the widen carries the whole depth.
+        _presence_now = dt_util.utcnow().timestamp()
+        _room_present = _tristate(self._occupancy_entity)
+        self._room_absent_since = step_room_absence(
+            self._room_absent_since, present=_room_present, now=_presence_now
+        )
+        _absent_min = (
+            (_presence_now - self._room_absent_since) / 60.0
+            if self._room_absent_since is not None
+            else 0.0
+        )
+        _level = resolve_presence(
+            home=_home,
+            room_absent_min=_absent_min,
+            is_comfort=sched.is_comfort,
+            preheating=preheating,
+            cfg=self._presence_cfg,
+        )
+        _eco_widen: float
+        _cool_ceiling: float | None
+        if _level is PresenceLevel.AWAY:
+            _occupied = False
+            _eco_widen = self._override_cfg.away_offset
+            _cool_ceiling = DEVICE_MAX_C
+        elif _level is PresenceLevel.ROOM_ECO:
+            _occupied = False
+            _eco_widen = self._presence_cfg.eco_delta
+            _cool_ceiling = self._cool_hard_cap
+        else:  # COMFORT
+            _occupied = sched.is_comfort or preheating
+            _eco_widen = 0.0
+            _cool_ceiling = None
         decision = comfort_decide(
             t_rm=t_rm_eff,
             room=room_decide,
@@ -1361,6 +1443,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             occupied=_occupied,
             adaptive_cool=self._adaptive_cool,
             adaptive_cap=self._cool_hard_cap,
+            eco_widen=_eco_widen,
+            cool_ceiling_override=_cool_ceiling,
         )
 
         act_state = self.hass.states.get(self._actuator)
@@ -1482,7 +1566,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 act_state and act_state.attributes.get("fan_modes")
             )
             _fan = fan_circulation(
-                occupied=None,
+                occupied=_occupied,
                 in_deadband=decision.heat_sp <= room_decide <= eff_cool,
                 active_mode=mode,
                 window_open=window_open,
@@ -1540,6 +1624,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "fan_cool_sp_shadow": _fan_cool_sp,
                 "fan_velocity_ms": round(_fan_v, 2),
                 "fan_circ_reason": _fan.reason,
+                "occupied": _occupied,
+                "presence_level": _level.value,
+                "room_absent_min": round(_absent_min, 1),
+                "home_present": _home,
                 "pmv": _pmv.pmv,
                 "ppd": _pmv.ppd,
                 "pmv_category": _pmv.category,
