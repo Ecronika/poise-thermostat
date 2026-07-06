@@ -197,18 +197,24 @@ async def test_options_flow_creates_entry(hass: HomeAssistant) -> None:
         result = await hass.config_entries.options.async_init(entry.entry_id)
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "init"
-        # the options schema requires the shared comfort fields (no bare {})
+        # The options schema is sectioned (ADR-0008): submit the nested shape.
+        # Required-no-default fields must be present in their section; sections
+        # whose fields are all optional/defaulted may be empty.
         opts = {
-            k: ROOM[k]
-            for k in (
-                CONF_CATEGORY,
-                CONF_COMFORT_BASE,
-                CONF_CLIMATE_MODE,
-                CONF_COMFORT_WEIGHT,
-                CONF_SETBACK_DELTA,
-                CONF_OPTIMAL_START,
-                CONF_OPERATIVE_INPUT,
-            )
+            "comfort": {
+                CONF_CATEGORY: ROOM[CONF_CATEGORY],
+                CONF_COMFORT_BASE: ROOM[CONF_COMFORT_BASE],
+                CONF_CLIMATE_MODE: ROOM[CONF_CLIMATE_MODE],
+                CONF_COMFORT_WEIGHT: ROOM[CONF_COMFORT_WEIGHT],
+            },
+            "schedule": {
+                CONF_SETBACK_DELTA: ROOM[CONF_SETBACK_DELTA],
+                CONF_OPTIMAL_START: ROOM[CONF_OPTIMAL_START],
+            },
+            "heat_cool": {},
+            "presence": {},
+            "advanced": {CONF_OPERATIVE_INPUT: ROOM[CONF_OPERATIVE_INPUT]},
+            "energy": {},
         }
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], opts
@@ -216,6 +222,8 @@ async def test_options_flow_creates_entry(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
+    # flatten_sections stored the tuning flat (not nested under section keys)
+    assert entry.options[CONF_COMFORT_BASE] == ROOM[CONF_COMFORT_BASE]
 
 
 async def test_reconfigure_system_hub(hass: HomeAssistant) -> None:
