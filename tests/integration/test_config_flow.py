@@ -127,7 +127,10 @@ async def test_reconfigure_updates_room(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_COMFORT_BASE] == 22.5
+    # V2 (ADR-0007): the reconfigure reload migrates the still-V1 entry, so tuning
+    # moves into options; the effective config the coordinator reads carries it.
+    assert entry.version == 2
+    assert {**entry.data, **entry.options}[CONF_COMFORT_BASE] == 22.5
 
 
 async def test_reconfigure_overrides_stale_option(hass: HomeAssistant) -> None:
@@ -150,8 +153,11 @@ async def test_reconfigure_overrides_stale_option(hass: HomeAssistant) -> None:
         await hass.async_block_till_done()
 
     assert result["reason"] == "reconfigure_successful"
-    assert entry.data[CONF_CLIMATE_MODE] == "heat_only"
-    assert CONF_CLIMATE_MODE not in entry.options  # no longer shadows data
+    # V2 (ADR-0007): the migrating reload moves tuning into options. The
+    # reconfigured value wins over the stale option (cool_only is gone) and the
+    # options-only field survives.
+    assert entry.options[CONF_CLIMATE_MODE] == "heat_only"  # was stale cool_only
+    assert {**entry.data, **entry.options}[CONF_CLIMATE_MODE] == "heat_only"
     assert entry.options[CONF_COOL_MIN_OUTDOOR] == 10.0  # options-only survives
 
 
