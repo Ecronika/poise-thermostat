@@ -165,7 +165,6 @@ def _schema() -> vol.Schema:
                 selector.SelectSelectorConfig(
                     options=["I", "II", "III"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="category",
                 )
             ),
             vol.Required(
@@ -375,7 +374,6 @@ def _options_schema() -> vol.Schema:
                             selector.SelectSelectorConfig(
                                 options=["I", "II", "III"],
                                 mode=selector.SelectSelectorMode.DROPDOWN,
-                                translation_key="category",
                             )
                         ),
                         vol.Required(CONF_CLIMATE_MODE): selector.SelectSelector(

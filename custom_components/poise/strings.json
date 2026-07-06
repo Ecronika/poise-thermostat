@@ -199,13 +199,6 @@
     }
   },
   "selector": {
-    "category": {
-      "options": {
-        "I": "Category I — high expectation (±2 K)",
-        "II": "Category II — normal (±3 K)",
-        "III": "Category III — moderate (±4 K)"
-      }
-    },
     "climate_mode": {
       "options": {
         "auto": "Automatic (heat & cool)",
