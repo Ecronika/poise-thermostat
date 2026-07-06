@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.poise.const import (
     CONF_ACTUATOR,
+    CONF_ADAPTIVE_COOL,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
@@ -64,6 +65,9 @@ async def test_cool_raise_writes_lifted_setpoint(hass: HomeAssistant) -> None:
         CONF_CATEGORY: "II",
         CONF_COMFORT_BASE: 21.0,
         CONF_CLIMATE_MODE: "auto",
+        # adaptive_cool now defaults to "auto" (ADR-0008 tri-state); this test
+        # targets the FIXED-band heat-day raise, so pin it off explicitly.
+        CONF_ADAPTIVE_COOL: "off",
         CONF_COOL_HARD_CAP: 30.0,
     }
     entry = MockConfigEntry(
