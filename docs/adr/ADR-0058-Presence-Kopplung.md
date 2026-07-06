@@ -1,6 +1,26 @@
 # ADR-0058: Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco)
 
-**Status:** In Arbeit (25 %) · **Datum:** 2026-07-05 · **Bezug:** ADR-0023 (Dual-Setpoint/Setback als `occupied`-Konsument, V3), ADR-0025 (Zeitplan/Optimal-Start), ADR-0042 (Preset/Override, Away), ADR-0052 (Aktor-Dynamikprofil), ADR-0053 (Lüfterumwälzung — `occupied`-Vorbedingung), ADR-0048 (Nicht-Ziele: kein Ortungsdienst), ADR-0008 (Config) · **Verifizierung:** Wettbewerb (Versatile Thermostat Presence/Motion nativ; Better Thermostat keine; tado Auto-Assist als v2-Referenz); EN 16798-1 (Bänder gelten für die Nutzungszeit); PIR/mmWave-Sensorik-Asymmetrie
+**Status:** In Arbeit (70 %) · **Datum:** 2026-07-05 · **Bezug:** ADR-0023 (Dual-Setpoint/Setback als `occupied`-Konsument, V3), ADR-0025 (Zeitplan/Optimal-Start), ADR-0042 (Preset/Override, Away), ADR-0052 (Aktor-Dynamikprofil), ADR-0053 (Lüfterumwälzung — `occupied`-Vorbedingung), ADR-0048 (Nicht-Ziele: kein Ortungsdienst), ADR-0008 (Config) · **Verifizierung:** Wettbewerb (Versatile Thermostat Presence/Motion nativ; Better Thermostat keine; tado Auto-Assist als v2-Referenz); EN 16798-1 (Bänder gelten für die Nutzungszeit); PIR/mmWave-Sensorik-Asymmetrie
+
+## Umsetzungsstand
+**v0.150.0 — Glue gelandet (live).** Pure `comfort/presence.py` (`resolve_presence`
+hierarchisch + `step_room_absence` asymmetrischer Anker, 8 Tests) + `decide()`-Nachtrag
+(`eco_widen`/`cool_ceiling_override`, 5 Regressionstests) sind verdrahtet:
+- **Config:** `presence_home` (person/tracker/binary_sensor/group), `occupancy_sensor`
+  (binary_sensor), `absence_after_min` (Default 30) — beide Entities optional, unkonfiguriert
+  = heutiges Verhalten (fail-safe anwesend), null Regression.
+- **Coordinator:** Haus-Gate wird **vor** `plan_preheat` aufgelöst; ein leeres Haus (oder
+  Away-Preset) heizt nicht mehr vor und speist eine **neutrale** Basis in `mode_comfort_base`
+  (kein `override.py`-Eingriff), sodass die Tiefe allein `eco_widen` trägt (kein Double-Dip).
+  Raum-Absenz-Anker ist transient (Neustart → anwesend, Latch greift neu).
+- **Level→Parameter:** COMFORT → (`occupied` wie bisher, 0, `COOLING_UPPER`); ROOM_ECO →
+  (`False`, `eco_offset` 2 K, Decke `cool_hard_cap`); AWAY → (`False`, `away_offset` 4 K,
+  Decke `device_max`), **ohne Basisverschiebung** → schließt den Away-Kühl-Bug (Nachtrag unten).
+- **Nebenwirkung:** `fan_circulation` (ADR-0053) bekommt jetzt echtes `occupied`.
+- **Diagnose:** `occupied`/`presence_level`/`room_absent_min`/`home_present`.
+
+Offen bis 100 %: Card-Anzeige des Presence-Levels · Coordinator-Integrationstest (CI) ·
+Live-Verifikation am Büro/Home-HA · optional Persistenz des Absenz-Ankers (bewusst transient).
 
 ## Kontext
 Presence ist die letzte große Lücke der Wettbewerbsmatrix gegenüber Versatile Thermostat. Das Fundament steht bereits: `occupied` ist seit v0.122 ein echter, **live** wirkender Steuer-Eingang — `dual_setpoint.decide(occupied=…)` erlaubt bei `False` die V3-Absenk-Drift (Bandunterkante relaxt bis zum Health-Floor), heute gespeist rein aus dem Away-Preset: `_occupied = (sched.is_comfort ∨ preheating) ∧ ¬away` → `comfort_decide(occupied=_occupied)`. `fan_circulation` (ADR-0053) wartet direkt auf genau dieses `occupied`-Signal (heute hart `None` übergeben → nur Shadow). Es fehlt allein die **Auflösung eines Presence-Entities → `occupied`**; die Steuerwirkung reitet auf dem bestehenden Pfad.

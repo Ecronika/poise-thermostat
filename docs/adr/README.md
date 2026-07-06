@@ -76,7 +76,7 @@ Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere re
 | [0055](ADR-0055-Regelguete-Metrik-Control-Accuracy.md) | M1 Regelgüte-Metrik (EN 15500-1 CA) — Komfortabweichung + Pendel-Detektor als Flip-Gate | In Arbeit (40 %) |
 | [0056](ADR-0056-Referenzrahmen-Abgleich-Aktor-Raum.md) | Referenzrahmen-Abgleich Aktor-Interntemperatur ↔ Raumfühler (Offset-Kompensation self-regulating) | In Arbeit (25 %) |
 | [0057](ADR-0057-Card-Layout-Konfiguration.md) | Card-Layout & Konfiguration (Dichte, Bedienung dial/buttons/none, Abschnitte, Schimmel-Tick, UI-Editor) | Implementiert (v0.138.0) |
-| [0058](ADR-0058-Presence-Kopplung.md) | Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco) | In Arbeit (25 %) |
+| [0058](ADR-0058-Presence-Kopplung.md) | Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco) | In Arbeit (70 %) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
