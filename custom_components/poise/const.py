@@ -138,4 +138,36 @@ CONF_BOILER_POWER_THRESHOLD: Final = "boiler_power_threshold"
 CONF_CONTROLS_BOILER: Final = "controls_boiler"
 DEFAULT_BOILER_COUNT_THRESHOLD: Final = 1
 
-# Boiler actuation (ADR-0039 Stufe 2). Actions optional -> sha
+# Boiler actuation (ADR-0039 Stufe 2). Actions optional -> shadow-only if unset.
+CONF_BOILER_ON_ACTION: Final = "boiler_on_action"
+CONF_BOILER_OFF_ACTION: Final = "boiler_off_action"
+CONF_BOILER_ACTIVATION_DELAY: Final = "boiler_activation_delay_s"
+CONF_BOILER_KEEPALIVE: Final = "boiler_keepalive_s"
+CONF_BOILER_MIN_ON: Final = "boiler_min_on_s"
+CONF_BOILER_MIN_OFF: Final = "boiler_min_off_s"
+DEFAULT_BOILER_ACTIVATION_DELAY_S: Final = 0.0
+DEFAULT_BOILER_KEEPALIVE_S: Final = 300.0  # review V2c: self-healing on by default
+DEFAULT_BOILER_MIN_ON_S: Final = 300.0
+DEFAULT_BOILER_MIN_OFF_S: Final = 300.0
+
+# Load shedding (S3) + compressor groups (S4) — both ADR-0013, shadow stage
+CONF_MAX_POWER_SENSOR: Final = "max_power_sensor"
+CONF_CURRENT_POWER_SENSOR: Final = "current_power_sensor"
+CONF_COMPRESSOR_GROUP: Final = "compressor_group"
+CONF_DECLARED_POWER: Final = "declared_power"
+
+# Flow-temperature allocator (S5, ADR-0013) — highest request wins, capped, hysteresis
+CONF_FLOW_TEMP: Final = "design_flow_temp"
+CONF_MAX_FLOW_TEMP: Final = "max_flow_temp"
+CONF_FLOW_HYSTERESIS: Final = "flow_hysteresis"
+DEFAULT_MAX_FLOW_TEMP_C: Final = 60.0
+DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5
+
+# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise routes
+CONF_SOURCE_POLICY: Final = "source_policy"
+CONF_DEFAULT_SOURCE: Final = "default_heat_source"
+DEFAULT_HEAT_SOURCE: Final = "radiator"
+
+# Bundled Lovelace card, served + auto-registered by the integration (ADR-0040)
+CARD_URL_BASE: Final = "/poise"
+CARD_MODULES: Final = ({"name": "Poise Card", "filename": "poise-card.js"},)
