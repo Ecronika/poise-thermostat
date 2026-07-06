@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from . import actuator as actuator_mod
+from .adaptive_cool import adaptive_cool_mode, resolve_adaptive_cool
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
 from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
@@ -91,6 +92,7 @@ from .const import (
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
+    DEFAULT_ADAPTIVE_COOL,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
@@ -389,7 +391,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
-        self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
+        self._adaptive_cool_cfg = data.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL)
         self._cool_sp_eff_prev: float | None = None
         self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor: float = float(
@@ -588,7 +590,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
-        self._adaptive_cool = bool(data.get(CONF_ADAPTIVE_COOL, False))
+        self._adaptive_cool_cfg = data.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL)
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
         self._cool_min_outdoor = float(
@@ -1234,6 +1236,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             bypass=self._window_bypass,
         )
         can_heat, can_cool = self._capability()
+        # ADR-0008 tri-state: 'auto' follows cooling capability; a legacy bool is
+        # honoured unchanged (True->on, False->off), so the upgrade is regression-free.
+        adaptive_cool = resolve_adaptive_cool(
+            self._adaptive_cool_cfg, can_cool=can_cool
+        )
         # ADR-0052: retune the PI/MPC to the actuator's dynamics class so a fast
         # split AC is not driven by a 2 h radiator integrator (which oscillates).
         try:
@@ -1451,7 +1458,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             dewpoint=dewpoint,
             priority=self._priority,
             occupied=_occupied,
-            adaptive_cool=self._adaptive_cool,
+            adaptive_cool=adaptive_cool,
             adaptive_cap=self._cool_hard_cap,
             eco_widen=_eco_widen,
             cool_ceiling_override=_cool_ceiling,
@@ -2287,7 +2294,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "comfort_high": decision.cool_sp,
             "binding_lower_cause": binding,
             "category": self._category.value,
-            "adaptive_cool": self._adaptive_cool,
+            "adaptive_cool": adaptive_cool,
+            "adaptive_cool_mode": adaptive_cool_mode(self._adaptive_cool_cfg),
             "heating": heating,
             "window_open": window_open,
             "window_auto_detected": self._window_auto.open,

@@ -19,6 +19,7 @@ from homeassistant.config_entries import (
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
+from .adaptive_cool import adaptive_cool_mode
 from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from .config_reconcile import reconfigure_options
 from .config_sections import flatten_sections, nest_by_section
@@ -80,6 +81,7 @@ from .const import (
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
+    DEFAULT_ADAPTIVE_COOL,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
@@ -206,7 +208,15 @@ def _schema() -> vol.Schema:
                 )
             ),
             vol.Required(CONF_OPTIMAL_START, default=True): selector.BooleanSelector(),
-            vol.Required(CONF_ADAPTIVE_COOL, default=False): selector.BooleanSelector(),
+            vol.Required(
+                CONF_ADAPTIVE_COOL, default=DEFAULT_ADAPTIVE_COOL
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=["auto", "on", "off"],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    translation_key="adaptive_cool",
+                )
+            ),
             vol.Optional(CONF_WEATHER): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="weather")
             ),
@@ -418,8 +428,14 @@ def _options_schema() -> vol.Schema:
                 vol.Schema(
                     {
                         vol.Required(
-                            CONF_ADAPTIVE_COOL, default=False
-                        ): selector.BooleanSelector(),
+                            CONF_ADAPTIVE_COOL, default=DEFAULT_ADAPTIVE_COOL
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["auto", "on", "off"],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="adaptive_cool",
+                            )
+                        ),
                         vol.Optional(
                             CONF_COOL_MIN_OUTDOOR, default=DEFAULT_COOL_MIN_OUTDOOR_C
                         ): selector.NumberSelector(
@@ -680,6 +696,11 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
             return self.async_create_entry(title="", data=flat)
         # Pre-fill each section from the effective current config (data + options).
         current = {**self.config_entry.data, **self.config_entry.options}
+        # legacy bool -> canonical mode so the tri-state dropdown pre-fills
+        if CONF_ADAPTIVE_COOL in current:
+            current[CONF_ADAPTIVE_COOL] = adaptive_cool_mode(
+                current[CONF_ADAPTIVE_COOL]
+            )
         suggested = nest_by_section(current, _OPTIONS_SECTIONS)
         return self.async_show_form(
             step_id="init",

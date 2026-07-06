@@ -219,6 +219,13 @@
         "auto": "Automatic",
         "off": "Off"
       }
+    },
+    "adaptive_cool": {
+      "options": {
+        "auto": "Automatic (on if the device can cool)",
+        "on": "On",
+        "off": "Off"
+      }
     }
   },
   "entity": {

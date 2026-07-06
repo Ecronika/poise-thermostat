@@ -55,6 +55,8 @@ _ATTRS = (
     "heating_failure",
     "heat_sp",
     "cool_sp",
+    "adaptive_cool",
+    "adaptive_cool_mode",
     "mode_nudge_blocked",
     "tick_over_budget",
     "mould_floor",
