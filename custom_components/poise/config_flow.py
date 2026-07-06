@@ -16,9 +16,12 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
+from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from .config_reconcile import reconfigure_options
+from .config_sections import flatten_sections, nest_by_section
 from .const import (
     COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
@@ -45,10 +48,12 @@ from .const import (
     CONF_COMPRESSOR_MIN_OFF,
     CONF_COMPRESSOR_MODE_HOLD,
     CONF_CONTROLS_BOILER,
+    CONF_COOL_HARD_CAP,
     CONF_COOL_MIN_OUTDOOR,
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
     CONF_DEFAULT_SOURCE,
+    CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
     CONF_FLOW_HYSTERESIS,
     CONF_FLOW_TEMP,
@@ -68,6 +73,7 @@ from .const import (
     CONF_SETBACK_DELTA,
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
+    CONF_THERMAL_SHOCK_DELTA,
     CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
@@ -83,6 +89,7 @@ from .const import (
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
+    DEFAULT_DYNAMICS,
     DEFAULT_FLOW_HYSTERESIS_C,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_HEAT_SOURCE,
@@ -92,6 +99,39 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
 )
+
+_DYNAMICS_OPTIONS = ["auto", "fast_air", "slow_hydronic", "very_slow"]
+
+# Options-flow section groups (ADR-0008): the single source of truth for which
+# tuning field lives in which collapsible section. Drives both the schema and the
+# flatten (submit) / nest (display) of the sectioned values (config_sections).
+_OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
+    "comfort": (
+        CONF_COMFORT_BASE,
+        CONF_CATEGORY,
+        CONF_CLIMATE_MODE,
+        CONF_COMFORT_WEIGHT,
+    ),
+    "schedule": (
+        CONF_COMFORT_START,
+        CONF_COMFORT_END,
+        CONF_SETBACK_DELTA,
+        CONF_OPTIMAL_START,
+    ),
+    "heat_cool": (CONF_ADAPTIVE_COOL, CONF_COOL_MIN_OUTDOOR, CONF_HEAT_MAX_OUTDOOR),
+    "presence": (CONF_PRESENCE_HOME, CONF_OCCUPANCY_SENSOR, CONF_ABSENCE_AFTER_MIN),
+    "advanced": (
+        CONF_COOL_HARD_CAP,
+        CONF_THERMAL_SHOCK_DELTA,
+        CONF_OPERATIVE_INPUT,
+        CONF_DYNAMICS,
+        CONF_COMPRESSOR_GUARD,
+        CONF_COMPRESSOR_MIN_OFF,
+        CONF_COMPRESSOR_MODE_HOLD,
+        CONF_TRACE_RECORDING,
+    ),
+    "energy": (CONF_ANNUAL_KWH, CONF_PRICE_EUR_KWH),
+}
 
 
 def _temp() -> selector.EntitySelector:
@@ -125,6 +165,7 @@ def _schema() -> vol.Schema:
                 selector.SelectSelectorConfig(
                     options=["I", "II", "III"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
+                    translation_key="category",
                 )
             ),
             vol.Required(
@@ -142,6 +183,7 @@ def _schema() -> vol.Schema:
                 selector.SelectSelectorConfig(
                     options=["auto", "heat_only", "cool_only"],
                     mode=selector.SelectSelectorMode.DROPDOWN,
+                    translation_key="climate_mode",
                 )
             ),
             vol.Required(
@@ -310,146 +352,236 @@ def _system_schema() -> vol.Schema:
 
 
 def _options_schema() -> vol.Schema:
-    """Volatile tuning that can be hot-applied without a reload (A10).
-
-    Only fields that the coordinator can update in place live here; structural
-    inputs (sensors / actuator) stay in the reconfigure step.
-    """
+    """Volatile tuning, hot-applied without a reload (A10), grouped into
+    collapsible sections (ADR-0008). Only fields the coordinator can update in
+    place live here; structural inputs stay in the reconfigure step. The sectioned
+    submit is flattened before storage (config_sections)."""
+    box = selector.NumberSelectorMode.BOX
     return vol.Schema(
         {
-            vol.Required(CONF_CATEGORY): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["I", "II", "III"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
+            vol.Required("comfort"): section(
+                vol.Schema(
+                    {
+                        vol.Required(CONF_COMFORT_BASE): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=16.0,
+                                max=26.0,
+                                step=0.5,
+                                unit_of_measurement="°C",
+                                mode=box,
+                            )
+                        ),
+                        vol.Required(CONF_CATEGORY): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["I", "II", "III"],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="category",
+                            )
+                        ),
+                        vol.Required(CONF_CLIMATE_MODE): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["auto", "heat_only", "cool_only"],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="climate_mode",
+                            )
+                        ),
+                        vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0,
+                                max=100,
+                                step=5,
+                                mode=selector.NumberSelectorMode.SLIDER,
+                            )
+                        ),
+                    }
+                ),
+                {"collapsed": False},
             ),
-            vol.Required(CONF_COMFORT_BASE): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=16.0,
-                    max=26.0,
-                    step=0.5,
-                    unit_of_measurement="\u00b0C",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
+            vol.Required("schedule"): section(
+                vol.Schema(
+                    {
+                        vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
+                        vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
+                        vol.Required(CONF_SETBACK_DELTA): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.0,
+                                max=8.0,
+                                step=0.5,
+                                unit_of_measurement="K",
+                                mode=box,
+                            )
+                        ),
+                        vol.Required(CONF_OPTIMAL_START): selector.BooleanSelector(),
+                    }
+                ),
+                {"collapsed": False},
             ),
-            vol.Required(CONF_CLIMATE_MODE): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["auto", "heat_only", "cool_only"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
+            vol.Required("heat_cool"): section(
+                vol.Schema(
+                    {
+                        vol.Required(
+                            CONF_ADAPTIVE_COOL, default=False
+                        ): selector.BooleanSelector(),
+                        vol.Optional(
+                            CONF_COOL_MIN_OUTDOOR, default=DEFAULT_COOL_MIN_OUTDOOR_C
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=-30.0,
+                                max=30.0,
+                                step=0.5,
+                                unit_of_measurement="°C",
+                                mode=box,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_HEAT_MAX_OUTDOOR, default=DEFAULT_HEAT_MAX_OUTDOOR_C
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.0,
+                                max=45.0,
+                                step=0.5,
+                                unit_of_measurement="°C",
+                                mode=box,
+                            )
+                        ),
+                    }
+                ),
+                {"collapsed": False},
             ),
-            vol.Optional(
-                CONF_COOL_MIN_OUTDOOR, default=DEFAULT_COOL_MIN_OUTDOOR_C
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-30.0,
-                    max=30.0,
-                    step=0.5,
-                    unit_of_measurement="°C",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
+            vol.Required("presence"): section(
+                vol.Schema(
+                    {
+                        vol.Optional(CONF_PRESENCE_HOME): selector.EntitySelector(
+                            selector.EntitySelectorConfig(
+                                domain=[
+                                    "person",
+                                    "device_tracker",
+                                    "binary_sensor",
+                                    "group",
+                                ],
+                                multiple=True,
+                            )
+                        ),
+                        vol.Optional(CONF_OCCUPANCY_SENSOR): selector.EntitySelector(
+                            selector.EntitySelectorConfig(
+                                domain="binary_sensor",
+                                device_class=["occupancy", "motion", "presence"],
+                                multiple=True,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_ABSENCE_AFTER_MIN, default=DEFAULT_ABSENCE_AFTER_MIN
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=5,
+                                max=240,
+                                step=5,
+                                unit_of_measurement="min",
+                                mode=box,
+                            )
+                        ),
+                    }
+                ),
+                {"collapsed": False},
             ),
-            vol.Optional(
-                CONF_HEAT_MAX_OUTDOOR, default=DEFAULT_HEAT_MAX_OUTDOOR_C
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.0,
-                    max=45.0,
-                    step=0.5,
-                    unit_of_measurement="°C",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
+            vol.Required("advanced"): section(
+                vol.Schema(
+                    {
+                        # ADR-0051 §1: latent tuning now surfaced. cool_hard_cap is
+                        # the ASR ceiling (lower = more cooling; raising > 26 opt-in);
+                        # thermal_shock 0 = feature off.
+                        vol.Optional(
+                            CONF_COOL_HARD_CAP, default=DEFAULT_HARD_CAP_C
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=23.0,
+                                max=30.0,
+                                step=0.5,
+                                unit_of_measurement="°C",
+                                mode=box,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_THERMAL_SHOCK_DELTA, default=DEFAULT_SHOCK_DELTA_K
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.0,
+                                max=12.0,
+                                step=0.5,
+                                unit_of_measurement="K",
+                                mode=box,
+                            )
+                        ),
+                        vol.Required(CONF_OPERATIVE_INPUT): selector.BooleanSelector(),
+                        # ADR-0052 §1: actuator dynamics profile (auto-detected).
+                        vol.Optional(
+                            CONF_DYNAMICS, default=DEFAULT_DYNAMICS
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=_DYNAMICS_OPTIONS,
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="actuator_dynamics",
+                            )
+                        ),
+                        # ADR-0046 §8: single-AC compressor guard. Blank timers fall
+                        # back to the dynamics-profile default (fast_air 300 s).
+                        vol.Optional(
+                            CONF_COMPRESSOR_GUARD, default=COMPRESSOR_GUARD_AUTO
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=[COMPRESSOR_GUARD_AUTO, COMPRESSOR_GUARD_OFF],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="compressor_guard",
+                            )
+                        ),
+                        vol.Optional(CONF_COMPRESSOR_MIN_OFF): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0,
+                                max=1200,
+                                step=30,
+                                unit_of_measurement="s",
+                                mode=box,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_COMPRESSOR_MODE_HOLD
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0,
+                                max=1200,
+                                step=30,
+                                unit_of_measurement="s",
+                                mode=box,
+                            )
+                        ),
+                        # ADR-0011: opt-in field-trace recorder (one JSONL/tick).
+                        vol.Optional(
+                            CONF_TRACE_RECORDING, default=False
+                        ): selector.BooleanSelector(),
+                    }
+                ),
+                {"collapsed": True},
             ),
-            # ADR-0046 §8: single-AC compressor guard (kill switch + timers). Blank
-            # timers fall back to the dynamics-profile default (fast_air 300 s).
-            vol.Optional(
-                CONF_COMPRESSOR_GUARD, default=COMPRESSOR_GUARD_AUTO
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[COMPRESSOR_GUARD_AUTO, COMPRESSOR_GUARD_OFF],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Optional(CONF_COMPRESSOR_MIN_OFF): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=1200,
-                    step=30,
-                    unit_of_measurement="s",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Optional(CONF_COMPRESSOR_MODE_HOLD): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=1200,
-                    step=30,
-                    unit_of_measurement="s",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            # ADR-0011: opt-in field-trace recorder (one JSONL line per tick).
-            vol.Optional(
-                CONF_TRACE_RECORDING, default=False
-            ): selector.BooleanSelector(),
-            # ADR-0058: presence coupling. Both entities optional -> today's
-            # behaviour (fail-safe present), so the feature is zero-regression.
-            vol.Optional(CONF_PRESENCE_HOME): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain=["person", "device_tracker", "binary_sensor", "group"],
-                    multiple=True,
-                )
-            ),
-            vol.Optional(CONF_OCCUPANCY_SENSOR): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="binary_sensor",
-                    device_class=["occupancy", "motion", "presence"],
-                    multiple=True,
-                )
-            ),
-            vol.Optional(
-                CONF_ABSENCE_AFTER_MIN, default=DEFAULT_ABSENCE_AFTER_MIN
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=5,
-                    max=240,
-                    step=5,
-                    unit_of_measurement="min",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER
-                )
-            ),
-            vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
-            vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
-            vol.Required(CONF_SETBACK_DELTA): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.0,
-                    max=8.0,
-                    step=0.5,
-                    unit_of_measurement="K",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(CONF_OPTIMAL_START): selector.BooleanSelector(),
-            vol.Required(CONF_ADAPTIVE_COOL, default=False): selector.BooleanSelector(),
-            vol.Required(CONF_OPERATIVE_INPUT): selector.BooleanSelector(),
-            vol.Optional(
-                CONF_ANNUAL_KWH, default=DEFAULT_ANNUAL_KWH
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100000, step=100, mode=selector.NumberSelectorMode.BOX
-                )
-            ),
-            vol.Optional(
-                CONF_PRICE_EUR_KWH, default=DEFAULT_PRICE_EUR_KWH
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=2, step=0.01, mode=selector.NumberSelectorMode.BOX
-                )
+            vol.Required("energy"): section(
+                vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_ANNUAL_KWH, default=DEFAULT_ANNUAL_KWH
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0, max=100000, step=100, mode=box
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_PRICE_EUR_KWH, default=DEFAULT_PRICE_EUR_KWH
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0, max=2, step=0.01, mode=box
+                            )
+                        ),
+                    }
+                ),
+                {"collapsed": True},
             ),
         }
     )
@@ -544,9 +676,16 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(title="", data=user_input)
+            # Sections nest the submit one level; store it flat (config_sections)
+            # so the coordinator/merge/reconfigure paths stay unchanged.
+            flat = flatten_sections(user_input, _OPTIONS_SECTIONS)
+            return self.async_create_entry(title="", data=flat)
+        # Pre-fill each section from the effective current config (data + options).
         current = {**self.config_entry.data, **self.config_entry.options}
+        suggested = nest_by_section(current, _OPTIONS_SECTIONS)
         return self.async_show_form(
             step_id="init",
-            data_schema=self.add_suggested_values_to_schema(_options_schema(), current),
+            data_schema=self.add_suggested_values_to_schema(
+                _options_schema(), suggested
+            ),
         )

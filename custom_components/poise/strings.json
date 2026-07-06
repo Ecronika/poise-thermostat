@@ -106,31 +106,125 @@
   "options": {
     "step": {
       "init": {
-        "title": "Tuning",
-        "description": "Adjust comfort tuning without a reload — the learned model is kept.",
-        "data": {
-          "category": "EN 16798 comfort category",
-          "comfort_base": "Comfort base temperature (°C)",
-          "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "cool_min_outdoor": "Cooling outdoor lockout — cool only above this °C (set low for internal-gain rooms)",
-          "heat_max_outdoor": "Heating outdoor lockout — heat only below this °C",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
-          "comfort_start": "Comfort window start",
-          "comfort_end": "Comfort window end",
-          "setback_delta": "Night setback (K)",
-          "optimal_start": "Optimal start (pre-heat)",
-          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
-          "operative_input": "Control operative temperature",
-          "annual_heating_kwh": "Annual heating energy (kWh) — for the savings estimate",
-          "price_eur_kwh": "Energy price (€/kWh) — for the savings estimate",
-          "compressor_guard": "Compressor guard (single AC) — hold cool/dry starts + flips that would short-cycle the compressor",
-          "compressor_min_off_s": "Compressor min-off (s) — wait after a stop before a restart (blank = 300)",
-          "compressor_mode_hold_s": "Compressor mode-hold (s) — wait before a cool↔dry flip (blank = 300)",
-          "trace_recording": "Field-trace recording — one JSONL line per tick for offline replay analysis (advanced)",
-          "presence_home": "Home presence (optional) — a person/device_tracker/group; when 'not home' the zone eases to away setback and stops preheating. Blank = off.",
-          "occupancy_sensor": "Room occupancy (optional) — a motion/occupancy binary_sensor; an empty room relaxes to Eco after the delay below. Blank = off.",
-          "absence_after_min": "Room-empty delay (min) before Eco — how long the room must read empty before easing off (default 30)"
+        "title": "Fine-tuning",
+        "description": "Adjust tuning without a reload — the learned model is kept. All fields have sensible defaults.",
+        "sections": {
+          "comfort": {
+            "name": "Comfort",
+            "data": {
+              "comfort_base": "Comfort base temperature (°C)",
+              "category": "EN 16798 comfort category",
+              "climate_mode": "Climate mode",
+              "comfort_weight": "Comfort vs efficiency"
+            },
+            "data_description": {
+              "comfort_base": "The centre of the comfort band; the category sets how wide the band is around it.",
+              "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. Default 70."
+            }
+          },
+          "schedule": {
+            "name": "Schedule",
+            "data": {
+              "comfort_start": "Comfort window start",
+              "comfort_end": "Comfort window end",
+              "setback_delta": "Night setback (K)",
+              "optimal_start": "Optimal start (pre-heat)"
+            },
+            "data_description": {
+              "comfort_start": "Set both start and end to enable a daily comfort window; leave both empty for all-day comfort.",
+              "setback_delta": "How far to relax the band outside the comfort window."
+            }
+          },
+          "heat_cool": {
+            "name": "Heating & cooling",
+            "data": {
+              "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
+              "cool_min_outdoor": "Cooling outdoor lockout (°C)",
+              "heat_max_outdoor": "Heating outdoor lockout (°C)"
+            },
+            "data_description": {
+              "adaptive_cool": "Let the cooling edge follow the outdoor running mean (EN 16798-1), capped by the ASR ceiling in Advanced.",
+              "cool_min_outdoor": "Only cool when it is warmer than this outside; set low for rooms with high internal gains.",
+              "heat_max_outdoor": "Emergency brake — only heat below this outdoor temperature. Saving is done by the schedule and presence, not this."
+            }
+          },
+          "presence": {
+            "name": "Presence",
+            "data": {
+              "presence_home": "Home presence (optional)",
+              "occupancy_sensor": "Room occupancy (optional)",
+              "absence_after_min": "Room-empty delay before Eco (min)"
+            },
+            "data_description": {
+              "presence_home": "One or more person/device_tracker/group entities. When none is home the zone eases to away setback and stops preheating. Empty = off.",
+              "occupancy_sensor": "One or more motion/occupancy sensors. An empty room relaxes to Eco after the delay below. Empty = off.",
+              "absence_after_min": "How long the room must read empty before easing off (default 30)."
+            }
+          },
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "cool_hard_cap_c": "Cooling hard cap (°C)",
+              "thermal_shock_delta_k": "Heat-day cooling raise (K)",
+              "operative_input": "Control operative temperature",
+              "actuator_dynamics": "Actuator dynamics profile",
+              "compressor_guard": "Compressor guard (single AC)",
+              "compressor_min_off_s": "Compressor min-off (s)",
+              "compressor_mode_hold_s": "Compressor mode-hold (s)",
+              "trace_recording": "Field-trace recording"
+            },
+            "data_description": {
+              "cool_hard_cap_c": "ASR A3.5 ceiling for the adaptive cooling edge (default 26 °C). Lowering it cools more; raising above 26 is an opt-in.",
+              "thermal_shock_delta_k": "Largest indoor↔outdoor gap on hot days; the cooling setpoint is raised to stay within it. 0 = off.",
+              "actuator_dynamics": "How fast the device reacts. Automatic detects it from the device type.",
+              "compressor_guard": "Hold cool/dry starts and flips that would short-cycle the compressor.",
+              "compressor_min_off_s": "Wait after a stop before a restart (blank = 300).",
+              "compressor_mode_hold_s": "Wait before a cool↔dry flip (blank = 300).",
+              "trace_recording": "One JSONL line per tick for offline replay analysis (advanced)."
+            }
+          },
+          "energy": {
+            "name": "Energy report",
+            "data": {
+              "annual_heating_kwh": "Annual heating energy (kWh)",
+              "price_eur_kwh": "Energy price (€/kWh)"
+            },
+            "data_description": {
+              "annual_heating_kwh": "For the savings estimate only. ~12000 for a house, 6000–8000 for a flat.",
+              "price_eur_kwh": "For the savings estimate only. ~0.11 €/kWh for gas, ~0.30 for electricity."
+            }
+          }
         }
+      }
+    }
+  },
+  "selector": {
+    "category": {
+      "options": {
+        "I": "Category I — high expectation (±2 K)",
+        "II": "Category II — normal (±3 K)",
+        "III": "Category III — moderate (±4 K)"
+      }
+    },
+    "climate_mode": {
+      "options": {
+        "auto": "Automatic (heat & cool)",
+        "heat_only": "Heat only",
+        "cool_only": "Cool only"
+      }
+    },
+    "actuator_dynamics": {
+      "options": {
+        "auto": "Automatic (from device)",
+        "fast_air": "Fast — air / split AC",
+        "slow_hydronic": "Slow — radiator / TRV",
+        "very_slow": "Very slow — underfloor / storage"
+      }
+    },
+    "compressor_guard": {
+      "options": {
+        "auto": "Automatic",
+        "off": "Off"
       }
     }
   },
