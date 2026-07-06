@@ -13,7 +13,7 @@ from custom_components.poise.const import (
     CONF_TEMP_SENSOR,
     CONF_WINDOW_SENSOR,
 )
-from custom_components.poise.migration import migrate_room_entry
+from custom_components.poise.migration import as_entity_list, migrate_room_entry
 
 
 def test_tuning_moves_to_options_structure_stays() -> None:
@@ -63,3 +63,12 @@ def test_system_entry_untouched() -> None:
     new_data, new_options = migrate_room_entry(data, {})
     assert new_data == data
     assert new_options == {}
+
+
+def test_as_entity_list_normalizes() -> None:
+    assert as_entity_list("person.a") == ["person.a"]  # single -> one-element
+    assert as_entity_list("") == []  # empty string -> empty
+    assert as_entity_list(None) == []  # missing -> empty
+    assert as_entity_list(["a", "b"]) == ["a", "b"]  # list passes through
+    assert as_entity_list(["a", "", None]) == ["a"]  # falsy members filtered
+    assert as_entity_list(("x",)) == ["x"]  # tuple -> list

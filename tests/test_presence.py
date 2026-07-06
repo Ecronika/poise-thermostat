@@ -5,6 +5,7 @@ from __future__ import annotations
 from custom_components.poise.comfort.presence import (
     PresenceConfig,
     PresenceLevel,
+    any_present,
     resolve_presence,
     step_room_absence,
 )
@@ -95,3 +96,22 @@ def test_restart_starts_present() -> None:
     # fresh restart: no anchor -> 0 absent minutes -> comfort (latch re-engages)
     assert step_room_absence(None, present=True, now=0.0) is None
     assert _resolve(room_absent_min=0.0) is PresenceLevel.COMFORT
+
+
+# -- OR-reduction across multiple entities (multiple=True, ADR-0007) -------
+
+
+def test_any_present_or_reduces_tristates() -> None:
+    # no entities configured -> None (fail-safe present == today's behaviour)
+    assert any_present([]) is None
+    # any one present wins over an absent sibling
+    assert any_present([True, False]) is True
+    assert any_present([False, False, True]) is True
+    # all resolvable and all absent -> False (empty house / empty room)
+    assert any_present([False, False]) is False
+    # an unresolved sibling with none present -> None (a dead tracker never
+    # closes the gate)
+    assert any_present([False, None]) is None
+    assert any_present([None]) is None
+    # a present one still wins over an unresolved sibling
+    assert any_present([None, True]) is True
