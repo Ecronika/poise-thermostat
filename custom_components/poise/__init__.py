@@ -110,6 +110,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """V1 -> V2 config-entry store migration (ADR-0007).
+
+    Split ``entry.data`` into structural inputs (kept in ``data``) + hot-applyable
+    tuning (moved to ``options``) and normalize the multi-entity pickers
+    (window/presence/occupancy) from a single id to a list, so the reconfigure
+    step can later shrink to structural fields without silently dropping tuning
+    that used to live in ``data``. Hub entries keep their content unchanged (only
+    the version bumps). A future (>2) schema is refused, not downgraded.
+    """
+    if entry.version > 2:
+        return False
+    from .migration import migrate_room_entry
+
+    new_data, new_options = migrate_room_entry(dict(entry.data), dict(entry.options))
+    hass.config_entries.async_update_entry(
+        entry, data=new_data, options=new_options, version=2
+    )
+    return True
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.const import Platform
 

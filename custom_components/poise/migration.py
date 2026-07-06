@@ -86,3 +86,19 @@ def migrate_room_entry(
         if key in new_options:
             new_options[key] = _as_list(new_options[key])
     return new_data, new_options
+
+
+def as_entity_list(value: object) -> list[str]:
+    """Normalize a stored config value to a list of entity ids (coordinator side).
+
+    A single id becomes a one-element list; a list/tuple is filtered to truthy
+    strings; anything else (``None``/missing) becomes an empty list. Mirrors the
+    V2 store shape so the coordinator reads window/presence/occupancy uniformly
+    whether the entry was freshly created, migrated, or (defensively) still holds
+    a bare string.
+    """
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, (list, tuple)):
+        return [str(v) for v in value if v]
+    return []

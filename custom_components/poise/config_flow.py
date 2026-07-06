@@ -118,6 +118,7 @@ def _schema() -> vol.Schema:
                 selector.EntitySelectorConfig(
                     domain="binary_sensor",
                     device_class=["window", "opening", "door"],
+                    multiple=True,
                 )
             ),
             vol.Required(CONF_CATEGORY, default="II"): selector.SelectSelector(
@@ -396,12 +397,14 @@ def _options_schema() -> vol.Schema:
             vol.Optional(CONF_PRESENCE_HOME): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain=["person", "device_tracker", "binary_sensor", "group"],
+                    multiple=True,
                 )
             ),
             vol.Optional(CONF_OCCUPANCY_SENSOR): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="binary_sensor",
                     device_class=["occupancy", "motion", "presence"],
+                    multiple=True,
                 )
             ),
             vol.Optional(
@@ -455,7 +458,9 @@ def _options_schema() -> vol.Schema:
 class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg]
     """Guided per-room config flow with reconfigure support."""
 
-    VERSION = 1
+    # V2 (ADR-0007): async_migrate_entry splits data->options and normalizes the
+    # window/presence/occupancy pickers (now multiple=True) to lists.
+    VERSION = 2
 
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> PoiseOptionsFlow:

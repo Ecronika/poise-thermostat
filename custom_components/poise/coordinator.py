@@ -39,6 +39,7 @@ from .comfort.pmv import pmv_ppd, seasonal_clo
 from .comfort.presence import (
     PresenceConfig,
     PresenceLevel,
+    any_present,
     resolve_presence,
     step_room_absence,
 )
@@ -193,6 +194,7 @@ from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.tau_settle import TauSettle, settle_confidence, update_settle
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature, parse_finite
+from .migration import as_entity_list
 from .multi import lifecycle as _lifecycle
 from .multi.discovery import EntitySnapshot
 from .multi.model import DeviceHealth, Direction
@@ -325,9 +327,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._outdoor: str | None = data.get(CONF_OUTDOOR_SENSOR)
         self._humidity: str | None = data.get(CONF_HUMIDITY_SENSOR)
         self._mrt: str | None = data.get(CONF_MRT_SENSOR)
-        # ADR-0058 presence coupling (optional; both None -> today's behaviour).
-        self._presence_home_entity: str | None = data.get(CONF_PRESENCE_HOME)
-        self._occupancy_entity: str | None = data.get(CONF_OCCUPANCY_SENSOR)
+        # ADR-0058 presence coupling (optional; empty -> today's behaviour). Both
+        # are multiple=True (ADR-0007): OR-reduced across the set, str-tolerant.
+        self._presence_home_entities: list[str] = as_entity_list(
+            data.get(CONF_PRESENCE_HOME)
+        )
+        self._occupancy_entities: list[str] = as_entity_list(
+            data.get(CONF_OCCUPANCY_SENSOR)
+        )
         self._presence_cfg = PresenceConfig(
             absence_after_min=float(
                 data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
@@ -335,7 +342,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             eco_delta=self._override_cfg.eco_offset,
         )
         self._room_absent_since: float | None = None  # transient; restart->present
-        self._window: str | None = data.get(CONF_WINDOW_SENSOR)
+        # window: multiple=True, structural (data) -> re-read only on reload.
+        self._windows: list[str] = as_entity_list(data.get(CONF_WINDOW_SENSOR))
         self._category = Category(data.get(CONF_CATEGORY, "II"))
         self._comfort_base: float = float(
             data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
@@ -568,8 +576,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
         self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
         self._trace_enabled = bool(data.get(CONF_TRACE_RECORDING, False))
-        self._presence_home_entity = data.get(CONF_PRESENCE_HOME)
-        self._occupancy_entity = data.get(CONF_OCCUPANCY_SENSOR)
+        self._presence_home_entities = as_entity_list(data.get(CONF_PRESENCE_HOME))
+        self._occupancy_entities = as_entity_list(data.get(CONF_OCCUPANCY_SENSOR))
         self._presence_cfg = PresenceConfig(
             absence_after_min=float(
                 data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
@@ -618,7 +626,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         from homeassistant.core import Event
         from homeassistant.helpers.event import async_track_state_change_event
 
-        watched = [e for e in (self._temp, self._window, self._actuator) if e]
+        watched = [e for e in (self._temp, *self._windows, self._actuator) if e]
 
         async def _on_change(event: Event) -> None:
             # H-1: skip pure attribute churn. A watched entity may emit many
@@ -736,10 +744,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         return int(now.hour * 60 + now.minute)
 
     def _window_open(self) -> bool:
-        if not self._window:
-            return False
-        state = self.hass.states.get(self._window)
-        return state is not None and state.state == "on"
+        # OR across the picker: any configured contact reporting "on" = open.
+        for entity_id in self._windows:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state == "on":
+                return True
+        return False
 
     def _capability(self) -> tuple[bool, bool]:
         act = self.hass.states.get(self._actuator)
@@ -822,7 +832,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         threshold is adapted to the learned tau once the model is identified
         (steeper natural cooling -> higher threshold), else the fixed default.
         """
-        if self._window is not None:
+        if self._windows:
             return
         now = self._clock.monotonic()
         cfg = self._window_auto_cfg
@@ -1329,7 +1339,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 return False
             return None
 
-        _home = _tristate(self._presence_home_entity)
+        _home = any_present(_tristate(e) for e in self._presence_home_entities)
         _is_away = self._preset is OverrideMode.AWAY or _home is False
         _base_preset = OverrideMode.NONE if _is_away else self._preset
         plan = plan_preheat(
@@ -1394,7 +1404,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # Eco delta capped at the cool hard cap; AWAY widens by the away offset up
         # to the device max. No base shift -- the widen carries the whole depth.
         _presence_now = dt_util.utcnow().timestamp()
-        _room_present = _tristate(self._occupancy_entity)
+        _room_present = any_present(_tristate(e) for e in self._occupancy_entities)
         self._room_absent_since = step_room_absence(
             self._room_absent_since, present=_room_present, now=_presence_now
         )
