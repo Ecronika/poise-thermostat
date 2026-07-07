@@ -3,71 +3,67 @@
     "step": {
       "reconfigure": {
         "title": "Poise — Raum neu konfigurieren",
-        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
+        "description": "Verkabelung dieses Raums ändern: Sensor, Thermostat und optionale Sensoren. Die Komfort-Feineinstellung wird in den Optionen editiert und bleibt hier erhalten.",
         "data": {
           "name": "Raumname",
           "temp_sensor": "Raumtemperatur-Sensor",
-          "actuator": "Zu steuerndes Thermostat / TRV",
-          "trm_sensor": "Gleitendes Außentemperatur-Mittel (optional)",
-          "outdoor_sensor": "Außentemperatur (optional)",
-          "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
-          "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
-          "category": "EN-16798-Komfortkategorie",
-          "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
-          "comfort_base": "Komfort-Basistemperatur (°C)",
-          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-          "cool_min_outdoor": "Kühl-Außensperre — kühlt nur über dieser °C (für lastreiche Räume niedrig setzen)",
-          "heat_max_outdoor": "Heiz-Außensperre — heizt nur unter dieser °C",
-          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
-          "comfort_start": "Komfortfenster Beginn",
-          "comfort_end": "Komfortfenster Ende",
-          "setback_delta": "Nachtabsenkung (K)",
-          "optimal_start": "Optimal-Start (Vorheizen)",
-          "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
-          "weather_entity": "Wetter-Entität (Prognose)",
-          "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
-          "trv_external_temp_input": "TRV-Eingang externe Temperatur",
-          "operative_input": "Operative Temperatur regeln"
+          "actuator": "Zu steuerndes Thermostat / TRV"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
+        },
+        "sections": {
+          "sensors": {
+            "name": "Optionale Sensoren",
+            "description": "Zusatzeingänge, die die Regelung schärfen. Alles optional.",
+            "data": {
+              "trm_sensor": "Gleitendes Außentemperatur-Mittel",
+              "outdoor_sensor": "Außentemperatur",
+              "humidity_sensor": "Raumfeuchte (aktiviert Schimmelschutz)",
+              "mrt_sensor": "Mittlere Strahlungstemperatur",
+              "window_sensor": "Fenster-/Kontaktsensor (pausiert Heizen bei offenem Fenster)",
+              "weather_entity": "Wetter-Entität (Prognose)",
+              "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
+              "trv_external_temp_input": "TRV-Eingang externe Temperatur"
+            }
+          },
+          "anlagen": {
+            "name": "Anlagen-Anbindung (Mehrzonen)",
+            "description": "Nur relevant mit einem Poise-System-Hub: wie dieser Raum an den geteilten Kessel / Verdichter / die Vorlauf-Zuteilung angebunden ist.",
+            "data": {
+              "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern",
+              "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit",
+              "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf)",
+              "design_flow_temp": "Auslegungs-Vorlauftemperatur dieser Zone",
+              "source_policy": "Heizquellen-Policy (von deiner Energie-Automation gesetzt)"
+            }
+          }
         }
       },
       "room": {
         "title": "Poise — Raum hinzufügen",
-        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Optionale Eingänge erhöhen die Genauigkeit.",
+        "description": "Raumfühler und zu steuerndes Thermostat/TRV wählen. Mehr braucht Poise nicht — alles andere hat sinnvolle Voreinstellungen, die du später in den Optionen feinjustierst.",
         "data": {
-          "name": "Raumname",
+          "name": "Raumname (optional — wird sonst vom Thermostat abgeleitet)",
           "temp_sensor": "Raumtemperatur-Sensor",
-          "actuator": "Zu steuerndes Thermostat / TRV",
-          "trm_sensor": "Gleitendes Außentemperatur-Mittel (optional)",
-          "outdoor_sensor": "Außentemperatur (optional)",
-          "humidity_sensor": "Raumfeuchte (optional — aktiviert Schimmelschutz)",
-          "mrt_sensor": "Mittlere Strahlungstemperatur (optional)",
-          "category": "EN-16798-Komfortkategorie",
-          "window_sensor": "Fenster-/Kontaktsensor (optional — pausiert das Heizen bei offenem Fenster)",
-          "comfort_base": "Komfort-Basistemperatur (°C)",
-          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-          "cool_min_outdoor": "Kühl-Außensperre — kühlt nur über dieser °C (für lastreiche Räume niedrig setzen)",
-          "heat_max_outdoor": "Heiz-Außensperre — heizt nur unter dieser °C",
-          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
-          "comfort_start": "Komfortfenster Beginn",
-          "comfort_end": "Komfortfenster Ende",
-          "setback_delta": "Nachtabsenkung (K)",
-          "optimal_start": "Optimal-Start (Vorheizen)",
-          "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
-          "weather_entity": "Wetter-Entität (Prognose)",
-          "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
-          "trv_external_temp_input": "TRV-Eingang externe Temperatur",
-          "operative_input": "Operative Temperatur regeln",
-          "controls_boiler": "Dieser Raum darf den gemeinsamen Kessel anfordern",
-          "compressor_group": "Gruppe geteilter Verdichter/Außeneinheit (optional)",
-          "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf, optional)",
-          "design_flow_temp": "Auslegungs-Vorlauftemperatur dieser Zone (optional)",
-          "source_policy": "Heizquellen-Policy (von deiner Energie-Automation gesetzt, optional)"
+          "actuator": "Zu steuerndes Thermostat / TRV"
         },
         "data_description": {
           "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
+        },
+        "sections": {
+          "accuracy": {
+            "name": "Genauigkeit verbessern (optional)",
+            "description": "Komfortkategorie und Zusatzsensoren schärfen die Regelung. Alles optional — Poise läuft auch nur mit dem Raumsensor.",
+            "data": {
+              "comfort_base": "Komfort-Basistemperatur (°C)",
+              "category": "EN-16798-Komfortkategorie (I / II / III)",
+              "outdoor_sensor": "Außentemperatur",
+              "humidity_sensor": "Raumfeuchte (aktiviert Schimmelschutz)",
+              "window_sensor": "Fenster-/Kontaktsensor (pausiert Heizen bei offenem Fenster)",
+              "weather_entity": "Wetter-Entität (Prognose, für Optimal-Start)"
+            }
+          }
         }
       },
       "user": {
@@ -98,9 +94,13 @@
         }
       }
     },
+    "error": {
+      "sensor_on_actuator": "Der Raumsensor sitzt am selben Gerät wie das Thermostat — das ist dessen eingebauter Fühler, der den Heizkörper misst, nicht den Raum. Wähle einen separaten, freistehenden Raumsensor, damit Poise den Raum korrekt lernt."
+    },
     "abort": {
       "already_configured": "Dieses Thermostat ist bereits konfiguriert.",
-      "reconfigure_successful": "Poise wurde aktualisiert."
+      "reconfigure_successful": "Poise wurde aktualisiert.",
+      "actuator_in_use": "Dieses Thermostat wird bereits von der Poise-Zone „{zone}“ gesteuert. Jedes Thermostat kann nur zu einer Zone gehören."
     }
   },
   "entity": {
@@ -211,6 +211,10 @@
     "frost_zone_not_boiler": {
       "title": "Poise: frierender Raum steuert den geteilten Kessel nicht",
       "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere in seinen Optionen \"Diese Zone steuert den Kessel\" (ein reiner Kühl-Raum kann ignoriert werden). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
+    },
+    "mould_protection_inactive": {
+      "title": "Poise: Schimmelschutz inaktiv",
+      "description": "Der Feuchtesensor `{entity}` dieses Raums ist ausgefallen, daher kann Poise die relative Luftfeuchte nicht überwachen und den schimmelsicheren Mindest-Sollwert nicht anheben. Prüfe den Sensor; bis dahin regelt Poise ohne Schimmelschutz weiter. Der Hinweis verschwindet automatisch, sobald der Sensor wieder plausible Werte liefert."
     }
   },
   "options": {
@@ -218,29 +222,126 @@
       "init": {
         "title": "Feineinstellung",
         "description": "Komfort-Feineinstellung ohne Reload — das gelernte Modell bleibt erhalten.",
-        "data": {
-          "category": "EN-16798-Komfortkategorie",
-          "comfort_base": "Komfort-Basistemperatur (°C)",
-          "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-          "cool_min_outdoor": "Kühl-Außensperre — kühlt nur über dieser °C (für lastreiche Räume niedrig setzen)",
-          "heat_max_outdoor": "Heiz-Außensperre — heizt nur unter dieser °C",
-          "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
-          "comfort_start": "Komfortfenster Beginn",
-          "comfort_end": "Komfortfenster Ende",
-          "setback_delta": "Nachtabsenkung (K)",
-          "optimal_start": "Optimal-Start (Vorheizen)",
-          "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
-          "operative_input": "Operative Temperatur regeln",
-          "annual_heating_kwh": "Jährliche Heizenergie (kWh) — für die Einsparungsschätzung",
-          "price_eur_kwh": "Energiepreis (€/kWh) — für die Einsparungsschätzung",
-          "compressor_guard": "Kompressorschutz (Einzel-AC) — hält Kühl-/Trocken-Starts + Flips zurück, die den Kompressor kurzschließen würden",
-          "compressor_min_off_s": "Kompressor-Mindest-Aus-Zeit (s) — warten nach Stopp vor Neustart (leer = 300)",
-          "compressor_mode_hold_s": "Kompressor-Modus-Haltezeit (s) — warten vor Kühlen↔Trocknen-Wechsel (leer = 300)",
-          "trace_recording": "Feld-Trace-Aufzeichnung — eine JSONL-Zeile je Tick für Offline-Replay-Analyse (fortgeschritten)",
-          "presence_home": "Anwesenheit Zuhause (optional) — person/device_tracker/group; bei 'nicht zuhause' geht die Zone in die Abwesenheits-Absenkung und heizt nicht vor. Leer = aus.",
-          "occupancy_sensor": "Raumbelegung (optional) — Bewegungs-/Belegungs-binary_sensor; ein leerer Raum geht nach der Verzögerung unten auf Eco. Leer = aus.",
-          "absence_after_min": "Verzögerung (min) bis Eco — wie lange der Raum leer messen muss, bevor abgesenkt wird (Standard 30)"
+        "sections": {
+          "comfort": {
+            "name": "Komfort",
+            "data": {
+              "comfort_base": "Komfort-Basistemperatur (°C)",
+              "category": "EN-16798-Komfortkategorie",
+              "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
+              "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+            },
+            "data_description": {
+              "comfort_base": "Die Mitte des Komfortbands; die Kategorie legt die Bandbreite fest.",
+              "comfort_weight": "0 = Energie sparen (breiteres Band), 100 = engster Komfort. Standard 70."
+            }
+          },
+          "schedule": {
+            "name": "Zeitplan",
+            "data": {
+              "comfort_start": "Komfortfenster Beginn",
+              "comfort_end": "Komfortfenster Ende",
+              "setback_delta": "Nachtabsenkung (K)",
+              "optimal_start": "Optimal-Start (Vorheizen)"
+            },
+            "data_description": {
+              "comfort_start": "Beginn und Ende beide setzen = tägliches Komfortfenster; beide leer = ganztägig.",
+              "setback_delta": "Wie weit das Band außerhalb des Komfortfensters gelockert wird."
+            }
+          },
+          "heat_cool": {
+            "name": "Heizen & Kühlen",
+            "data": {
+              "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
+              "cool_min_outdoor": "Kühl-Außensperre — kühlt nur über dieser °C (für lastreiche Räume niedrig setzen)",
+              "heat_max_outdoor": "Heiz-Außensperre — heizt nur unter dieser °C"
+            },
+            "data_description": {
+              "adaptive_cool": "Kühlkante folgt dem gleitenden Außenmittel (EN 16798-1), gedeckelt durch den ASR-Deckel unter Erweitert.",
+              "cool_min_outdoor": "Kühlt nur, wenn es draußen wärmer ist; für Räume mit hohen internen Lasten niedrig setzen.",
+              "heat_max_outdoor": "Notbremse — heizt nur unter dieser Außentemperatur. Gespart wird über Zeitplan und Anwesenheit, nicht hierüber."
+            }
+          },
+          "presence": {
+            "name": "Anwesenheit",
+            "data": {
+              "presence_home": "Anwesenheit Zuhause (optional) — person/device_tracker/group; bei „nicht zuhause“ Absenkung, kein Vorheizen. Leer = aus.",
+              "occupancy_sensor": "Raumbelegung (optional) — Bewegungs-/Belegungs-binary_sensor; leerer Raum → Eco nach der Verzögerung. Leer = aus.",
+              "absence_after_min": "Verzögerung (min) bis Eco (Standard 30)"
+            },
+            "data_description": {
+              "presence_home": "Eine oder mehrere person/device_tracker/group-Entitäten. Ist niemand zuhause, Absenkung + kein Vorheizen. Leer = aus.",
+              "occupancy_sensor": "Ein oder mehrere Bewegungs-/Belegungssensoren. Leerer Raum lockert nach der Verzögerung auf Eco. Leer = aus.",
+              "absence_after_min": "Wie lange der Raum leer messen muss, bevor abgesenkt wird (Standard 30)."
+            }
+          },
+          "advanced": {
+            "name": "Erweitert",
+            "data": {
+              "cool_hard_cap_c": "ASR-Kühldeckel (°C)",
+              "thermal_shock_delta_k": "Hitzetag-Anhebung (K)",
+              "operative_input": "Operative Temperatur regeln",
+              "actuator_dynamics": "Aktor-Dynamikprofil",
+              "compressor_guard": "Kompressorschutz (Einzel-AC)",
+              "compressor_min_off_s": "Kompressor-Mindest-Aus-Zeit (s)",
+              "compressor_mode_hold_s": "Kompressor-Modus-Haltezeit (s)",
+              "trace_recording": "Feld-Trace-Aufzeichnung (fortgeschritten)"
+            },
+            "data_description": {
+              "cool_hard_cap_c": "ASR-A3.5-Deckel für die adaptive Kühlkante (Standard 26 °C). Absenken kühlt mehr; über 26 anheben ist Opt-in.",
+              "thermal_shock_delta_k": "Größte Innen↔Außen-Differenz an Hitzetagen; der Kühl-Sollwert wird angehoben, um darin zu bleiben. 0 = aus.",
+              "actuator_dynamics": "Wie schnell das Gerät reagiert. Automatisch erkennt es aus dem Gerätetyp.",
+              "compressor_guard": "Hält Kühl-/Trocken-Starts und -Wechsel zurück, die den Kompressor kurzschließen würden.",
+              "compressor_min_off_s": "Nach einem Stopp vor dem Neustart warten (leer = 300).",
+              "compressor_mode_hold_s": "Vor einem Kühlen↔Trocknen-Wechsel warten (leer = 300).",
+              "trace_recording": "Eine JSONL-Zeile je Tick für die Offline-Replay-Analyse (fortgeschritten)."
+            }
+          },
+          "energy": {
+            "name": "Energie-Report",
+            "data": {
+              "annual_heating_kwh": "Jährliche Heizenergie (kWh) — für die Einsparungsschätzung",
+              "price_eur_kwh": "Energiepreis (€/kWh) — für die Einsparungsschätzung"
+            },
+            "data_description": {
+              "annual_heating_kwh": "Nur für die Einsparungsschätzung. ~12000 für ein Haus, 6000–8000 für eine Wohnung.",
+              "price_eur_kwh": "Nur für die Einsparungsschätzung. ~0,11 €/kWh für Gas, ~0,30 für Strom."
+            }
+          }
         }
+      }
+    },
+    "error": {
+      "comfort_window_pair": "Für das Komfortfenster Beginn und Ende beide setzen, oder beide leer lassen."
+    }
+  },
+  "selector": {
+    "climate_mode": {
+      "options": {
+        "auto": "Automatisch (Heizen & Kühlen)",
+        "heat_only": "Nur Heizen",
+        "cool_only": "Nur Kühlen"
+      }
+    },
+    "actuator_dynamics": {
+      "options": {
+        "auto": "Automatisch (vom Gerät)",
+        "fast_air": "Schnell — Luft / Split-AC",
+        "slow_hydronic": "Träge — Heizkörper / TRV",
+        "very_slow": "Sehr träge — Fußboden / Speicher"
+      }
+    },
+    "compressor_guard": {
+      "options": {
+        "auto": "Automatisch",
+        "off": "Aus"
+      }
+    },
+    "adaptive_cool": {
+      "options": {
+        "auto": "Automatisch (an, wenn das Gerät kühlen kann)",
+        "on": "An",
+        "off": "Aus"
       }
     }
   }
