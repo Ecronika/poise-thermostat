@@ -91,7 +91,6 @@ from .const import (
     DEFAULT_BOILER_MIN_OFF_S,
     DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_COMFORT_BASE,
-    DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_DYNAMICS,
     DEFAULT_FLOW_HYSTERESIS_C,
@@ -99,7 +98,6 @@ from .const import (
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
     DEFAULT_PRICE_EUR_KWH,
-    DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
 )
@@ -762,6 +760,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             )
         current = {**entry.data, **entry.options}
         suggested = nest_by_section(current, _RECONFIGURE_SECTIONS)
+        # the structural fields live at the top level (not in a section), so carry
+        # them into the suggested values or they'd show empty on reconfigure.
+        for key in (CONF_NAME, CONF_TEMP_SENSOR, CONF_ACTUATOR):
+            if key in current:
+                suggested[key] = current[key]
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(
