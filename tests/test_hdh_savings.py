@@ -5,10 +5,24 @@ from __future__ import annotations
 from custom_components.poise.control.hdh_savings import (
     HdhConfig,
     HdhSavings,
+    report_price_eur_kwh,
     saved_fraction_tick,
 )
 
 CFG = HdhConfig()
+
+
+def test_report_price_explicit_wins() -> None:
+    assert report_price_eur_kwh(0.42, "radiator", gas=0.11, electric=0.30) == 0.42
+
+
+def test_report_price_radiator_is_gas() -> None:
+    assert report_price_eur_kwh(None, "radiator", gas=0.11, electric=0.30) == 0.11
+
+
+def test_report_price_electric_default() -> None:
+    assert report_price_eur_kwh(None, "heat_pump", gas=0.11, electric=0.30) == 0.30
+    assert report_price_eur_kwh(None, None, gas=0.11, electric=0.30) == 0.30
 
 
 def test_setback_yields_saving_full_comfort_none() -> None:
