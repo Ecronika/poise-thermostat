@@ -26,6 +26,24 @@ class HdhConfig:
 _DEFAULT = HdhConfig()
 
 
+def report_price_eur_kwh(
+    explicit: float | int | str | None,
+    source: object,
+    *,
+    gas: float,
+    electric: float,
+) -> float:
+    """Report-only €/kWh fallback: an explicit price wins; otherwise pick by heat
+    source (a gas radiator is ~3× cheaper than electricity, so a fixed electric
+    default would overstate a gas home's running cost — report trust, no control
+    effect)."""
+    if explicit is not None:
+        return float(explicit)
+    if isinstance(source, str) and source.strip().lower() == "radiator":
+        return gas
+    return electric
+
+
 def saved_fraction_tick(
     comfort: float,
     setpoint: float,
