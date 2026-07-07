@@ -3,71 +3,67 @@
     "step": {
       "reconfigure": {
         "title": "Poise — reconfigure room",
-        "description": "Pick the room sensor and the thermostat/TRV to control. Optional inputs improve accuracy.",
+        "description": "Change the wiring of this room: its sensor, the thermostat, and the optional sensors. Comfort tuning is edited under Options and is preserved here.",
         "data": {
           "name": "Room name",
           "temp_sensor": "Room temperature sensor",
-          "actuator": "Thermostat / TRV to control",
-          "trm_sensor": "Running-mean outdoor temperature (optional)",
-          "outdoor_sensor": "Outdoor temperature (optional)",
-          "humidity_sensor": "Room humidity (optional — enables mould protection)",
-          "mrt_sensor": "Mean radiant temperature (optional)",
-          "category": "EN 16798 comfort category",
-          "window_sensor": "Window / contact sensor (optional — pauses heating when open)",
-          "comfort_base": "Comfort base temperature (°C)",
-          "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "cool_min_outdoor": "Cooling outdoor lockout — cool only above this °C (set low for internal-gain rooms)",
-          "heat_max_outdoor": "Heating outdoor lockout — heat only below this °C",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
-          "comfort_start": "Comfort window start",
-          "comfort_end": "Comfort window end",
-          "setback_delta": "Night setback (K)",
-          "optimal_start": "Optimal start (pre-heat)",
-          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
-          "weather_entity": "Weather entity (forecast)",
-          "irradiance_sensor": "Solar irradiance sensor (W/m²)",
-          "trv_external_temp_input": "TRV external-temperature input",
-          "operative_input": "Control operative temperature"
+          "actuator": "Thermostat / TRV to control"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
+        },
+        "sections": {
+          "sensors": {
+            "name": "Optional sensors",
+            "description": "Extra inputs that sharpen the control. All optional.",
+            "data": {
+              "trm_sensor": "Running-mean outdoor temperature",
+              "outdoor_sensor": "Outdoor temperature",
+              "humidity_sensor": "Room humidity (enables mould protection)",
+              "mrt_sensor": "Mean radiant temperature",
+              "window_sensor": "Window / contact sensor (pauses heating when open)",
+              "weather_entity": "Weather entity (forecast)",
+              "irradiance_sensor": "Solar irradiance sensor (W/m²)",
+              "trv_external_temp_input": "TRV external-temperature input"
+            }
+          },
+          "anlagen": {
+            "name": "Shared plant (multi-zone)",
+            "description": "Only relevant with a Poise system hub: how this room ties into the shared boiler / compressor / flow allocation.",
+            "data": {
+              "controls_boiler": "This room may request the shared boiler",
+              "compressor_group": "Shared compressor/outdoor-unit group",
+              "declared_power": "Declared heating power (for load shedding / weighted demand)",
+              "design_flow_temp": "Design flow temperature for this zone",
+              "source_policy": "Heat-source policy (set by your energy automation)"
+            }
+          }
         }
       },
       "room": {
         "title": "Poise — add a room",
-        "description": "Pick the room sensor and the thermostat/TRV to control. Optional inputs improve accuracy.",
+        "description": "Pick the room sensor and the thermostat/TRV to control. That's all Poise needs — everything else has sensible defaults you can fine-tune later in the options.",
         "data": {
-          "name": "Room name",
+          "name": "Room name (optional — derived from the thermostat if left blank)",
           "temp_sensor": "Room temperature sensor",
-          "actuator": "Thermostat / TRV to control",
-          "trm_sensor": "Running-mean outdoor temperature (optional)",
-          "outdoor_sensor": "Outdoor temperature (optional)",
-          "humidity_sensor": "Room humidity (optional — enables mould protection)",
-          "mrt_sensor": "Mean radiant temperature (optional)",
-          "category": "EN 16798 comfort category",
-          "window_sensor": "Window / contact sensor (optional — pauses heating when open)",
-          "comfort_base": "Comfort base temperature (°C)",
-          "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "cool_min_outdoor": "Cooling outdoor lockout — cool only above this °C (set low for internal-gain rooms)",
-          "heat_max_outdoor": "Heating outdoor lockout — heat only below this °C",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
-          "comfort_start": "Comfort window start",
-          "comfort_end": "Comfort window end",
-          "setback_delta": "Night setback (K)",
-          "optimal_start": "Optimal start (pre-heat)",
-          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
-          "weather_entity": "Weather entity (forecast)",
-          "irradiance_sensor": "Solar irradiance sensor (W/m²)",
-          "trv_external_temp_input": "TRV external-temperature input",
-          "operative_input": "Control operative temperature",
-          "controls_boiler": "This room may request the shared boiler",
-          "compressor_group": "Shared compressor/outdoor-unit group (optional)",
-          "declared_power": "Declared heating power (for load shedding / weighted demand, optional)",
-          "design_flow_temp": "Design flow temperature for this zone (optional)",
-          "source_policy": "Heat-source policy (set by your energy automation, optional)"
+          "actuator": "Thermostat / TRV to control"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
+        },
+        "sections": {
+          "accuracy": {
+            "name": "Improve accuracy (optional)",
+            "description": "Comfort category and extra sensors sharpen the control. All optional — Poise runs well on the room sensor alone.",
+            "data": {
+              "comfort_base": "Comfort base temperature (°C)",
+              "category": "EN 16798 comfort category (I / II / III)",
+              "outdoor_sensor": "Outdoor temperature",
+              "humidity_sensor": "Room humidity (enables mould protection)",
+              "window_sensor": "Window / contact sensor (pauses heating when open)",
+              "weather_entity": "Weather entity (forecast, for optimal start)"
+            }
+          }
         }
       },
       "user": {
@@ -100,7 +96,139 @@
     },
     "abort": {
       "already_configured": "This thermostat is already configured.",
-      "reconfigure_successful": "Poise was updated."
+      "reconfigure_successful": "Poise was updated.",
+      "actuator_in_use": "This thermostat is already controlled by the Poise zone “{zone}”. Each thermostat can belong to only one zone."
+    },
+    "error": {
+      "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fine-tuning",
+        "description": "Adjust tuning without a reload — the learned model is kept. All fields have sensible defaults.",
+        "sections": {
+          "comfort": {
+            "name": "Comfort",
+            "data": {
+              "comfort_base": "Comfort base temperature (°C)",
+              "category": "EN 16798 comfort category",
+              "climate_mode": "Climate mode",
+              "comfort_weight": "Comfort vs efficiency"
+            },
+            "data_description": {
+              "comfort_base": "The centre of the comfort band; the category sets how wide the band is around it.",
+              "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. Default 70."
+            }
+          },
+          "schedule": {
+            "name": "Schedule",
+            "data": {
+              "comfort_start": "Comfort window start",
+              "comfort_end": "Comfort window end",
+              "setback_delta": "Night setback (K)",
+              "optimal_start": "Optimal start (pre-heat)"
+            },
+            "data_description": {
+              "comfort_start": "Set both start and end to enable a daily comfort window; leave both empty for all-day comfort.",
+              "setback_delta": "How far to relax the band outside the comfort window."
+            }
+          },
+          "heat_cool": {
+            "name": "Heating & cooling",
+            "data": {
+              "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
+              "cool_min_outdoor": "Cooling outdoor lockout (°C)",
+              "heat_max_outdoor": "Heating outdoor lockout (°C)"
+            },
+            "data_description": {
+              "adaptive_cool": "Let the cooling edge follow the outdoor running mean (EN 16798-1), capped by the ASR ceiling in Advanced.",
+              "cool_min_outdoor": "Only cool when it is warmer than this outside; set low for rooms with high internal gains.",
+              "heat_max_outdoor": "Emergency brake — only heat below this outdoor temperature. Saving is done by the schedule and presence, not this."
+            }
+          },
+          "presence": {
+            "name": "Presence",
+            "data": {
+              "presence_home": "Home presence (optional)",
+              "occupancy_sensor": "Room occupancy (optional)",
+              "absence_after_min": "Room-empty delay before Eco (min)"
+            },
+            "data_description": {
+              "presence_home": "One or more person/device_tracker/group entities. When none is home the zone eases to away setback and stops preheating. Empty = off.",
+              "occupancy_sensor": "One or more motion/occupancy sensors. An empty room relaxes to Eco after the delay below. Empty = off.",
+              "absence_after_min": "How long the room must read empty before easing off (default 30)."
+            }
+          },
+          "advanced": {
+            "name": "Advanced",
+            "data": {
+              "cool_hard_cap_c": "Cooling hard cap (°C)",
+              "thermal_shock_delta_k": "Heat-day cooling raise (K)",
+              "operative_input": "Control operative temperature",
+              "actuator_dynamics": "Actuator dynamics profile",
+              "compressor_guard": "Compressor guard (single AC)",
+              "compressor_min_off_s": "Compressor min-off (s)",
+              "compressor_mode_hold_s": "Compressor mode-hold (s)",
+              "trace_recording": "Field-trace recording"
+            },
+            "data_description": {
+              "cool_hard_cap_c": "ASR A3.5 ceiling for the adaptive cooling edge (default 26 °C). Lowering it cools more; raising above 26 is an opt-in.",
+              "thermal_shock_delta_k": "Largest indoor↔outdoor gap on hot days; the cooling setpoint is raised to stay within it. 0 = off.",
+              "actuator_dynamics": "How fast the device reacts. Automatic detects it from the device type.",
+              "compressor_guard": "Hold cool/dry starts and flips that would short-cycle the compressor.",
+              "compressor_min_off_s": "Wait after a stop before a restart (blank = 300).",
+              "compressor_mode_hold_s": "Wait before a cool↔dry flip (blank = 300).",
+              "trace_recording": "One JSONL line per tick for offline replay analysis (advanced)."
+            }
+          },
+          "energy": {
+            "name": "Energy report",
+            "data": {
+              "annual_heating_kwh": "Annual heating energy (kWh)",
+              "price_eur_kwh": "Energy price (€/kWh)"
+            },
+            "data_description": {
+              "annual_heating_kwh": "For the savings estimate only. ~12000 for a house, 6000–8000 for a flat.",
+              "price_eur_kwh": "For the savings estimate only. ~0.11 €/kWh for gas, ~0.30 for electricity."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "comfort_window_pair": "Set both a start and end time for the comfort window, or leave both empty."
+    }
+  },
+  "selector": {
+    "climate_mode": {
+      "options": {
+        "auto": "Automatic (heat & cool)",
+        "heat_only": "Heat only",
+        "cool_only": "Cool only"
+      }
+    },
+    "actuator_dynamics": {
+      "options": {
+        "auto": "Automatic (from device)",
+        "fast_air": "Fast — air / split AC",
+        "slow_hydronic": "Slow — radiator / TRV",
+        "very_slow": "Very slow — underfloor / storage"
+      }
+    },
+    "compressor_guard": {
+      "options": {
+        "auto": "Automatic",
+        "off": "Off"
+      }
+    },
+    "adaptive_cool": {
+      "options": {
+        "auto": "Automatic (on if the device can cool)",
+        "on": "On",
+        "off": "Off"
+      }
     }
   },
   "entity": {
@@ -143,6 +271,21 @@
       },
       "mpc_weight": {
         "name": "MPC weight"
+      },
+      "ca_deviation_k": {
+        "name": "Control accuracy — deviation (K)"
+      },
+      "ca_cycles_per_h": {
+        "name": "Control accuracy — cycles per hour"
+      },
+      "ca_time_in_band": {
+        "name": "Control accuracy — time in band"
+      },
+      "compressor_guard_blocked": {
+        "name": "Compressor guard blocked (0/1)"
+      },
+      "tick_duration_ms": {
+        "name": "Tick duration (ms)"
       }
     },
     "binary_sensor": {
@@ -168,6 +311,10 @@
     "sensor_frozen": {
       "title": "Poise: room sensor frozen",
       "description": "The room temperature sensor `{entity}` has not changed for a long time and may be stuck (dead battery, stalled integration). Poise paused learning for this room; control continues on the last value. The issue clears once the sensor updates again."
+    },
+    "mould_protection_inactive": {
+      "title": "Poise: mould protection inactive",
+      "description": "The configured humidity sensor `{entity}` is unavailable, so Poise cannot compute the mould-avoidance minimum temperature for this room. Frost protection still applies, but mould protection is off until the sensor returns. Check the humidity sensor; this issue clears automatically."
     },
     "device_schedule": {
       "title": "Poise: thermostat's own schedule is active",
@@ -196,30 +343,6 @@
     "frost_zone_not_boiler": {
       "title": "Poise: freezing room not controlling the shared boiler",
       "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable \"This zone controls the boiler\" in its options (a cooling-only room can be ignored). This issue clears automatically once no such room is freezing."
-    }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "Tuning",
-        "description": "Adjust comfort tuning without a reload — the learned model is kept.",
-        "data": {
-          "category": "EN 16798 comfort category",
-          "comfort_base": "Comfort base temperature (°C)",
-          "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "cool_min_outdoor": "Cooling outdoor lockout — cool only above this °C (set low for internal-gain rooms)",
-          "heat_max_outdoor": "Heating outdoor lockout — heat only below this °C",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
-          "comfort_start": "Comfort window start",
-          "comfort_end": "Comfort window end",
-          "setback_delta": "Night setback (K)",
-          "optimal_start": "Optimal start (pre-heat)",
-          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
-          "operative_input": "Control operative temperature",
-          "annual_heating_kwh": "Annual heating energy (kWh) — for the savings estimate",
-          "price_eur_kwh": "Energy price (€/kWh) — for the savings estimate"
-        }
-      }
     }
   }
 }
