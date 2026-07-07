@@ -42,6 +42,15 @@ ROOM_INPUT: dict[str, Any] = {
     CONF_CONTROLS_BOILER: False,
 }
 
+# Slim onboarding submit (Step 3): the essentials + the collapsed accuracy
+# section; everything else defaults from const. Reconfigure still uses ROOM_INPUT.
+ROOM_SETUP: dict[str, Any] = {
+    CONF_NAME: "Test Room",
+    CONF_TEMP_SENSOR: "sensor.room_temp",
+    CONF_ACTUATOR: "climate.trv",
+    "accuracy": {CONF_CATEGORY: "II", CONF_COMFORT_BASE: 21.0},
+}
+
 
 async def test_user_menu_then_room_creates_entry(hass: HomeAssistant) -> None:
     """user -> menu -> room form -> CREATE_ENTRY with actuator as unique_id."""
@@ -58,7 +67,7 @@ async def test_user_menu_then_room_creates_entry(hass: HomeAssistant) -> None:
 
     with patch("custom_components.poise.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], ROOM_INPUT
+            result["flow_id"], ROOM_SETUP
         )
         await hass.async_block_till_done()
 
@@ -83,7 +92,7 @@ async def test_duplicate_actuator_aborts(hass: HomeAssistant) -> None:
     )
     with patch("custom_components.poise.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], ROOM_INPUT
+            result["flow_id"], ROOM_SETUP
         )
 
     assert result["type"] is FlowResultType.ABORT
