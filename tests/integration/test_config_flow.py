@@ -25,6 +25,7 @@ from custom_components.poise.const import (
     CONF_NAME,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
+    CONF_OUTDOOR_SENSOR,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     DOMAIN,
@@ -122,8 +123,11 @@ async def test_system_hub_entry_is_tagged(hass: HomeAssistant) -> None:
     assert result["data"][CONF_ENTRY_TYPE] == ENTRY_TYPE_SYSTEM
 
 
-async def test_reconfigure_updates_room(hass: HomeAssistant) -> None:
-    """Reconfigure edits an existing room entry in place (learning preserved)."""
+async def test_reconfigure_preserves_tuning_and_updates_wiring(
+    hass: HomeAssistant,
+) -> None:
+    """Reconfigure edits the wiring (a sensor) and carries tuning that sat in data
+    over to options, so a comfort setting survives the now-shrunk form."""
     entry = MockConfigEntry(
         domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
     )
@@ -134,26 +138,32 @@ async def test_reconfigure_updates_room(hass: HomeAssistant) -> None:
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "reconfigure"
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {**ROOM_INPUT, CONF_COMFORT_BASE: 22.5}
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Room",
+                CONF_TEMP_SENSOR: "sensor.room_temp",
+                CONF_ACTUATOR: "climate.trv",
+                "sensors": {CONF_OUTDOOR_SENSOR: "sensor.outdoor"},
+            },
         )
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
-    # V2 (ADR-0007): the reconfigure reload migrates the still-V1 entry, so tuning
-    # moves into options; the effective config the coordinator reads carries it.
     assert entry.version == 2
-    assert {**entry.data, **entry.options}[CONF_COMFORT_BASE] == 22.5
+    merged = {**entry.data, **entry.options}
+    assert merged[CONF_OUTDOOR_SENSOR] == "sensor.outdoor"  # wiring updated
+    assert merged[CONF_COMFORT_BASE] == ROOM_INPUT[CONF_COMFORT_BASE]  # tuning kept
+    assert entry.options[CONF_COMFORT_BASE] == ROOM_INPUT[CONF_COMFORT_BASE]
 
 
-async def test_reconfigure_overrides_stale_option(hass: HomeAssistant) -> None:
-    """A shared field changed via reconfigure takes effect even if it was last set
-    via the options flow — the stale option must not shadow it (review V7 b/c)."""
+async def test_reconfigure_keeps_options_tuning(hass: HomeAssistant) -> None:
+    """Reconfiguring the wiring preserves tuning last set via the options flow."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="climate.trv",
         data=ROOM_INPUT,
-        options={CONF_CLIMATE_MODE: "cool_only", CONF_COOL_MIN_OUTDOOR: 10.0},
+        options={CONF_CLIMATE_MODE: "heat_only", CONF_COOL_MIN_OUTDOOR: 10.0},
         title="Test Room",
     )
     entry.add_to_hass(hass)
@@ -161,24 +171,25 @@ async def test_reconfigure_overrides_stale_option(hass: HomeAssistant) -> None:
     with patch("custom_components.poise.async_setup_entry", return_value=True):
         result = await entry.start_reconfigure_flow(hass)
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {**ROOM_INPUT, CONF_CLIMATE_MODE: "heat_only"}
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Room",
+                CONF_TEMP_SENSOR: "sensor.room_temp",
+                CONF_ACTUATOR: "climate.trv",
+                "sensors": {},
+            },
         )
         await hass.async_block_till_done()
 
     assert result["reason"] == "reconfigure_successful"
-    # V2 (ADR-0007): the migrating reload moves tuning into options. The
-    # reconfigured value wins over the stale option (cool_only is gone) and the
-    # options-only field survives.
-    assert entry.options[CONF_CLIMATE_MODE] == "heat_only"  # was stale cool_only
-    assert {**entry.data, **entry.options}[CONF_CLIMATE_MODE] == "heat_only"
-    assert entry.options[CONF_COOL_MIN_OUTDOOR] == 10.0  # options-only survives
+    merged = {**entry.data, **entry.options}
+    assert merged[CONF_CLIMATE_MODE] == "heat_only"  # options tuning survived
+    assert merged[CONF_COOL_MIN_OUTDOOR] == 10.0
 
 
-async def test_reconfigure_full_replace_drops_cleared_field(
-    hass: HomeAssistant,
-) -> None:
-    """Reconfigure fully replaces data, so an optional field omitted on re-submit
-    is really removed, not merged over (review V7 a)."""
+async def test_reconfigure_drops_cleared_sensor(hass: HomeAssistant) -> None:
+    """A sensor cleared on reconfigure is really removed (full replace of data),
+    and is not resurrected into options since it is not tuning."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="climate.trv",
@@ -190,12 +201,19 @@ async def test_reconfigure_full_replace_drops_cleared_field(
     with patch("custom_components.poise.async_setup_entry", return_value=True):
         result = await entry.start_reconfigure_flow(hass)
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], dict(ROOM_INPUT)
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Room",
+                CONF_TEMP_SENSOR: "sensor.room_temp",
+                CONF_ACTUATOR: "climate.trv",
+                "sensors": {},
+            },
         )
         await hass.async_block_till_done()
 
     assert result["reason"] == "reconfigure_successful"
     assert CONF_MRT_SENSOR not in entry.data
+    assert CONF_MRT_SENSOR not in entry.options
 
 
 async def test_sensor_on_actuator_blocks_and_filters_own(
