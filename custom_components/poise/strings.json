@@ -89,7 +89,11 @@
     },
     "abort": {
       "already_configured": "This thermostat is already configured.",
-      "reconfigure_successful": "Poise was updated."
+      "reconfigure_successful": "Poise was updated.",
+      "actuator_in_use": "This thermostat is already controlled by the Poise zone “{zone}”. Each thermostat can belong to only one zone."
+    },
+    "error": {
+      "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly."
     }
   },
   "options": {
@@ -185,6 +189,9 @@
           }
         }
       }
+    },
+    "error": {
+      "comfort_window_pair": "Set both a start and end time for the comfort window, or leave both empty."
     }
   },
   "selector": {

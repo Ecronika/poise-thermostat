@@ -16,8 +16,9 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlow,
 )
+from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import section
-from homeassistant.helpers import selector
+from homeassistant.helpers import entity_registry as er, selector
 
 from .adaptive_cool import adaptive_cool_mode
 from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
@@ -136,10 +137,11 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _temp() -> selector.EntitySelector:
-    return selector.EntitySelector(
-        selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
-    )
+def _temp(exclude: list[str] | None = None) -> selector.EntitySelector:
+    cfg = selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
+    if exclude:
+        cfg["exclude_entities"] = exclude
+    return selector.EntitySelector(cfg)
 
 
 def _schema() -> vol.Schema:
@@ -259,18 +261,23 @@ def _schema() -> vol.Schema:
     )
 
 
-def _setup_schema() -> vol.Schema:
+def _setup_schema(hass: HomeAssistant) -> vol.Schema:
     """Slim room onboarding (ADR-0008): only the room sensor + actuator up front
     (the name is derived from the actuator), with the accuracy-improving optional
     inputs behind a collapsed section. All tuning has good defaults and is edited
     later in the options flow."""
+    # Don't offer Poise's own entities (its zone climate + diagnostic sensors) in
+    # the pickers — selecting one would wire a zone to itself.
+    reg = er.async_get(hass)
+    own = [e.entity_id for e in reg.entities.values() if e.platform == DOMAIN]
+    climate_cfg = selector.EntitySelectorConfig(domain="climate")
+    if own:
+        climate_cfg["exclude_entities"] = own
     return vol.Schema(
         {
             vol.Optional(CONF_NAME): selector.TextSelector(),
-            vol.Required(CONF_TEMP_SENSOR): _temp(),
-            vol.Required(CONF_ACTUATOR): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="climate")
-            ),
+            vol.Required(CONF_TEMP_SENSOR): _temp(own),
+            vol.Required(CONF_ACTUATOR): selector.EntitySelector(climate_cfg),
             vol.Required("accuracy"): section(
                 vol.Schema(
                     {
@@ -293,7 +300,7 @@ def _setup_schema() -> vol.Schema:
                                 mode=selector.SelectSelectorMode.DROPDOWN,
                             )
                         ),
-                        vol.Optional(CONF_OUTDOOR_SENSOR): _temp(),
+                        vol.Optional(CONF_OUTDOOR_SENSOR): _temp(own),
                         vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
                             selector.EntitySelectorConfig(
                                 domain="sensor", device_class="humidity"
@@ -678,18 +685,34 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     async def async_step_room(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
             data = flatten_sections(user_input, ("accuracy",))
-            # A-point #3: derive the zone name from the actuator when left blank,
-            # so only the room sensor + actuator are truly required up front.
-            if not data.get(CONF_NAME):
-                act = data[CONF_ACTUATOR]
-                state = self.hass.states.get(act)
-                data[CONF_NAME] = (state.name if state else None) or act
-            await self.async_set_unique_id(data[CONF_ACTUATOR])
-            self._abort_if_unique_id_configured()
-            return self.async_create_entry(title=data[CONF_NAME], data=data)
-        return self.async_show_form(step_id="room", data_schema=_setup_schema())
+            act = data[CONF_ACTUATOR]
+            reg = er.async_get(self.hass)
+            # (b) the room sensor must be free-standing — not the actuator's own
+            # built-in sensor (same device), or the model learns the wrong room.
+            te = reg.async_get(data[CONF_TEMP_SENSOR])
+            ae = reg.async_get(act)
+            if te and ae and te.device_id and te.device_id == ae.device_id:
+                errors[CONF_TEMP_SENSOR] = "sensor_on_actuator"
+            # (c) one entry per actuator; name the zone that already owns it.
+            for other in self._async_current_entries():
+                if other.unique_id == act:
+                    return self.async_abort(
+                        reason="actuator_in_use",
+                        description_placeholders={"zone": other.title},
+                    )
+            if not errors:
+                if not data.get(CONF_NAME):
+                    state = self.hass.states.get(act)
+                    data[CONF_NAME] = (state.name if state else None) or act
+                await self.async_set_unique_id(act)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(title=data[CONF_NAME], data=data)
+        return self.async_show_form(
+            step_id="room", data_schema=_setup_schema(self.hass), errors=errors
+        )
 
     async def async_step_system(
         self, user_input: dict[str, Any] | None = None
@@ -754,22 +777,30 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
         if user_input is not None:
             # Sections nest the submit one level; store it flat (config_sections)
             # so the coordinator/merge/reconfigure paths stay unchanged.
             flat = flatten_sections(user_input, _OPTIONS_SECTIONS)
-            return self.async_create_entry(title="", data=flat)
-        # Pre-fill each section from the effective current config (data + options).
-        current = {**self.config_entry.data, **self.config_entry.options}
-        # legacy bool -> canonical mode so the tri-state dropdown pre-fills
-        if CONF_ADAPTIVE_COOL in current:
-            current[CONF_ADAPTIVE_COOL] = adaptive_cool_mode(
-                current[CONF_ADAPTIVE_COOL]
-            )
-        suggested = nest_by_section(current, _OPTIONS_SECTIONS)
+            # (a) comfort window: both bounds or neither (one alone is ambiguous).
+            if bool(flat.get(CONF_COMFORT_START)) != bool(flat.get(CONF_COMFORT_END)):
+                errors["base"] = "comfort_window_pair"
+            else:
+                return self.async_create_entry(title="", data=flat)
+            suggested = user_input
+        else:
+            # Pre-fill each section from the effective current config (data+options).
+            current = {**self.config_entry.data, **self.config_entry.options}
+            # legacy bool -> canonical mode so the tri-state dropdown pre-fills
+            if CONF_ADAPTIVE_COOL in current:
+                current[CONF_ADAPTIVE_COOL] = adaptive_cool_mode(
+                    current[CONF_ADAPTIVE_COOL]
+                )
+            suggested = nest_by_section(current, _OPTIONS_SECTIONS)
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
                 _options_schema(), suggested
             ),
+            errors=errors,
         )
