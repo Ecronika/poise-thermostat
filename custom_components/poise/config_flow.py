@@ -259,6 +259,64 @@ def _schema() -> vol.Schema:
     )
 
 
+def _setup_schema() -> vol.Schema:
+    """Slim room onboarding (ADR-0008): only the room sensor + actuator up front
+    (the name is derived from the actuator), with the accuracy-improving optional
+    inputs behind a collapsed section. All tuning has good defaults and is edited
+    later in the options flow."""
+    return vol.Schema(
+        {
+            vol.Optional(CONF_NAME): selector.TextSelector(),
+            vol.Required(CONF_TEMP_SENSOR): _temp(),
+            vol.Required(CONF_ACTUATOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="climate")
+            ),
+            vol.Required("accuracy"): section(
+                vol.Schema(
+                    {
+                        vol.Optional(
+                            CONF_COMFORT_BASE, default=DEFAULT_COMFORT_BASE
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=16.0,
+                                max=26.0,
+                                step=0.5,
+                                unit_of_measurement="°C",
+                                mode=selector.NumberSelectorMode.BOX,
+                            )
+                        ),
+                        vol.Optional(
+                            CONF_CATEGORY, default="II"
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["I", "II", "III"],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                            )
+                        ),
+                        vol.Optional(CONF_OUTDOOR_SENSOR): _temp(),
+                        vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
+                            selector.EntitySelectorConfig(
+                                domain="sensor", device_class="humidity"
+                            )
+                        ),
+                        vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
+                            selector.EntitySelectorConfig(
+                                domain="binary_sensor",
+                                device_class=["window", "opening", "door"],
+                                multiple=True,
+                            )
+                        ),
+                        vol.Optional(CONF_WEATHER): selector.EntitySelector(
+                            selector.EntitySelectorConfig(domain="weather")
+                        ),
+                    }
+                ),
+                {"collapsed": True},
+            ),
+        }
+    )
+
+
 def _system_schema() -> vol.Schema:
     return vol.Schema(
         {
@@ -621,10 +679,17 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         if user_input is not None:
-            await self.async_set_unique_id(user_input[CONF_ACTUATOR])
+            data = flatten_sections(user_input, ("accuracy",))
+            # A-point #3: derive the zone name from the actuator when left blank,
+            # so only the room sensor + actuator are truly required up front.
+            if not data.get(CONF_NAME):
+                act = data[CONF_ACTUATOR]
+                state = self.hass.states.get(act)
+                data[CONF_NAME] = (state.name if state else None) or act
+            await self.async_set_unique_id(data[CONF_ACTUATOR])
             self._abort_if_unique_id_configured()
-            return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
-        return self.async_show_form(step_id="room", data_schema=_schema())
+            return self.async_create_entry(title=data[CONF_NAME], data=data)
+        return self.async_show_form(step_id="room", data_schema=_setup_schema())
 
     async def async_step_system(
         self, user_input: dict[str, Any] | None = None
