@@ -84,6 +84,7 @@ from .const import (
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
+    CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
     CONF_THERMAL_SHOCK_DELTA,
     CONF_TRACE_RECORDING,
@@ -100,6 +101,7 @@ from .const import (
     DEFAULT_DYNAMICS,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_PRICE_EUR_KWH,
+    DEFAULT_PRICE_GAS_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
     DEFAULT_TRACE_MAX_BYTES,
     DEVICE_MAX_C,
@@ -126,7 +128,7 @@ from .control.dynamics import (
     classify_dynamics,
     regulation_throttled,
 )
-from .control.hdh_savings import HdhConfig, HdhSavings
+from .control.hdh_savings import HdhConfig, HdhSavings, report_price_eur_kwh
 from .control.mpc import MpcParams
 from .control.mpc_shadow import evaluate_shadow
 from .control.optimal_start import (
@@ -362,7 +364,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._hdh = HdhSavings()
         self._hdh_cfg = HdhConfig(
             annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
-            price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
+            price_eur_kwh=report_price_eur_kwh(
+                data.get(CONF_PRICE_EUR_KWH),
+                data.get(CONF_SOURCE_POLICY),
+                gas=DEFAULT_PRICE_GAS_EUR_KWH,
+                electric=DEFAULT_PRICE_EUR_KWH,
+            ),
         )
         # ADR-0052: per-actuator dynamics profile (PI/MPC tuning by speed class).
         self._dynamics_override: str = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
@@ -567,7 +574,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comfort_base = float(data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE))
         self._hdh_cfg = HdhConfig(
             annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
-            price_eur_kwh=float(data.get(CONF_PRICE_EUR_KWH, DEFAULT_PRICE_EUR_KWH)),
+            price_eur_kwh=report_price_eur_kwh(
+                data.get(CONF_PRICE_EUR_KWH),
+                data.get(CONF_SOURCE_POLICY),
+                gas=DEFAULT_PRICE_GAS_EUR_KWH,
+                electric=DEFAULT_PRICE_EUR_KWH,
+            ),
         )
         self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
         self._compressor_guard = str(

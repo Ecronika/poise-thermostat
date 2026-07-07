@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.156.0"
+VERSION: Final = "0.157.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -79,7 +79,8 @@ DEFAULT_HEAT_MAX_OUTDOOR_C: Final = 22.0
 CONF_ANNUAL_KWH: Final = "annual_heating_kwh"
 CONF_PRICE_EUR_KWH: Final = "price_eur_kwh"
 DEFAULT_ANNUAL_KWH: Final = 12000.0
-DEFAULT_PRICE_EUR_KWH: Final = 0.30
+DEFAULT_PRICE_EUR_KWH: Final = 0.30  # electricity
+DEFAULT_PRICE_GAS_EUR_KWH: Final = 0.11  # gas radiator (report-only fallback)
 
 # Actuator dynamics profile (ADR-0052): retune PI/MPC to the device's speed
 # class. "auto" derives it from the actuator's capabilities; override per zone.
