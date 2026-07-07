@@ -3,34 +3,41 @@
     "step": {
       "reconfigure": {
         "title": "Poise — reconfigure room",
-        "description": "Pick the room sensor and the thermostat/TRV to control. Optional inputs improve accuracy.",
+        "description": "Change the wiring of this room: its sensor, the thermostat, and the optional sensors. Comfort tuning is edited under Options and is preserved here.",
         "data": {
           "name": "Room name",
           "temp_sensor": "Room temperature sensor",
-          "actuator": "Thermostat / TRV to control",
-          "trm_sensor": "Running-mean outdoor temperature (optional)",
-          "outdoor_sensor": "Outdoor temperature (optional)",
-          "humidity_sensor": "Room humidity (optional — enables mould protection)",
-          "mrt_sensor": "Mean radiant temperature (optional)",
-          "category": "EN 16798 comfort category",
-          "window_sensor": "Window / contact sensor (optional — pauses heating when open)",
-          "comfort_base": "Comfort base temperature (°C)",
-          "climate_mode": "Climate mode (auto / heat only / cool only)",
-          "cool_min_outdoor": "Cooling outdoor lockout — cool only above this °C (set low for internal-gain rooms)",
-          "heat_max_outdoor": "Heating outdoor lockout — heat only below this °C",
-          "comfort_weight": "Comfort vs efficiency (0 = save energy, 100 = comfort)",
-          "comfort_start": "Comfort window start",
-          "comfort_end": "Comfort window end",
-          "setback_delta": "Night setback (K)",
-          "optimal_start": "Optimal start (pre-heat)",
-          "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
-          "weather_entity": "Weather entity (forecast)",
-          "irradiance_sensor": "Solar irradiance sensor (W/m²)",
-          "trv_external_temp_input": "TRV external-temperature input",
-          "operative_input": "Control operative temperature"
+          "actuator": "Thermostat / TRV to control"
         },
         "data_description": {
           "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
+        },
+        "sections": {
+          "sensors": {
+            "name": "Optional sensors",
+            "description": "Extra inputs that sharpen the control. All optional.",
+            "data": {
+              "trm_sensor": "Running-mean outdoor temperature",
+              "outdoor_sensor": "Outdoor temperature",
+              "humidity_sensor": "Room humidity (enables mould protection)",
+              "mrt_sensor": "Mean radiant temperature",
+              "window_sensor": "Window / contact sensor (pauses heating when open)",
+              "weather_entity": "Weather entity (forecast)",
+              "irradiance_sensor": "Solar irradiance sensor (W/m²)",
+              "trv_external_temp_input": "TRV external-temperature input"
+            }
+          },
+          "anlagen": {
+            "name": "Shared plant (multi-zone)",
+            "description": "Only relevant with a Poise system hub: how this room ties into the shared boiler / compressor / flow allocation.",
+            "data": {
+              "controls_boiler": "This room may request the shared boiler",
+              "compressor_group": "Shared compressor/outdoor-unit group",
+              "declared_power": "Declared heating power (for load shedding / weighted demand)",
+              "design_flow_temp": "Design flow temperature for this zone",
+              "source_policy": "Heat-source policy (set by your energy automation)"
+            }
+          }
         }
       },
       "room": {

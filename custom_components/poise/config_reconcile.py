@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 
@@ -19,3 +19,28 @@ def reconfigure_options(
     kept so it survives a reconfigure.
     """
     return {k: v for k, v in old_options.items() if k not in user_input}
+
+
+def reconcile_reconfigure(
+    user_input: Mapping[str, Any],
+    old_data: Mapping[str, Any],
+    old_options: Mapping[str, Any],
+    tuning_keys: Collection[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split a shrunk room reconfigure into ``(new_data, new_options)``.
+
+    The reconfigure form now owns only structural + sensor + installation fields, so
+    it full-replaces ``data``. Two things must survive the shrink:
+      * options-only tuning the form doesn't touch (``kept``), and
+      * tuning an older/fresh entry stored in ``data`` (``carried`` into options),
+        so a comfort setting is never silently dropped.
+    A live option value wins over a carried data value (edited more recently).
+    """
+    new_data = dict(user_input)
+    kept = {k: v for k, v in old_options.items() if k not in user_input}
+    carried = {
+        k: v
+        for k, v in old_data.items()
+        if k not in user_input and k in tuning_keys and k not in kept
+    }
+    return new_data, {**carried, **kept}

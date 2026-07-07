@@ -23,7 +23,7 @@ from homeassistant.helpers import selector
 
 from .adaptive_cool import adaptive_cool_mode
 from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
-from .config_reconcile import reconfigure_options
+from .config_reconcile import reconcile_reconfigure
 from .config_sections import flatten_sections, nest_by_section
 from .const import (
     COMPRESSOR_GUARD_AUTO,
@@ -138,6 +138,27 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
 }
 
 
+_RECONFIGURE_SECTIONS: dict[str, tuple[str, ...]] = {
+    "sensors": (
+        CONF_TRM_SENSOR,
+        CONF_OUTDOOR_SENSOR,
+        CONF_HUMIDITY_SENSOR,
+        CONF_MRT_SENSOR,
+        CONF_WINDOW_SENSOR,
+        CONF_WEATHER,
+        CONF_IRRADIANCE,
+        CONF_TRV_EXTERNAL_TEMP,
+    ),
+    "anlagen": (
+        CONF_CONTROLS_BOILER,
+        CONF_COMPRESSOR_GROUP,
+        CONF_DECLARED_POWER,
+        CONF_FLOW_TEMP,
+        CONF_SOURCE_POLICY,
+    ),
+}
+
+
 def _temp(exclude: list[str] | None = None) -> selector.EntitySelector:
     cfg = selector.EntitySelectorConfig(domain="sensor", device_class="temperature")
     if exclude:
@@ -145,121 +166,94 @@ def _temp(exclude: list[str] | None = None) -> selector.EntitySelector:
     return selector.EntitySelector(cfg)
 
 
-def _schema() -> vol.Schema:
-    return vol.Schema(
-        {
-            vol.Required(CONF_NAME, default="Living room"): str,
-            vol.Required(CONF_TEMP_SENSOR): _temp(),
-            vol.Required(CONF_ACTUATOR): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="climate")
+def _reconfigure_schema(hass: HomeAssistant) -> vol.Schema:
+    """Room reconfigure (ADR-0008): structural wiring only — the room sensor +
+    actuator, the optional sensor entities, and (only when a system hub exists) the
+    shared-plant fields. Tuning is edited hot in the options flow, so it is not
+    repeated here; reconcile_reconfigure carries any tuning still in data across."""
+    reg = er.async_get(hass)
+    own = [e.entity_id for e in reg.entities.values() if e.platform == DOMAIN]
+    climate_cfg = selector.EntitySelectorConfig(domain="climate")
+    if own:
+        climate_cfg["exclude_entities"] = own
+    schema: dict[Any, Any] = {
+        vol.Required(CONF_NAME): selector.TextSelector(),
+        vol.Required(CONF_TEMP_SENSOR): _temp(own),
+        vol.Required(CONF_ACTUATOR): selector.EntitySelector(climate_cfg),
+        vol.Required("sensors"): section(
+            vol.Schema(
+                {
+                    vol.Optional(CONF_TRM_SENSOR): _temp(own),
+                    vol.Optional(CONF_OUTDOOR_SENSOR): _temp(own),
+                    vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="sensor", device_class="humidity"
+                        )
+                    ),
+                    vol.Optional(CONF_MRT_SENSOR): _temp(own),
+                    vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="binary_sensor",
+                            device_class=["window", "opening", "door"],
+                            multiple=True,
+                        )
+                    ),
+                    vol.Optional(CONF_WEATHER): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="weather")
+                    ),
+                    vol.Optional(CONF_IRRADIANCE): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="sensor", device_class="irradiance"
+                        )
+                    ),
+                    vol.Optional(CONF_TRV_EXTERNAL_TEMP): selector.EntitySelector(
+                        selector.EntitySelectorConfig(domain="number")
+                    ),
+                }
             ),
-            vol.Optional(CONF_TRM_SENSOR): _temp(),
-            vol.Optional(CONF_OUTDOOR_SENSOR): _temp(),
-            vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor", device_class="humidity")
-            ),
-            vol.Optional(CONF_MRT_SENSOR): _temp(),
-            vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="binary_sensor",
-                    device_class=["window", "opening", "door"],
-                    multiple=True,
-                )
-            ),
-            vol.Required(CONF_CATEGORY, default="II"): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["I", "II", "III"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-            vol.Required(
-                CONF_COMFORT_BASE, default=DEFAULT_COMFORT_BASE
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=16.0,
-                    max=26.0,
-                    step=0.5,
-                    unit_of_measurement="°C",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(CONF_CLIMATE_MODE, default="auto"): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["auto", "heat_only", "cool_only"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="climate_mode",
-                )
-            ),
-            vol.Required(
-                CONF_COMFORT_WEIGHT, default=DEFAULT_COMFORT_WEIGHT
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100, step=5, mode=selector.NumberSelectorMode.SLIDER
-                )
-            ),
-            vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
-            vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
-            vol.Required(
-                CONF_SETBACK_DELTA, default=DEFAULT_SETBACK_DELTA
-            ): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.0,
-                    max=8.0,
-                    step=0.5,
-                    unit_of_measurement="K",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Required(CONF_OPTIMAL_START, default=True): selector.BooleanSelector(),
-            vol.Required(
-                CONF_ADAPTIVE_COOL, default=DEFAULT_ADAPTIVE_COOL
-            ): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["auto", "on", "off"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="adaptive_cool",
-                )
-            ),
-            vol.Optional(CONF_WEATHER): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="weather")
-            ),
-            vol.Optional(CONF_IRRADIANCE): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor", device_class="irradiance"
-                )
-            ),
-            vol.Optional(CONF_TRV_EXTERNAL_TEMP): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="number")
-            ),
-            vol.Required(
-                CONF_OPERATIVE_INPUT, default=False
-            ): selector.BooleanSelector(),
-            vol.Required(
-                CONF_CONTROLS_BOILER, default=False
-            ): selector.BooleanSelector(),
-            vol.Optional(CONF_COMPRESSOR_GROUP): selector.TextSelector(),
-            vol.Optional(CONF_DECLARED_POWER): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0, max=100000, step=0.1, mode=selector.NumberSelectorMode.BOX
-                )
-            ),
-            vol.Optional(CONF_FLOW_TEMP): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=20,
-                    max=80,
-                    step=1,
-                    unit_of_measurement="°C",
-                    mode=selector.NumberSelectorMode.BOX,
-                )
-            ),
-            vol.Optional(CONF_SOURCE_POLICY): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=["auto", "radiator", "heat_pump"],
-                    mode=selector.SelectSelectorMode.DROPDOWN,
-                )
-            ),
-        }
+            {"collapsed": True},
+        ),
+    }
+    hub_exists = any(
+        e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+        for e in hass.config_entries.async_entries(DOMAIN)
     )
+    if hub_exists:
+        schema[vol.Required("anlagen")] = section(
+            vol.Schema(
+                {
+                    vol.Required(
+                        CONF_CONTROLS_BOILER, default=False
+                    ): selector.BooleanSelector(),
+                    vol.Optional(CONF_COMPRESSOR_GROUP): selector.TextSelector(),
+                    vol.Optional(CONF_DECLARED_POWER): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=0,
+                            max=100000,
+                            step=0.1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(CONF_FLOW_TEMP): selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=20,
+                            max=80,
+                            step=1,
+                            unit_of_measurement="°C",
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Optional(CONF_SOURCE_POLICY): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=["auto", "radiator", "heat_pump"],
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
+            {"collapsed": True},
+        )
+    return vol.Schema(schema)
 
 
 def _setup_schema(hass: HomeAssistant) -> vol.Schema:
@@ -733,42 +727,46 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         entry = self._get_reconfigure_entry()
         is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
-        schema = _system_schema() if is_system else _schema()
-        if user_input is not None:
-            if is_system:
-                # V7: full replace (not merge) so a cleared optional field is
-                # actually removed; keep the ENTRY_TYPE tag.
+        if is_system:
+            if user_input is not None:
+                # V7: full replace (not merge); keep the ENTRY_TYPE tag.
                 return self.async_update_reload_and_abort(
-                    entry,
-                    data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
+                    entry, data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input}
                 )
-            # 1.1/1.2: the actuator is a zone's unique_id. Re-validate on
-            # reconfigure so a changed actuator can't silently collide with
-            # another zone's entry, and keep this entry's unique_id tracking it.
-            await self.async_set_unique_id(user_input[CONF_ACTUATOR])
+            return self.async_show_form(
+                step_id="reconfigure",
+                data_schema=self.add_suggested_values_to_schema(
+                    _system_schema(), entry.data
+                ),
+            )
+        # Room reconfigure owns only structural + sensor + installation fields; tuning
+        # stays in the options flow. reconcile_reconfigure carries any tuning still in
+        # data over to options so shrinking the form never drops a setting.
+        tuning = {f for fields in _OPTIONS_SECTIONS.values() for f in fields}
+        if user_input is not None:
+            flat = flatten_sections(user_input, _RECONFIGURE_SECTIONS)
+            # 1.1/1.2: the actuator is a zone's unique_id — re-validate so a changed
+            # actuator can't silently collide with another zone's entry.
+            await self.async_set_unique_id(flat[CONF_ACTUATOR])
             for other in self._async_current_entries():
                 if (
                     other.entry_id != entry.entry_id
                     and other.unique_id == self.unique_id
                 ):
                     return self.async_abort(reason="already_configured")
-            # V7: fully REPLACE data (a cleared optional sensor is really removed,
-            # not merged over) and drop from options any key the form now owns so a
-            # stale option can no longer shadow the new data value (the coordinator
-            # reads {**data, **options}); options-only tuning is preserved.
-            return self.async_update_reload_and_abort(
-                entry,
-                unique_id=self.unique_id,
-                data=user_input,
-                options=reconfigure_options(user_input, entry.options),
+            new_data, new_options = reconcile_reconfigure(
+                flat, entry.data, entry.options, tuning
             )
-        # Pre-fill from the EFFECTIVE current values (data overlaid by options), so a
-        # field last changed via the options flow shows its real value, not the stale
-        # data value (review V7 climate_mode restore).
+            return self.async_update_reload_and_abort(
+                entry, unique_id=self.unique_id, data=new_data, options=new_options
+            )
         current = {**entry.data, **entry.options}
+        suggested = nest_by_section(current, _RECONFIGURE_SECTIONS)
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=self.add_suggested_values_to_schema(schema, current),
+            data_schema=self.add_suggested_values_to_schema(
+                _reconfigure_schema(self.hass), suggested
+            ),
         )
 
 
