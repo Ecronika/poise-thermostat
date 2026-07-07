@@ -264,9 +264,42 @@ async def test_reconfigure_collision_aborts(hass: HomeAssistant) -> None:
     with patch("custom_components.poise.async_setup_entry", return_value=True):
         result = await entry.start_reconfigure_flow(hass)
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {**ROOM, CONF_ACTUATOR: "climate.other"}
+            result["flow_id"],
+            {
+                CONF_NAME: ROOM[CONF_NAME],
+                CONF_TEMP_SENSOR: ROOM[CONF_TEMP_SENSOR],
+                CONF_ACTUATOR: "climate.other",
+                "sensors": {},
+            },
         )
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_reconfigure_room_shows_anlagen_with_hub(hass: HomeAssistant) -> None:
+    """With a system hub present, the room reconfigure form exposes the shared-plant
+    (anlagen) section — hub-conditional (Step 4)."""
+    MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM},
+        title="Poise System",
+    ).add_to_hass(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+    # a Poise-owned entity so the exclude-own filter runs on the reconfigure schema
+    er.async_get(hass).async_get_or_create(
+        "climate", DOMAIN, "own", suggested_object_id="poise_own"
+    )
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await entry.start_reconfigure_flow(hass)
+
+    assert result["type"] is FlowResultType.FORM
+    keys = {getattr(k, "schema", k) for k in result["data_schema"].schema}
+    assert "sensors" in keys
+    assert "anlagen" in keys  # shown only because a hub exists
