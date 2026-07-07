@@ -273,7 +273,7 @@ async def test_options_comfort_window_pair_error(hass: HomeAssistant) -> None:
                 },
                 "heat_cool": {},
                 "presence": {},
-                "advanced": {},
+                "advanced": {CONF_OPERATIVE_INPUT: ROOM_INPUT[CONF_OPERATIVE_INPUT]},
                 "energy": {},
             },
         )
