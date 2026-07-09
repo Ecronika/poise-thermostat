@@ -277,6 +277,11 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             min_on_s=self._min_on,
             min_off_s=self._min_off,
             keepalive_s=self._keepalive,
+            # F29: never re-assert a merely-ASSUMED state. Until the real boiler
+            # entity was readable once (reconciled), a first boot tick with a
+            # late-loading Zigbee/network switch would otherwise fire a
+            # keepalive-OFF onto a physically running boiler.
+            allow_keepalive=self._reconciled,
         )
         # Safety (review 2.3 + V2a): never commit a boiler state whose service
         # call failed. On an ON *or* OFF call, keep the previous state on failure
