@@ -99,6 +99,27 @@ async def test_diagnostics_returns_redacted_payload(hass: HomeAssistant) -> None
     assert isinstance(diag, dict) and diag
 
 
+async def test_diagnostics_includes_options_tuning(hass: HomeAssistant) -> None:
+    # F19: after the V2 migration the tuning lives in entry.options — the dump
+    # must merge it in (options win) instead of exposing only entry.data.
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _actuator(hass, modes=["heat", "off"])
+    hass.states.async_set("sensor.room_temp", "19.0", {"device_class": "temperature"})
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=_base(),
+        options={CONF_COMFORT_WEIGHT: 33},
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["config"][CONF_COMFORT_WEIGHT] == 33  # options tuning surfaced
+
+
 async def test_set_hvac_mode_off_and_back(hass: HomeAssistant) -> None:
     async_mock_service(hass, "climate", "set_temperature")
     _actuator(hass, modes=["heat", "off"])

@@ -174,3 +174,28 @@ async def test_hub_collect_skips_snapshotless_zone(hass: HomeAssistant) -> None:
     ).add_to_hass(hass)
     hub = await _setup_hub(hass)
     assert hub._collect_requests() == []
+
+
+async def test_boiler_demand_surfaces_frost_zone_attrs(hass: HomeAssistant) -> None:
+    """F26: the hub publishes frost_zone / frost_excluded — the boiler-demand
+    binary sensor must surface both (they were absent from the allow-list)."""
+    from custom_components.poise.binary_sensor import PoiseBoilerDemand
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, CONF_BOILER_COUNT_THRESHOLD: 1},
+        title="Poise System",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coordinator = entry.runtime_data
+    coordinator.data = {
+        **(coordinator.data or {}),
+        "frost_zone": "climate.bath",
+        "frost_excluded": ["climate.bath"],
+    }
+    attrs = PoiseBoilerDemand(coordinator, entry).extra_state_attributes
+    assert attrs["frost_zone"] == "climate.bath"
+    assert attrs["frost_excluded"] == ["climate.bath"]

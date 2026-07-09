@@ -13,6 +13,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.poise.const import (
     CONF_ACTUATOR,
+    CONF_BOILER_OFF_ACTION,
+    CONF_BOILER_ON_ACTION,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
@@ -298,3 +300,87 @@ async def test_options_comfort_window_pair_error(hass: HomeAssistant) -> None:
 
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "comfort_window_pair"}
+
+
+async def test_hub_options_flow_aborts(hass: HomeAssistant) -> None:
+    """F9: the system hub exposes no hot-tunable options — its options flow aborts,
+    steering the user to Reconfigure instead of showing an empty room form."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM},
+        title="Poise System",
+    )
+    entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "hub_no_options"
+
+
+async def test_system_setup_rejects_invalid_boiler_action(
+    hass: HomeAssistant,
+) -> None:
+    """F11: a boiler action that doesn't parse is rejected at setup rather than
+    silently leaving the hub shadow-only."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "system"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_BOILER_ON_ACTION: "not a valid action"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "system"
+    assert result["errors"] == {"base": "invalid_boiler_action"}
+
+
+async def test_system_setup_accepts_valid_boiler_action(
+    hass: HomeAssistant,
+) -> None:
+    """F11: a well-formed boiler action passes and the hub entry is created."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "system"}
+    )
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_BOILER_ON_ACTION: "switch.boiler/switch.turn_on"},
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_ENTRY_TYPE] == ENTRY_TYPE_SYSTEM
+    assert result["data"][CONF_BOILER_ON_ACTION] == "switch.boiler/switch.turn_on"
+
+
+async def test_system_reconfigure_rejects_invalid_boiler_action(
+    hass: HomeAssistant,
+) -> None:
+    """F11: the same validation guards the hub reconfigure step."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM},
+        title="Poise System",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await entry.start_reconfigure_flow(hass)
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "reconfigure"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_BOILER_OFF_ACTION: "typo"}
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {"base": "invalid_boiler_action"}
