@@ -336,6 +336,7 @@ def step_boiler(
     min_on_s: float,
     min_off_s: float,
     keepalive_s: float,
+    allow_keepalive: bool = True,
 ) -> BoilerStep:
     """Advance the boiler state machine by one tick (pure, fully testable).
 
@@ -344,6 +345,12 @@ def step_boiler(
     keep-alive resend into one deterministic transition. The coordinator only
     performs the returned ``call`` — no control state lives in the glue, so the
     hardware-protecting logic is unit-tested, not 0%-covered (review #1).
+
+    ``allow_keepalive`` gates the periodic re-assert on the caller having
+    reconciled the real device once (F29). Before reconciliation the state is
+    only *assumed*, so re-asserting a fresh (``last_keepalive_mono=0.0``) state
+    would fire a keepalive-OFF onto a possibly-running boiler at boot — the
+    demand-driven ON/OFF transitions still run, only the blind re-assert waits.
     """
     demand_true_since = state.demand_true_since
     if demand and demand_true_since is None:
@@ -370,7 +377,11 @@ def step_boiler(
             ),
             "on" if target else "off",
         )
-    if keepalive_s > 0.0 and (now_mono - state.last_keepalive_mono) >= keepalive_s:
+    if (
+        allow_keepalive
+        and keepalive_s > 0.0
+        and (now_mono - state.last_keepalive_mono) >= keepalive_s
+    ):
         # Re-assert the CURRENT state periodically so a dropped service call
         # self-heals. Symmetric for OFF too: a missed off-call (review 2.3) can
         # never leave the physical boiler stuck on (set keepalive_s=0 to disable).
