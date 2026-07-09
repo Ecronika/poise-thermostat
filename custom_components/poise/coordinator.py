@@ -129,6 +129,7 @@ from .control.dynamics import (
     regulation_throttled,
 )
 from .control.hdh_savings import HdhConfig, HdhSavings, report_price_eur_kwh
+from .control.lifecycle import resolve_safe_state
 from .control.mpc import MpcParams
 from .control.mpc_shadow import evaluate_shadow
 from .control.optimal_start import (
@@ -305,6 +306,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._unavailable_logged = False
         self._notif_id = f"poise_heating_failure_{entry.entry_id}"
         self._entry_id = entry.entry_id
+        self._data_snapshot: dict[str, Any] = dict(entry.data)  # F14 reconfigure guard
+        self._save_failures = 0  # F24: consecutive store-save failures
         self._active_issues: set[str] = set()
         self._lock = asyncio.Lock()
         self._enabled = True
@@ -498,6 +501,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
     async def async_bootstrap(self) -> None:
         """Restore the learned EKF before the first control tick (ADR-0007)."""
+        # F17: re-adopt any repair issues this entry already owns so a coordinator
+        # rebuilt after a crash/setup-retry can still clear them (otherwise they are
+        # instance-local and orphaned once the condition resolves).
+        try:
+            _reg = ir.async_get(self.hass)
+            self._active_issues = {
+                iid
+                for (dom, iid) in _reg.issues
+                if dom == DOMAIN and iid.endswith(self._entry_id)
+            }
+        except Exception:  # noqa: BLE001 - registry read must never block setup
+            pass
         try:
             data = await self._store.load()
             if isinstance(data, dict) and "ekf" in data:
@@ -1015,8 +1030,23 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._dirty = False
             try:
                 await self._store.save(self._save_payload())
+                self._note_save_result(ok=True)
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Poise: failed to persist learned model")
+                self._note_save_result(ok=False)
+
+    def _note_save_result(self, *, ok: bool) -> None:
+        """Escalate a persistently failing store to a repair issue (F24).
+
+        A single transient failure is only logged; N in a row means the store is
+        broken and the learned model is silently not being persisted — surface it.
+        """
+        self._save_failures = 0 if ok else self._save_failures + 1
+        self._issue(
+            f"persistence_failed_{self._entry_id}",
+            self._save_failures >= 5,  # after 5 consecutive failures
+            translation_key="persistence_failed",
+        )
 
     async def async_persist_and_cleanup(self) -> None:
         """Final save + repair-issue/notification cleanup on unload (review P1.3)."""
@@ -1038,6 +1068,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Poise: notification dismiss on unload failed")
+
+    def structural_unchanged(self, entry: ConfigEntry) -> bool:
+        """True if only tuning options changed since setup (F14).
+
+        A change to ``entry.data`` means a reconfigure is reloading the entry, so
+        the in-place options hot-apply must NOT run on this soon-to-be-discarded
+        coordinator (the reload rebuilds it with the new data anyway).
+        """
+        return dict(entry.data) == self._data_snapshot
+
+    async def async_flush_on_stop(self, _event: Any) -> None:
+        """Persist learned state on HA shutdown (F7 / ADR-0007 flush).
+
+        HA does not call async_unload_entry on a normal stop, so without this the
+        last <=30 ticks of EKF learning and any pending user intent are lost.
+        """
+        async with self._lock:
+            try:
+                await self._store.save(self._save_payload())
+            except Exception:  # noqa: BLE001 - shutdown save is best-effort
+                _LOGGER.exception("Poise: save on HA stop failed")
 
     async def _async_update_data(self) -> dict[str, Any]:
         async with self._lock:
@@ -1126,38 +1177,41 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         modes = (
             [str(m) for m in (act.attributes.get("hvac_modes") or [])] if act else []
         )
+        # F1: decide mode + setpoint together (pure), so a device in cool/auto/off
+        # actually receives the set_hvac_mode('heat') it needs — the old check only
+        # skipped a re-write when state=='heat', and never emitted the mode nudge for
+        # a multi-mode device (it would keep cooling toward the floor). Mode and
+        # setpoint writes are independent and each idempotent.
+        plan = resolve_safe_state(
+            hvac_modes=modes,
+            device_state=act.state if act is not None else None,
+            device_setpoint=_num_attr(act, "temperature"),
+            device_min=_num_attr(act, "min_temp"),
+            floor=FROST_FLOOR_C,
+        )
+        if plan is None:
+            return  # already in the safe state -> no re-write (idempotent)
         try:
-            if "heat" in modes:
-                target = frozen_safe_target(FROST_FLOOR_C, None)
-                device_min = _num_attr(act, "min_temp")
-                if device_min is not None:
-                    target = max(target, device_min)
-                already = (
-                    act is not None
-                    and act.state == "heat"
-                    and _num_attr(act, "temperature") == target
+            if plan.write_mode:
+                await self.hass.services.async_call(
+                    "climate",
+                    "set_hvac_mode",
+                    {"entity_id": self._actuator, "hvac_mode": plan.hvac_mode},
+                    blocking=False,
                 )
-                if already:
-                    return  # already holding the safe floor -> no re-write
+                self._last_written_mode = plan.hvac_mode  # only after a real nudge
+            if plan.write_setpoint and plan.setpoint is not None:
                 await actuator_mod.write(
                     self.hass,
                     ActuatorCommand(
                         actuator_id=self._actuator,
                         path=ActuatorPath.SETPOINT,
-                        value=target,
-                        hvac_mode="heat",
+                        value=plan.setpoint,
+                        hvac_mode=plan.hvac_mode,
                         reason="unavailable_safe",
                     ),
                 )
-                self._last_written_mode = "heat"
-                self._last_target = target
-            elif act is not None and act.state not in ("off", "unavailable"):
-                await self.hass.services.async_call(
-                    "climate",
-                    "set_hvac_mode",
-                    {"entity_id": self._actuator, "hvac_mode": "off"},
-                    blocking=False,
-                )
+                self._last_target = plan.setpoint
         except Exception:  # noqa: BLE001 - safe-state write must never kill the tick
             _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
 
@@ -1170,6 +1224,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             placeholders={"entity": self._temp},
         )
         if air is None:
+            # F5: a user intent set via the switch/select (enabled / preset / mode)
+            # while the room sensor is down must still be persisted — the normal
+            # save sits after this early return, so flush a pending change here too.
+            if self._dirty:
+                await self._maybe_save()
             now_mono = self._clock.monotonic()
             if self._unavailable_since is None:
                 self._unavailable_since = now_mono

@@ -32,3 +32,11 @@ class PoiseStore:
 
     async def save(self, data: dict[str, Any]) -> None:
         await self._store.async_save(data)
+
+    async def async_remove(self) -> None:
+        """Delete the underlying store file (entry-removal cleanup, ADR-0007).
+
+        Called from the config-entry remove path so a deleted room leaves no
+        orphaned EKF state behind; a fresh entry reusing the id starts clean.
+        """
+        await self._store.async_remove()

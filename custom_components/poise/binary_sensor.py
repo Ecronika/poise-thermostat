@@ -27,6 +27,8 @@ _ATTRS = (
     "active_zones",
     "weighted_demand",
     "frost_override",
+    "frost_zone",
+    "frost_excluded",
     "zone_count",
     "controlling_zones",
     "actuation_enabled",

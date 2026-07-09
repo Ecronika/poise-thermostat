@@ -30,11 +30,13 @@ from .const import (
     CONF_TRV_EXTERNAL_TEMP,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
+    ENTRY_TYPE_SYSTEM,
 )
 
 # Structural inputs stay in entry.data (need a reload; not hot-applyable).
 STRUCTURAL_KEYS: frozenset[str] = frozenset(
     {
+        CONF_ENTRY_TYPE,
         CONF_NAME,
         CONF_TEMP_SENSOR,
         CONF_ACTUATOR,
@@ -73,11 +75,16 @@ def migrate_room_entry(
     """Return the V2 ``(data, options)`` split for a room entry.
 
     System/hub entries pass through unchanged. On a key present in both, the
-    options value wins (it holds the newer, hot-tuned value).
+    options value wins (it holds the newer, hot-tuned value) — except for the
+    structural keys, which are data-owned (they need a reload and are never
+    hot-tuned), so a stale options copy must not shadow them on the merge.
     """
-    if data.get(CONF_ENTRY_TYPE) is not None:
+    if data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM:
         return dict(data), dict(options)  # hub entry: untouched
     merged: dict[str, object] = {**data, **options}
+    for key in STRUCTURAL_KEYS:  # structural is data-owned; options must not win
+        if key in data:
+            merged[key] = data[key]
     new_data = {k: v for k, v in merged.items() if k in STRUCTURAL_KEYS}
     new_options = {k: v for k, v in merged.items() if k not in STRUCTURAL_KEYS}
     for key in MULTI_ENTITY_KEYS:

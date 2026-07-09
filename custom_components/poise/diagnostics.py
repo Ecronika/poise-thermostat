@@ -14,11 +14,12 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
-    from .coordinator import PoiseCoordinator
-
 
 async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
-    coordinator: PoiseCoordinator = entry.runtime_data
-    return build_diagnostics(entry.data, coordinator.data)
+    # runtime_data is a PoiseCoordinator for a room entry and a
+    # PoiseHubCoordinator for the system entry; both expose ``.data``, so keep
+    # the binding duck-typed and let the hub entry's dump go through too (F19).
+    coordinator: Any = entry.runtime_data
+    return build_diagnostics(entry.data, coordinator.data, entry_options=entry.options)

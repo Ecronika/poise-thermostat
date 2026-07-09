@@ -48,10 +48,17 @@ def build_diagnostics(
     coordinator_data: Mapping[str, Any] | None,
     redact_keys: frozenset[str] = REDACT_KEYS,
     coordinator_redact_keys: frozenset[str] = COORDINATOR_REDACT_KEYS,
+    entry_options: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Assemble the diagnostics payload, redacting config + live entity ids."""
+    """Assemble the diagnostics payload, redacting config + live entity ids.
+
+    Config is ``entry.data`` merged with ``entry.options`` (options win), so the
+    hot-applyable tuning the V2 migration moved out of ``data`` still shows up in
+    the dump instead of silently vanishing (review F19, mirrors the migration).
+    """
+    config = {**dict(entry_data), **(dict(entry_options) if entry_options else {})}
     return {
-        "config": redact(dict(entry_data), redact_keys),
+        "config": redact(config, redact_keys),
         "data": (
             redact(dict(coordinator_data), coordinator_redact_keys)
             if coordinator_data is not None

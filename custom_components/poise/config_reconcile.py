@@ -30,13 +30,25 @@ def reconcile_reconfigure(
     """Split a shrunk room reconfigure into ``(new_data, new_options)``.
 
     The reconfigure form now owns only structural + sensor + installation fields, so
-    it full-replaces ``data``. Two things must survive the shrink:
+    it full-replaces ``data``. Three things must survive the shrink:
+      * structural ``data`` keys the form does not render (controls_boiler,
+        declared_power, flow_temp, source_policy) — carried back into ``data`` as-is,
       * options-only tuning the form doesn't touch (``kept``), and
       * tuning an older/fresh entry stored in ``data`` (``carried`` into options),
         so a comfort setting is never silently dropped.
     A live option value wins over a carried data value (edited more recently).
     """
     new_data = dict(user_input)
+    # Structural data keys the shrunk form doesn't render would be lost on the full
+    # data replace. They are not tuning, so carry them back into data unchanged
+    # rather than letting them migrate to options.
+    new_data.update(
+        {
+            k: v
+            for k, v in old_data.items()
+            if k not in user_input and k not in tuning_keys
+        }
+    )
     kept = {k: v for k, v in old_options.items() if k not in user_input}
     carried = {
         k: v

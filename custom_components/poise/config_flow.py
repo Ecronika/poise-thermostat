@@ -7,6 +7,7 @@ be edited in place without removing the entry (so learning is preserved).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -101,6 +102,7 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
 )
+from .control.hub_aggregate import parse_service_action
 
 _DYNAMICS_OPTIONS = ["auto", "fast_air", "slow_hydronic", "very_slow"]
 
@@ -659,15 +661,35 @@ def _options_schema() -> vol.Schema:
     )
 
 
+def _validate_boiler_actions(user_input: Mapping[str, Any]) -> dict[str, str]:
+    """Reject a boiler on/off action that doesn't parse (F11).
+
+    The on/off actions are free-text service specs; a typo would silently leave the
+    hub shadow-only. An empty action is allowed (diagnostic-only); a non-empty action
+    that ``parse_service_action`` can't parse fails the form so the mistake surfaces.
+    """
+    for key in (CONF_BOILER_ON_ACTION, CONF_BOILER_OFF_ACTION):
+        spec = user_input.get(key)
+        if spec and parse_service_action(spec) is None:
+            return {"base": "invalid_boiler_action"}
+    return {}
+
+
 class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg]
     """Guided per-room config flow with reconfigure support."""
 
     # V2 (ADR-0007): async_migrate_entry splits data->options and normalizes the
     # window/presence/occupancy pickers (now multiple=True) to lists.
     VERSION = 2
+    MINOR_VERSION = 1
 
     @staticmethod
-    def async_get_options_flow(config_entry: ConfigEntry) -> PoiseOptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        # F9: the system hub has no hot-tunable room options — its options flow
+        # aborts immediately (the hub is edited via Reconfigure). Rooms get the
+        # real tuning flow.
+        if config_entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM:
+            return PoiseHubOptionsFlow()
         return PoiseOptionsFlow()
 
     async def async_step_user(
@@ -713,12 +735,17 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         # singleton hub entry (ADR-0038)
         await self.async_set_unique_id("poise_system")
         self._abort_if_unique_id_configured()
+        errors: dict[str, str] = {}
         if user_input is not None:
-            return self.async_create_entry(
-                title="Poise System",
-                data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
-            )
-        return self.async_show_form(step_id="system", data_schema=_system_schema())
+            errors = _validate_boiler_actions(user_input)  # F11
+            if not errors:
+                return self.async_create_entry(
+                    title="Poise System",
+                    data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
+                )
+        return self.async_show_form(
+            step_id="system", data_schema=_system_schema(), errors=errors
+        )
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -726,16 +753,20 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         entry = self._get_reconfigure_entry()
         is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
         if is_system:
+            errors: dict[str, str] = {}
             if user_input is not None:
-                # V7: full replace (not merge); keep the ENTRY_TYPE tag.
-                return self.async_update_reload_and_abort(
-                    entry, data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input}
-                )
+                errors = _validate_boiler_actions(user_input)  # F11
+                if not errors:
+                    # V7: full replace (not merge); keep the ENTRY_TYPE tag.
+                    return self.async_update_reload_and_abort(
+                        entry, data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input}
+                    )
             return self.async_show_form(
                 step_id="reconfigure",
                 data_schema=self.add_suggested_values_to_schema(
                     _system_schema(), entry.data
                 ),
+                errors=errors,
             )
         # Room reconfigure owns only structural + sensor + installation fields; tuning
         # stays in the options flow. reconcile_reconfigure carries any tuning still in
@@ -806,3 +837,16 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
             ),
             errors=errors,
         )
+
+
+class PoiseHubOptionsFlow(OptionsFlow):  # type: ignore[misc]
+    """The system hub has no hot-tunable options (F9).
+
+    Its shared-plant settings are structural and are edited via Reconfigure, so the
+    options flow aborts immediately rather than showing an empty form.
+    """
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_abort(reason="hub_no_options")

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -57,7 +56,6 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
     HUB_ZONE_STALE_AFTER_S,
-    TICK_INTERVAL_S,
 )
 from .contracts import ZoneRequest
 from .control.hub_aggregate import (
@@ -88,7 +86,13 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             _LOGGER,
             config_entry=entry,
             name=f"{DOMAIN}_hub",
-            update_interval=timedelta(seconds=TICK_INTERVAL_S),
+            # F2: the hub tick is driven by an INDEPENDENT time-interval registered
+            # at setup (async_track_time_interval), not by entity listeners. A
+            # DataUpdateCoordinator only self-schedules while it has >=1 listener, and
+            # the hub's only entity is a diagnostic one the user can disable — which
+            # would then silently stop boiler keepalive/min-cycle/OFF. update_interval
+            # stays None so the external timer is the single driver in both cases.
+            update_interval=None,
             always_update=False,
         )
         self._clock = MonotonicClock()
@@ -254,11 +258,15 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             st = self.hass.states.get(ent) if ent else None
             real = reconcile_boiler_on(st.state if st is not None else None)
             if real is not None:
+                # F8: stamp the switch time to NOW when adopting the real boiler
+                # state at startup, so min-on protects it — otherwise the default
+                # last_switch_mono=-1e9 lets a first tick that has not yet seen any
+                # zone snapshot switch a physically running boiler straight off.
                 self._boiler = BoilerState(
                     on=real,
-                    last_switch_mono=self._boiler.last_switch_mono,
+                    last_switch_mono=now,
                     demand_true_since=self._boiler.demand_true_since,
-                    last_keepalive_mono=self._boiler.last_keepalive_mono,
+                    last_keepalive_mono=now,
                 )
                 self._reconciled = True
         step = step_boiler(
@@ -308,6 +316,33 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         elif issue_id in self._active_issues:
             self._active_issues.discard(issue_id)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    @property
+    def actuation_active(self) -> bool:
+        """Whether Poise is wired to actuate the boiler (both actions parse)."""
+        return self._actuation
+
+    async def async_fire_boiler_off(self) -> None:
+        """Best-effort boiler OFF at a hub hand-over (review F4). Blocking so an
+        execution error is at least logged, not swallowed as a background task."""
+        if self._action_off is None:
+            return
+        try:
+            await self.hass.services.async_call(
+                self._action_off.domain,
+                self._action_off.service,
+                dict(self._action_off.data),
+                blocking=True,
+            )
+        except Exception:  # noqa: BLE001 - hand-over OFF is best-effort
+            _LOGGER.exception("Poise: boiler OFF on hub hand-over failed")
+
+    def cleanup_issues(self) -> None:
+        """Delete the hub's repair issues (review F16) so they do not survive a
+        disable/teardown in the UI's Repairs list."""
+        for issue_id in list(self._active_issues):
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+        self._active_issues.clear()
 
     async def _async_update_data(self) -> dict[str, Any]:
         now = self._clock.monotonic()
