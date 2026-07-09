@@ -163,7 +163,27 @@ def test_from_dict_version_mismatch_recovers() -> None:
     bad = ThermalEKF().to_dict()
     bad["ekf_version"] = 999
     ekf = ThermalEKF.from_dict(bad)
-    assert ekf.n_heating == 0  # fresh model
+    assert ekf.n_heating == 0  # default-data source stays at zero counters
+
+
+def test_from_dict_version_mismatch_keeps_counters_resets_params() -> None:
+    # F23: a version bump must migrate the model, not wipe it — the maturity
+    # counters survive (so the gates stay satisfied) while the RC parameters
+    # fall back to priors and the covariance re-widens.
+    ekf = ThermalEKF()
+    ekf.n_updates = 300
+    ekf.n_heating = 42
+    ekf.n_idle = 100
+    ekf.n_cooling = 7
+    ekf.x[1] = 0.5  # a learned, non-default alpha (not pegged at a bound)
+    old = ekf.to_dict()
+    old["ekf_version"] = 0  # an older / absent persisted version
+    restored = ThermalEKF.from_dict(old)
+    assert restored.n_heating == 42  # counters preserved (the F23 fix)
+    assert restored.n_idle == 100
+    assert restored.n_cooling == 7
+    assert restored.n_updates == 300
+    assert restored.x[1] == 0.15  # RC params reset to the default prior
 
 
 def test_from_dict_non_finite_recovers() -> None:

@@ -31,6 +31,19 @@ def test_build_diagnostics_handles_no_data() -> None:
     assert diag["data"] is None
 
 
+def test_build_diagnostics_merges_options_options_win() -> None:
+    # F19: the V2 migration moves tuning into entry.options — the dump must
+    # merge data + options (options win) so the tuning is not lost.
+    diag = build_diagnostics(
+        {"name": "Bath", "comfort_weight": 70},
+        None,
+        entry_options={"comfort_weight": 33, "setback_delta": 3.0},
+    )
+    assert diag["config"]["comfort_weight"] == 33  # options override data
+    assert diag["config"]["setback_delta"] == 3.0  # options-only tuning present
+    assert diag["config"]["name"] == "Bath"  # data-only key retained
+
+
 def test_all_sensor_keys_redacted() -> None:
     payload = {k: f"entity.{k}" for k in REDACT_KEYS}
     out = redact(payload, REDACT_KEYS)

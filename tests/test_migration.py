@@ -6,6 +6,7 @@ from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_COMFORT_BASE,
     CONF_COMFORT_WEIGHT,
+    CONF_CONTROLS_BOILER,
     CONF_ENTRY_TYPE,
     CONF_NAME,
     CONF_OCCUPANCY_SENSOR,
@@ -63,6 +64,35 @@ def test_system_entry_untouched() -> None:
     new_data, new_options = migrate_room_entry(data, {})
     assert new_data == data
     assert new_options == {}
+
+
+def test_structural_key_is_data_owned_options_cannot_shadow() -> None:
+    # F20: a structural key in both data and options keeps the DATA value — options
+    # (hot-tuned) must not win for a data-owned structural field on the merge.
+    data = {CONF_TEMP_SENSOR: "sensor.correct", CONF_CONTROLS_BOILER: True}
+    options = {CONF_TEMP_SENSOR: "sensor.stale", CONF_CONTROLS_BOILER: False}
+    new_data, new_options = migrate_room_entry(data, options)
+    assert new_data[CONF_TEMP_SENSOR] == "sensor.correct"  # data wins, not options
+    assert new_data[CONF_CONTROLS_BOILER] is True
+    assert CONF_TEMP_SENSOR not in new_options
+    assert CONF_CONTROLS_BOILER not in new_options
+
+
+def test_non_system_entry_type_room_still_migrates() -> None:
+    # F21: hub detection keys on ENTRY_TYPE_SYSTEM, not merely "entry_type present".
+    # A room entry carrying a non-system entry_type must still get the V2 split,
+    # not pass through untouched.
+    data = {
+        CONF_ENTRY_TYPE: "legacy_room",
+        CONF_TEMP_SENSOR: "sensor.t",
+        CONF_ACTUATOR: "climate.ac",
+        CONF_COMFORT_BASE: 22.0,  # tuning must still split out to options
+    }
+    new_data, new_options = migrate_room_entry(data, {})
+    assert new_options[CONF_COMFORT_BASE] == 22.0  # split happened
+    assert CONF_COMFORT_BASE not in new_data
+    assert new_data[CONF_TEMP_SENSOR] == "sensor.t"  # structural stayed in data
+    assert new_data[CONF_ENTRY_TYPE] == "legacy_room"  # entry_type is data-owned
 
 
 def test_as_entity_list_normalizes() -> None:
