@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.150.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.159.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -31,7 +31,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Open-window reaction (sensor *or* sensorless)** — a configured window sensor or the **slope detector** (open threshold adapted to the learned time constant τ) drops the room to the frost/mould floor through the solver and pauses learning; a per-zone **bypass switch** overrides it. The sensor wins when present.
 - **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks, and a value pushed outside the comfort band is clamped to it and flagged (`override_clamped`) rather than limited silently.
 - **Bundled Lovelace cards** — Poise ships its own cards inside the integration and **auto-registers** them (no separate HACS plugin, no manual resource URL). `poise-card` puts the **EN 16798 comfort band** front and centre — operative temperature & setpoint as markers in the live band, a 24 h history graph, clickable status chips, learning confidence and a **shadow pill that shows what the engine *would* do** (TPI %/PI/MPC). `poise-system-card` surfaces the multi-zone hub (boiler demand, heating zones, flow target, load shedding). Self-contained Lit/TS, only `lit` bundled (ADR-0040).
-- **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts. While enabled, Poise also keeps a heat-capable actuator in its `heat` mode so it follows Poise's setpoint instead of running its own `auto`/schedule.
+- **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts (and flushed on Home Assistant shutdown, not only periodically). While enabled, Poise also keeps a heat-capable actuator in its `heat` mode so it follows Poise's setpoint instead of running its own `auto`/schedule.
 
 ### 🟡 Shadow / diagnostic (computed, not yet actuating)
 
@@ -77,7 +77,7 @@ Use a **free-standing room sensor** (not the TRV's internal sensor) for best res
 
 ## Removing the integration
 
-Poise has no cloud account or external state. To remove it: *Settings → Devices & Services →* Poise → the **⋮** menu on the entry → **Delete**. Repeat for each room entry and (if present) the *Poise System* hub entry. This removes the integration's entities, devices and stored learned model. If you installed it as a HACS custom repository and no longer want updates, also remove it from *HACS → Integrations*.
+Poise has no cloud account or external state. To remove it: *Settings → Devices & Services →* Poise → the **⋮** menu on the entry → **Delete**. Repeat for each room entry and (if present) the *Poise System* hub entry. On deletion Poise first parks the actuator in a safe end state — a heating device to its setback temperature in `heat`, a direct valve closed, a cool-only device off — restores a TRV's external sensor source back to `internal`, and deletes the stored learned model and trace file. Deleting the *Poise System* hub also switches its boiler off, but only when Poise was actually actuating it (both boiler actions configured); a shadow-only hub is left untouched. If you installed it as a HACS custom repository and no longer want updates, also remove it from *HACS → Integrations*.
 
 
 ## Configuration
