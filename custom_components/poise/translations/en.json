@@ -100,7 +100,8 @@
       "actuator_in_use": "This thermostat is already controlled by the Poise zone “{zone}”. Each thermostat can belong to only one zone."
     },
     "error": {
-      "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly."
+      "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly.",
+      "invalid_boiler_action": "That boiler action could not be read. Use the format entity_id/domain.service[/attr:value], e.g. switch.boiler/switch.turn_on — or leave it empty to stay diagnostic-only."
     }
   },
   "options": {
@@ -196,6 +197,9 @@
           }
         }
       }
+    },
+    "abort": {
+      "hub_no_options": "The system hub has no options; use Reconfigure instead."
     },
     "error": {
       "comfort_window_pair": "Set both a start and end time for the comfort window, or leave both empty."
@@ -343,6 +347,10 @@
     "frost_zone_not_boiler": {
       "title": "Poise: freezing room not controlling the shared boiler",
       "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable \"This zone controls the boiler\" in its options (a cooling-only room can be ignored). This issue clears automatically once no such room is freezing."
+    },
+    "persistence_failed": {
+      "title": "Poise: cannot save learned model",
+      "description": "Poise has repeatedly failed to write its learned model and settings to storage, so learning and your recent changes may be lost on the next restart. Check the disk and the Home Assistant `.storage` directory. This issue clears automatically once a save succeeds."
     }
   }
 }

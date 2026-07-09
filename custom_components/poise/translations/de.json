@@ -95,7 +95,8 @@
       }
     },
     "error": {
-      "sensor_on_actuator": "Der Raumsensor sitzt am selben Gerät wie das Thermostat — das ist dessen eingebauter Fühler, der den Heizkörper misst, nicht den Raum. Wähle einen separaten, freistehenden Raumsensor, damit Poise den Raum korrekt lernt."
+      "sensor_on_actuator": "Der Raumsensor sitzt am selben Gerät wie das Thermostat — das ist dessen eingebauter Fühler, der den Heizkörper misst, nicht den Raum. Wähle einen separaten, freistehenden Raumsensor, damit Poise den Raum korrekt lernt.",
+      "invalid_boiler_action": "Diese Kessel-Aktion konnte nicht gelesen werden. Format: entity_id/domain.service[/attr:value], z. B. switch.boiler/switch.turn_on — oder leer lassen für reinen Diagnosebetrieb."
     },
     "abort": {
       "already_configured": "Dieses Thermostat ist bereits konfiguriert.",
@@ -212,6 +213,10 @@
       "title": "Poise: frierender Raum steuert den geteilten Kessel nicht",
       "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere in seinen Optionen \"Diese Zone steuert den Kessel\" (ein reiner Kühl-Raum kann ignoriert werden). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
     },
+    "persistence_failed": {
+      "title": "Poise: Gelerntes Modell kann nicht gespeichert werden",
+      "description": "Poise konnte sein gelerntes Modell und die Einstellungen wiederholt nicht speichern — Lernfortschritt und jüngste Änderungen können beim nächsten Neustart verloren gehen. Prüfe den Speicherplatz und das Home-Assistant-Verzeichnis `.storage`. Der Hinweis verschwindet automatisch, sobald ein Speichern gelingt."
+    },
     "mould_protection_inactive": {
       "title": "Poise: Schimmelschutz inaktiv",
       "description": "Der Feuchtesensor `{entity}` dieses Raums ist ausgefallen, daher kann Poise die relative Luftfeuchte nicht überwachen und den schimmelsicheren Mindest-Sollwert nicht anheben. Prüfe den Sensor; bis dahin regelt Poise ohne Schimmelschutz weiter. Der Hinweis verschwindet automatisch, sobald der Sensor wieder plausible Werte liefert."
@@ -310,6 +315,9 @@
           }
         }
       }
+    },
+    "abort": {
+      "hub_no_options": "Der System-Hub hat keine Optionen; nutze Neu konfigurieren."
     },
     "error": {
       "comfort_window_pair": "Für das Komfortfenster Beginn und Ende beide setzen, oder beide leer lassen."
