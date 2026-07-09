@@ -5,6 +5,29 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from typing import Any
 
+from .const import (
+    CONF_COMPRESSOR_GROUP,
+    CONF_CONTROLS_BOILER,
+    CONF_DECLARED_POWER,
+    CONF_FLOW_TEMP,
+    CONF_SOURCE_POLICY,
+)
+
+# Structural "installation" keys the reconfigure form renders ONLY when a system
+# hub exists (F10). When the form hides them, their absence from user_input means
+# "not shown", not "cleared" — so they are carried back into data. Sensor keys the
+# form always renders (mrt_sensor, outdoor_sensor, ...) are deliberately NOT in
+# this set: their absence means the user cleared them and they must be dropped.
+_STRUCTURAL_CARRY: frozenset[str] = frozenset(
+    {
+        CONF_CONTROLS_BOILER,
+        CONF_COMPRESSOR_GROUP,
+        CONF_DECLARED_POWER,
+        CONF_FLOW_TEMP,
+        CONF_SOURCE_POLICY,
+    }
+)
+
 
 def reconfigure_options(
     user_input: Mapping[str, Any], old_options: Mapping[str, Any]
@@ -46,7 +69,7 @@ def reconcile_reconfigure(
         {
             k: v
             for k, v in old_data.items()
-            if k not in user_input and k not in tuning_keys
+            if k not in user_input and k in _STRUCTURAL_CARRY
         }
     )
     kept = {k: v for k, v in old_options.items() if k not in user_input}

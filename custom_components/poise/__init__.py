@@ -287,12 +287,12 @@ async def _remove_room_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         )
         await _execute_park(hass, actuator, plan)
         await _restore_trv_internal(hass, actuator)
+    import contextlib
+
     from .storage import PoiseStore
 
-    try:
+    with contextlib.suppress(Exception):  # store cleanup is best-effort
         await PoiseStore(hass, entry.entry_id).async_remove()
-    except Exception:  # noqa: BLE001 - store cleanup is best-effort
-        pass
     await hass.async_add_executor_job(
         _remove_trace_file,
         hass.config.path("poise_traces", f"{entry.entry_id}.jsonl"),

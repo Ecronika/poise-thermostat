@@ -22,9 +22,9 @@ class PoiseStore:
     """Thin wrapper around HA Store for one room's learned state."""
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
-        self._store: Store[dict[str, Any]] = Store(
-            hass, STORAGE_VERSION, f"{DOMAIN}_{entry_id}_ekf"
-        )
+        self._hass = hass
+        self._key = f"{DOMAIN}_{entry_id}_ekf"
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, self._key)
 
     async def load(self) -> dict[str, Any] | None:
         data = await self._store.async_load()
@@ -38,5 +38,9 @@ class PoiseStore:
 
         Called from the config-entry remove path so a deleted room leaves no
         orphaned EKF state behind; a fresh entry reusing the id starts clean.
+        HA's ``Store`` keeps its in-memory cache after ``async_remove``, so swap in
+        a fresh ``Store`` — a subsequent ``load`` then re-reads the (now deleted)
+        file and yields ``None`` instead of the stale cache.
         """
         await self._store.async_remove()
+        self._store = Store(self._hass, STORAGE_VERSION, self._key)
