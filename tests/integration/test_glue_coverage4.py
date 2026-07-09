@@ -27,6 +27,7 @@ from custom_components.poise import async_remove_entry, async_setup
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_BOILER_OFF_ACTION,
+    CONF_BOILER_ON_ACTION,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
@@ -91,12 +92,14 @@ async def _setup(hass: HomeAssistant, data: dict[str, Any]) -> MockConfigEntry:
 
 
 async def test_remove_system_hub_switches_boiler_off(hass: HomeAssistant) -> None:
+    # F12: OFF fires on removal only when Poise was actuating (BOTH actions wired).
     turn_off = async_mock_service(hass, "switch", "turn_off")
     hub = MockConfigEntry(
         domain=DOMAIN,
         unique_id="poise_system",
         data={
             CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM,
+            CONF_BOILER_ON_ACTION: "switch.boiler/switch.turn_on",
             CONF_BOILER_OFF_ACTION: "switch.boiler/switch.turn_off",
         },
         title="Poise System",
