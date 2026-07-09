@@ -375,12 +375,16 @@ class ThermalEKF:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ThermalEKF:
-        # M8: validate version + matrix shapes; on any mismatch recover with a
-        # fresh model (the documented corruption-recovery, ADR-0007) instead of
-        # loading a malformed P that crashes later in _matmul.
+        # M8: validate matrix shapes; a malformed x/P recovers with a fresh
+        # model (documented corruption-recovery, ADR-0007) rather than loading a
+        # P that crashes later in _matmul.
+        # F23: an ekf_version *mismatch* is a migration, not corruption. Keep the
+        # temperature state and the maturity counters, and fall the RC params
+        # back to priors with a re-widened covariance -- exactly as the pegged
+        # recovery below does. Discarding the whole model there wiped the
+        # observation counters too, resetting hard-won filter maturity.
         try:
-            if int(data.get("ekf_version", 0)) != EKF_VERSION:
-                return cls()
+            version_ok = int(data.get("ekf_version", 0)) == EKF_VERSION
             x = [float(v) for v in data["x"]]
             p = [[float(v) for v in row] for row in data["p"]]
         except (KeyError, TypeError, ValueError):
@@ -392,17 +396,25 @@ class ThermalEKF:
         ):
             return cls()
         ekf = cls(x)
-        ekf.p = p
+        # trust the stored covariance only within the same version; across a
+        # bump keep the fresh P0 diagonal from __init__ (conservative re-widen).
+        if version_ok:
+            ekf.p = p
         ekf.n_updates = int(data.get("n_updates", 0))
         ekf.n_idle = int(data.get("n_idle", 0))
         ekf.n_heating = int(data.get("n_heating", 0))
         ekf.n_cooling = int(data.get("n_cooling", 0))
         ekf._n_uc = int(data.get("n_uc", 0))
         ekf._n_qocc = int(data.get("n_qocc", 0))
-        # recovery: a parameter pegged at its bound on load is unreliable ->
-        # reset RC parameters to defaults but keep the observation counters so
-        # the maturity gates stay satisfied while it re-learns (ADR-0007/0009).
-        if ekf.x[_A] >= _UPPER[_A] * 0.99 or ekf.x[_A] <= _LOWER[_A] * 1.01:
+        # recovery: a parameter pegged at its bound on load -- or a model loaded
+        # across a version bump -- is unreliable, so reset the RC parameters to
+        # defaults but keep the observation counters so the maturity gates stay
+        # satisfied while it re-learns (ADR-0007/0009, F23).
+        if (
+            not version_ok
+            or ekf.x[_A] >= _UPPER[_A] * 0.99
+            or ekf.x[_A] <= _LOWER[_A] * 1.01
+        ):
             for i in (_A, _BH, _BC, _BS, _BO):
                 ekf.x[i] = _DEFAULTS[i]
                 ekf.p[i][i] = _P0[i]
