@@ -831,9 +831,7 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             ),
         )
 
-    async def _park_replaced_actuator(
-        self, entry: ConfigEntry, actuator: str
-    ) -> None:
+    async def _park_replaced_actuator(self, entry: ConfigEntry, actuator: str) -> None:
         """AR-12: release a room's PREVIOUS actuator when a reconfigure repoints the
         zone to a different one — park it in a capability-appropriate end state and
         flip a TRV sensor source back to internal, so the old device does not keep

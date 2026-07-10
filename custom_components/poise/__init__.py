@@ -256,9 +256,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             else None
         )
         old_on = (
-            hub._action_on.data.get("entity_id")
-            if hub._action_on is not None
-            else None
+            hub._action_on.data.get("entity_id") if hub._action_on is not None else None
         )
         new_off = parse_service_action(entry.data.get(CONF_BOILER_OFF_ACTION))
         new_on = parse_service_action(entry.data.get(CONF_BOILER_ON_ACTION))
@@ -493,9 +491,7 @@ async def _execute_park(hass: HomeAssistant, actuator: str, plan: Any) -> None:
                 blocking=True,
             )
     except (HomeAssistantError, ValueError):
-        logging.getLogger(__name__).exception(
-            "Poise: actuator park on removal failed"
-        )
+        logging.getLogger(__name__).exception("Poise: actuator park on removal failed")
 
 
 async def _restore_trv_internal(hass: HomeAssistant, actuator: str) -> None:
