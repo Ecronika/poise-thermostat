@@ -213,9 +213,17 @@
       "title": "Poise: frierender Raum steuert den geteilten Kessel nicht",
       "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere in seinen Optionen \"Diese Zone steuert den Kessel\" (ein reiner Kühl-Raum kann ignoriert werden). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
     },
+    "hub_frost_zone_unavailable": {
+      "title": "Poise: Raumsensor verloren — Heizen im Frostschutz",
+      "description": "Diese Räume haben ihren Temperatursensor verloren und sind auf lokalen Frostschutz zurückgefallen; Poise lässt den geteilten Kessel feuern, damit sie nicht einfrieren: {zones}. Die Komfortregelung ist eingeschränkt, bis der Sensor zurückkehrt — prüfe den Sensor sowie dessen Batterie/Integration. Der Hinweis verschwindet automatisch, sobald der Sensor wieder verfügbar ist."
+    },
     "persistence_failed": {
       "title": "Poise: Gelerntes Modell kann nicht gespeichert werden",
       "description": "Poise konnte sein gelerntes Modell und die Einstellungen wiederholt nicht speichern — Lernfortschritt und jüngste Änderungen können beim nächsten Neustart verloren gehen. Prüfe den Speicherplatz und das Home-Assistant-Verzeichnis `.storage`. Der Hinweis verschwindet automatisch, sobald ein Speichern gelingt."
+    },
+    "required_entity_disabled": {
+      "title": "Poise: benötigte Entität ist deaktiviert",
+      "description": "Ein von Poise benötigter Raumsensor oder ein Thermostat (`{entity}`) ist in Home Assistant deaktiviert — Poise kann diesen Raum nicht regeln. Aktiviere die Entität unter Einstellungen → Geräte & Dienste → Entitäten und lade Poise neu. Der Hinweis verschwindet automatisch, sobald die Entität aktiviert ist."
     },
     "mould_protection_inactive": {
       "title": "Poise: Schimmelschutz inaktiv",

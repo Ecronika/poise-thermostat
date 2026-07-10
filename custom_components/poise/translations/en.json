@@ -348,9 +348,17 @@
       "title": "Poise: freezing room not controlling the shared boiler",
       "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable \"This zone controls the boiler\" in its options (a cooling-only room can be ignored). This issue clears automatically once no such room is freezing."
     },
+    "hub_frost_zone_unavailable": {
+      "title": "Poise: room sensor lost — heating on frost protection",
+      "description": "These rooms lost their temperature sensor and have fallen back to local frost protection; Poise is firing the shared boiler so they do not freeze: {zones}. Comfort control is degraded until the sensor returns — check the sensor and its battery/integration. This issue clears automatically once the sensor is back."
+    },
     "persistence_failed": {
       "title": "Poise: cannot save learned model",
       "description": "Poise has repeatedly failed to write its learned model and settings to storage, so learning and your recent changes may be lost on the next restart. Check the disk and the Home Assistant `.storage` directory. This issue clears automatically once a save succeeds."
+    },
+    "required_entity_disabled": {
+      "title": "Poise: a required entity is disabled",
+      "description": "A room sensor or thermostat Poise needs (`{entity}`) is disabled in Home Assistant, so Poise cannot control this room. Re-enable it under Settings → Devices & Services → Entities and reload Poise. This issue clears automatically once the entity is enabled."
     }
   }
 }
