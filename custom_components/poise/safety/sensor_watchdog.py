@@ -3,8 +3,11 @@
 A sensor that stays *available* but stops changing its value (dead battery,
 stuck firmware, stalled integration) is a silent failure: control runs on stale
 data and the EKF would mislearn from a flat signal. We detect it from the age
-of the last value change and react *advisorily* — raise a repair issue and pause
-learning — without altering the control output (no new control risk).
+of the last value change and react on two fronts: raise a repair issue and pause
+learning, and degrade the control output to a safe state — a heat-capable device
+holds the health floor (frost/mould, kept by the actuator's own sensor, fail
+toward warmth) while a cool-only device is commanded off, so control never chases
+a comfort target computed from a dead value.
 """
 
 from __future__ import annotations
