@@ -712,3 +712,90 @@ def test_reconcile_boiler_on() -> None:
     assert reconcile_boiler_on(None) is None  # no entity -> keep prior belief
     assert reconcile_boiler_on("unknown") is None
     assert reconcile_boiler_on("unavailable") is None
+
+
+def test_frost_heat_request_fires_boiler_unconditionally() -> None:
+    # AR-05: a boiler-controlling zone that lost its sensor and parked on the frost
+    # floor gets a synthetic request that fires the shared boiler via the frost
+    # override — regardless of the count/power thresholds.
+    from custom_components.poise.control.hub_aggregate import (
+        aggregate_boiler_demand,
+        frost_heat_request,
+    )
+
+    r = frost_heat_request("bath", mono_ts=123.0)
+    assert r.heating is True and r.frost_active is True and r.controls_boiler is True
+    assert r.zone_id == "bath" and r.mono_ts == 123.0 and r.declared_power is None
+    # even with a high count threshold the frost override still fires the boiler
+    d = aggregate_boiler_demand([r], count_threshold=9)
+    assert d.active is True and d.frost_override is True and d.frost_zone_id == "bath"
+
+
+def test_boiler_state_payload_round_trip_preserves_dwell() -> None:
+    # AR-08: persisting then restoring across a (simulated) restart keeps the
+    # min-cycle dwell — the monotonic switch stamp is re-anchored via wall-clock.
+    from custom_components.poise.control.hub_aggregate import (
+        BoilerState,
+        boiler_state_to_payload,
+        restore_boiler_state,
+    )
+
+    # boiler switched on 120 s ago (mono 1000, switch at 880); wall now 5000.
+    state = BoilerState(on=True, last_switch_mono=880.0)
+    payload = boiler_state_to_payload(
+        state, now_mono=1000.0, now_wall=5000.0, has_actuated=True
+    )
+    assert payload == {
+        "boiler_on": True,
+        "last_switch_wall": 4880.0,  # 5000 - (1000 - 880)
+        "has_actuated": True,
+    }
+    # restart: fresh mono clock (now 0), wall advanced 30 s (5030). The 120 s that
+    # had already elapsed must be preserved -> restored switch stamp 0 - 150 = -150.
+    restored, has_actuated = restore_boiler_state(
+        payload, now_mono=0.0, now_wall=5030.0
+    )
+    assert has_actuated is True and restored.on is True
+    assert restored.last_switch_mono == -150.0  # 0 - (5030 - 4880)
+
+
+def test_restore_boiler_state_empty_is_default() -> None:
+    from custom_components.poise.control.hub_aggregate import (
+        BoilerState,
+        restore_boiler_state,
+    )
+
+    assert restore_boiler_state(None, now_mono=10.0, now_wall=1.0) == (
+        BoilerState(),
+        False,
+    )
+    assert restore_boiler_state({}, now_mono=10.0, now_wall=1.0) == (
+        BoilerState(),
+        False,
+    )
+
+
+def test_restore_boiler_state_missing_wall_keeps_belief() -> None:
+    # a payload without a switch stamp restores the on/has_actuated belief but
+    # leaves the dwell at the immediate-switch default.
+    from custom_components.poise.control.hub_aggregate import restore_boiler_state
+
+    restored, has_actuated = restore_boiler_state(
+        {"boiler_on": True, "has_actuated": True}, now_mono=50.0, now_wall=99.0
+    )
+    assert restored.on is True and has_actuated is True
+    assert restored.last_switch_mono == -1.0e9  # BoilerState default
+
+
+def test_restore_boiler_state_clamps_backwards_clock() -> None:
+    # AR-08: a persisted wall time in the FUTURE (system clock jumped back) must
+    # not read as long-elapsed and free an immediate switch — elapsed clamps to 0
+    # so the dwell stays engaged (restored stamp == now_mono).
+    from custom_components.poise.control.hub_aggregate import restore_boiler_state
+
+    restored, _ = restore_boiler_state(
+        {"boiler_on": True, "last_switch_wall": 9000.0, "has_actuated": True},
+        now_mono=500.0,
+        now_wall=4000.0,  # earlier than the persisted 9000 -> clock went back
+    )
+    assert restored.last_switch_mono == 500.0  # clamped to now_mono
