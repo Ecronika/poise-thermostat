@@ -204,7 +204,6 @@ async def test_options_flow_creates_entry(hass: HomeAssistant) -> None:
             "comfort": {
                 CONF_CATEGORY: ROOM[CONF_CATEGORY],
                 CONF_COMFORT_BASE: ROOM[CONF_COMFORT_BASE],
-                CONF_CLIMATE_MODE: ROOM[CONF_CLIMATE_MODE],
                 CONF_COMFORT_WEIGHT: ROOM[CONF_COMFORT_WEIGHT],
             },
             "schedule": {

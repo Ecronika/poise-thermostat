@@ -209,7 +209,7 @@ async def test_setup_loads_when_required_sensor_unavailable(
 ) -> None:
     """AR-41: a required entity that EXISTS but is 'unavailable' must not block setup
     — the guard trips only on a truly absent entity; unavailability is handled by the
-    tick's degraded (hold-then-safe-state) path, so the entry still LOADS (review A2)."""
+    tick's degraded (hold-then-safe-state) path, so the entry still LOADS."""
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     # both required entities exist; the room sensor is present but 'unavailable'
