@@ -344,10 +344,7 @@ async def _remove_hub_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
                 # AR-24: bound the blocking OFF with the same timeout the hub's
                 # normal actuation path uses, so a hung boiler integration cannot
                 # stall entry removal.
-                try:
-                    from .const import _BOILER_CALL_TIMEOUT_S
-                except ImportError:  # not yet relocated to const (cross-process)
-                    from .hub_coordinator import _BOILER_CALL_TIMEOUT_S
+                from .hub_coordinator import _BOILER_CALL_TIMEOUT_S
 
                 try:
                     async with asyncio.timeout(_BOILER_CALL_TIMEOUT_S):
