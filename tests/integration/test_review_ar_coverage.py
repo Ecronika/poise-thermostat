@@ -509,4 +509,3 @@ async def test_restore_trv_internal_swallows_error(hass: HomeAssistant) -> None:
         await async_remove_entry(hass, entry)  # must not raise
 
     assert await PoiseStore(hass, entry.entry_id).load() is None
-
