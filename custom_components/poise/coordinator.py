@@ -1281,7 +1281,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     ),
                 )
                 self._last_target = plan.setpoint
-                self._has_actuated = True  # AR-11: a real write reached the actuator
+                self._has_actuated = True  # AR-11: real actuator write
         except Exception:  # noqa: BLE001 - safe-state write must never kill the tick
             _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
 
@@ -1970,7 +1970,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     await actuator_mod.write(self.hass, cmd)
                     self._last_written_mode = final_mode
                     self._last_sp_write_ts = now
-                    self._has_actuated = True  # AR-11: a real write reached the actuator
+                    self._has_actuated = True  # AR-11: real actuator write
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
                         "Poise: actuator write failed for %s", self._actuator
@@ -2062,7 +2062,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             reason="frost_rescue",
                         ),
                     )
-                    self._has_actuated = True  # AR-11: a real write reached the actuator
+                    self._has_actuated = True  # AR-11: real actuator write
                 except Exception:  # noqa: BLE001 - frost rescue write is best-effort
                     _LOGGER.exception(
                         "Poise: frost rescue write failed for %s", self._actuator

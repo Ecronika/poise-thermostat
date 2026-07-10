@@ -20,7 +20,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -137,6 +137,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._flow_current: float | None = None
         self._default_source = str(d.get(CONF_DEFAULT_SOURCE, DEFAULT_HEAT_SOURCE))
         self._active_issues: set[str] = set()
+        self._tick_unsub: CALLBACK_TYPE | None = None  # AR-02: hub tick timer unsub
         # AR-08: persist the boiler state (on + wall-clock switch time) + the
         # has_actuated dead-man flag so a restart rebuilds the min-cycle dwell and
         # the entry-removal gate (AR-15) can tell Poise ever commanded the boiler.

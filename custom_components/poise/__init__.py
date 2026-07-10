@@ -99,12 +99,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # AFTER async_unload_platforms; the hub-unload branch cancels it FIRST,
         # before the blocking boiler OFF, so a tick can never fire in between and
         # command the boiler back ON just after we have handed it off.
-        setattr(
-            hub,
-            "_tick_unsub",
-            async_track_time_interval(
-                hass, _hub_tick, timedelta(seconds=TICK_INTERVAL_S)
-            ),
+        hub._tick_unsub = async_track_time_interval(
+            hass, _hub_tick, timedelta(seconds=TICK_INTERVAL_S)
         )
         await hass.config_entries.async_forward_entry_setups(
             entry, [Platform.BINARY_SENSOR]
@@ -247,7 +243,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         tick_unsub = getattr(hub, "_tick_unsub", None)
         if tick_unsub is not None:
             tick_unsub()
-            setattr(hub, "_tick_unsub", None)
+            hub._tick_unsub = None
 
         # F4/F12: hand the boiler back cleanly — fire OFF only at a genuine
         # relinquish (the entry is being disabled, the reconfigured data no longer
