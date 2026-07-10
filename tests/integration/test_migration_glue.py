@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
+from custom_components.poise import async_migrate_entry
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,
@@ -96,8 +97,9 @@ async def test_v1_entry_migrates_and_runs_list_presence(hass: HomeAssistant) -> 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    # migrated to V2
+    # migrated to V2 with an explicit minor_version pinned (AR-36)
     assert entry.version == 2
+    assert entry.minor_version == 1
     # tuning moved out of data into options; structural inputs stayed in data
     assert CONF_COMFORT_BASE not in entry.data
     assert entry.options[CONF_COMFORT_BASE] == 21.0
@@ -108,3 +110,42 @@ async def test_v1_entry_migrates_and_runs_list_presence(hass: HomeAssistant) -> 
     # the coordinator read the list-form presence: person 'not_home' -> AWAY
     # relaxation wrote a cooling setpoint without breaking the tick.
     assert set_temp, "coordinator did not write a cooling setpoint after migration"
+
+
+async def test_future_schema_version_is_refused(hass: HomeAssistant) -> None:
+    """AR-19: a config entry from a NEWER schema (v3) is refused, not silently
+    downgraded — async_migrate_entry returns False and leaves the entry untouched."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.ac",
+        data={CONF_TEMP_SENSOR: "sensor.room_temp", CONF_ACTUATOR: "climate.ac"},
+        version=3,
+        title="Future",
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is False
+    assert entry.version == 3  # not downgraded
+
+
+async def test_migration_is_idempotent(hass: HomeAssistant) -> None:
+    """AR-19: migrating an already-migrated (v2) entry again is a no-op split — the
+    same data/options come back out, so a double migration cannot corrupt the store."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.ac",
+        data=_v1_data(),
+        version=1,
+        title="Office",
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.version == 2
+    data_once, options_once = dict(entry.data), dict(entry.options)
+
+    # a second pass over the now-v2 entry must reproduce the same split
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.version == 2
+    assert dict(entry.data) == data_once
+    assert dict(entry.options) == options_once

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.config_entries import ConfigEntryDisabler
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -66,7 +66,11 @@ async def test_room_remove_parks_heater_and_deletes_store(
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     hass.states.async_set("climate.trv", "heat", {"hvac_modes": ["heat", "cool"]})
     entry = _room_entry(hass)
-    await PoiseStore(hass, entry.entry_id).save({"ekf_version": 1, "n_heating": 3})
+    # AR-11/AR-13: park is gated on has_actuated and reads the live climate mode
+    # from the store (not entry.data).
+    await PoiseStore(hass, entry.entry_id).save(
+        {"has_actuated": True, "climate_mode": "auto", "ekf_version": 1}
+    )
 
     await async_remove_entry(hass, entry)
 
@@ -79,8 +83,15 @@ async def test_room_remove_parks_heater_and_deletes_store(
 async def test_room_remove_off_for_cool_only(hass: HomeAssistant) -> None:
     set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     set_temp = async_mock_service(hass, "climate", "set_temperature")
-    hass.states.async_set("climate.trv", "cool", {"hvac_modes": ["cool", "fan_only"]})
+    # heat-capable device, but the LIVE climate mode (from the store, AR-13) is
+    # cool_only -> the zone does not heat -> park OFF, never heat@setback.
+    hass.states.async_set(
+        "climate.trv", "cool", {"hvac_modes": ["heat", "cool", "fan_only"]}
+    )
     entry = _room_entry(hass, **{CONF_CLIMATE_MODE: "cool_only"})
+    await PoiseStore(hass, entry.entry_id).save(
+        {"has_actuated": True, "climate_mode": "cool_only"}
+    )
 
     await async_remove_entry(hass, entry)
 
@@ -92,6 +103,7 @@ async def test_room_remove_closes_valve(hass: HomeAssistant) -> None:
     set_value = async_mock_service(hass, "number", "set_value")
     hass.states.async_set("number.valve", "40", {})
     entry = _room_entry(hass, **{CONF_ACTUATOR: "number.valve"})
+    await PoiseStore(hass, entry.entry_id).save({"has_actuated": True})
 
     await async_remove_entry(hass, entry)
 
@@ -121,7 +133,11 @@ async def test_room_remove_restores_trv_sensor_source(hass: HomeAssistant) -> No
         sel.entity_id, "external", {"options": ["internal", "external"]}
     )
 
-    await async_remove_entry(hass, _room_entry(hass))
+    entry = _room_entry(hass)
+    await PoiseStore(hass, entry.entry_id).save(
+        {"has_actuated": True, "climate_mode": "auto"}
+    )
+    await async_remove_entry(hass, entry)
 
     assert select_opt[-1].data["option"] == "internal"
     assert select_opt[-1].data["entity_id"] == sel.entity_id
@@ -198,3 +214,119 @@ async def test_flush_on_stop_persists_model(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
     assert await PoiseStore(hass, entry.entry_id).load() is not None
+
+
+# --- AR-42: room-remove error paths -------------------------------------------
+async def test_room_remove_survives_throwing_park(hass: HomeAssistant) -> None:
+    """A park service that raises must not abort removal — the error is caught and
+    the stored model + trace are still cleaned up (AR-42/AR-17)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    async def _boom(_call: Any) -> None:
+        raise HomeAssistantError("actuator offline")
+
+    hass.services.async_register("climate", "set_hvac_mode", _boom)
+    async_mock_service(hass, "climate", "set_temperature")
+    hass.states.async_set("climate.trv", "heat", {"hvac_modes": ["heat"]})
+    entry = _room_entry(hass)
+    await PoiseStore(hass, entry.entry_id).save(
+        {"has_actuated": True, "climate_mode": "auto"}
+    )
+
+    await async_remove_entry(hass, entry)  # must not raise
+
+    assert await PoiseStore(hass, entry.entry_id).load() is None
+
+
+async def test_room_remove_survives_unavailable_actuator(hass: HomeAssistant) -> None:
+    """An unavailable actuator whose park service is not even registered
+    (ServiceNotFound) must not abort removal; store cleanup still runs (AR-42)."""
+    hass.states.async_set("climate.trv", "unavailable", {})
+    entry = _room_entry(hass)
+    await PoiseStore(hass, entry.entry_id).save(
+        {"has_actuated": True, "climate_mode": "auto"}
+    )
+    # climate services intentionally NOT registered -> set_hvac_mode raises
+    # ServiceNotFound (a HomeAssistantError); removal must still complete cleanly.
+    await async_remove_entry(hass, entry)
+
+    assert await PoiseStore(hass, entry.entry_id).load() is None
+
+
+async def test_room_remove_skips_park_when_never_actuated(hass: HomeAssistant) -> None:
+    """AR-11: a zone Poise never actuated (no store / has_actuated False) leaves the
+    actuator untouched on removal — nothing to hand back."""
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    hass.states.async_set("climate.trv", "heat", {"hvac_modes": ["heat"]})
+    entry = _room_entry(hass)
+    # no store saved -> load() None -> has_actuated defaults False -> no park
+
+    await async_remove_entry(hass, entry)
+
+    assert len(set_mode) == 0
+    assert len(set_temp) == 0
+
+
+# --- AR-33: a registry-disabled required entity fails setup cleanly ------------
+async def test_setup_errors_when_required_entity_disabled(hass: HomeAssistant) -> None:
+    """A registry-DISABLED required entity fails setup with a fixable error + repair
+    issue (AR-33), not an endless ConfigEntryNotReady retry loop."""
+    hass.states.async_set("sensor.room_temp", "20", {"device_class": "temperature"})
+    ent_reg = er.async_get(hass)
+    ent_reg.async_get_or_create(
+        "climate",
+        "demo",
+        "trv-uid",
+        suggested_object_id="trv",  # -> climate.trv, matching ROOM's actuator
+        disabled_by=er.RegistryEntryDisabler.USER,
+    )
+    entry = _room_entry(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert (
+        DOMAIN,
+        f"required_entity_disabled_{entry.entry_id}",
+    ) in ir.async_get(hass).issues
+
+
+# --- AR-01: reconfigure to a different boiler hands the OLD one back -----------
+async def test_hub_unload_hands_back_old_boiler_on_retarget(
+    hass: HomeAssistant,
+) -> None:
+    """A reconfigure that re-points the boiler at a DIFFERENT target fires the OLD
+    boiler's OFF (target_changed), rather than leaving it running (AR-01)."""
+    off_calls = async_mock_service(hass, "switch", "turn_off")
+    async_mock_service(hass, "switch", "turn_on")
+    hub = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="poise_system",
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM,
+            CONF_BOILER_ON_ACTION: "switch.boiler_a/switch.turn_on",
+            CONF_BOILER_OFF_ACTION: "switch.boiler_a/switch.turn_off",
+        },
+        title="Poise System",
+    )
+    hub.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(hub.entry_id)
+    await hass.async_block_till_done()
+
+    # Simulate the reconfigure: entry.data now points at boiler_b while the live
+    # hub (runtime_data) still holds boiler_a as its wired action.
+    hass.config_entries.async_update_entry(
+        hub,
+        data={
+            CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM,
+            CONF_BOILER_ON_ACTION: "switch.boiler_b/switch.turn_on",
+            CONF_BOILER_OFF_ACTION: "switch.boiler_b/switch.turn_off",
+        },
+    )
+    assert await hass.config_entries.async_unload(hub.entry_id)
+    await hass.async_block_till_done()
+
+    # the OLD boiler (boiler_a) was handed back
+    assert any(c.data.get("entity_id") == "switch.boiler_a" for c in off_calls)

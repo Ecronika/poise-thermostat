@@ -9,7 +9,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.poise.const import (
     CONF_ACTUATOR,
@@ -56,6 +59,13 @@ ROOM_SETUP: dict[str, Any] = {
     CONF_ACTUATOR: "climate.trv",
     "accuracy": {CONF_CATEGORY: "II", CONF_COMFORT_BASE: 21.0},
 }
+
+
+def _add_room(hass: HomeAssistant, unique_id: str = "climate.existing") -> None:
+    """A pre-existing room entry — AR-30 only offers 'system' once a zone exists."""
+    MockConfigEntry(
+        domain=DOMAIN, unique_id=unique_id, data=ROOM_INPUT, title="Existing Room"
+    ).add_to_hass(hass)
 
 
 async def test_user_menu_then_room_creates_entry(hass: HomeAssistant) -> None:
@@ -108,6 +118,7 @@ async def test_duplicate_actuator_aborts(hass: HomeAssistant) -> None:
 
 async def test_system_hub_entry_is_tagged(hass: HomeAssistant) -> None:
     """The system branch creates the singleton hub entry (ENTRY_TYPE_SYSTEM)."""
+    _add_room(hass)  # AR-30: 'system' is only offered once a room exists
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -283,7 +294,6 @@ async def test_options_comfort_window_pair_error(hass: HomeAssistant) -> None:
                 "comfort": {
                     CONF_CATEGORY: ROOM_INPUT[CONF_CATEGORY],
                     CONF_COMFORT_BASE: ROOM_INPUT[CONF_COMFORT_BASE],
-                    CONF_CLIMATE_MODE: ROOM_INPUT[CONF_CLIMATE_MODE],
                     CONF_COMFORT_WEIGHT: ROOM_INPUT[CONF_COMFORT_WEIGHT],
                 },
                 "schedule": {
@@ -324,6 +334,7 @@ async def test_system_setup_rejects_invalid_boiler_action(
 ) -> None:
     """F11: a boiler action that doesn't parse is rejected at setup rather than
     silently leaving the hub shadow-only."""
+    _add_room(hass)  # AR-30: 'system' is only offered once a room exists
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -343,6 +354,7 @@ async def test_system_setup_accepts_valid_boiler_action(
     hass: HomeAssistant,
 ) -> None:
     """F11: a well-formed boiler action passes and the hub entry is created."""
+    _add_room(hass)  # AR-30: 'system' is only offered once a room exists
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
     )
@@ -384,3 +396,90 @@ async def test_system_reconfigure_rejects_invalid_boiler_action(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
     assert result["errors"] == {"base": "invalid_boiler_action"}
+
+
+async def test_user_menu_hides_system_until_a_room_exists(
+    hass: HomeAssistant,
+) -> None:
+    """AR-30: a fresh install (no zone yet) is offered only 'room'; the singleton
+    system hub appears in the menu once at least one room entry exists."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == ["room"]
+
+    _add_room(hass)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user"}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert "system" in result["menu_options"]
+
+
+async def test_options_first_save_keeps_optimal_start_and_weight_defaults(
+    hass: HomeAssistant,
+) -> None:
+    """AR-16: the first options-save of a fresh entry must not flip the coordinator
+    defaults — optimal_start stays True and comfort_weight stays 70 when the user
+    leaves those (now default-carrying) fields untouched."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                "comfort": {CONF_CATEGORY: "II", CONF_COMFORT_BASE: 21.0},
+                "schedule": {CONF_SETBACK_DELTA: 3.0},
+                "heat_cool": {},
+                "presence": {},
+                "advanced": {CONF_OPERATIVE_INPUT: False},
+                "energy": {},
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_OPTIMAL_START] is True
+    assert entry.options[CONF_COMFORT_WEIGHT] == 70
+
+
+async def test_reconfigure_new_actuator_parks_old(hass: HomeAssistant) -> None:
+    """AR-12: repointing a zone to a different actuator releases the OLD one — a
+    heat-capable device is parked to heat at the setback (comfort_base 21 - setback
+    3 = 18 °C) so it does not stay frozen against Poise's external feed after the
+    reload adopts the new actuator."""
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    hass.states.async_set(
+        "climate.trv", "heat", {"hvac_modes": ["heat", "off"], "min_temp": 5}
+    )
+    hass.states.async_set("climate.new", "heat", {"hvac_modes": ["heat", "off"]})
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await entry.start_reconfigure_flow(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "Test Room",
+                CONF_TEMP_SENSOR: "sensor.room_temp",
+                CONF_ACTUATOR: "climate.new",
+                "sensors": {},
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_ACTUATOR] == "climate.new"  # new actuator adopted
+    old_mode = [c for c in set_mode if c.data["entity_id"] == "climate.trv"]
+    old_temp = [c for c in set_temp if c.data["entity_id"] == "climate.trv"]
+    assert old_mode and old_mode[-1].data["hvac_mode"] == "heat"
+    assert old_temp and old_temp[-1].data["temperature"] == 18.0

@@ -14,7 +14,7 @@ CI-only: needs a modern HA runtime (see conftest); the sandbox HA 2023.7 skips.
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.util import dt as dt_util
@@ -92,7 +92,9 @@ async def _setup(hass: HomeAssistant, data: dict[str, Any]) -> MockConfigEntry:
 
 
 async def test_remove_system_hub_switches_boiler_off(hass: HomeAssistant) -> None:
-    # F12: OFF fires on removal only when Poise was actuating (BOTH actions wired).
+    # F12/AR-15: OFF fires on removal only when Poise was actuating — BOTH actions
+    # wired AND the hub actually fired the boiler at least once (has_actuated from
+    # PoiseHubStore, delivered by the hub-store process).
     turn_off = async_mock_service(hass, "switch", "turn_off")
     hub = MockConfigEntry(
         domain=DOMAIN,
@@ -105,7 +107,12 @@ async def test_remove_system_hub_switches_boiler_off(hass: HomeAssistant) -> Non
         title="Poise System",
     )
     hub.add_to_hass(hass)
-    await async_remove_entry(hass, hub)
+    with patch(
+        "custom_components.poise.storage.PoiseHubStore.load",
+        new_callable=AsyncMock,
+        return_value={"has_actuated": True},
+    ):
+        await async_remove_entry(hass, hub)
     assert len(turn_off) == 1
 
 
