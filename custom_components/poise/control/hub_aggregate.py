@@ -507,3 +507,83 @@ def reconcile_boiler_on(state: str | None) -> bool | None:
     if state is None or state in ("unknown", "unavailable"):
         return None
     return state != "off"
+
+
+# A zone in local unavailable-safe frost parking declares no power: it fires the
+# shared boiler solely via the frost override, so it must never dominate the
+# power-threshold / load-shedding math meant for real, metered heating (AR-05).
+def frost_heat_request(
+    zone_id: str,
+    *,
+    mono_ts: float,
+    declared_power: float | None = None,
+) -> ZoneRequest:
+    """Synthetic call-for-heat for a boiler-controlling zone whose room sensor
+    dropped out and which has locally degraded to the frost floor (AR-05).
+
+    The zone can no longer publish a fresh snapshot (its sensor is gone) yet it
+    IS holding its TRV at the frost floor and needs the shared boiler to fire.
+    ``frost_active`` is set so :func:`aggregate_boiler_demand`'s frost override
+    fires it unconditionally (never gated by count/power thresholds) -- this is a
+    considered, timeout-gated safety state (``unavailable_safe``), not a transient
+    bad reading, so it legitimately bypasses the plausibility floor that guards a
+    single broken sensor from pinning the boiler.
+    """
+    return ZoneRequest(
+        zone_id=zone_id,
+        heating=True,
+        hvac_action="heating",
+        heat_demand=1.0,
+        comfort_gap=0.0,
+        frost_active=True,
+        controls_boiler=True,
+        mono_ts=mono_ts,
+        declared_power=declared_power,
+    )
+
+
+def boiler_state_to_payload(
+    state: BoilerState,
+    *,
+    now_mono: float,
+    now_wall: float,
+    has_actuated: bool,
+) -> dict[str, Any]:
+    """Serialise the tick-crossing :class:`BoilerState` to a restart-safe payload
+    (AR-08). The monotonic ``last_switch_mono`` is re-anchored to the wall clock
+    (monotonic time resets per process; ADR-0006/0007) so
+    :func:`restore_boiler_state` can rebuild the min-on/min-off dwell after a
+    restart. Elapsed is clamped to >= 0 against a mid-tick clock read.
+    """
+    elapsed = max(0.0, now_mono - state.last_switch_mono)
+    return {
+        "boiler_on": bool(state.on),
+        "last_switch_wall": now_wall - elapsed,
+        "has_actuated": bool(has_actuated),
+    }
+
+
+def restore_boiler_state(
+    payload: dict[str, Any] | None,
+    *,
+    now_mono: float,
+    now_wall: float,
+) -> tuple[BoilerState, bool]:
+    """Rebuild the :class:`BoilerState` + ``has_actuated`` flag from a persisted
+    payload (AR-08). The wall-clock ``last_switch_wall`` is converted back to a
+    monotonic stamp anchored at ``now_mono`` so the min-cycle dwell survives a
+    restart. Elapsed is clamped to >= 0 so a wall clock that jumped backwards
+    keeps the dwell engaged rather than reading as long-elapsed (Muster:
+    ``multi.lifecycle.from_dict`` / ``_clamp_future``). The restored ``on`` is a
+    *belief* only -- the caller still reconciles it against the real actuator. A
+    missing/empty payload yields the fresh default state and ``has_actuated`` False.
+    """
+    if not payload:
+        return BoilerState(), False
+    on = bool(payload.get("boiler_on", False))
+    has_actuated = bool(payload.get("has_actuated", False))
+    wall = payload.get("last_switch_wall")
+    if wall is None:
+        return BoilerState(on=on), has_actuated
+    elapsed = max(0.0, now_wall - float(wall))
+    return BoilerState(on=on, last_switch_mono=now_mono - elapsed), has_actuated

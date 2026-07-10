@@ -73,6 +73,7 @@ def resolve_park_command(
     heats_for_zone: bool,
     setback_setpoint: float | None,
     floor: float,
+    device_min: float | None = None,
 ) -> ParkPlan | None:
     """Capability-dependent park state on room-entry deletion (review F3).
 
@@ -94,18 +95,30 @@ def resolve_park_command(
         return ParkPlan("valve", None, None, 0.0)
     if heats_for_zone and "heat" in hvac_modes:
         sp = floor if setback_setpoint is None else max(floor, setback_setpoint)
+        # AR-10: clamp up to the device min so a high-min heater (heat pump / split
+        # AC) does not silently reject a sub-min setback and stay on the old comfort
+        # setpoint — symmetric with resolve_safe_state.
+        if device_min is not None:
+            sp = max(sp, device_min)
         return ParkPlan("climate", "heat", round(sp, 1), None)
     return ParkPlan("climate", "off", None, None)
 
 
 def resolve_hub_unload_off(
-    *, was_actuating: bool, disabled: bool, still_actuating: bool
+    *,
+    was_actuating: bool,
+    disabled: bool,
+    still_actuating: bool,
+    target_changed: bool = False,
 ) -> bool:
-    """Fire the boiler OFF on hub unload only at a genuine hand-over (F4/F12).
+    """Fire the boiler OFF on hub unload only at a genuine hand-over (F4/F12/AR-01).
 
     True iff Poise was actuating the boiler AND control is being relinquished —
-    the entry is being disabled, or the reconfigured data no longer wires
-    actuation (ON+OFF). A plain reload (``still_actuating``) keeps hands off, and
-    a hub that was only ever shadow-only never fires an OFF it never commanded.
+    the entry is being disabled, the reconfigured data no longer wires actuation
+    (ON+OFF), OR the reconfigure points the boiler at a DIFFERENT target
+    (``target_changed``) so the OLD boiler must be handed back rather than left
+    running. A plain reload onto the SAME target keeps hands off, and a hub that
+    was only ever shadow-only never fires an OFF it never commanded. When
+    ``target_changed`` fires the OFF, the caller must send it to the OLD action.
     """
-    return was_actuating and (disabled or not still_actuating)
+    return was_actuating and (disabled or not still_actuating or target_changed)
