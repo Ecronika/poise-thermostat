@@ -1,6 +1,6 @@
 # ADR-0007: Persistenz, Migration & Bootstrap
 
-**Status:** In Arbeit (75 %) · **Datum:** 2026-06-18 · **Bezug:** E7, E8, K15 · **Verifizierung:** Code-Review RoomMind/BT/Vesta/ThermoSmart/Versatile (Thema C)
+**Status:** In Arbeit (75 %) · **Datum:** 2026-06-18 · **Bezug:** E7, E8, K15 · **Verifizierung:** Code-Review RoomMind/BT/Vesta/ThermoSmart/Versatile (Thema C) · **Korrektur (Ist-Stand):** siehe Nachtrag — Throttle als Counter+Dirty (nicht Debounce), Race-Guard als Existenz-Guard (kein `_check_entities_ready`)
 
 ## Kontext
 Persistenzverlust bei Reload ist ein dokumentierter Hebel des eigenen Stacks; der Strukturplan verlangt koordinierten Bootstrap vor dem ersten Tick (K15). Offen: Mechanismus, Versionierung/Migration, Restore-Reihenfolge, Speicherhäufigkeit.
@@ -33,3 +33,10 @@ Persistenzmuster allgemeingültig, eigenständig umgesetzt; anonymisierte Export
 
 ## Verknüpfungen
 Nutzt die monotone Uhr + Wall-Clock-Anker aus ADR-0006. Persistiert die Verträge/Zustände aus ADR-0002/0005. Bootstrap-Reihenfolge ist Teil der Tick-Initialisierung (ADR-0006).
+
+## Nachtrag/Korrektur (Ist-Stand v0.159)
+Der Persistenzapparat ist gebaut (dedizierter `Store`, Restore vor erstem Tick, Fehler-Eskalation als Repair-Issue), aber **§3 und §4 sind anders umgesetzt** als beim BT-Vorbild formuliert:
+
+- **§4 Throttle = Counter + Dirty, nicht Debounce.** Kein `async_call_later`. `_maybe_save` speichert alle `EKF_SAVE_EVERY_TICKS = 30` Ticks **oder** sofort, wenn `_dirty` gesetzt ist (Override/Enable/Modus-Änderung markiert `_dirty`). Der Shutdown-/Unload-Schutz existiert wie geplant: `async_flush_on_stop` auf `EVENT_HOMEASSISTANT_STOP` plus finaler Save in `async_persist_and_cleanup` beim Unload. „Kein Verlust beim Shutdown" gilt also; „schreibt nur bei echter Änderung (Debounce)" gilt nicht — es wird zusätzlich zeitgezählt gespeichert.
+- **§3 Race-Guard = Existenz-Guard, keine Warteschleife.** Kein `_check_entities_ready`-Loop und kein `_model_loaded`-Flag. `async_setup_entry` wirft `ConfigEntryNotReady`, solange eine **Pflicht-Entität (Sensor/Aktor) noch nicht existiert** (`hass.states.get(...) is None`), und überlässt das erneute Aufsetzen dem HA-Retry. Eine Entität, die existiert, aber `unavailable/unknown` ist, passiert den Guard und wird vom degradierten Tick-Pfad behandelt (letzten Zustand halten → Frost-/Schimmel-Sicherheitszustand). Restore läuft in `async_bootstrap` (`_store.load()`) strikt **vor** `async_config_entry_first_refresh` (erster Steuertick).
+- **Konsequenz-Korrektur:** Der in „Konsequenzen" genannte „Wartepfad (`_check_entities_ready`)" existiert nicht; der erste Tick wird nur durch den `ConfigEntryNotReady`-Retry verzögert, wenn Pflicht-Entitäten fehlen.

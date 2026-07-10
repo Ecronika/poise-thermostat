@@ -28,3 +28,10 @@ Generisch (Rollen/Geräte/Gruppen als Parameter), keine geräte-/herstellerspezi
 
 ## Verknüpfungen
 Konkretisiert ADR-0013 (Strukturplan-Ebene 5); nutzt ADR-0035 (Solver), ADR-0006 (monotone Zeit), ADR-0005 (Verträge). Liefert gedeckelte Freigaben an die Zonen-Arbitrierung. **ADR-0039** (Kesselbedarf-Aggregat) ist der erste Konsument.
+
+## Nachtrag/Korrektur (Ist-Stand v0.159)
+Die ausgelieferte Umsetzung weicht in der **Transportmechanik** von Punkt 1/3/4 ab; die tragenden Invarianten (Single-Writer, Schatten-zuerst, eine Solver-Algebra, Stale-Erkennung über `mono_ts`) bleiben unberührt:
+
+- **Pull statt Push-Registry.** Es gibt **keine** In-Memory-Registry `hass.data[DOMAIN]["hub"]`, in die Zonen ihre `ZoneRequest` schreiben. Der `PoiseHubCoordinator` **zieht** die Zonenzustände in `_collect_requests`: er iteriert `hass.config_entries.async_entries(DOMAIN)` und liest je Zone den zuletzt publizierten Snapshot aus `entry.runtime_data.data` (geprüft auf `available`, `last_update_success` und `mono_ts`-Alter). Die `ZoneRequest`-Objekte werden dabei hub-seitig aus dem Snapshot gebaut. Die Entkopplung der unabhängig taktenden Zonen entsteht aus diesem gepufferten `runtime_data`-Snapshot, nicht aus einer geteilten Registry.
+- **Kein `ResourceRelease`-Rückkanal.** Der Hub schreibt **keine** per-Zone-`ResourceRelease` zurück. `_async_update_data` liefert ein **einfaches Diagnose-Dict** (`boiler_demand`, `active_zones`, Load-Shedding-/Verdichter-/Flow-Shadow …), das die Hub-Entitäten lesen. Die Zonen speisen aktuell **keinen** Hub-Cap in ihren Solver ein; die zonenseitige Cap-Durchsetzung aus Punkt 3 (S3/S4) ist noch offen. Der Datentyp `ResourceRelease` (`contracts.py`) ist daher **reserviert/ungenutzt** und dort so markiert.
+- **Kesselaktuierung** liegt beim Hub (`if self._actuation`, opt-in); die Bedarfsaggregation zählt **nur** Zonen mit `controls_boiler` (ADR-0039). „Der Hub aktuiert keine Zonen" (Punkt 3) bleibt korrekt: er schaltet den **geteilten** Kessel, nicht die Zonen-Aktoren.
