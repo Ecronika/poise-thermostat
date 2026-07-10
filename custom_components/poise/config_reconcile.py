@@ -49,6 +49,8 @@ def reconcile_reconfigure(
     old_data: Mapping[str, Any],
     old_options: Mapping[str, Any],
     tuning_keys: Collection[str],
+    *,
+    structural_section_rendered: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Split a shrunk room reconfigure into ``(new_data, new_options)``.
 
@@ -65,13 +67,18 @@ def reconcile_reconfigure(
     # Structural data keys the shrunk form doesn't render would be lost on the full
     # data replace. They are not tuning, so carry them back into data unchanged
     # rather than letting them migrate to options.
-    new_data.update(
-        {
-            k: v
-            for k, v in old_data.items()
-            if k not in user_input and k in _STRUCTURAL_CARRY
-        }
-    )
+    # AR-09: carry the structural installation keys back ONLY when the form did NOT
+    # render them (no hub → the anlagen section is hidden). When the section IS
+    # rendered, a key absent from user_input means the user CLEARED it and it must
+    # be dropped, not reanimated from old_data.
+    if not structural_section_rendered:
+        new_data.update(
+            {
+                k: v
+                for k, v in old_data.items()
+                if k not in user_input and k in _STRUCTURAL_CARRY
+            }
+        )
     kept = {k: v for k, v in old_options.items() if k not in user_input}
     carried = {
         k: v

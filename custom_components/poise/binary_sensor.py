@@ -1,8 +1,12 @@
-"""Binary-sensor platform — boiler-demand shadow (ADR-0039, S1).
+"""Binary-sensor platform — boiler-demand indicator (ADR-0039, S1).
 
 One entity on the "Poise System" hub entry. It reflects the aggregated
-call-for-heat across all zones and is **diagnostic only** — Poise does not
-switch any boiler in this stage (shadow; actuation is S2, opt-in).
+call-for-heat across the zones configured to control the shared boiler
+(``controls_boiler``) — not across all zones — and is **diagnostic only**:
+this entity itself never writes. Switching the shared boiler is done by the hub
+coordinator and is live but opt-in (S2) — it fires only when both boiler on/off
+actions are configured (``self._actuation``); with no actions configured the hub
+stays shadow-only.
 """
 
 from __future__ import annotations

@@ -23,6 +23,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .clock import MonotonicClock
 from .const import (
@@ -62,16 +63,20 @@ from .control.hub_aggregate import (
     BoilerState,
     ServiceAction,
     aggregate_boiler_demand,
+    boiler_state_to_payload,
+    frost_heat_request,
     group_call_for_heat,
     parse_service_action,
     reconcile_boiler_on,
     resolve_flow_temperature,
     resolve_load_shedding,
     resolve_source_policy,
+    restore_boiler_state,
     step_boiler,
     step_min_cycle,
     zone_request_from_data,
 )
+from .storage import PoiseHubStore
 
 _LOGGER = logging.getLogger(__name__)
 _BOILER_CALL_TIMEOUT_S = 10.0  # a hung boiler service must not stall the hub (N-1)
@@ -132,16 +137,41 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._flow_current: float | None = None
         self._default_source = str(d.get(CONF_DEFAULT_SOURCE, DEFAULT_HEAT_SOURCE))
         self._active_issues: set[str] = set()
+        # AR-08: persist the boiler state (on + wall-clock switch time) + the
+        # has_actuated dead-man flag so a restart rebuilds the min-cycle dwell and
+        # the entry-removal gate (AR-15) can tell Poise ever commanded the boiler.
+        self._store = PoiseHubStore(hass)
+        self._restored = False
+        self._has_actuated = False
+        # AR-05: boiler-controlling zones parked in local unavailable-safe frost
+        # protection (room sensor out) — surfaced as a repair issue, per tick.
+        self._frost_unavailable_zones: tuple[str, ...] = ()
 
     def _collect_requests(self) -> list[ZoneRequest]:
         now = self._clock.monotonic()
         out: list[ZoneRequest] = []
+        frost_unavailable: list[str] = []
         for e in self.hass.config_entries.async_entries(DOMAIN):
             if e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM:
                 continue  # skip the hub itself
             coord = getattr(e, "runtime_data", None)
             data = getattr(coord, "data", None)
-            if not isinstance(data, dict) or not data.get("available"):
+            if not isinstance(data, dict):
+                continue
+            controls_boiler = bool(e.data.get(CONF_CONTROLS_BOILER, False))
+            dp = e.data.get(CONF_DECLARED_POWER)
+            declared_power = float(dp) if dp else None
+            if not data.get("available"):
+                # AR-05: an unavailable zone is normally dropped, but one that has
+                # locally degraded to unavailable-safe frost parking (its room
+                # sensor is out, TRV held at the frost floor) still needs the shared
+                # boiler it controls to fire. Emit a synthetic frost-heat request —
+                # bypassing the mono_ts/staleness guard, since the zone is REPORTING
+                # failure right now and cannot publish a fresh stamp — and surface
+                # the sensor defect as a repair issue.
+                if controls_boiler and data.get("unavailable_safe"):
+                    frost_unavailable.append(e.entry_id)
+                    out.append(frost_heat_request(e.entry_id, mono_ts=now))
                 continue
             # H3/ADR-0038: a zone whose last coordinator update failed exposes a
             # stale snapshot — never call for heat on it (the zone entity already
@@ -158,13 +188,12 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             # forever (the very failure this age check exists to prevent).
             if zmono is None or (now - float(zmono)) > HUB_ZONE_STALE_AFTER_S:
                 continue
-            dp = e.data.get(CONF_DECLARED_POWER)
             out.append(
                 zone_request_from_data(
                     e.entry_id,
                     data,
-                    controls_boiler=bool(e.data.get(CONF_CONTROLS_BOILER, False)),
-                    declared_power=float(dp) if dp else None,
+                    controls_boiler=controls_boiler,
+                    declared_power=declared_power,
                     compressor_group=e.data.get(CONF_COMPRESSOR_GROUP),
                     flow_temp_request=(
                         float(ft) if (ft := e.data.get(CONF_FLOW_TEMP)) else None
@@ -173,6 +202,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
                     mono_ts=float(zmono),  # guaranteed present by the guard above
                 )
             )
+        self._frost_unavailable_zones = tuple(frost_unavailable)
         return out
 
     def _power(self, entity_id: str | None) -> float | None:
@@ -249,22 +279,66 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             )
             return False
 
+    async def _restore_state(self, now: float) -> None:
+        """AR-08: one-time restore of the persisted BoilerState so the min-cycle
+        dwell + has_actuated survive a restart. The restored ``on`` is provisional
+        — ``_actuate`` still reconciles it against the real actuator (review V2b).
+        """
+        if self._restored:
+            return
+        self._restored = True
+        try:
+            payload = await self._store.load()
+        except Exception:  # noqa: BLE001 - a corrupt load must not break setup
+            _LOGGER.exception("Poise hub: boiler-state restore failed")
+            return
+        self._boiler, self._has_actuated = restore_boiler_state(
+            payload, now_mono=now, now_wall=dt_util.utcnow().timestamp()
+        )
+
+    async def _persist(self, now: float) -> None:
+        """AR-08: persist the boiler state (wall-clock anchored) + has_actuated.
+        Best-effort — a store failure must never break the tick."""
+        try:
+            await self._store.save(
+                boiler_state_to_payload(
+                    self._boiler,
+                    now_mono=now,
+                    now_wall=dt_util.utcnow().timestamp(),
+                    has_actuated=self._has_actuated,
+                )
+            )
+        except Exception:  # noqa: BLE001 - persistence is best-effort
+            _LOGGER.exception("Poise hub: boiler-state persist failed")
+
     async def _actuate(self, demand_active: bool, now: float) -> None:
-        # review V2b: after a restart our BoilerState starts off; reconcile it
-        # once against the real actuator entity so a boiler left physically on
+        # AR-08: restore the persisted dwell + has_actuated once, before the first
+        # reconcile/step, so a restart keeps the min-cycle timing and dead-man.
+        await self._restore_state(now)
+        # review V2b: after a restart our BoilerState is only a *belief*; reconcile
+        # it once against the real actuator entity so a boiler left physically on
         # (with demand since cleared) is switched off, not wrongly believed off.
         if not self._reconciled and self._action_on is not None:
             ent = self._action_on.data.get("entity_id")
             st = self.hass.states.get(ent) if ent else None
             real = reconcile_boiler_on(st.state if st is not None else None)
             if real is not None:
-                # F8: stamp the switch time to NOW when adopting the real boiler
-                # state at startup, so min-on protects it — otherwise the default
-                # last_switch_mono=-1e9 lets a first tick that has not yet seen any
-                # zone snapshot switch a physically running boiler straight off.
+                # F8/AR-35: pick the switch stamp so min-cycle survives a restart.
+                # When the restored belief already matches the real boiler, KEEP the
+                # restored wall-clock dwell (AR-08) — never reset it. On a divergence
+                # (or a fresh, unpersisted start) fall back to: a RUNNING boiler is
+                # stamped NOW so min-on protects it; an OFF boiler is placed in the
+                # past so a phantom min-off cannot block the first ON (incl. a frost
+                # override) straight after a restart.
+                if real == self._boiler.on:
+                    last_switch = self._boiler.last_switch_mono
+                elif real:
+                    last_switch = now
+                else:
+                    last_switch = now - max(self._min_off, self._min_on)
                 self._boiler = BoilerState(
                     on=real,
-                    last_switch_mono=now,
+                    last_switch_mono=last_switch,
                     demand_true_since=self._boiler.demand_true_since,
                     last_keepalive_mono=now,
                 )
@@ -291,9 +365,19 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             action = self._action_off
         elif step.call == "on":
             action = self._action_on
+        prev_on = self._boiler.on
         if action is not None and not await self._call(action):
             return
         self._boiler = step.state
+        if action is not None:
+            # AR-08: a real ON/OFF was issued — record that the hub has actuated
+            # (the entry-removal OFF gate reads this, AR-15) and persist the state
+            # so a restart rebuilds the min-cycle dwell + dead-man. Persist on the
+            # has_actuated milestone and on every subsequent on/off flip.
+            newly_actuated = not self._has_actuated
+            self._has_actuated = True
+            if newly_actuated or step.state.on != prev_on:
+                await self._persist(now)
 
     def _zone_name(self, zone_id: str) -> str:
         entry = self.hass.config_entries.async_get_entry(zone_id)
@@ -322,6 +406,30 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             self._active_issues.discard(issue_id)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
+    def _update_frost_unavailable_issues(self, zones: tuple[str, ...]) -> None:
+        """AR-05: a boiler-controlling zone whose room sensor dropped out has
+        entered local unavailable-safe frost parking and is now firing the shared
+        boiler via a synthetic frost request. Surface the sensor defect so the
+        (otherwise silent) fallback is visible; cleared once no such zone remains.
+        """
+        issue_id = "hub_frost_zone_unavailable"
+        if zones:
+            self._active_issues.add(issue_id)
+            ir.async_create_issue(  # idempotent; refreshes the zone list each tick
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="hub_frost_zone_unavailable",
+                translation_placeholders={
+                    "zones": ", ".join(self._zone_name(z) for z in zones)
+                },
+            )
+        elif issue_id in self._active_issues:
+            self._active_issues.discard(issue_id)
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
     @property
     def actuation_active(self) -> bool:
         """Whether Poise is wired to actuate the boiler (both actions parse)."""
@@ -329,16 +437,19 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
 
     async def async_fire_boiler_off(self) -> None:
         """Best-effort boiler OFF at a hub hand-over (review F4). Blocking so an
-        execution error is at least logged, not swallowed as a background task."""
+        execution error is at least logged, not swallowed as a background task;
+        wrapped in a timeout so a hung boiler integration cannot stall the
+        hand-over (AR-24, mirrors ``_call``)."""
         if self._action_off is None:
             return
         try:
-            await self.hass.services.async_call(
-                self._action_off.domain,
-                self._action_off.service,
-                dict(self._action_off.data),
-                blocking=True,
-            )
+            async with asyncio.timeout(_BOILER_CALL_TIMEOUT_S):
+                await self.hass.services.async_call(
+                    self._action_off.domain,
+                    self._action_off.service,
+                    dict(self._action_off.data),
+                    blocking=True,
+                )
         except Exception:  # noqa: BLE001 - hand-over OFF is best-effort
             _LOGGER.exception("Poise: boiler OFF on hub hand-over failed")
 
@@ -352,6 +463,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
     async def _async_update_data(self) -> dict[str, Any]:
         now = self._clock.monotonic()
         requests = self._collect_requests()
+        self._update_frost_unavailable_issues(self._frost_unavailable_zones)  # AR-05
         demand = aggregate_boiler_demand(
             requests,
             count_threshold=self._count_threshold,
@@ -367,6 +479,8 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             "frost_override": demand.frost_override,
             "frost_zone": demand.frost_zone_id,  # which zone forced frost (P1/2.1)
             "frost_excluded": list(demand.frost_excluded),  # N-2
+            # AR-05: boiler zones firing frost via the unavailable-safe fallback
+            "frost_unavailable_zones": list(self._frost_unavailable_zones),
             "zone_count": len(requests),
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),
             "actuation_enabled": self._actuation,

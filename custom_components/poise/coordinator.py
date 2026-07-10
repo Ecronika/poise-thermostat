@@ -19,7 +19,11 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, State
-from homeassistant.exceptions import ServiceNotFound
+from homeassistant.exceptions import (
+    ConfigEntryError,
+    ConfigEntryNotReady,
+    ServiceNotFound,
+)
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -289,6 +293,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._heatup_acc = HeatupAccumulator()
         self._last_target: float | None = None
         self._last_written_mode: str | None = None
+        # AR-11: True once any setpoint/mode write to the actuator has SUCCEEDED
+        # this run (tick, unavailable-safe, or frost rescue). Persisted + restored;
+        # gates the teardown park so a zone that never actuated is not "parked".
+        self._has_actuated = False
         self._last_sp_write_ts: float | None = None  # ADR-0052 §4 nudge throttle
         self._last_fed: float | None = None
         self._dirty = False  # override/enabled/mode changed -> persist next save
@@ -322,14 +330,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # options override data for hot-applyable tuning (A10); structural
         # inputs (sensors/actuator) live only in data.
         data = {**entry.data, **entry.options}
-        self.zone_name: str = data[CONF_NAME]
+
+        def _require(key: str) -> str:
+            # AR-34: a corrupt entry missing a structural field must fail setup
+            # cleanly (ConfigEntryError -> SETUP_ERROR + repair flow), not raise an
+            # uncaught KeyError from ``data[key]``.
+            val = data.get(key)
+            if not isinstance(val, str) or not val:
+                raise ConfigEntryError(
+                    f"Poise entry '{entry.entry_id}' is missing the required "
+                    f"'{key}' setting; reconfigure the zone."
+                )
+            return val
+
+        self.zone_name: str = _require(CONF_NAME)
         # opt-in field-trace recorder (ADR-0011 golden-file replay); default off.
         self._trace_enabled: bool = bool(data.get(CONF_TRACE_RECORDING, False))
         self._trace_recorder: TraceRecorder | None = None
         self._trace_slug: str = entry.entry_id
         self._tick_budget = TickBudget()  # ADR-0020 per-tick compute-time budget
-        self._temp: str = data[CONF_TEMP_SENSOR]
-        self._actuator: str = data[CONF_ACTUATOR]
+        self._temp: str = _require(CONF_TEMP_SENSOR)
+        self._actuator: str = _require(CONF_ACTUATOR)
         self._trm: str | None = data.get(CONF_TRM_SENSOR)
         self._outdoor: str | None = data.get(CONF_OUTDOOR_SENSOR)
         self._humidity: str | None = data.get(CONF_HUMIDITY_SENSOR)
@@ -351,7 +372,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._room_absent_since: float | None = None  # transient; restart->present
         # window: multiple=True, structural (data) -> re-read only on reload.
         self._windows: list[str] = as_entity_list(data.get(CONF_WINDOW_SENSOR))
-        self._category = Category(data.get(CONF_CATEGORY, "II"))
+        # AR-34: an unknown/corrupt category string must not throw in __init__; fall
+        # back to the norm default rather than failing setup on a tuning value.
+        try:
+            self._category = Category(data.get(CONF_CATEGORY, "II"))
+        except ValueError:
+            self._category = Category("II")
         self._comfort_base: float = float(
             data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
         )
@@ -391,6 +417,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         # ADR-0050/0051: humidity dry-active hysteresis state (shadow).
         self._dry_active = False
+        # AR-32: warn once (not every 60 s tick) when the climate-band/humidity
+        # block throws — its humidity action drives the *live* dry mode-nudge, so a
+        # silent fall back to "idle" is worth surfacing the first time.
+        self._hum_shadow_warned = False
         # ADR-0025/0034: optimal-start/stop anti-chatter latch — the prior tick's
         # engage state, so the planner holds preheat/coast until the room crosses
         # target instead of flapping at the boundary. Not persisted (re-latches).
@@ -513,9 +543,45 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             }
         except Exception:  # noqa: BLE001 - registry read must never block setup
             pass
+        # AR-20: keep store I/O and parsing failures separate. A transient load
+        # error must NOT be mistaken for "no saved state" (which would silently
+        # start fresh and overwrite the learned model on the next save) — fail setup
+        # so HA retries. Only genuinely *corrupt* data is recovered below.
         try:
             data = await self._store.load()
+        except Exception as err:  # noqa: BLE001 - transient I/O -> retry, don't wipe
+            raise ConfigEntryNotReady(
+                f"Poise {self.zone_name}: could not load persisted state"
+            ) from err
+        # Corruption recovery (narrowly scoped): restore the cheap user-intent keys
+        # FIRST and each defensively, so a later failure in the heavier learned-model
+        # from_dict parsing cannot lose enabled / preset / override / mode.
+        try:
             if isinstance(data, dict) and "ekf" in data:
+                self._enabled = bool(data.get("enabled", True))
+                try:
+                    self._preset = OverrideMode(data.get("preset", "none"))
+                except ValueError:
+                    self._preset = OverrideMode.NONE
+                ov = data.get("override")
+                self._override = float(ov) if isinstance(ov, (int, float)) else None
+                # C5: restore the *wall-clock* set-time so the 2 h auto-revert
+                # measures real elapsed time and a hold cannot outlive a restart.
+                osw = data.get("override_set_wall")
+                self._override_set_wall = (
+                    float(osw)
+                    if self._override is not None and isinstance(osw, (int, float))
+                    else None
+                )
+                self._window_bypass = bool(data.get("window_bypass", False))
+                cm = data.get("climate_mode")
+                if isinstance(cm, str):
+                    self._climate_mode = cm
+                # AR-11: restore the actuation latch so the teardown-park gate
+                # survives a restart.
+                self._has_actuated = bool(data.get("has_actuated", False))
+                # heavier learned-model parsing (a failure here must not lose the
+                # user intent already restored above)
                 self._ekf = ThermalEKF.from_dict(data["ekf"])
                 if isinstance(data.get("trm"), dict):
                     self._trm_tracker = RunningMeanTracker.from_dict(data["trm"])
@@ -540,25 +606,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._tau_settle = TauSettle.from_dict(data["tau_settle"])
                 if isinstance(data.get("hdh_savings"), dict):
                     self._hdh = HdhSavings.from_dict(data["hdh_savings"])
-                self._window_bypass = bool(data.get("window_bypass", False))
-                try:
-                    self._preset = OverrideMode(data.get("preset", "none"))
-                except ValueError:
-                    self._preset = OverrideMode.NONE
-                self._enabled = bool(data.get("enabled", True))
-                ov = data.get("override")
-                self._override = float(ov) if isinstance(ov, (int, float)) else None
-                # C5: restore the *wall-clock* set-time so the 2 h auto-revert
-                # measures real elapsed time and a hold cannot outlive a restart.
-                osw = data.get("override_set_wall")
-                self._override_set_wall = (
-                    float(osw)
-                    if self._override is not None and isinstance(osw, (int, float))
-                    else None
-                )
-                cm = data.get("climate_mode")
-                if isinstance(cm, str):
-                    self._climate_mode = cm
             elif data is not None:
                 self._ekf = ThermalEKF.from_dict(data)  # legacy: bare EKF dict
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
@@ -619,7 +666,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._adaptive_cool_cfg = data.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL)
         self._category = Category(data.get(CONF_CATEGORY, "II"))
-        self._climate_mode = data.get(CONF_CLIMATE_MODE, "auto")
+        # AR-04: climate_mode is Store-owned — the climate entity sets it live via
+        # set_climate_mode() and it is persisted in the payload. Do NOT re-apply the
+        # (stale) options form value here; that clobbered the live selection on every
+        # options submit (double ownership).
         self._cool_min_outdoor = float(
             data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
         )
@@ -1021,6 +1071,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "override": self._override,
             "override_set_wall": self._override_set_wall,
             "climate_mode": self._climate_mode,
+            "has_actuated": self._has_actuated,  # AR-11: teardown-park gate
         }
 
     async def _maybe_save(self) -> None:
@@ -1049,14 +1100,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
 
     async def async_persist_and_cleanup(self) -> None:
-        """Final save + repair-issue/notification cleanup on unload (review P1.3)."""
-        try:
-            await self._store.save(self._save_payload())
-        except Exception:  # noqa: BLE001
-            _LOGGER.exception("Poise: final save on unload failed")
+        """Final save + repair-issue/notification cleanup on unload (review P1.3).
+
+        AR-28: the final save runs under the same lock as the tick / stop flush.
+        AR-21: if that save fails we KEEP (and raise) the ``persistence_failed``
+        issue instead of clearing it — a failed unload save can lose the last
+        learning window, so this is honest, not an unconditional "no learning loss".
+        """
+        saved = False
+        async with self._lock:
+            try:
+                await self._store.save(self._save_payload())
+                saved = True
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Poise: final save on unload failed")
+        keep: set[str] = set()
+        if not saved:
+            # Surface + retain the persistence issue; it is re-adopted (F17) on the
+            # next setup and cleared once a save finally succeeds.
+            pid = f"persistence_failed_{self._entry_id}"
+            self._issue(pid, True, translation_key="persistence_failed")
+            keep.add(pid)
         for issue_id in list(self._active_issues):
+            if issue_id in keep:
+                continue
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-        self._active_issues.clear()
+            self._active_issues.discard(issue_id)
         if self._failure_notified:
             self._failure_notified = False
             try:
@@ -1212,6 +1281,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     ),
                 )
                 self._last_target = plan.setpoint
+                self._has_actuated = True  # AR-11: a real write reached the actuator
         except Exception:  # noqa: BLE001 - safe-state write must never kill the tick
             _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
 
@@ -1608,8 +1678,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             else:
                 mode = "off"
             self._last_target = target
-        # ADR-0050/0051 SHADOW (diagnostic only, no writes): heat-day cool raise
-        # + humidity action, composed against the *effective* (raised) band.
+        # ADR-0050/0051: mostly-diagnostic climate-band block, but NOT "no writes" —
+        # the humidity action it computes (_hum_action) drives the LIVE dry
+        # mode-nudge below (mode_arbitration). Composed against the *effective*
+        # (raised) cool band; the fan/PMV/free-running fields are the shadow parts.
         climate_diag: dict[str, object] = {}
         _hum_action = "idle"  # ADR-0050 S2c: drives the live dry mode-nudge below
         try:
@@ -1720,8 +1792,19 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 "ppd": _pmv.ppd,
                 "pmv_category": _pmv.category,
             }
-        except Exception:  # noqa: BLE001 - shadow diagnostics must never break tick
-            _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
+        except Exception:  # noqa: BLE001 - must never break the tick
+            # AR-32: not purely shadow — on failure the LIVE dry mode-nudge silently
+            # falls back to "idle". Surface it at WARNING once, then DEBUG after.
+            if not self._hum_shadow_warned:
+                self._hum_shadow_warned = True
+                _LOGGER.warning(
+                    "Poise %s: climate-band/humidity block failed; the live dry "
+                    "mode-nudge falls back to idle this tick (further at DEBUG)",
+                    self.zone_name,
+                    exc_info=True,
+                )
+            else:
+                _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
         heating = self._enabled and not window_open and mode == "heat"
         cooling = self._enabled and not window_open and mode == "cool"
         self._was_cooling = mode == "cool"  # gate the window slope next tick
@@ -1887,6 +1970,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     await actuator_mod.write(self.hass, cmd)
                     self._last_written_mode = final_mode
                     self._last_sp_write_ts = now
+                    self._has_actuated = True  # AR-11: a real write reached the actuator
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
                         "Poise: actuator write failed for %s", self._actuator
@@ -1978,6 +2062,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             reason="frost_rescue",
                         ),
                     )
+                    self._has_actuated = True  # AR-11: a real write reached the actuator
                 except Exception:  # noqa: BLE001 - frost rescue write is best-effort
                     _LOGGER.exception(
                         "Poise: frost rescue write failed for %s", self._actuator

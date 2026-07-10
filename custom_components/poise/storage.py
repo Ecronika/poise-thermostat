@@ -44,3 +44,36 @@ class PoiseStore:
         """
         await self._store.async_remove()
         self._store = Store(self._hass, STORAGE_VERSION, self._key)
+
+
+class PoiseHubStore:
+    """Thin wrapper around HA Store for the singleton hub's boiler state (AR-08).
+
+    Persists the tick-crossing ``BoilerState`` (on + wall-clock switch time) plus
+    the ``has_actuated`` dead-man flag so a restart can rebuild the min-cycle dwell
+    and the entry-removal path can tell whether Poise ever commanded the boiler.
+    A single, entry-id-independent key (the hub is a singleton, ADR-0038/0039).
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+        self._key = f"{DOMAIN}_system_hub"
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, self._key)
+
+    async def load(self) -> dict[str, Any] | None:
+        data = await self._store.async_load()
+        return data if isinstance(data, dict) else None
+
+    async def save(self, data: dict[str, Any]) -> None:
+        await self._store.async_save(data)
+
+    async def async_remove(self) -> None:
+        """Delete the underlying store file (hub-removal cleanup).
+
+        HA's ``Store`` keeps its in-memory cache after ``async_remove``, so swap in
+        a fresh ``Store`` — a subsequent ``load`` then re-reads the (now deleted)
+        file and yields ``None`` instead of the stale cache (mirrors
+        :meth:`PoiseStore.async_remove`).
+        """
+        await self._store.async_remove()
+        self._store = Store(self._hass, STORAGE_VERSION, self._key)

@@ -58,10 +58,10 @@ rules:
     comment: No authentication; fully local, no credentials.
   parallel-updates: done  # PARALLEL_UPDATES = 0 in every platform module
   log-when-unavailable: done  # room-sensor loss logged once (WARNING) + recovery once (INFO)
-  test-coverage: done  # HA-glue 95.1% (74 integration tests, gate 95); pure core ~98.6% (unit gate 85)
+  test-coverage: done  # HA-glue 95.1% (98 integration tests, gate 95); pure core ~98.6% (unit gate 85)
 
   # ---------------- Gold ----------------
-  devices: done  # DeviceInfo per zone + hub; via_device hub<->zone link still pending (review M9)
+  devices: done  # DeviceInfo per zone + hub; via_device hub<->zone link wired (climate/sensor/switch -> coordinator.via_device_id) (review M9)
   diagnostics: done  # diagnostics.py (redacted)
   reconfiguration-flow: done
   repair-issues: done

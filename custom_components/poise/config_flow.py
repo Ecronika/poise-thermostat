@@ -92,6 +92,7 @@ from .const import (
     DEFAULT_BOILER_MIN_OFF_S,
     DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_COMFORT_BASE,
+    DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_DYNAMICS,
     DEFAULT_FLOW_HYSTERESIS_C,
@@ -99,8 +100,10 @@ from .const import (
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
     DEFAULT_PRICE_EUR_KWH,
+    DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
+    FROST_FLOOR_C,
 )
 from .control.hub_aggregate import parse_service_action
 
@@ -113,7 +116,6 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
     "comfort": (
         CONF_COMFORT_BASE,
         CONF_CATEGORY,
-        CONF_CLIMATE_MODE,
         CONF_COMFORT_WEIGHT,
     ),
     "schedule": (
@@ -446,14 +448,9 @@ def _options_schema() -> vol.Schema:
                                 mode=selector.SelectSelectorMode.DROPDOWN,
                             )
                         ),
-                        vol.Required(CONF_CLIMATE_MODE): selector.SelectSelector(
-                            selector.SelectSelectorConfig(
-                                options=["auto", "heat_only", "cool_only"],
-                                mode=selector.SelectSelectorMode.DROPDOWN,
-                                translation_key="climate_mode",
-                            )
-                        ),
-                        vol.Required(CONF_COMFORT_WEIGHT): selector.NumberSelector(
+                        vol.Required(
+                            CONF_COMFORT_WEIGHT, default=DEFAULT_COMFORT_WEIGHT
+                        ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=0,
                                 max=100,
@@ -479,7 +476,9 @@ def _options_schema() -> vol.Schema:
                                 mode=box,
                             )
                         ),
-                        vol.Required(CONF_OPTIMAL_START): selector.BooleanSelector(),
+                        vol.Required(
+                            CONF_OPTIMAL_START, default=True
+                        ): selector.BooleanSelector(),
                     }
                 ),
                 {"collapsed": False},
@@ -695,7 +694,15 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="user", menu_options=["room", "system"])
+        # AR-30: offer the singleton system hub only once at least one room entry
+        # exists — a hub with no zones to aggregate has nothing to do, so a fresh
+        # install starts with just "room" (system appears on a later add).
+        has_room = any(
+            e.data.get(CONF_ENTRY_TYPE) != ENTRY_TYPE_SYSTEM
+            for e in self._async_current_entries()
+        )
+        menu = ["room", "system"] if has_room else ["room"]
+        return self.async_show_menu(step_id="user", menu_options=menu)
 
     async def async_step_room(
         self, user_input: dict[str, Any] | None = None
@@ -783,9 +790,30 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     and other.unique_id == self.unique_id
                 ):
                     return self.async_abort(reason="already_configured")
-            new_data, new_options = reconcile_reconfigure(
-                flat, entry.data, entry.options, tuning
+            hub_exists = any(
+                e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+                for e in self.hass.config_entries.async_entries(DOMAIN)
             )
+            # AR-09: signal that the anlagen section was rendered (a hub is present)
+            # so a structural installation field the user CLEARED there is dropped,
+            # not reanimated from old_data.
+            new_data, new_options = reconcile_reconfigure(
+                flat,
+                entry.data,
+                entry.options,
+                tuning,
+                structural_section_rendered=hub_exists,
+            )
+            # AR-12: a reconfigure onto a DIFFERENT actuator must release the OLD one
+            # — park it and hand its TRV sensor source back to internal, or the old
+            # device stays frozen against Poise's external feed after the reload.
+            old_actuator = entry.data.get(CONF_ACTUATOR)
+            if (
+                isinstance(old_actuator, str)
+                and old_actuator
+                and old_actuator != new_data.get(CONF_ACTUATOR)
+            ):
+                await self._park_replaced_actuator(entry, old_actuator)
             return self.async_update_reload_and_abort(
                 entry, unique_id=self.unique_id, data=new_data, options=new_options
             )
@@ -802,6 +830,46 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                 _reconfigure_schema(self.hass), suggested
             ),
         )
+
+    async def _park_replaced_actuator(
+        self, entry: ConfigEntry, actuator: str
+    ) -> None:
+        """AR-12: release a room's PREVIOUS actuator when a reconfigure repoints the
+        zone to a different one — park it in a capability-appropriate end state and
+        flip a TRV sensor source back to internal, so the old device does not keep
+        regulating against Poise's now-frozen external feed after the reload.
+
+        Mirrors the delete-time park (``_remove_room_entry``). The live, Store-owned
+        climate_mode wins over the (now option-free) config copy.
+        """
+        from . import _execute_park, _restore_trv_internal
+        from .control.lifecycle import resolve_park_command
+
+        cfg = {**entry.data, **entry.options}
+        coordinator = getattr(entry, "runtime_data", None)
+        mode = getattr(coordinator, "climate_mode", None) or str(
+            cfg.get(CONF_CLIMATE_MODE, "auto")
+        )
+        st = self.hass.states.get(actuator)
+        modes = (
+            [str(m) for m in (st.attributes.get("hvac_modes") or [])]
+            if st is not None
+            else []
+        )
+        device_min = st.attributes.get("min_temp") if st is not None else None
+        setback = float(cfg.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)) - float(
+            cfg.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA)
+        )
+        plan = resolve_park_command(
+            is_valve=actuator.startswith("number."),
+            hvac_modes=modes,
+            heats_for_zone="heat" in modes and mode != "cool_only",
+            setback_setpoint=setback,
+            floor=FROST_FLOOR_C,
+            device_min=float(device_min) if device_min is not None else None,
+        )
+        await _execute_park(self.hass, actuator, plan)
+        await _restore_trv_internal(self.hass, actuator)
 
 
 class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]

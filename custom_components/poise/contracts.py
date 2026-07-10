@@ -161,10 +161,13 @@ class ActuatorCommand:
 class ZoneRequest:
     """One zone's per-tick state handed to the multi-zone hub (ADR-0038).
 
-    Each zone writes this at the end of Phase 1 into the shared registry; the
-    hub resolves shared resources (boiler, power budget, compressor, flow temp)
-    from the set of all ``ZoneRequest``s. It is never an actuator command — the
-    hub replies with a :class:`ResourceRelease` cap, not a write.
+    The hub builds one of these per active zone in
+    ``hub_coordinator._collect_requests`` by *pulling* the zone's last published
+    ``runtime_data`` snapshot (there is no shared push registry), then resolves
+    the shared resources (boiler, power budget, compressor, flow temp) from the
+    whole set. It is never an actuator command; the hub exposes the resolved
+    result as diagnostics and (opt-in) actuates only the shared boiler — it does
+    not send a per-zone reply back (see the ADR-0038 correction note).
     """
 
     zone_id: str
@@ -185,11 +188,19 @@ class ZoneRequest:
 
 @dataclass(frozen=True, slots=True)
 class ResourceRelease:
-    """The hub's per-zone reply: caps the zone feeds into its own solver (ADR-0038).
+    """RESERVED / UNUSED — the per-zone hub reply from the original ADR-0038 design.
 
-    The hub never writes a zone's actuator; it publishes this release and the
-    zone composes ``power_cap``/``shed`` into its existing constraint solver
-    (ADR-0035) as an additional high-precedence bound. Single-writer is kept.
+    NOTE: the shipped hub does **not** use this type. It resolves shared resources
+    by pulling each zone's ``runtime_data`` snapshot and exposes the result as a
+    plain diagnostics dict (see ``hub_coordinator._collect_requests`` /
+    ``_async_update_data``); there is no per-zone ``ResourceRelease`` reply channel,
+    and nothing imports or instantiates this class. It is kept as a reserved
+    contract for the not-yet-wired zone-side cap enforcement (ADR-0038 §3, S3/S4);
+    see the "Nachtrag/Korrektur" section in ADR-0038.
+
+    Design intent (not wired): the hub would publish this release and the zone
+    would compose ``power_cap``/``shed`` into its own constraint solver (ADR-0035)
+    as an additional high-precedence bound, keeping single-writer.
     """
 
     zone_id: str
