@@ -53,6 +53,7 @@ from .const import (
     CONF_COMPRESSOR_MODE_HOLD,
     CONF_CONTROLS_BOILER,
     CONF_COOL_HARD_CAP,
+    CONF_COOL_LOCKOUT_ENABLED,
     CONF_COOL_MIN_OUTDOOR,
     CONF_CURRENT_POWER_SENSOR,
     CONF_DECLARED_POWER,
@@ -61,6 +62,7 @@ from .const import (
     CONF_ENTRY_TYPE,
     CONF_FLOW_HYSTERESIS,
     CONF_FLOW_TEMP,
+    CONF_HEAT_LOCKOUT_ENABLED,
     CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
@@ -93,9 +95,11 @@ from .const import (
     DEFAULT_BOILER_MIN_ON_S,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_COOL_LOCKOUT_ENABLED,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_DYNAMICS,
     DEFAULT_FLOW_HYSTERESIS_C,
+    DEFAULT_HEAT_LOCKOUT_ENABLED,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
@@ -124,7 +128,13 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_SETBACK_DELTA,
         CONF_OPTIMAL_START,
     ),
-    "heat_cool": (CONF_ADAPTIVE_COOL, CONF_COOL_MIN_OUTDOOR, CONF_HEAT_MAX_OUTDOOR),
+    "heat_cool": (
+        CONF_ADAPTIVE_COOL,
+        CONF_COOL_MIN_OUTDOOR,
+        CONF_COOL_LOCKOUT_ENABLED,
+        CONF_HEAT_MAX_OUTDOOR,
+        CONF_HEAT_LOCKOUT_ENABLED,
+    ),
     "presence": (CONF_PRESENCE_HOME, CONF_OCCUPANCY_SENSOR, CONF_ABSENCE_AFTER_MIN),
     "advanced": (
         CONF_COOL_HARD_CAP,
@@ -168,7 +178,9 @@ def _temp(exclude: list[str] | None = None) -> selector.EntitySelector:
     return selector.EntitySelector(cfg)
 
 
-def _reconfigure_schema(hass: HomeAssistant) -> vol.Schema:
+def _reconfigure_schema(
+    hass: HomeAssistant, hub_exists: bool | None = None
+) -> vol.Schema:
     """Room reconfigure (ADR-0008): structural wiring only — the room sensor +
     actuator, the optional sensor entities, and (only when a system hub exists) the
     shared-plant fields. Tuning is edited hot in the options flow, so it is not
@@ -189,7 +201,9 @@ def _reconfigure_schema(hass: HomeAssistant) -> vol.Schema:
                     vol.Optional(CONF_OUTDOOR_SENSOR): _temp(own),
                     vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            domain="sensor", device_class="humidity"
+                            domain="sensor",
+                            device_class="humidity",
+                            exclude_entities=own,
                         )
                     ),
                     vol.Optional(CONF_MRT_SENSOR): _temp(own),
@@ -198,6 +212,7 @@ def _reconfigure_schema(hass: HomeAssistant) -> vol.Schema:
                             domain="binary_sensor",
                             device_class=["window", "opening", "door"],
                             multiple=True,
+                            exclude_entities=own,
                         )
                     ),
                     vol.Optional(CONF_WEATHER): selector.EntitySelector(
@@ -209,17 +224,20 @@ def _reconfigure_schema(hass: HomeAssistant) -> vol.Schema:
                         )
                     ),
                     vol.Optional(CONF_TRV_EXTERNAL_TEMP): selector.EntitySelector(
-                        selector.EntitySelectorConfig(domain="number")
+                        selector.EntitySelectorConfig(
+                            domain="number", exclude_entities=own
+                        )
                     ),
                 }
             ),
             {"collapsed": True},
         ),
     }
-    hub_exists = any(
-        e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
-        for e in hass.config_entries.async_entries(DOMAIN)
-    )
+    if hub_exists is None:
+        hub_exists = any(
+            e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+            for e in hass.config_entries.async_entries(DOMAIN)
+        )
     if hub_exists:
         schema[vol.Required("anlagen")] = section(
             vol.Schema(
@@ -300,7 +318,9 @@ def _setup_schema(hass: HomeAssistant) -> vol.Schema:
                         vol.Optional(CONF_OUTDOOR_SENSOR): _temp(own),
                         vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
                             selector.EntitySelectorConfig(
-                                domain="sensor", device_class="humidity"
+                                domain="sensor",
+                                device_class="humidity",
+                                exclude_entities=own,
                             )
                         ),
                         vol.Optional(CONF_WINDOW_SENSOR): selector.EntitySelector(
@@ -308,6 +328,7 @@ def _setup_schema(hass: HomeAssistant) -> vol.Schema:
                                 domain="binary_sensor",
                                 device_class=["window", "opening", "door"],
                                 multiple=True,
+                                exclude_entities=own,
                             )
                         ),
                         vol.Optional(CONF_WEATHER): selector.EntitySelector(
@@ -364,7 +385,7 @@ def _system_schema() -> vol.Schema:
                 CONF_BOILER_MIN_ON, default=DEFAULT_BOILER_MIN_ON_S
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
-                    min=0,
+                    min=120,
                     max=3600,
                     step=30,
                     unit_of_measurement="s",
@@ -375,7 +396,7 @@ def _system_schema() -> vol.Schema:
                 CONF_BOILER_MIN_OFF, default=DEFAULT_BOILER_MIN_OFF_S
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
-                    min=0,
+                    min=120,
                     max=3600,
                     step=30,
                     unit_of_measurement="s",
@@ -422,12 +443,14 @@ def _system_schema() -> vol.Schema:
     )
 
 
-def _options_schema() -> vol.Schema:
+def _options_schema(hass: HomeAssistant) -> vol.Schema:
     """Volatile tuning, hot-applied without a reload (A10), grouped into
     collapsible sections (ADR-0008). Only fields the coordinator can update in
     place live here; structural inputs stay in the reconfigure step. The sectioned
     submit is flattened before storage (config_sections)."""
     box = selector.NumberSelectorMode.BOX
+    reg = er.async_get(hass)
+    own = [e.entity_id for e in reg.entities.values() if e.platform == DOMAIN]
     return vol.Schema(
         {
             vol.Required("comfort"): section(
@@ -467,7 +490,9 @@ def _options_schema() -> vol.Schema:
                     {
                         vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
                         vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
-                        vol.Required(CONF_SETBACK_DELTA): selector.NumberSelector(
+                        vol.Required(
+                            CONF_SETBACK_DELTA, default=DEFAULT_SETBACK_DELTA
+                        ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=0.0,
                                 max=8.0,
@@ -506,6 +531,10 @@ def _options_schema() -> vol.Schema:
                                 mode=box,
                             )
                         ),
+                        vol.Required(
+                            CONF_COOL_LOCKOUT_ENABLED,
+                            default=DEFAULT_COOL_LOCKOUT_ENABLED,
+                        ): selector.BooleanSelector(),
                         vol.Optional(
                             CONF_HEAT_MAX_OUTDOOR, default=DEFAULT_HEAT_MAX_OUTDOOR_C
                         ): selector.NumberSelector(
@@ -517,6 +546,10 @@ def _options_schema() -> vol.Schema:
                                 mode=box,
                             )
                         ),
+                        vol.Required(
+                            CONF_HEAT_LOCKOUT_ENABLED,
+                            default=DEFAULT_HEAT_LOCKOUT_ENABLED,
+                        ): selector.BooleanSelector(),
                     }
                 ),
                 {"collapsed": False},
@@ -533,6 +566,7 @@ def _options_schema() -> vol.Schema:
                                     "group",
                                 ],
                                 multiple=True,
+                                exclude_entities=own,
                             )
                         ),
                         vol.Optional(CONF_OCCUPANCY_SENSOR): selector.EntitySelector(
@@ -585,7 +619,9 @@ def _options_schema() -> vol.Schema:
                                 mode=box,
                             )
                         ),
-                        vol.Required(CONF_OPERATIVE_INPUT): selector.BooleanSelector(),
+                        vol.Required(
+                            CONF_OPERATIVE_INPUT, default=False
+                        ): selector.BooleanSelector(),
                         # ADR-0052 §1: actuator dynamics profile (auto-detected).
                         vol.Optional(
                             CONF_DYNAMICS, default=DEFAULT_DYNAMICS
@@ -759,8 +795,8 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         entry = self._get_reconfigure_entry()
         is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+        errors: dict[str, str] = {}
         if is_system:
-            errors: dict[str, str] = {}
             if user_input is not None:
                 errors = _validate_boiler_actions(user_input)  # F11
                 if not errors:
@@ -790,33 +826,49 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     and other.unique_id == self.unique_id
                 ):
                     return self.async_abort(reason="already_configured")
-            hub_exists = any(
-                e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
-                for e in self.hass.config_entries.async_entries(DOMAIN)
-            )
-            # AR-09: signal that the anlagen section was rendered (a hub is present)
-            # so a structural installation field the user CLEARED there is dropped,
-            # not reanimated from old_data.
-            new_data, new_options = reconcile_reconfigure(
-                flat,
-                entry.data,
-                entry.options,
-                tuning,
-                structural_section_rendered=hub_exists,
-            )
-            # AR-12: a reconfigure onto a DIFFERENT actuator must release the OLD one
-            # — park it and hand its TRV sensor source back to internal, or the old
-            # device stays frozen against Poise's external feed after the reload.
-            old_actuator = entry.data.get(CONF_ACTUATOR)
-            if (
-                isinstance(old_actuator, str)
-                and old_actuator
-                and old_actuator != new_data.get(CONF_ACTUATOR)
-            ):
-                await self._park_replaced_actuator(entry, old_actuator)
-            return self.async_update_reload_and_abort(
-                entry, unique_id=self.unique_id, data=new_data, options=new_options
-            )
+            # F3: the room sensor must be free-standing — not the actuator's own
+            # built-in sensor (same device), mirroring async_step_room, or the
+            # model learns the wrong room.
+            reg = er.async_get(self.hass)
+            te = reg.async_get(flat[CONF_TEMP_SENSOR])
+            ae = reg.async_get(flat[CONF_ACTUATOR])
+            if te and ae and te.device_id and te.device_id == ae.device_id:
+                errors[CONF_TEMP_SENSOR] = "sensor_on_actuator"
+            if not errors:
+                # F5: reuse the hub-existence captured when the form was RENDERED so
+                # a hub added/removed between render and submit can't flip which
+                # fields the reconcile treats as rendered (fresh if render skipped).
+                hub_exists = (
+                    self._reconf_structural_rendered
+                    if hasattr(self, "_reconf_structural_rendered")
+                    else any(
+                        e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+                        for e in self.hass.config_entries.async_entries(DOMAIN)
+                    )
+                )
+                # AR-09: signal that the anlagen section was rendered (a hub is
+                # present) so a structural field the user CLEARED there is dropped,
+                # not reanimated from old_data.
+                new_data, new_options = reconcile_reconfigure(
+                    flat,
+                    entry.data,
+                    entry.options,
+                    tuning,
+                    structural_section_rendered=hub_exists,
+                )
+                # AR-12: a reconfigure onto a DIFFERENT actuator must release the OLD
+                # one — park it and hand its TRV sensor source back to internal, or
+                # the old device stays frozen against Poise's external feed on reload.
+                old_actuator = entry.data.get(CONF_ACTUATOR)
+                if (
+                    isinstance(old_actuator, str)
+                    and old_actuator
+                    and old_actuator != new_data.get(CONF_ACTUATOR)
+                ):
+                    await self._park_replaced_actuator(entry, old_actuator)
+                return self.async_update_reload_and_abort(
+                    entry, unique_id=self.unique_id, data=new_data, options=new_options
+                )
         current = {**entry.data, **entry.options}
         suggested = nest_by_section(current, _RECONFIGURE_SECTIONS)
         # the structural fields live at the top level (not in a section), so carry
@@ -824,11 +876,19 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         for key in (CONF_NAME, CONF_TEMP_SENSOR, CONF_ACTUATOR):
             if key in current:
                 suggested[key] = current[key]
+        # F5: capture hub-existence at RENDER and reuse it on submit, so the anlagen
+        # section shown and the reconcile's structural flag can never disagree.
+        hub_exists = any(
+            e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
+            for e in self.hass.config_entries.async_entries(DOMAIN)
+        )
+        self._reconf_structural_rendered = hub_exists
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=self.add_suggested_values_to_schema(
-                _reconfigure_schema(self.hass), suggested
+                _reconfigure_schema(self.hass, hub_exists), suggested
             ),
+            errors=errors,
         )
 
     async def _park_replaced_actuator(self, entry: ConfigEntry, actuator: str) -> None:
@@ -899,7 +959,7 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                _options_schema(), suggested
+                _options_schema(self.hass), suggested
             ),
             errors=errors,
         )

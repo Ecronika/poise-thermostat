@@ -29,21 +29,6 @@ _STRUCTURAL_CARRY: frozenset[str] = frozenset(
 )
 
 
-def reconfigure_options(
-    user_input: Mapping[str, Any], old_options: Mapping[str, Any]
-) -> dict[str, Any]:
-    """The options to keep after a room reconfigure fully replaces ``data``.
-
-    The coordinator reads ``{**entry.data, **entry.options}`` — options win. So any
-    key the reconfigure form now writes into ``data`` must be dropped from
-    ``options``, or the stale option value would permanently shadow the new data
-    value (the Options<->Data divergence, incl. climate_mode; review V7). Options-
-    only tuning the reconfigure schema does not own (outdoor lockouts, tariff) is
-    kept so it survives a reconfigure.
-    """
-    return {k: v for k, v in old_options.items() if k not in user_input}
-
-
 def reconcile_reconfigure(
     user_input: Mapping[str, Any],
     old_data: Mapping[str, Any],
@@ -57,7 +42,8 @@ def reconcile_reconfigure(
     The reconfigure form now owns only structural + sensor + installation fields, so
     it full-replaces ``data``. Three things must survive the shrink:
       * structural ``data`` keys the form does not render (controls_boiler,
-        declared_power, flow_temp, source_policy) — carried back into ``data`` as-is,
+        compressor_group, declared_power, flow_temp, source_policy) — carried
+        back into ``data`` as-is,
       * options-only tuning the form doesn't touch (``kept``), and
       * tuning an older/fresh entry stored in ``data`` (``carried`` into options),
         so a comfort setting is never silently dropped.

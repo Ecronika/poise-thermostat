@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.160.0"
+VERSION: Final = "0.161.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -73,6 +73,15 @@ DEFAULT_SETBACK_DELTA: Final = 3.0
 # low so the room cools regardless of a mild outdoor temperature.
 DEFAULT_COOL_MIN_OUTDOOR_C: Final = 16.0
 DEFAULT_HEAT_MAX_OUTDOOR_C: Final = 22.0
+# ADR-0047: the outdoor lockout is a deactivatable efficiency guardrail
+# (None = off). The number field always carries a value, so a per-direction
+# enable toggle (default on) makes "lockout off" reachable in the UI; when off
+# the coordinator passes None to decide_mode. Backward compatible (absent =
+# enabled = today's behaviour).
+CONF_HEAT_LOCKOUT_ENABLED: Final = "heat_lockout_enabled"
+CONF_COOL_LOCKOUT_ENABLED: Final = "cool_lockout_enabled"
+DEFAULT_HEAT_LOCKOUT_ENABLED: Final = True
+DEFAULT_COOL_LOCKOUT_ENABLED: Final = True
 
 # Efficiency report (ADR-0045): an *estimate* from a configured annual figure,
 # not metered energy. Defaults are sane EU values; override per zone.
@@ -119,9 +128,10 @@ DEFAULT_ABSENCE_AFTER_MIN: Final = 30.0
 # raise is a no-op until the cap is raised.
 CONF_THERMAL_SHOCK_DELTA: Final = "thermal_shock_delta_k"
 CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
-# ADR-0023 §1 (opt-in per zone): use the EN adaptive cooling edge (capped
-# at the ASR ceiling above) instead of the fixed summer band, so a warm
-# free-running room is not over-cooled toward 23 °C.
+# ADR-0023 §1: use the EN adaptive cooling edge (capped at the ASR ceiling
+# above) instead of the fixed summer band, so a warm free-running room is not
+# over-cooled toward 23 °C. "auto" = capability-default: active on any
+# cool-capable device (see README); set "off" to force the fixed summer band.
 CONF_ADAPTIVE_COOL: Final = "adaptive_cool"
 DEFAULT_ADAPTIVE_COOL: Final = "auto"  # tri-state auto|on|off (ADR-0008)
 
@@ -150,6 +160,13 @@ DEFAULT_BOILER_ACTIVATION_DELAY_S: Final = 0.0
 DEFAULT_BOILER_KEEPALIVE_S: Final = 300.0  # review V2c: self-healing on by default
 DEFAULT_BOILER_MIN_ON_S: Final = 300.0
 DEFAULT_BOILER_MIN_OFF_S: Final = 300.0
+# F9/review 2026-07-10: min-on/min-off are a physical anti-short-cycle dwell —
+# 0 has no valid "off" meaning (unlike keepalive=0 or activation_delay=0). The
+# read path clamps both up to this floor so a stored/typed 0 cannot switch the
+# boiler every tick. 120 s = 2 ticks, the smallest dwell that actually binds
+# (tick = 60 s). Applied uniformly (incl. shadow-only); clamp direction is
+# always the safe one.
+BOILER_MIN_DWELL_FLOOR_S: Final = 120.0
 
 # Load shedding (S3) + compressor groups (S4) — both ADR-0013, shadow stage
 CONF_MAX_POWER_SENSOR: Final = "max_power_sensor"

@@ -141,12 +141,16 @@
             "data": {
               "adaptive_cool": "Adaptive summer cooling edge (EN 16798)",
               "cool_min_outdoor": "Cooling outdoor lockout (°C)",
-              "heat_max_outdoor": "Heating outdoor lockout (°C)"
+              "cool_lockout_enabled": "Cool lockout active",
+              "heat_max_outdoor": "Heating outdoor lockout (°C)",
+              "heat_lockout_enabled": "Heat lockout active"
             },
             "data_description": {
               "adaptive_cool": "Let the cooling edge follow the outdoor running mean (EN 16798-1), capped by the ASR ceiling in Advanced.",
               "cool_min_outdoor": "Only cool when it is warmer than this outside; set low for rooms with high internal gains.",
-              "heat_max_outdoor": "Emergency brake — only heat below this outdoor temperature. Saving is done by the schedule and presence, not this."
+              "cool_lockout_enabled": "When off, the outdoor cool lockout is disabled — cooling is allowed regardless of outdoor temperature.",
+              "heat_max_outdoor": "Emergency brake — only heat below this outdoor temperature. Saving is done by the schedule and presence, not this.",
+              "heat_lockout_enabled": "When off, the outdoor heat lockout is disabled — heating is allowed regardless of outdoor temperature."
             }
           },
           "presence": {
@@ -359,6 +363,10 @@
     "required_entity_disabled": {
       "title": "Poise: a required entity is disabled",
       "description": "A room sensor or thermostat Poise needs (`{entity}`) is disabled in Home Assistant, so Poise cannot control this room. Re-enable it under Settings → Devices & Services → Entities and reload Poise. This issue clears automatically once the entity is enabled."
+    },
+    "external_temp_implausible": {
+      "title": "Poise: external-temperature input implausible",
+      "description": "The configured external-temperature input for zone `{name}` (`{entity}`) does not look like a temperature input, so Poise has stopped feeding it to avoid writing room temperatures into an unrelated `number` entity — pick a different entity in the zone's options."
     }
   }
 }

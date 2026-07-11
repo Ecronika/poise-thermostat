@@ -73,9 +73,11 @@ from .const import (
     CONF_COMPRESSOR_MIN_OFF,
     CONF_COMPRESSOR_MODE_HOLD,
     CONF_COOL_HARD_CAP,
+    CONF_COOL_LOCKOUT_ENABLED,
     CONF_COOL_MIN_OUTDOOR,
     CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
+    CONF_HEAT_LOCKOUT_ENABLED,
     CONF_HEAT_MAX_OUTDOOR,
     CONF_HUMIDITY_SENSOR,
     CONF_IRRADIANCE,
@@ -101,8 +103,10 @@ from .const import (
     DEFAULT_ANNUAL_KWH,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
+    DEFAULT_COOL_LOCKOUT_ENABLED,
     DEFAULT_COOL_MIN_OUTDOOR_C,
     DEFAULT_DYNAMICS,
+    DEFAULT_HEAT_LOCKOUT_ENABLED,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_PRICE_GAS_EUR_KWH,
@@ -440,6 +444,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._heat_max_outdoor: float = float(
             data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
         )
+        # F4a: outdoor-lockout enable toggles. When off, None is passed into the
+        # pure decide so that lockout edge is dropped (None already = "off" there).
+        self._heat_lockout_enabled: bool = bool(
+            data.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
+        )
+        self._cool_lockout_enabled: bool = bool(
+            data.get(CONF_COOL_LOCKOUT_ENABLED, DEFAULT_COOL_LOCKOUT_ENABLED)
+        )
         weight = float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT))
         self._priority: float = weight / 100.0
         delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
@@ -624,6 +636,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
                 if prior is not None:
                     self._ekf.seed_beta_h(prior)
+        # F2: vet the configured external-temp number once, now that _active_issues
+        # has been re-adopted (F17) so a stale issue can be cleared on recovery.
+        self._validate_configured_ext_temp()
 
     async def async_apply_options(self, entry: ConfigEntry) -> None:
         """Apply changed tuning options in place, without a reload (A10).
@@ -665,7 +680,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
         self._adaptive_cool_cfg = data.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL)
-        self._category = Category(data.get(CONF_CATEGORY, "II"))
+        # F11: mirror the init guard (AR-34) so a corrupt category string cannot
+        # throw in the hot-apply either; fall back to the norm default.
+        try:
+            self._category = Category(data.get(CONF_CATEGORY, "II"))
+        except ValueError:
+            self._category = Category("II")
         # AR-04: climate_mode is Store-owned — the climate entity sets it live via
         # set_climate_mode() and it is persisted in the payload. Do NOT re-apply the
         # (stale) options form value here; that clobbered the live selection on every
@@ -675,6 +695,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         self._heat_max_outdoor = float(
             data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
+        )
+        # F4a: keep the lockout toggles in lockstep with the init read.
+        self._heat_lockout_enabled = bool(
+            data.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
+        )
+        self._cool_lockout_enabled = bool(
+            data.get(CONF_COOL_LOCKOUT_ENABLED, DEFAULT_COOL_LOCKOUT_ENABLED)
         )
         self._priority = (
             float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT)) / 100.0
@@ -800,6 +827,49 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         elif not active and issue_id in self._active_issues:
             self._active_issues.discard(issue_id)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+    def _validate_configured_ext_temp(self) -> None:
+        """F2: vet the *configured* external-temp number once (not per tick).
+
+        The auto-detected input is already screened by
+        looks_like_external_temp_number; the configured CONF_TRV_EXTERNAL_TEMP
+        bypassed that and, if it were a plain setpoint, we would overwrite it with
+        the room temperature every tick. Resolve its device_class from the entity
+        registry and screen it the same way. On failure drop the entity (so the
+        per-tick feed never writes to it) and raise a repair issue; when valid or
+        unset, clear it. A registry miss must never block setup.
+        """
+        issue_id = f"external_temp_implausible_{self._entry_id}"
+        entity_id = self._trv_ext_temp
+        if not entity_id:
+            self._issue(issue_id, False, translation_key="external_temp_implausible")
+            return
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            reg = er.async_get(self.hass)
+            ent = reg.async_get(entity_id)
+            device_class = ent.original_device_class if ent is not None else None
+            valid = looks_like_external_temp_number(entity_id, device_class)
+        except Exception:  # noqa: BLE001 - a registry miss must not block setup
+            _LOGGER.debug(
+                "Poise: external-temp validation failed for %s",
+                entity_id,
+                exc_info=True,
+            )
+            return
+        if valid:
+            self._issue(issue_id, False, translation_key="external_temp_implausible")
+            return
+        # Implausible: never feed it. Drop to None so the per-tick write path
+        # (ext_num) cannot target it, and surface a repair issue for the user.
+        self._trv_ext_temp = None
+        self._issue(
+            issue_id,
+            True,
+            translation_key="external_temp_implausible",
+            placeholders={"entity": entity_id, "name": self.zone_name},
+        )
 
     def _read(self, entity_id: str | None) -> float | None:
         if not entity_id:
@@ -1590,8 +1660,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             can_heat=can_heat,
             can_cool=can_cool,
             climate_mode=self._climate_mode,
-            cool_min_outdoor=self._cool_min_outdoor,
-            heat_max_outdoor=self._heat_max_outdoor,
+            cool_min_outdoor=(
+                self._cool_min_outdoor if self._cool_lockout_enabled else None
+            ),
+            heat_max_outdoor=(
+                self._heat_max_outdoor if self._heat_lockout_enabled else None
+            ),
             t_out=t_out_eff,
             t_mrt=t_mrt_decide,
             frost_floor=FROST_FLOOR_C,

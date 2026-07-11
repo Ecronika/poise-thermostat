@@ -27,6 +27,7 @@ from homeassistant.util import dt as dt_util
 
 from .clock import MonotonicClock
 from .const import (
+    BOILER_MIN_DWELL_FLOOR_S,
     CONF_BOILER_ACTIVATION_DELAY,
     CONF_BOILER_COUNT_THRESHOLD,
     CONF_BOILER_KEEPALIVE,
@@ -118,8 +119,17 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._keepalive = float(
             d.get(CONF_BOILER_KEEPALIVE, DEFAULT_BOILER_KEEPALIVE_S)
         )
-        self._min_on = float(d.get(CONF_BOILER_MIN_ON, DEFAULT_BOILER_MIN_ON_S))
-        self._min_off = float(d.get(CONF_BOILER_MIN_OFF, DEFAULT_BOILER_MIN_OFF_S))
+        # F9: clamp the min-cycle dwell UP to the hard floor so a mis-configured
+        # (too-short) min_on/min_off can never short-cycle the boiler/compressor.
+        # keepalive (0 = off) and activation_delay are intentionally not clamped.
+        self._min_on = max(
+            BOILER_MIN_DWELL_FLOOR_S,
+            float(d.get(CONF_BOILER_MIN_ON, DEFAULT_BOILER_MIN_ON_S)),
+        )
+        self._min_off = max(
+            BOILER_MIN_DWELL_FLOOR_S,
+            float(d.get(CONF_BOILER_MIN_OFF, DEFAULT_BOILER_MIN_OFF_S)),
+        )
         self._boiler = BoilerState()
         self._reconciled = False  # review V2b: reconcile vs real boiler once
         # S3 load shedding + S4 compressor groups (shadow stage)
