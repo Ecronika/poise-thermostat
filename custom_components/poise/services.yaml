@@ -1,0 +1,12 @@
+# Poise services (ADR-0059 §6).
+
+# Clear any active manual override / preset on the targeted Poise room zones (or on
+# every room zone when no target is given) so they immediately resume the schedule.
+resume_schedule:
+  target:
+    entity:
+      integration: poise
+      domain: climate
+    device:
+      integration: poise
+    area: {}

@@ -133,6 +133,13 @@ _ATTRS = (
     "ca_cycles_per_h",
     "ca_minutes",
     "override_clamped",
+    # ADR-0059 manual-hold + timed-Boost lifecycle (card contract).
+    "override_active",
+    "override_expires_at",
+    "override_policy",
+    "override_requested",
+    "boost_expires_at",
+    "preset",
     "ref_offset",
     "ref_offset_dev",
     "ref_offset_trusted",
@@ -183,6 +190,12 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
             entry_type=DeviceEntryType.SERVICE,
             via_device=coordinator.via_device_id,
         )
+
+    async def async_added_to_hass(self) -> None:
+        # ADR-0059 §4: hand the resolved entity_id to the coordinator so the
+        # poise_override_ended event can name this climate entity.
+        await super().async_added_to_hass()
+        self.coordinator.set_climate_entity_id(self.entity_id)
 
     @property
     def _d(self) -> dict[str, Any]:
@@ -257,8 +270,10 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
         else:
             self.coordinator.set_enabled(True)
             self.coordinator.set_climate_mode(climate_mode_for_hvac(hvac_mode.value))
-        # selecting a mode returns to automatic control: clear any manual hold (M2)
-        self.coordinator.set_override(None)
+        # ADR-0059 §5: selecting an ACTIVE mode returns to automatic control and
+        # clears any manual hold; OFF must NOT clear it (enables "off + resume").
+        if hvac_mode != HVACMode.OFF:
+            self.coordinator.set_override(None, reason="mode_change")
         await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:

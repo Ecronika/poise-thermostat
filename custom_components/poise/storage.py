@@ -19,7 +19,19 @@ STORAGE_VERSION: Final = 1
 
 
 class PoiseStore:
-    """Thin wrapper around HA Store for one room's learned state."""
+    """HA Store wrapper for one room's persisted state (ADR-0007).
+
+    The payload is built by ``PoiseCoordinator._save_payload`` and restored in
+    ``async_bootstrap``; every key is optional-on-read (a missing key falls back
+    to a default) so the schema can grow without a version bump. Besides the
+    learned model (``ekf``/``trm``/``seasonless``/…) and the user intent
+    (``enabled``/``preset``/``override``/``climate_mode``), it carries the
+    ADR-0059 manual-hold + timed-Boost lifecycle on a wall-clock basis, so a hold
+    survives a restart and still expires on real elapsed time (review C5):
+    ``override_set_wall``/``override_requested``/``override_policy``/
+    ``override_expires_at`` and ``boost_expires_at``/``boost_prev_preset``, plus
+    the observe-only ``override_stats`` (§5 L1).
+    """
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._hass = hass

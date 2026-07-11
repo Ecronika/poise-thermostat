@@ -71,6 +71,36 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         import logging
 
         logging.getLogger(__name__).exception("Poise card registration failed")
+
+    # ADR-0059 §6: poise.resume_schedule — clear any active manual override/preset on
+    # the targeted room zones (or every room zone when no target is given) so they
+    # fall back to the schedule at once. System/hub entries and entries without a live
+    # coordinator (not yet / failed to set up) are skipped defensively.
+    from homeassistant.core import ServiceCall
+    from homeassistant.helpers.service import async_extract_config_entry_ids
+
+    from .control.override import OverrideMode
+
+    _resume_target_keys = ("entity_id", "device_id", "area_id", "floor_id", "label_id")
+
+    async def _resume_schedule(call: ServiceCall) -> None:
+        has_target = any(call.data.get(key) for key in _resume_target_keys)
+        referenced = (
+            await async_extract_config_entry_ids(hass, call) if has_target else set()
+        )
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if _is_system(entry):
+                continue
+            if has_target and entry.entry_id not in referenced:
+                continue
+            coordinator = getattr(entry, "runtime_data", None)
+            if coordinator is None:
+                continue
+            coordinator.set_override(None, reason="user_resume")
+            coordinator.set_preset(OverrideMode.NONE)
+            await coordinator.async_request_refresh()
+
+    hass.services.async_register(DOMAIN, "resume_schedule", _resume_schedule)
     return True
 
 
@@ -210,14 +240,22 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # this guard is defensive/dead. Kept as an explicit no-downgrade contract.
     if entry.version > 2:
         return False
-    from .migration import migrate_room_entry
+    from .migration import apply_override_policy_default, migrate_room_entry
 
+    stored_minor = entry.minor_version
     new_data, new_options = migrate_room_entry(dict(entry.data), dict(entry.options))
+    # ADR-0059 §7: a room zone stored below minor_version 2 predates the manual
+    # override policy, so pin it to the fixed-timer hold to keep today's behaviour;
+    # a fresh zone leaves the key unset and the coordinator falls back to schedule.
+    if not _is_system(entry):
+        new_options = apply_override_policy_default(
+            new_data, new_options, stored_minor_version=stored_minor
+        )
     # AR-36: pin the minor_version alongside the major so HA records a complete
     # (version, minor_version) pair and does not treat the entry as needing a
     # minor migration on every load.
     hass.config_entries.async_update_entry(
-        entry, data=new_data, options=new_options, version=2, minor_version=1
+        entry, data=new_data, options=new_options, version=2, minor_version=2
     )
     # F22: leave a diagnosable trace of the migration (ADR-0018).
     import logging

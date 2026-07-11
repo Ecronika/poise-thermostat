@@ -14,7 +14,7 @@ import asyncio
 import logging
 import time
 from dataclasses import replace
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -63,6 +63,7 @@ from .const import (
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ANNUAL_KWH,
+    CONF_BOOST_DURATION_MIN,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
@@ -87,6 +88,10 @@ from .const import (
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_OVERRIDE_END_ON_PRESENCE,
+    CONF_OVERRIDE_MAX_H,
+    CONF_OVERRIDE_POLICY,
+    CONF_OVERRIDE_TIMER_H,
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
@@ -101,6 +106,7 @@ from .const import (
     DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ADAPTIVE_COOL,
     DEFAULT_ANNUAL_KWH,
+    DEFAULT_BOOST_DURATION_MIN,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_LOCKOUT_ENABLED,
@@ -108,6 +114,10 @@ from .const import (
     DEFAULT_DYNAMICS,
     DEFAULT_HEAT_LOCKOUT_ENABLED,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
+    DEFAULT_OVERRIDE_END_ON_PRESENCE,
+    DEFAULT_OVERRIDE_MAX_H,
+    DEFAULT_OVERRIDE_POLICY,
+    DEFAULT_OVERRIDE_TIMER_H,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_PRICE_GAS_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
@@ -120,6 +130,7 @@ from .const import (
     FROST_FLOOR_C,
     LOW_BATTERY_PCT,
     MIN_PLAUSIBLE_TAU_H,
+    OVERRIDE_POLICY_SCHEDULE,
     SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
     UNAVAILABLE_SAFE_AFTER_S,
@@ -153,8 +164,10 @@ from .control.outcome_scoring import (
 from .control.override import (
     OverrideConfig,
     OverrideMode,
-    manual_override_expired,
+    hold_expired,
     mode_comfort_base,
+    resolve_boost_expiry,
+    resolve_hold_expiry,
 )
 from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
@@ -260,6 +273,11 @@ def _num_attr(state: State | None, key: str) -> float | None:
     return parse_finite(state.attributes.get(key))
 
 
+def _iso_utc(ts: float | None) -> str | None:
+    """UTC ISO-8601 string for a wall-clock epoch, or None (ADR-0059 §4 attrs)."""
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat() if ts is not None else None
+
+
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
     """One coordinator per room; capability-aware dual-setpoint each tick."""
 
@@ -326,6 +344,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._enabled = True
         self._override: float | None = None
         self._override_set_wall: float | None = None
+        # ADR-0059 manual-hold + timed-Boost lifecycle (all wall-clock; persisted).
+        self._override_requested: float | None = None  # pre-clamp user ask
+        self._override_expires_at: float | None = None  # announced at set-time
+        self._override_policy: str = DEFAULT_OVERRIDE_POLICY
+        self._override_stats: list[dict[str, Any]] = []  # §5 L1 (observe-only)
+        self._boost_expires_at: float | None = None
+        self._boost_prev_preset: OverrideMode | None = None  # VT#1961 restore
+        self._prev_home: bool | None = None  # §1 house-gate flip tracking
+        self._last_presence_level: str = "comfort"  # cached for the §5 stat
+        self._last_window_open: bool = False  # cached for the §5 stat
+        self._climate_entity_id: str | None = None  # for the ended-event payload
         # ADR-0046 P2: per-device anti-short-cycle lifecycle (wall-clock, survives
         # restart). Shadow-only today — tracks the actuator's run-state + health to
         # report the min-off / health gate; actuates nothing until P3.
@@ -335,6 +364,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # options override data for hot-applyable tuning (A10); structural
         # inputs (sensors/actuator) live only in data.
         data = {**entry.data, **entry.options}
+        self._read_override_options(data)  # ADR-0059 §1/§2 hold/Boost tuning
 
         def _require(key: str) -> str:
             # AR-34: a corrupt entry missing a structural field must fail setup
@@ -492,14 +522,168 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._enabled = value
         self._dirty = True
 
-    def set_override(self, target: float | None) -> None:
+    def set_override(
+        self, value: float | None, *, reason: str | None = None
+    ) -> None:
         # Validate at the trust boundary: reject non-finite, clamp to the safe
         # envelope so a bad manual setpoint can never reach the actuator (C2).
-        self._override = sanitize_override(target, FROST_FLOOR_C, DEVICE_MAX_C)
-        self._override_set_wall = (
-            dt_util.utcnow().timestamp() if self._override is not None else None
-        )
+        self._override = sanitize_override(value, FROST_FLOOR_C, DEVICE_MAX_C)
+        if self._override is not None:
+            # ADR-0059 §4: announce the hold's expiry at set-time so the Card can
+            # show "gilt bis …" the instant the user intervenes.
+            set_at = dt_util.utcnow().timestamp()
+            self._override_set_wall = set_at
+            # Keep the pre-clamp requested value (was discarded): the Card shows
+            # what the user asked for vs the norm-clamped hold that is applied.
+            self._override_requested = float(value) if value is not None else None
+            self._override_expires_at = resolve_hold_expiry(
+                policy=self._override_policy,
+                set_at=set_at,
+                timer_h=self._override_timer_h,
+                max_h=self._override_max_h,
+                minutes_to_switchpoint=self._minutes_to_switchpoint(),
+            )
+            self._record_override_stat(self._override)  # §5 L1 (observe-only)
+        else:
+            # Clearing the hold: drop the whole lifecycle + announce the reason.
+            self._override_set_wall = None
+            self._override_expires_at = None
+            self._override_requested = None
+            if value is None:  # explicit user clear -> announce; a NaN just no-ops
+                self._fire_override_ended(reason or "user_resume")
         self._dirty = True
+
+    def _read_override_options(self, data: dict[str, Any]) -> None:
+        """Read the ADR-0059 hold/Boost tuning (hot-applyable; options>data)."""
+        self._override_policy = str(
+            data.get(CONF_OVERRIDE_POLICY, DEFAULT_OVERRIDE_POLICY)
+        )
+        self._override_timer_h = float(
+            data.get(CONF_OVERRIDE_TIMER_H, DEFAULT_OVERRIDE_TIMER_H)
+        )
+        self._override_max_h = float(
+            data.get(CONF_OVERRIDE_MAX_H, DEFAULT_OVERRIDE_MAX_H)
+        )
+        self._override_end_on_presence = bool(
+            data.get(CONF_OVERRIDE_END_ON_PRESENCE, DEFAULT_OVERRIDE_END_ON_PRESENCE)
+        )
+        self._boost_duration_min = float(
+            data.get(CONF_BOOST_DURATION_MIN, DEFAULT_BOOST_DURATION_MIN)
+        )
+
+    def set_climate_entity_id(self, entity_id: str) -> None:
+        """Record the room's climate entity_id for the ended-event payload."""
+        self._climate_entity_id = entity_id
+
+    def _minutes_to_switchpoint(self) -> float | None:
+        """Minutes to the next schedule switchpoint for a hold's expiry (§1).
+
+        The nearer of the upcoming setback/comfort edges; None when there is no
+        upcoming switchpoint (always-comfort) -> the timer fallback applies.
+
+        TODO ADR-0059 §3: when optimal-start is active and its preheat-start is
+        earlier than a comfort-start switchpoint, end the hold at the preheat so
+        the room is warm at comfort time. The preheat lead is only resolved in
+        the tick (model/forecast), not here, so we use the plain switchpoint.
+        """
+        sched = self._schedule.state_at(self._local_minute())
+        cands = [
+            float(m)
+            for m in (sched.minutes_to_setback, sched.minutes_to_comfort)
+            if m is not None and m > 0
+        ]
+        return min(cands) if cands else None
+
+    def _record_override_stat(self, clamped: float) -> None:
+        """Append one L1 override observation (ADR-0059 §5; diagnostic only).
+
+        A capped rolling log of user setpoint nudges: direction/delta vs the
+        effective preset base, the schedule phase and the presence level at set
+        time. AWAY / window-open nudges are skipped (not representative). No
+        behaviour and no suggestions -- L2 (suggestions) is a v2 feature.
+        """
+        try:
+            if (
+                self._preset is OverrideMode.AWAY
+                or self._last_presence_level == PresenceLevel.AWAY.value
+                or self._last_window_open
+            ):
+                return
+            base = mode_comfort_base(
+                self._preset, self._comfort_base, self._override_cfg
+            )
+            delta = clamped - base
+            phase = (
+                "comfort"
+                if self._schedule.state_at(self._local_minute()).is_comfort
+                else "setback"
+            )
+            self._override_stats.append(
+                {
+                    "ts": dt_util.utcnow().timestamp(),
+                    "direction": 1 if delta >= 0 else -1,
+                    "delta": round(delta, 2),
+                    "phase": phase,
+                    "presence_level": self._last_presence_level,
+                }
+            )
+            del self._override_stats[:-50]  # keep the last 50
+        except Exception:  # noqa: BLE001 - a diagnostic stat must never break a set
+            _LOGGER.debug("Poise override-stat record failed", exc_info=True)
+
+    def _fire_override_ended(self, reason: str) -> None:
+        """Announce a manual-hold end on the HA bus (ADR-0059 §4).
+
+        Reasons: expired_timer | schedule_point | presence_change | user_resume |
+        mode_change. The Card/automations subscribe to surface "Auto wieder aktiv".
+        """
+        payload: dict[str, Any] = {
+            "zone": self.zone_name,
+            "entry_id": self._entry_id,
+            "reason": reason,
+        }
+        if self._climate_entity_id is not None:
+            payload["entity_id"] = self._climate_entity_id
+        self.hass.bus.async_fire("poise_override_ended", payload)
+
+    def _expire_timed_states(self, home: bool | None) -> None:
+        """Expire the timed Boost + manual hold on a tick (ADR-0059 §1/§2).
+
+        A house-gate presence flip (either direction) since the last tick, or the
+        hold's announced wall-clock expiry, ends a manual hold; a timed Boost
+        restores the preset frozen at activation. Wall-clock throughout, so a
+        state restored after a restart expires on real elapsed time (review C5).
+        Runs under any active layer (window/frozen): the layer keeps regulating.
+        """
+        now = dt_util.utcnow().timestamp()
+        presence_changed = (
+            self._prev_home is not None
+            and home is not None
+            and home != self._prev_home
+        )
+        self._prev_home = home
+        # timed Boost (§2): restore the frozen preset; then Boost is stateless.
+        if self._boost_expires_at is not None and now >= self._boost_expires_at:
+            self.set_preset(self._boost_prev_preset or OverrideMode.NONE)
+        # manual hold (§1): value-independent expiry announced at set-time.
+        if self._override is not None and hold_expired(
+            expires_at=self._override_expires_at,
+            now=now,
+            presence_changed=presence_changed,
+            end_on_presence=self._override_end_on_presence,
+        ):
+            if presence_changed and self._override_end_on_presence:
+                reason = "presence_change"
+            elif self._override_policy == OVERRIDE_POLICY_SCHEDULE:
+                reason = "schedule_point"
+            else:
+                reason = "expired_timer"
+            self._override = None
+            self._override_set_wall = None
+            self._override_expires_at = None
+            self._override_requested = None
+            self._dirty = True
+            self._fire_override_ended(reason)
 
     def set_climate_mode(self, mode: str) -> None:
         self._climate_mode = mode
@@ -510,6 +694,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._dirty = True
 
     def set_preset(self, mode: OverrideMode) -> None:
+        if mode is OverrideMode.BOOST:
+            # ADR-0059 §2: Boost is the one timed preset. Freeze the preset active
+            # at activation (VT#1961) so expiry restores it, and announce the
+            # expiry up front; re-pressing Boost re-arms from now without stacking
+            # BOOST onto itself as the frozen preset.
+            if self._preset is not OverrideMode.BOOST:
+                self._boost_prev_preset = self._preset
+            self._boost_expires_at = resolve_boost_expiry(
+                set_at=dt_util.utcnow().timestamp(),
+                boost_duration_min=self._boost_duration_min,
+            )
+        else:
+            # Any stateless preset (Eco/Comfort/Away/None) drops the Boost timer.
+            self._boost_expires_at = None
+            self._boost_prev_preset = None
         self._preset = mode
         self._dirty = True
 
@@ -586,6 +785,41 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     if self._override is not None and isinstance(osw, (int, float))
                     else None
                 )
+                # ADR-0059: restore the manual-hold + timed-Boost lifecycle on a
+                # wall-clock basis, each defensively, so a hold/Boost survives a
+                # restart and still expires on real elapsed time (review C5).
+                orq = data.get("override_requested")
+                self._override_requested = (
+                    float(orq)
+                    if self._override is not None and isinstance(orq, (int, float))
+                    else None
+                )
+                pol = data.get("override_policy")
+                if isinstance(pol, str) and pol:
+                    self._override_policy = pol
+                oea = data.get("override_expires_at")
+                self._override_expires_at = (
+                    float(oea)
+                    if self._override is not None and isinstance(oea, (int, float))
+                    else None
+                )
+                try:
+                    bpp = data.get("boost_prev_preset")
+                    self._boost_prev_preset = (
+                        OverrideMode(bpp) if isinstance(bpp, str) else None
+                    )
+                except ValueError:
+                    self._boost_prev_preset = None
+                bea = data.get("boost_expires_at")
+                self._boost_expires_at = (
+                    float(bea) if isinstance(bea, (int, float)) else None
+                )
+                ostats = data.get("override_stats")
+                self._override_stats = (
+                    [r for r in ostats if isinstance(r, dict)][-50:]
+                    if isinstance(ostats, list)
+                    else []
+                )
                 self._window_bypass = bool(data.get("window_bypass", False))
                 cm = data.get("climate_mode")
                 if isinstance(cm, str):
@@ -649,6 +883,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         transient that a full reload would. Structural inputs are not options.
         """
         data = {**entry.data, **entry.options}
+        self._read_override_options(data)  # ADR-0059 §1/§2 hot-apply
         self._comfort_base = float(data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE))
         self._hdh_cfg = HdhConfig(
             annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
@@ -1159,6 +1394,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "enabled": self._enabled,
             "override": self._override,
             "override_set_wall": self._override_set_wall,
+            # ADR-0059 manual-hold + timed-Boost lifecycle (wall-clock; review C5).
+            "override_requested": self._override_requested,
+            "override_policy": self._override_policy,
+            "override_expires_at": self._override_expires_at,
+            "boost_expires_at": self._boost_expires_at,
+            "boost_prev_preset": (
+                self._boost_prev_preset.value
+                if self._boost_prev_preset is not None
+                else None
+            ),
+            "override_stats": self._override_stats,
             "climate_mode": self._climate_mode,
             "has_actuated": self._has_actuated,  # AR-11: teardown-park gate
         }
@@ -1447,18 +1693,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # outdoor + a solar radiant bump; a measured globe/MRT sensor overrides.
         mrt_internal = virtual_mrt(room, t_out_eff, q_solar)
         t_mrt, mrt_source = select_mrt(self._read(self._mrt), mrt_internal)
-        if (
-            self._override is not None
-            and self._override_set_wall is not None
-            and manual_override_expired(
-                self._override_set_wall,
-                dt_util.utcnow().timestamp(),
-                self._override_cfg,
-            )
-        ):
-            self._override = None
-            self._override_set_wall = None
-            self._dirty = True
         sensor_window_open = self._window_open()
         window_open = effective_window_open(
             sensor_open=sensor_window_open,
@@ -1577,6 +1811,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             return None
 
         _home = any_present(_tristate(e) for e in self._presence_home_entities)
+        # ADR-0059 §1/§2: expire the timed Boost + manual hold here, once the house
+        # gate is known and before the preset/override feed the plan and solver. A
+        # Boost restore must land before _is_away/_base_preset read the preset.
+        self._expire_timed_states(_home)
         _is_away = self._preset is OverrideMode.AWAY or _home is False
         _base_preset = OverrideMode.NONE if _is_away else self._preset
         plan = plan_preheat(
@@ -1657,6 +1895,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             preheating=preheating,
             cfg=self._presence_cfg,
         )
+        # ADR-0059 §5: cache the presence level + window state so a user setpoint
+        # nudge recorded in set_override (no tick context) can skip AWAY/window.
+        self._last_presence_level = _level.value
+        self._last_window_open = window_open
         _eco_widen: float
         _cool_ceiling: float | None
         if _level is PresenceLevel.AWAY:
@@ -2552,6 +2794,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
             "override_active": self._override is not None,
+            # ADR-0059 §4: the manual-hold lifecycle for the Card ("gilt bis …").
+            "override_expires_at": _iso_utc(self._override_expires_at),
+            "override_policy": self._override_policy,
+            "override_requested": self._override_requested,
+            "boost_expires_at": _iso_utc(self._boost_expires_at),
             "override_clamped": override_clamped,
             "cover_predicted_peak": round(_cover_peak, 1),
             "cover_would_shade": _cover_pos > 0,

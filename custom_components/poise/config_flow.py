@@ -41,6 +41,7 @@ from .const import (
     CONF_BOILER_OFF_ACTION,
     CONF_BOILER_ON_ACTION,
     CONF_BOILER_POWER_THRESHOLD,
+    CONF_BOOST_DURATION_MIN,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
@@ -74,6 +75,11 @@ from .const import (
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
     CONF_OUTDOOR_SENSOR,
+    CONF_OVERRIDE_END_ON_PRESENCE,
+    CONF_OVERRIDE_MAX_H,
+    CONF_OVERRIDE_POLICY,
+    CONF_OVERRIDE_SUGGESTIONS,
+    CONF_OVERRIDE_TIMER_H,
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
     CONF_SETBACK_DELTA,
@@ -93,6 +99,7 @@ from .const import (
     DEFAULT_BOILER_KEEPALIVE_S,
     DEFAULT_BOILER_MIN_OFF_S,
     DEFAULT_BOILER_MIN_ON_S,
+    DEFAULT_BOOST_DURATION_MIN,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_LOCKOUT_ENABLED,
@@ -103,6 +110,11 @@ from .const import (
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
+    DEFAULT_OVERRIDE_END_ON_PRESENCE,
+    DEFAULT_OVERRIDE_MAX_H,
+    DEFAULT_OVERRIDE_POLICY,
+    DEFAULT_OVERRIDE_SUGGESTIONS,
+    DEFAULT_OVERRIDE_TIMER_H,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
@@ -136,6 +148,14 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_HEAT_LOCKOUT_ENABLED,
     ),
     "presence": (CONF_PRESENCE_HOME, CONF_OCCUPANCY_SENSOR, CONF_ABSENCE_AFTER_MIN),
+    "manual_override": (
+        CONF_OVERRIDE_POLICY,
+        CONF_OVERRIDE_TIMER_H,
+        CONF_OVERRIDE_MAX_H,
+        CONF_OVERRIDE_END_ON_PRESENCE,
+        CONF_BOOST_DURATION_MIN,
+        CONF_OVERRIDE_SUGGESTIONS,
+    ),
     "advanced": (
         CONF_COOL_HARD_CAP,
         CONF_THERMAL_SHOCK_DELTA,
@@ -591,6 +611,67 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                 ),
                 {"collapsed": False},
             ),
+            vol.Required("manual_override"): section(
+                vol.Schema(
+                    {
+                        # ADR-0059 §6: how a manual setpoint/preset override ends —
+                        # follow the next schedule change, auto-revert after a timer,
+                        # or hold until cleared (poise.resume_schedule / Boost).
+                        vol.Required(
+                            CONF_OVERRIDE_POLICY, default=DEFAULT_OVERRIDE_POLICY
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=["schedule", "timer", "permanent"],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="override_policy",
+                            )
+                        ),
+                        vol.Required(
+                            CONF_OVERRIDE_TIMER_H, default=DEFAULT_OVERRIDE_TIMER_H
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=0.5,
+                                max=24,
+                                step=0.5,
+                                unit_of_measurement="h",
+                                mode=box,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_OVERRIDE_MAX_H, default=DEFAULT_OVERRIDE_MAX_H
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=1,
+                                max=24,
+                                step=1,
+                                unit_of_measurement="h",
+                                mode=box,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_OVERRIDE_END_ON_PRESENCE,
+                            default=DEFAULT_OVERRIDE_END_ON_PRESENCE,
+                        ): selector.BooleanSelector(),
+                        vol.Required(
+                            CONF_BOOST_DURATION_MIN,
+                            default=DEFAULT_BOOST_DURATION_MIN,
+                        ): selector.NumberSelector(
+                            selector.NumberSelectorConfig(
+                                min=15,
+                                max=180,
+                                step=5,
+                                unit_of_measurement="min",
+                                mode=box,
+                            )
+                        ),
+                        vol.Required(
+                            CONF_OVERRIDE_SUGGESTIONS,
+                            default=DEFAULT_OVERRIDE_SUGGESTIONS,
+                        ): selector.BooleanSelector(),
+                    }
+                ),
+                {"collapsed": True},
+            ),
             vol.Required("advanced"): section(
                 vol.Schema(
                     {
@@ -715,8 +796,10 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
 
     # V2 (ADR-0007): async_migrate_entry splits data->options and normalizes the
     # window/presence/occupancy pickers (now multiple=True) to lists.
+    # MINOR_VERSION 2 (ADR-0059 §7): migration pins pre-0.162 zones to the "timer"
+    # override policy so their fixed-2 h manual hold is preserved verbatim.
     VERSION = 2
-    MINOR_VERSION = 1
+    MINOR_VERSION = 2
     # F5: hub-existence captured when the reconfigure form was RENDERED, reused on
     # submit so the anlagen section shown and the reconcile's structural flag can
     # never disagree. The class-level default also gives mypy the type at the

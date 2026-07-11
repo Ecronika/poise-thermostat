@@ -23,6 +23,7 @@ from .const import (
     CONF_NAME,
     CONF_OCCUPANCY_SENSOR,
     CONF_OUTDOOR_SENSOR,
+    CONF_OVERRIDE_POLICY,
     CONF_PRESENCE_HOME,
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
@@ -31,6 +32,7 @@ from .const import (
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     ENTRY_TYPE_SYSTEM,
+    OVERRIDE_POLICY_TIMER,
 )
 
 # Structural inputs stay in entry.data (need a reload; not hot-applyable).
@@ -93,6 +95,30 @@ def migrate_room_entry(
         if key in new_options:
             new_options[key] = _as_list(new_options[key])
     return new_data, new_options
+
+
+def apply_override_policy_default(
+    data: dict[str, object],
+    options: dict[str, object],
+    *,
+    stored_minor_version: int,
+) -> dict[str, object]:
+    """ADR-0059 §7: pin a pre-0.162 room zone to the fixed-timer manual-hold policy.
+
+    Zones stored below minor_version 2 predate the configurable override policy and
+    kept a fixed 2 h manual hold, so set ``override_policy = timer`` to preserve that
+    behaviour verbatim across the upgrade. A zone already carrying an explicit policy
+    (in ``data`` or ``options``) is left untouched, and a freshly created zone
+    (``stored_minor_version >= 2``) leaves the key unset so the coordinator falls back
+    to ``schedule``. Returns the (possibly new) options mapping; never mutates input.
+    """
+    if stored_minor_version >= 2:
+        return options
+    if CONF_OVERRIDE_POLICY in data or CONF_OVERRIDE_POLICY in options:
+        return options
+    new_options = dict(options)
+    new_options[CONF_OVERRIDE_POLICY] = OVERRIDE_POLICY_TIMER
+    return new_options
 
 
 def as_entity_list(value: object) -> list[str]:

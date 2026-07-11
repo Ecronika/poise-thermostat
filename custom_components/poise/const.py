@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.161.1"
+VERSION: Final = "0.162.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -134,6 +134,27 @@ CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
 # cool-capable device (see README); set "off" to force the fixed summer band.
 CONF_ADAPTIVE_COOL: Final = "adaptive_cool"
 DEFAULT_ADAPTIVE_COOL: Final = "auto"  # tri-state auto|on|off (ADR-0008)
+
+# Manual-override lifecycle (ADR-0059): a manual setpoint hold carries an explicit
+# return policy + an expiry announced at set-time; Boost is timed; learning is
+# observe-only (L1 capture in v1; L2 suggestions are v2, field latent).
+CONF_OVERRIDE_POLICY: Final = "override_policy"
+CONF_OVERRIDE_TIMER_H: Final = "override_timer_h"
+CONF_OVERRIDE_MAX_H: Final = "override_max_h"
+CONF_OVERRIDE_END_ON_PRESENCE: Final = "override_end_on_presence_change"
+CONF_BOOST_DURATION_MIN: Final = "boost_duration_min"
+CONF_OVERRIDE_SUGGESTIONS: Final = "override_suggestions"  # L2 (v2), latent
+OVERRIDE_POLICY_SCHEDULE: Final = "schedule"
+OVERRIDE_POLICY_TIMER: Final = "timer"
+OVERRIDE_POLICY_PERMANENT: Final = "permanent"
+# Read-fallback = schedule (new zones); async_migrate_entry stamps EXISTING room
+# entries with "timer" so their fixed-2 h behaviour is preserved (ADR-0059 §7).
+DEFAULT_OVERRIDE_POLICY: Final = "schedule"
+DEFAULT_OVERRIDE_TIMER_H: Final = 2.0
+DEFAULT_OVERRIDE_MAX_H: Final = 8.0
+DEFAULT_OVERRIDE_END_ON_PRESENCE: Final = True
+DEFAULT_BOOST_DURATION_MIN: Final = 60.0
+DEFAULT_OVERRIDE_SUGGESTIONS: Final = True
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30
