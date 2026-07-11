@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from custom_components.poise.control.cooling import DualSetpoint, decide_mode
+from custom_components.poise.control.cooling import (
+    DualSetpoint,
+    decide_mode,
+    override_mode,
+)
 
 _SP = DualSetpoint(heat=21.0, cool=25.0)
 
@@ -75,3 +79,52 @@ def test_locked_out_cold_reversible_still_parks_heat_at_frost_floor() -> None:
         room=16.0, heat_sp=17.5, cool_sp=26.7, can_heat=True, can_cool=True
     )
     assert mode == "heat" and target >= FROST_FLOOR_C
+
+
+# --- ADR-0059 control-loop fix: an active override drives the direction --------
+def _ov(
+    room: float,
+    override: float,
+    *,
+    outdoor: float = 18.0,
+    climate_mode: str = "auto",
+    can_heat: bool = True,
+    can_cool: bool = True,
+    cool_min_outdoor: float | None = 16.0,
+    heat_max_outdoor: float | None = 22.0,
+) -> str:
+    return override_mode(
+        room,
+        override,
+        outdoor=outdoor,
+        climate_mode=climate_mode,
+        can_heat=can_heat,
+        can_cool=can_cool,
+        cool_min_outdoor=cool_min_outdoor,
+        heat_max_outdoor=heat_max_outdoor,
+    )
+
+
+def test_override_below_room_drives_cool() -> None:
+    # override 23, room 24.5, cool-capable + warm outside -> cool toward manual
+    assert _ov(24.5, 23.0, outdoor=25.0) == "cool"
+
+
+def test_override_above_room_drives_heat() -> None:
+    # override 23, room 21 -> heat toward the manual value
+    assert _ov(21.0, 23.0, outdoor=5.0) == "heat"
+
+
+def test_override_within_hysteresis_idles() -> None:
+    # room 23.2 within +/-0.5 of override 23 -> the dead-band case idles
+    assert _ov(23.2, 23.0) == "idle"
+
+
+def test_override_heat_only_never_cools() -> None:
+    # can_cool False: a room above the override must NOT cool -> idle
+    assert _ov(24.5, 23.0, outdoor=25.0, can_cool=False) == "idle"
+
+
+def test_override_cool_respects_outdoor_lockout() -> None:
+    # too cold outside (10 < cool_min_outdoor 16): cooling stays locked -> idle
+    assert _ov(24.5, 23.0, outdoor=10.0, cool_min_outdoor=16.0) == "idle"
