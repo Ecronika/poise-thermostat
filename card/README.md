@@ -50,3 +50,19 @@ sections:
   learning: true
   presets: true
 ```
+
+## Manual hold & resume (ADR-0059)
+
+Adjusting the setpoint starts a **manual hold**. While a hold is active the card
+shows a **hold pill** (hand icon) with the held setpoint and the remaining time,
+e.g. `Manual 22.5° · 45 min`, counted down from the `override_expires_at`
+attribute (same minute mechanic as the pre-heating/coasting chips). A
+`permanent` hold reads `Manual (permanent)` with no countdown.
+
+- **X / "Resume schedule"** on the pill drops the hold and returns to the
+  schedule/preset — it calls the `poise.resume_schedule` service for the entity.
+- Dragging the dial surfaces the hold **validity** ("valid until 22:00", from
+  `override_expires_at`) — the explanation appears at the moment of the change.
+- A norm clamp is shown in plain words — `22.5° instead of 24° (norm limit)` —
+  from `override_requested` (the pre-clamp request) vs the effective setpoint.
+- The **Boost** preset shows its remaining time from `boost_expires_at`.
