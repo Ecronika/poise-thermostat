@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import {
   clampLabel,
   clockLabel,
+  heldSetpoint,
   holdView,
   minutesUntil,
   presetChip,
   resumeSchedule,
 } from "../src/override.ts";
+import { DIAL, setpointForKey } from "../src/dial.ts";
 import type { HomeAssistant } from "../src/ha-types.ts";
 
 const NOW = Date.parse("2026-07-11T21:15:00Z");
@@ -93,4 +95,116 @@ test("resumeSchedule: X calls poise.resume_schedule for the entity", () => {
     "resume_schedule",
     { entity_id: "climate.wohnzimmer" },
   ]);
+});
+
+test("heldSetpoint: reads the commanded `temperature`, ignores the heat_sp band edge", () => {
+  // VT#1980 — the UI must mirror internal (written) state. `temperature` is the
+  // clamped write target (= target_temperature); `heat_sp` is only the
+  // comfort-band lower edge and is always set.
+  assert.equal(heldSetpoint({ temperature: 24, heat_sp: 20 }), 24);
+  assert.equal(heldSetpoint({ temperature: "22.5", heat_sp: 20 }), 22.5); // string coercion
+  // graceful degradation: no `temperature` -> null (never falls back to heat_sp)
+  assert.equal(heldSetpoint({ heat_sp: 20 }), null);
+  assert.equal(heldSetpoint({}), null);
+});
+
+test("hold-pill + clamp read `temperature` (24°), not the heat_sp band edge (20°)", () => {
+  // Regression guard for ADR-0059 Defekt 1: with an upward clamp the requested
+  // 26° is capped to the held/effective 24° (`temperature`), while `heat_sp` is
+  // the 20° band edge. The card reads these attributes via heldSetpoint(a); the
+  // Hold-pill and clamp chip must reflect 24 (and 26 as requested), never 20.
+  const a = {
+    override_active: true,
+    override_clamped: true,
+    temperature: 24,
+    override_requested: 26,
+    heat_sp: 20,
+    cool_sp: 24,
+  };
+  const held = heldSetpoint(a);
+  assert.equal(held, 24); // NOT 20 (heat_sp band edge)
+
+  // _holdPill: holdView(lang, heldSetpoint(a), …) -> "Manuell 24.0°", not 20.0°
+  assert.equal(
+    holdView("de", held, undefined, undefined, NOW).label,
+    "Manuell 24.0°",
+  );
+
+  // clamp chip: clampLabel(lang, heldSetpoint(a), num(override_requested))
+  //  -> effective 24 vs requested 26, not "20° statt 26°"
+  assert.equal(
+    clampLabel("de", held, a["override_requested"]),
+    "24.0° statt 26.0° (Normgrenze)",
+  );
+});
+
+// num() mirrors poise-card.ts's null-safe numeric coercion (heldSetpoint uses
+// the same rules internally) so these tests exercise the card's own idioms.
+function num(v: unknown): number | null {
+  const n = typeof v === "string" ? parseFloat(v) : (v as number);
+  return typeof n === "number" && !Number.isNaN(n) ? n : null;
+}
+
+test("dial centre setpoint shows the commanded `temperature` (23°), not the heat_sp band edge (20.2°)", () => {
+  // ADR-0059 Defekt 1 (v0.162.2): the MAIN dial number + handle marker must
+  // read the held/commanded setpoint (`temperature`). Live: a 23° hold exposes
+  // heat_sp:20.2 / cool_sp:27.1 as the comfort-band edges — the dial previously
+  // rendered 20.2 (the band lower edge) instead of 23 ("Text zeigt 20,2 statt 23").
+  const a = {
+    temperature: 23,
+    heat_sp: 20.2,
+    cool_sp: 27.1,
+    override_active: true,
+  };
+  // The dial's shown setpoint = `_pending ?? heldSetpoint(a) ?? op ?? min`
+  // (poise-card.ts _dial). No drag/pending here, so it resolves via heldSetpoint.
+  const pending: number | null = null;
+  const op = 22.4; // operative temperature
+  const dialMin = 16;
+  const shown = pending ?? heldSetpoint(a) ?? op ?? dialMin;
+  assert.equal(shown, 23); // NOT 20.2 (heat_sp band edge)
+
+  // Regression guard: the OLD idiom (heat_sp first) resolved to the band edge.
+  const oldShown = num(a.heat_sp) ?? num(a.temperature);
+  assert.equal(oldShown, 20.2);
+});
+
+test("history graph setpoint series plots `temperature` (23°), not the heat_sp band edge (20.2°)", () => {
+  // ADR-0059 Defekt 1 (v0.162.2): the chart setpoint line reads the commanded
+  // `temperature` per history sample (poise-card.ts _loadHistory), never the
+  // `heat_sp` band edge (the comfort band is shaded separately from low/high).
+  const attrs = { temperature: 23, heat_sp: 20.2, cool_sp: 27.1 };
+  const sp = num(attrs.temperature); // the new Sample.sp extraction
+  assert.equal(sp, 23); // NOT 20.2
+
+  // Regression guard: the OLD idiom (heat_sp first) plotted the band edge.
+  const oldSp = num(attrs.heat_sp) ?? num(attrs.temperature);
+  assert.equal(oldSp, 20.2);
+});
+
+test("+/- nudge and arrow keys re-base from the held setpoint (23°), not the heat_sp edge (20.2°)", () => {
+  // ADR-0059 Defekt 1 (v0.162.2): after the dial was fixed to SHOW heldSetpoint,
+  // the +/- buttons (_setpoint) and arrow keys (_onKey) must re-base from the
+  // SAME held/commanded `temperature`, not the `heat_sp` band edge. A single
+  // +0.5 step on a 23° hold must land on 23.5, never ~20.7 (20.2 edge + step).
+  const a = { temperature: 23, heat_sp: 20.2, cool_sp: 27.1, override_active: true };
+  const step = 0.5;
+  const pending: number | null = null;
+
+  // New base, mirroring poise-card.ts _setpoint/_onKey: `_pending ?? heldSetpoint(a) ?? …`.
+  const base = pending ?? heldSetpoint(a) ?? 21;
+  assert.equal(base, 23); // held/commanded temperature, NOT the 20.2 band edge
+
+  // +/- button path (_setpoint): Math.round((cur + delta*step)*10)/10
+  assert.equal(Math.round((base + 1 * step) * 10) / 10, 23.5);
+  assert.equal(Math.round((base - 1 * step) * 10) / 10, 22.5);
+
+  // arrow-key path (_onKey): setpointForKey(key, cur, step, dialCfg)
+  assert.equal(setpointForKey("ArrowUp", base, step, DIAL), 23.5);
+  assert.equal(setpointForKey("ArrowDown", base, step, DIAL), 22.5);
+
+  // Regression guard: the OLD heat_sp-first base produced the ~20.7 bug.
+  const oldBase = num(a.heat_sp) ?? num(a.temperature);
+  assert.equal(oldBase, 20.2);
+  assert.equal(Math.round((oldBase + 1 * step) * 10) / 10, 20.7);
 });
