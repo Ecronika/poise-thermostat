@@ -42,3 +42,6 @@ Methode generisch (Außen-Schwellwert je Richtung), eigenständig umgesetzt; kei
 
 ## Verknüpfungen
 **Erweitert ADR-0023** (macht dessen feste Gating-Werte konfigurierbar); **ADR-0008** (Config-Schema/Defaults); **ADR-0041** (Fenster = eigentlicher „nicht gegen Außenluft"-Schutz). **Abgegrenzt:** feuchte-bewusstes Free-Cooling, `fan_only`-Fensteraktion und Verdichter-Min-Run/Off sind in **ADR-0046** (bzw. ADR-0041) verortet, nicht hier — Begründung siehe Meinungsbild. Quelle/Beleg: `Meinungsbild_Fenster-Kuehlen-Aussen-Lockout.md` (Projekt-Arbeitsstand).
+
+## Nachtrag (v0.161): Deaktivierung über richtungsgetrennte Enable-Toggles
+Die in Punkt 3 zugesagte Deaktivierbarkeit (`None` = Lockout aus) wird **nicht** durch Leeren des Zahlenfelds realisiert, sondern über zwei richtungsgetrennte Schalter `heat_lockout_enabled` / `cool_lockout_enabled` (Default: an). Steht ein Schalter auf „aus", reicht der Coordinator für die betreffende Richtung `None` an `decide_mode` durch — der Schwellwert bleibt als sichtbarer Zahlenwert erhalten (eine 0 im Feld wäre nur ein verwirrendes Fast-Aus, kein echtes Aus). So ist die Außen-Grenze je Richtung eindeutig ein- oder ausschaltbar, ohne den konfigurierten Wert zu verlieren.
