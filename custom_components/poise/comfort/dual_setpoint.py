@@ -97,7 +97,7 @@ def decide(
         COOLING_LOWER[category],
         cool_ceiling,
     )
-    # ADR-0023 §1 (live, opt-in): in the cooling season lift the cooling edge from
+    # ADR-0023 §1 (live, capability-default): lift the cooling edge from
     # the fixed summer band to the EN adaptive upper (capped at the ASR ceiling),
     # so a room within the adaptive comfort band is not over-cooled toward 23 °C.
     if adaptive_cool:
