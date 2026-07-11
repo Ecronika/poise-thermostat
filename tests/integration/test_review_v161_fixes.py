@@ -1,9 +1,10 @@
 """Integration tests pinning the v0.161.0 external-review fixes (glue, CI-only).
 
-F2  — a CONFIGURED ``trv_external_temp_input`` is vetted at setup via
-      ``looks_like_external_temp_number``; an implausible one (e.g. a valve
-      position number) is dropped (never fed) and a repair issue is raised, a
-      plausible one passes silently.
+F2  — a CONFIGURED ``trv_external_temp_input`` is vetted at setup: a value the
+      user picked is trusted unless it shows a POSITIVE non-temperature signal
+      (device_class/unit, e.g. a valve's "%"), in which case it is dropped (never
+      fed), the TRV sensor source is handed back to internal (AR-12) and a repair
+      issue is raised; a plausible/renamed temperature number passes silently.
 F3  — the room reconfigure step rejects a temp sensor on the actuator's own
       device (``sensor_on_actuator``), mirroring the setup path.
 F4a — with the per-direction outdoor lockout toggles off, the coordinator passes
@@ -109,17 +110,51 @@ async def _setup_zone(
 
 
 # --------------------------------------------------------------------------- F2
-async def test_f2_implausible_ext_temp_number_raises_issue_and_no_write(
+async def test_f2_implausible_ext_temp_dropped_restores_select_no_write(
     hass: HomeAssistant,
 ) -> None:
-    """F2: a configured external-temp input that fails the heuristic is dropped
-    (never written to) and a repair issue is raised."""
+    """F2: a configured external-temp input with a POSITIVE non-temperature signal
+    (a valve position in "%") is dropped (never written to), the TRV sensor source
+    is handed back to internal (AR-12), and a repair issue is raised."""
     set_value = async_mock_service(hass, "number", "set_value")
+    select_opt = async_mock_service(hass, "select", "select_option")
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    _room_states(hass)
-    # a valve-position number: name doesn't match "external" + no temp device_class
-    hass.states.async_set("number.trv_valve_position", "50", {})
+    # actuator + its sensor-source select share a device; the select currently
+    # points at "external" (Poise fed it), so the reject must flip it back to
+    # internal or the TRV would regulate against a now-frozen value.
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    donor = MockConfigEntry(domain="demo")
+    donor.add_to_hass(hass)
+    device = dev_reg.async_get_or_create(
+        config_entry_id=donor.entry_id, identifiers={("demo", "trv")}
+    )
+    ent_reg.async_get_or_create(
+        "climate", "demo", "trv-act", device_id=device.id, suggested_object_id="trv"
+    )
+    sel = ent_reg.async_get_or_create(
+        "select", "demo", "src", device_id=device.id, suggested_object_id="trv_src"
+    )
+    hass.states.async_set("sensor.room_temp", "20", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 21.0,
+            "current_temperature": 20.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+    hass.states.async_set(
+        sel.entity_id, "external", {"options": ["internal", "external"]}
+    )
+    hass.states.async_set(
+        "number.trv_valve_position", "50", {"unit_of_measurement": "%"}
+    )
     entry = await _setup_zone(
         hass, _base(**{CONF_TRV_EXTERNAL_TEMP: "number.trv_valve_position"})
     )
@@ -128,10 +163,16 @@ async def test_f2_implausible_ext_temp_number_raises_issue_and_no_write(
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
     # the implausible feed was dropped, so nothing is ever written to it
     assert entry.runtime_data._trv_ext_temp is None
-    hits = [
+    assert not [
         c for c in set_value if c.data.get("entity_id") == "number.trv_valve_position"
     ]
-    assert not hits
+    # AR-12: the TRV sensor source was handed back to internal
+    assert [
+        c
+        for c in select_opt
+        if c.data.get("entity_id") == sel.entity_id
+        and c.data.get("option") == "internal"
+    ], "TRV sensor-source select was not restored to internal"
 
 
 async def test_f2_plausible_ext_temp_number_no_issue(hass: HomeAssistant) -> None:
@@ -151,6 +192,27 @@ async def test_f2_plausible_ext_temp_number_no_issue(hass: HomeAssistant) -> Non
     issue_id = f"external_temp_implausible_{entry.entry_id}"
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
     assert entry.runtime_data._trv_ext_temp == "number.trv_external_temperature"
+
+
+async def test_f2_renamed_temp_number_kept(hass: HomeAssistant) -> None:
+    """F2 regression: a legitimately renamed/localised external-temp number (no
+    "external" in the id, no temperature device_class, but a °C unit) must NOT be
+    dropped on upgrade — the user picked it explicitly. Guards the upgrade
+    regression that the old name-only heuristic would have caused."""
+    async_mock_service(hass, "number", "set_value")
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _room_states(hass)
+    hass.states.async_set(
+        "number.trv_buero_temperatur_extern", "20.5", {"unit_of_measurement": "°C"}
+    )
+    entry = await _setup_zone(
+        hass, _base(**{CONF_TRV_EXTERNAL_TEMP: "number.trv_buero_temperatur_extern"})
+    )
+
+    issue_id = f"external_temp_implausible_{entry.entry_id}"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+    assert entry.runtime_data._trv_ext_temp == "number.trv_buero_temperatur_extern"
 
 
 # --------------------------------------------------------------------------- F3
