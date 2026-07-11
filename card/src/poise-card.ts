@@ -22,6 +22,14 @@ import {
   valueToAngle,
 } from "./dial.ts";
 import { CARD_VERSION, checkCardVersion } from "./version.ts";
+import {
+  clampLabel,
+  clockLabel,
+  holdView,
+  minutesUntil,
+  presetChip,
+  resumeSchedule,
+} from "./override.ts";
 
 function presetIcon(p: string): string {
   const m: Record<string, string> = {
@@ -206,6 +214,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           ${band ? t(lang, band.verdict) : t(lang, "unknown")}
           ${band?.category ? html`<span class="cat">Kat. ${band.category}</span>` : nothing}
         </div>
+        ${this._holdPill(a, lang)}
         ${r.controls === "buttons"
           ? this._control(this._pending ?? setpoint, lang)
           : nothing}
@@ -261,6 +270,12 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const mOut = showMould ? polar(cx, cy, r + 9, mAng) : null;
     const mLbl = showMould ? polar(cx, cy, r + 17, mAng) : null;
     const interactive = this._r.controls === "dial";
+    // ADR-0059 §4: while dragging the dial, surface the hold validity ("valid
+    // until 22:00") from override_expires_at — the explain-at-the-moment cue.
+    const validUntil = this._dragging
+      ? clockLabel(a["override_expires_at"], lang)
+      : null;
+    const valText = `${sp.toFixed(1)} °C${validUntil ? ` · ${t(lang, "valid_until")} ${validUntil}` : ""}`;
     return html`<div class="dialwrap">
       <svg
         class="dial ${interactive ? "" : "ro"}"
@@ -271,7 +286,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         aria-valuemin=${this._dialCfg.min}
         aria-valuemax=${this._dialCfg.max}
         aria-valuenow=${sp}
-        aria-valuetext="${sp.toFixed(1)} °C"
+        aria-valuetext=${valText}
         @keydown=${this._onKey}
         @pointerdown=${this._onDown}
         @pointermove=${this._onMove}
@@ -302,6 +317,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         >
           <div class="op">${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
           <div class="soll">${t(lang, "setpoint")} <b>${sp.toFixed(1)}°</b></div>
+          ${validUntil
+            ? html`<div class="valid">${t(lang, "valid_until")} ${validUntil}</div>`
+            : nothing}
         </div>
       </div>
     </div>`;
@@ -399,6 +417,13 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     });
   }
 
+  // ADR-0059 §4: the Hold-pill X resumes the schedule / drops the manual hold.
+  private _resumeSchedule(): void {
+    const id = this._config.entity;
+    if (!id || !this.hass) return;
+    resumeSchedule(this.hass, id);
+  }
+
   // ADR-0057: optional preset row from the entity's own preset_modes, calling
   // climate.set_preset_mode. Hidden when the section is off or no presets exist.
   private _presets(a: Record<string, unknown>, lang?: string) {
@@ -406,18 +431,50 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const modes = a["preset_modes"];
     if (!Array.isArray(modes) || !modes.length) return nothing;
     const cur = a["preset_mode"] == null ? null : String(a["preset_mode"]);
+    // ADR-0059 §4: Boost is timed — show its remaining minutes from boost_expires_at.
+    const boostMin = minutesUntil(a["boost_expires_at"]);
     return html`<div class="presets" role="group" aria-label=${t(lang, "presets")}>
       ${modes.map((m) => {
         const key = String(m);
+        const kl = key.toLowerCase();
         return html`<button
           class="preset ${cur === key ? "on" : ""}"
           aria-pressed=${cur === key ? "true" : "false"}
           @click=${() => this._setPreset(key)}
         >
-          <ha-icon icon=${presetIcon(key.toLowerCase())}></ha-icon>
-          <span>${t(lang, key.toLowerCase()) || key}</span>
+          <ha-icon icon=${presetIcon(kl)}></ha-icon>
+          <span>${t(lang, kl) || key}</span>
+          ${kl === "boost" && boostMin != null
+            ? html`<em>${boostMin} ${t(lang, "min_left")}</em>`
+            : nothing}
         </button>`;
       })}
+    </div>`;
+  }
+
+  // ADR-0059 §4: manual-hold ("Hold") pill — hand icon, "Manual 22.5° · 45 min",
+  // and an X that resumes the schedule. A `permanent` policy shows "Manual
+  // (permanent)" with no countdown; the countdown reuses the min_left minute
+  // token, like the preheating/coasting chips.
+  private _holdPill(a: Record<string, unknown>, lang?: string) {
+    if (!a["override_active"]) return nothing;
+    const sp = num(a["heat_sp"]) ?? num(a["temperature"]);
+    const v = holdView(lang, sp, a["override_policy"], a["override_expires_at"]);
+    return html`<div class="hold">
+      <div class="chip hold-chip">
+        <ha-icon icon="mdi:hand-back-right"></ha-icon><span>${v.label}</span>
+        ${v.minutes != null
+          ? html`<em>· ${v.minutes} ${t(lang, "min_left")}</em>`
+          : nothing}
+      </div>
+      <button
+        class="resume"
+        aria-label=${t(lang, "resume_schedule")}
+        title=${t(lang, "resume_schedule")}
+        @click=${this._resumeSchedule}
+      >
+        <ha-icon icon="mdi:close"></ha-icon>
+      </button>
     </div>`;
   }
 
@@ -429,13 +486,24 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         chips.push(this._chip("mdi:fire-circle", t(lang, "preheating"), a["minutes_to_comfort"], lang));
       if (a["coasting"])
         chips.push(this._chip("mdi:coffee", t(lang, "coasting"), a["minutes_to_setback"], lang));
-      // Preset chip only when the dedicated preset section is off (else it duplicates).
-      const preset = a["preset"] == null ? "none" : String(a["preset"]);
-      if (preset !== "none" && !r.presets)
-        chips.push(this._chip(presetIcon(preset), t(lang, preset) || preset));
+      // ADR-0059 §4: preset fallback chip — live now that `preset` is published,
+      // shown only when the dedicated preset section is off (else it duplicates).
+      const pc = presetChip(lang, a["preset"], r.presets);
+      if (pc) chips.push(this._chip(presetIcon(pc.key), pc.label));
       if (a["heating_failure"]) chips.push(this._chip("mdi:alert", t(lang, "failure")));
+      // ADR-0059 §4: explain the clamp ("22.5° instead of 24° (norm limit)") from
+      // the pre-clamp request vs the effective setpoint, not just "clamped".
       if (a["override_clamped"])
-        chips.push(this._chip("mdi:arrow-collapse-vertical", t(lang, "override_clamped")));
+        chips.push(
+          this._chip(
+            "mdi:arrow-collapse-vertical",
+            clampLabel(
+              lang,
+              num(a["heat_sp"]) ?? num(a["temperature"]),
+              num(a["override_requested"]),
+            ),
+          ),
+        );
       // ADR-0046 §8: compressor guard is holding a cool/dry start or flip.
       if (a["mode_nudge_blocked"])
         chips.push(
@@ -648,6 +716,16 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .preset.on { background: var(--primary-color, #2196f3);
       color: var(--text-primary-color, #fff); border-color: var(--primary-color, #2196f3); }
     .preset:focus-visible { outline: 2px solid var(--primary-color, #2196f3); outline-offset: 2px; }
+    .preset em { font-style: normal; color: var(--secondary-text-color); margin-left: 2px; }
+    .preset.on em { color: inherit; opacity: 0.85; }
+    .hold { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; }
+    .hold-chip { flex: 1 1 auto; }
+    .resume { flex: none; display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; padding: 0; border: none; border-radius: 50%;
+      background: var(--secondary-background-color); color: var(--secondary-text-color); cursor: pointer; }
+    .resume ha-icon { --mdc-icon-size: 18px; }
+    .resume:focus-visible { outline: 2px solid var(--primary-color, #2196f3); outline-offset: 2px; }
+    .valid { font-size: 11px; color: var(--secondary-text-color); margin-top: 3px; }
     .wrap.compact { padding: 6px 12px 12px; }
     .wrap.compact .dialctr .op { font-size: 30px; }
     .wrap.compact .presets, .wrap.compact .monitor, .wrap.compact .chips { gap: 4px; }
