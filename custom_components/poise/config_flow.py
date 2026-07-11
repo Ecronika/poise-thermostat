@@ -717,6 +717,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     # window/presence/occupancy pickers (now multiple=True) to lists.
     VERSION = 2
     MINOR_VERSION = 1
+    # F5: hub-existence captured when the reconfigure form was RENDERED, reused on
+    # submit so the anlagen section shown and the reconcile's structural flag can
+    # never disagree. The class-level default also gives mypy the type at the
+    # submit read site (it is otherwise only assigned in the render branch).
+    _reconf_structural_rendered: bool = False
 
     @staticmethod
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
@@ -837,15 +842,8 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             if not errors:
                 # F5: reuse the hub-existence captured when the form was RENDERED so
                 # a hub added/removed between render and submit can't flip which
-                # fields the reconcile treats as rendered (fresh if render skipped).
-                hub_exists = (
-                    self._reconf_structural_rendered
-                    if hasattr(self, "_reconf_structural_rendered")
-                    else any(
-                        e.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
-                        for e in self.hass.config_entries.async_entries(DOMAIN)
-                    )
-                )
+                # fields the reconcile treats as rendered.
+                hub_exists = self._reconf_structural_rendered
                 # AR-09: signal that the anlagen section was rendered (a hub is
                 # present) so a structural field the user CLEARED there is dropped,
                 # not reanimated from old_data.
