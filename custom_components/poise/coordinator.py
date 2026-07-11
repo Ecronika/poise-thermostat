@@ -2231,14 +2231,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     can_heat=can_heat,
                     can_cool=can_cool,
                     cool_min_outdoor=(
-                        self._cool_min_outdoor
-                        if self._cool_lockout_enabled
-                        else None
+                        self._cool_min_outdoor if self._cool_lockout_enabled else None
                     ),
                     heat_max_outdoor=(
-                        self._heat_max_outdoor
-                        if self._heat_lockout_enabled
-                        else None
+                        self._heat_max_outdoor if self._heat_lockout_enabled else None
                     ),
                 )
             final_mode = mode_arbitration(
