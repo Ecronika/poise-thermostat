@@ -1,6 +1,8 @@
 # ADR-0059: Override-Lebenszyklus — Gültigkeit, Rückkehr, Feedback & Vorschlags-Lernen für manuelle Eingriffe
 
-**Status:** In Arbeit (70 %) — v1 (HoldPolicy/Boost/Presence-Ende/Event/Feedback/Config/L1-Erfassung) umgesetzt; offen: L2-Vorschläge (v2), Feld-Tuning, Live-Verifikation · **Datum:** 2026-07-11 · **Bezug:** ADR-0042 (Override/Preset-Modell, implementiert — wird *erweitert*, nicht abgelöst), ADR-0025 (Zeitplan/Optimal-Start), ADR-0058 (Presence), ADR-0035 (Constraint-Solver), ADR-0016/0040/0057 (Card-Vertrag), ADR-0008 (Config), ADR-0012 (Repair-Issues), ADR-0019 (KNX-Expose, künftig) · **Grundlage:** `docs/Meinungsbild_Manueller-Eingriff-Sollwert-und-Modus.md` (verifizierte Wettbewerbs-/Community-/Norm-Recherche, 2026-07-11)
+**Status:** In Arbeit (70 %) · **Datum:** 2026-07-11 · **Bezug:** ADR-0042 (Override/Preset-Modell, implementiert — wird *erweitert*, nicht abgelöst), ADR-0025 (Zeitplan/Optimal-Start), ADR-0058 (Presence), ADR-0035 (Constraint-Solver), ADR-0016/0040/0057 (Card-Vertrag), ADR-0008 (Config), ADR-0012 (Repair-Issues), ADR-0019 (KNX-Expose, künftig) · **Grundlage:** `docs/Meinungsbild_Manueller-Eingriff-Sollwert-und-Modus.md` (verifizierte Wettbewerbs-/Community-/Norm-Recherche, 2026-07-11)
+
+> **Umsetzungsstand (v0.162.0):** v1 umgesetzt — HoldPolicy (schedule/timer/permanent), Boost-Timer, Presence-Ende, angekündigte Ablaufzeit, Event `poise_override_ended` + Service `poise.resume_schedule`, Feedback-Attribute + Card-Hold-Pill, Config-Sektion + Migration, L1-Erfassung. Offen (v2): L2-Vorschläge, §3 Preheat-Glättung, Feld-Tuning, Live-Verifikation.
 
 ## Kontext
 
