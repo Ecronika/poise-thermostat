@@ -301,6 +301,7 @@ async def test_options_comfort_window_pair_error(hass: HomeAssistant) -> None:
                     CONF_OPTIMAL_START: ROOM_INPUT[CONF_OPTIMAL_START],
                     CONF_COMFORT_START: "22:00:00",
                 },
+                "manual_override": {},
                 "heat_cool": {},
                 "presence": {},
                 "advanced": {CONF_OPERATIVE_INPUT: ROOM_INPUT[CONF_OPERATIVE_INPUT]},
@@ -433,6 +434,7 @@ async def test_options_first_save_keeps_optimal_start_and_weight_defaults(
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             {
+                "manual_override": {},
                 "comfort": {CONF_CATEGORY: "II", CONF_COMFORT_BASE: 21.0},
                 "schedule": {CONF_SETBACK_DELTA: 3.0},
                 "heat_cool": {},

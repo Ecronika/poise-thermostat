@@ -97,9 +97,9 @@ async def test_v1_entry_migrates_and_runs_list_presence(hass: HomeAssistant) -> 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    # migrated to V2 with an explicit minor_version pinned (AR-36)
+    # migrated to V2; minor_version pinned to 2 (ADR-0059: override_policy stamp)
     assert entry.version == 2
-    assert entry.minor_version == 1
+    assert entry.minor_version == 2
     # tuning moved out of data into options; structural inputs stayed in data
     assert CONF_COMFORT_BASE not in entry.data
     assert entry.options[CONF_COMFORT_BASE] == 21.0

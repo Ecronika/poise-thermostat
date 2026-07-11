@@ -212,6 +212,7 @@ async def test_options_flow_creates_entry(hass: HomeAssistant) -> None:
             },
             "heat_cool": {},
             "presence": {},
+            "manual_override": {},
             "advanced": {CONF_OPERATIVE_INPUT: ROOM[CONF_OPERATIVE_INPUT]},
             "energy": {},
         }
