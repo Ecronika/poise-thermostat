@@ -6,6 +6,7 @@ from __future__ import annotations
 from custom_components.poise.control.override import (
     OverrideConfig,
     OverrideMode,
+    hold_ends_at_preheat,
     hold_expired,
     manual_override_expired,
     mode_comfort_base,
@@ -231,3 +232,102 @@ def test_boost_expiry_is_set_at_plus_duration() -> None:
         SET_AT + 60.0 * 60.0
     )
     assert resolve_boost_expiry(set_at=0.0, boost_duration_min=15.0) == 900.0
+
+
+# --- ADR-0059 §3: schedule-hold ends at the optimal-start preheat --------------
+
+
+def test_schedule_hold_ends_when_preheat_begins_below_target() -> None:
+    # The canonical case: a schedule-hold at 19.0, comfort/preheat target 21.0,
+    # optimal-start *begins* this tick (rising edge) -> end the hold so the room
+    # preheats to comfort instead of a cold block-start.
+    assert (
+        hold_ends_at_preheat(
+            policy="schedule",
+            preheat_started=True,
+            expiry_is_switchpoint=True,
+            preheat_target=21.0,
+            held_value=19.0,
+        )
+        is True
+    )
+
+
+def test_no_end_on_the_rising_edge_only() -> None:
+    # Preheat already running (preheat_started=False) -> a hold set *during* the
+    # preheat is deliberate and is never instantly killed.
+    assert (
+        hold_ends_at_preheat(
+            policy="schedule",
+            preheat_started=False,
+            expiry_is_switchpoint=True,
+            preheat_target=21.0,
+            held_value=19.0,
+        )
+        is False
+    )
+
+
+def test_timer_and_permanent_holds_are_never_shortened() -> None:
+    for policy in ("timer", "permanent", "bogus"):
+        assert (
+            hold_ends_at_preheat(
+                policy=policy,
+                preheat_started=True,
+                expiry_is_switchpoint=True,
+                preheat_target=21.0,
+                held_value=19.0,
+            )
+            is False
+        )
+
+
+def test_hold_at_or_above_target_keeps_running() -> None:
+    # A hold already at/above the preheat target keeps the room warm enough, so
+    # it runs to its normal switchpoint rather than ending early.
+    assert (
+        hold_ends_at_preheat(
+            policy="schedule",
+            preheat_started=True,
+            expiry_is_switchpoint=True,
+            preheat_target=21.0,
+            held_value=21.0,
+        )
+        is False
+    )
+    assert (
+        hold_ends_at_preheat(
+            policy="schedule",
+            preheat_started=True,
+            expiry_is_switchpoint=True,
+            preheat_target=21.0,
+            held_value=22.5,
+        )
+        is False
+    )
+
+
+def test_non_switchpoint_expiry_and_missing_target_do_not_trigger() -> None:
+    # A schedule hold whose expiry is the timer fallback / max_h cap (not a real
+    # switchpoint) is out of scope for the preheat pull-forward.
+    assert (
+        hold_ends_at_preheat(
+            policy="schedule",
+            preheat_started=True,
+            expiry_is_switchpoint=False,
+            preheat_target=21.0,
+            held_value=19.0,
+        )
+        is False
+    )
+    # No comfort target resolved this tick -> never trigger.
+    assert (
+        hold_ends_at_preheat(
+            policy="schedule",
+            preheat_started=True,
+            expiry_is_switchpoint=True,
+            preheat_target=None,
+            held_value=19.0,
+        )
+        is False
+    )
