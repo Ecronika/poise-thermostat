@@ -52,6 +52,30 @@ def looks_like_external_temp_number(
     return device_class in (None, "temperature")
 
 
+_TEMPERATURE_UNITS: frozenset[str] = frozenset({"°C", "°F", "K"})
+
+
+def ext_temp_number_is_implausible(
+    entity_id: str, device_class: str | None, unit: str | None
+) -> bool:
+    """True only when a *configured* external-temp number shows a POSITIVE
+    non-temperature signal: a non-temperature ``device_class`` or a
+    non-temperature ``unit_of_measurement`` (e.g. a valve's "%").
+
+    Unlike :func:`looks_like_external_temp_number` (a strict, name-based screen
+    fit for scanning auto-detected siblings), this trusts a value the user
+    picked EXPLICITLY: absence of metadata — or a temperature device_class/unit —
+    is accepted, and only an affirmative "this is not a temperature" rejects it.
+    That avoids disabling a legitimately renamed/localised temperature input on
+    upgrade, while still catching a mis-picked valve-position/level number.
+    """
+    if not entity_id.startswith("number."):
+        return True
+    if device_class is not None and device_class != "temperature":
+        return True
+    return unit is not None and unit not in _TEMPERATURE_UNITS
+
+
 def is_external_sensor_select(entity_id: str, options: object) -> bool:
     """A select that switches the thermostat between its internal/external sensor.
 
