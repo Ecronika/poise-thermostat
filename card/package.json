@@ -1,6 +1,6 @@
 {
   "name": "poise-card",
-  "version": "0.162.1",
+  "version": "0.162.2",
   "private": true,
   "type": "module",
   "engines": {
