@@ -522,9 +522,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._enabled = value
         self._dirty = True
 
-    def set_override(
-        self, value: float | None, *, reason: str | None = None
-    ) -> None:
+    def set_override(self, value: float | None, *, reason: str | None = None) -> None:
         # Validate at the trust boundary: reject non-finite, clamp to the safe
         # envelope so a bad manual setpoint can never reach the actuator (C2).
         self._override = sanitize_override(value, FROST_FLOOR_C, DEVICE_MAX_C)
@@ -657,9 +655,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """
         now = dt_util.utcnow().timestamp()
         presence_changed = (
-            self._prev_home is not None
-            and home is not None
-            and home != self._prev_home
+            self._prev_home is not None and home is not None and home != self._prev_home
         )
         self._prev_home = home
         # timed Boost (§2): restore the frozen preset; then Boost is stateless.

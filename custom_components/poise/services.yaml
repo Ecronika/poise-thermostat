@@ -9,4 +9,3 @@ resume_schedule:
       domain: climate
     device:
       integration: poise
-    area: {}
