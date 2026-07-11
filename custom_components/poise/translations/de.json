@@ -328,6 +328,20 @@
               "annual_heating_kwh": "Nur für die Einsparungsschätzung. ~12000 für ein Haus, 6000–8000 für eine Wohnung.",
               "price_eur_kwh": "Nur für die Einsparungsschätzung. ~0,11 €/kWh für Gas, ~0,30 für Strom."
             }
+          },
+          "manual_override": {
+            "name": "Manuelle Eingriffe",
+            "data": {
+              "override_policy": "Rückkehrregel",
+              "override_timer_h": "Manueller Timer (Std.)",
+              "override_max_h": "Max. Haltedauer (Std.)",
+              "override_end_on_presence_change": "Bei Anwesenheitswechsel (Haus) beenden",
+              "boost_duration_min": "Boost-Dauer (Min.)",
+              "override_suggestions": "Aus Eingriffen lernen (Vorschläge)"
+            },
+            "data_description": {
+              "override_policy": "Wann ein manueller Sollwert zur Automatik zurückkehrt."
+            }
           }
         }
       }
@@ -367,6 +381,19 @@
         "on": "An",
         "off": "Aus"
       }
+    },
+    "override_policy": {
+      "options": {
+        "schedule": "Bis nächster Schaltpunkt",
+        "timer": "Fester Timer",
+        "permanent": "Dauerhaft"
+      }
+    }
+  },
+  "services": {
+    "resume_schedule": {
+      "name": "Zeitplan fortsetzen",
+      "description": "Manuelle Eingriffe beenden und zur automatischen Regelung zurückkehren."
     }
   }
 }

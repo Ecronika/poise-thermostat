@@ -198,6 +198,20 @@
               "annual_heating_kwh": "For the savings estimate only. ~12000 for a house, 6000–8000 for a flat.",
               "price_eur_kwh": "For the savings estimate only. ~0.11 €/kWh for gas, ~0.30 for electricity."
             }
+          },
+          "manual_override": {
+            "name": "Manual interventions",
+            "data": {
+              "override_policy": "Return rule",
+              "override_timer_h": "Manual hold timer (h)",
+              "override_max_h": "Max manual hold (h)",
+              "override_end_on_presence_change": "End on home presence change",
+              "boost_duration_min": "Boost duration (min)",
+              "override_suggestions": "Learn from interventions (suggestions)"
+            },
+            "data_description": {
+              "override_policy": "When a manual setpoint returns to automatic."
+            }
           }
         }
       }
@@ -237,6 +251,19 @@
         "on": "On",
         "off": "Off"
       }
+    },
+    "override_policy": {
+      "options": {
+        "schedule": "Schedule",
+        "timer": "Timer",
+        "permanent": "Permanent"
+      }
+    }
+  },
+  "services": {
+    "resume_schedule": {
+      "name": "Resume schedule",
+      "description": "Return manual holds to automatic control."
     }
   },
   "entity": {
