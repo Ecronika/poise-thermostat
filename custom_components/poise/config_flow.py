@@ -78,7 +78,6 @@ from .const import (
     CONF_OVERRIDE_END_ON_PRESENCE,
     CONF_OVERRIDE_MAX_H,
     CONF_OVERRIDE_POLICY,
-    CONF_OVERRIDE_SUGGESTIONS,
     CONF_OVERRIDE_TIMER_H,
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
@@ -113,7 +112,6 @@ from .const import (
     DEFAULT_OVERRIDE_END_ON_PRESENCE,
     DEFAULT_OVERRIDE_MAX_H,
     DEFAULT_OVERRIDE_POLICY,
-    DEFAULT_OVERRIDE_SUGGESTIONS,
     DEFAULT_OVERRIDE_TIMER_H,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_SETBACK_DELTA,
@@ -154,7 +152,9 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_OVERRIDE_MAX_H,
         CONF_OVERRIDE_END_ON_PRESENCE,
         CONF_BOOST_DURATION_MIN,
-        CONF_OVERRIDE_SUGGESTIONS,
+        # CONF_OVERRIDE_SUGGESTIONS is latent (L2/v2, ADR-0059) and intentionally
+        # not exposed in the UI yet; kept in const.py for the future override
+        # learning feature.
     ),
     "advanced": (
         CONF_COOL_HARD_CAP,
@@ -664,10 +664,9 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                                 mode=box,
                             )
                         ),
-                        vol.Required(
-                            CONF_OVERRIDE_SUGGESTIONS,
-                            default=DEFAULT_OVERRIDE_SUGGESTIONS,
-                        ): selector.BooleanSelector(),
+                        # CONF_OVERRIDE_SUGGESTIONS (override learning) is latent —
+                        # L2/v2 (ADR-0059). Kept in const.py but intentionally not
+                        # surfaced here until the suggestion engine ships.
                     }
                 ),
                 {"collapsed": True},

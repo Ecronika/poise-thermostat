@@ -206,8 +206,7 @@
               "override_timer_h": "Manual hold timer (h)",
               "override_max_h": "Max manual hold (h)",
               "override_end_on_presence_change": "End on home presence change",
-              "boost_duration_min": "Boost duration (min)",
-              "override_suggestions": "Learn from interventions (suggestions)"
+              "boost_duration_min": "Boost duration (min)"
             },
             "data_description": {
               "override_policy": "When a manual setpoint returns to automatic."

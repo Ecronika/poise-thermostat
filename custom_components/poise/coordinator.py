@@ -347,6 +347,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # ADR-0059 manual-hold + timed-Boost lifecycle (all wall-clock; persisted).
         self._override_requested: float | None = None  # pre-clamp user ask
         self._override_expires_at: float | None = None  # announced at set-time
+        # ADR-0059 §1: was the announced expiry the switchpoint (not the timer
+        # fallback / max_h cap)? -> _expire_timed_states' reason accuracy.
+        self._override_expiry_is_switchpoint: bool = False
         self._override_policy: str = DEFAULT_OVERRIDE_POLICY
         self._override_stats: list[dict[str, Any]] = []  # §5 L1 (observe-only)
         self._boost_expires_at: float | None = None
@@ -525,6 +528,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     def set_override(self, value: float | None, *, reason: str | None = None) -> None:
         # Validate at the trust boundary: reject non-finite, clamp to the safe
         # envelope so a bad manual setpoint can never reach the actuator (C2).
+        was_active = self._override is not None  # Defekt-2: only a real hold ends
         self._override = sanitize_override(value, FROST_FLOOR_C, DEVICE_MAX_C)
         if self._override is not None:
             # ADR-0059 §4: announce the hold's expiry at set-time so the Card can
@@ -534,12 +538,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # Keep the pre-clamp requested value (was discarded): the Card shows
             # what the user asked for vs the norm-clamped hold that is applied.
             self._override_requested = float(value) if value is not None else None
+            mins = self._minutes_to_switchpoint()
             self._override_expires_at = resolve_hold_expiry(
                 policy=self._override_policy,
                 set_at=set_at,
                 timer_h=self._override_timer_h,
                 max_h=self._override_max_h,
-                minutes_to_switchpoint=self._minutes_to_switchpoint(),
+                minutes_to_switchpoint=mins,
+            )
+            # Was the announced expiry the switchpoint itself (not the timer
+            # fallback / max_h cap)? -> _expire_timed_states reason accuracy (§1).
+            self._override_expiry_is_switchpoint = (
+                self._override_policy == OVERRIDE_POLICY_SCHEDULE
+                and mins is not None
+                and mins > 0
+                and set_at + mins * 60.0 <= set_at + self._override_max_h * 3600.0
             )
             self._record_override_stat(self._override)  # §5 L1 (observe-only)
         else:
@@ -547,7 +560,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._override_set_wall = None
             self._override_expires_at = None
             self._override_requested = None
-            if value is None:  # explicit user clear -> announce; a NaN just no-ops
+            self._override_expiry_is_switchpoint = False
+            # Defekt-2: fire only when a hold was actually active, so a
+            # mode_change or a resume on a hold-less zone raises no false event.
+            if value is None and was_active:  # explicit clear of an active hold
                 self._fire_override_ended(reason or "user_resume")
         self._dirty = True
 
@@ -670,14 +686,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         ):
             if presence_changed and self._override_end_on_presence:
                 reason = "presence_change"
-            elif self._override_policy == OVERRIDE_POLICY_SCHEDULE:
+            elif self._override_expiry_is_switchpoint:
+                # schedule policy AND the announced expiry was the switchpoint
+                # (not the timer fallback / max_h cap) -> a true schedule end.
                 reason = "schedule_point"
             else:
+                # timer policy, or schedule with no switchpoint / max_h-capped.
                 reason = "expired_timer"
             self._override = None
             self._override_set_wall = None
             self._override_expires_at = None
             self._override_requested = None
+            self._override_expiry_is_switchpoint = False
             self._dirty = True
             self._fire_override_ended(reason)
 
@@ -798,6 +818,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     float(oea)
                     if self._override is not None and isinstance(oea, (int, float))
                     else None
+                )
+                # ADR-0059 §1: restore the reason-accuracy flag (default False so
+                # a pre-upgrade hold degrades to "expired_timer", never crashes).
+                self._override_expiry_is_switchpoint = bool(
+                    data.get("override_expiry_is_switchpoint", False)
                 )
                 try:
                     bpp = data.get("boost_prev_preset")
@@ -1394,6 +1419,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "override_requested": self._override_requested,
             "override_policy": self._override_policy,
             "override_expires_at": self._override_expires_at,
+            "override_expiry_is_switchpoint": self._override_expiry_is_switchpoint,
             "boost_expires_at": self._boost_expires_at,
             "boost_prev_preset": (
                 self._boost_prev_preset.value
@@ -2794,6 +2820,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "override_expires_at": _iso_utc(self._override_expires_at),
             "override_policy": self._override_policy,
             "override_requested": self._override_requested,
+            # ADR-0059 §5: the persisted L1 nudge log (observe-only). A shadow key
+            # (absent from _ATTRS) -> diagnostics-only, never a recorded attribute.
+            "override_stats": list(self._override_stats),
             "boost_expires_at": _iso_utc(self._boost_expires_at),
             "override_clamped": override_clamped,
             "cover_predicted_peak": round(_cover_peak, 1),
