@@ -799,3 +799,41 @@ def test_restore_boiler_state_clamps_backwards_clock() -> None:
         now_wall=4000.0,  # earlier than the persisted 9000 -> clock went back
     )
     assert restored.last_switch_mono == 500.0  # clamped to now_mono
+
+
+def test_boiler_min_dwell_floor_is_two_ticks() -> None:
+    # F9: the anti-short-cycle dwell floor is 120 s (two 60 s ticks) — the
+    # smallest dwell that binds. The hub clamps min_on/min_off up to it.
+    from custom_components.poise.const import BOILER_MIN_DWELL_FLOOR_S
+
+    assert BOILER_MIN_DWELL_FLOOR_S == 120.0
+
+
+def test_zero_min_off_switches_immediately_hence_read_point_clamp() -> None:
+    # F9: a raw 0 min_off has no valid "off" meaning — a just-switched-off boiler
+    # would be let straight back on (0 s dwell). This documents WHY the hub read
+    # point clamps min_off UP to the floor before gate_min_cycle ever sees a 0.
+    # unclamped 0 -> immediate on (short-cycle)
+    assert (
+        gate_min_cycle(
+            True,
+            currently_on=False,
+            last_change_mono=0.0,
+            now_mono=0.0,
+            min_on_s=0.0,
+            min_off_s=0.0,
+        )
+        is True
+    )
+    # clamped to the 120 s floor the same call holds the boiler off (dwell binds)
+    assert (
+        gate_min_cycle(
+            True,
+            currently_on=False,
+            last_change_mono=0.0,
+            now_mono=0.0,
+            min_on_s=0.0,
+            min_off_s=120.0,
+        )
+        is False
+    )

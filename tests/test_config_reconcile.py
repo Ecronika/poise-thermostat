@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from custom_components.poise.config_reconcile import (
-    reconcile_reconfigure,
-    reconfigure_options,
-)
+from custom_components.poise.config_reconcile import reconcile_reconfigure
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_COMFORT_BASE,
@@ -16,26 +13,6 @@ from custom_components.poise.const import (
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
 )
-
-
-def test_reconfigure_drops_shadowing_option() -> None:
-    # a shared field set via the options flow is dropped from options on
-    # reconfigure so it no longer shadows the new data value the form just set.
-    kept = reconfigure_options(
-        {"climate_mode": "heat_only", "temp_sensor": "sensor.x"},
-        {"climate_mode": "cool_only", "cool_min_outdoor": 10.0},
-    )
-    assert kept == {"cool_min_outdoor": 10.0}
-
-
-def test_reconfigure_keeps_options_only_keys() -> None:
-    # a key the reconfigure form does not own stays in options
-    assert reconfigure_options({"a": 9}, {"a": 1, "b": 2}) == {"b": 2}
-
-
-def test_reconfigure_empty() -> None:
-    assert reconfigure_options({}, {}) == {}
-    assert reconfigure_options({"a": 1}, {}) == {}
 
 
 def test_reconcile_keeps_structural_data_keys_form_omits() -> None:
@@ -89,3 +66,23 @@ def test_reconcile_form_value_wins_over_old_structural() -> None:
     assert new_data[CONF_ACTUATOR] == "climate.new"  # form value wins
     assert new_data[CONF_CONTROLS_BOILER] is True  # omitted -> carried
     assert new_options == {}
+
+
+def test_reconcile_structural_section_rendered_drops_cleared_key() -> None:
+    # AR-09: when the structural section IS rendered, a _STRUCTURAL_CARRY key
+    # absent from user_input means the user cleared it, so it must NOT be carried
+    # back from old_data. When the section is hidden (default) the same absence
+    # means "not shown" and the key IS carried back into data unchanged.
+    old_data = {CONF_ACTUATOR: "climate.a", CONF_CONTROLS_BOILER: True}
+    user_input = {CONF_ACTUATOR: "climate.a"}
+    # section rendered -> cleared -> dropped from data (and not leaked to options)
+    new_data, new_options = reconcile_reconfigure(
+        user_input, old_data, {}, set(), structural_section_rendered=True
+    )
+    assert CONF_CONTROLS_BOILER not in new_data
+    assert CONF_CONTROLS_BOILER not in new_options
+    # section hidden (default) -> not shown -> carried back into data unchanged
+    new_data_hidden, _ = reconcile_reconfigure(
+        user_input, old_data, {}, set(), structural_section_rendered=False
+    )
+    assert new_data_hidden[CONF_CONTROLS_BOILER] is True
