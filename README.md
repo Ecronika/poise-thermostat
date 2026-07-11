@@ -92,7 +92,6 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Actuator (climate) | yes | — | TRV / climate entity Poise writes the setpoint to. One entry per actuator. |
 | Comfort base | yes | 21 °C | Centre of the EN 16798-1 comfort band. |
 | Comfort category | yes | II | EN 16798-1 design category (I tightest … III widest). |
-| Climate mode | yes | auto | `auto` / `heat_only` / `cool_only`. |
 | Comfort weight | yes | 70 % | Comfort-vs-energy priority used by preheat / band widening. |
 | Setback delta | yes | 3 K | Night / away setback below the comfort base. |
 | Optimal start | yes | on | Forecast-aware preheat to the comfort deadline. |
@@ -102,8 +101,8 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Weather / irradiance | no | — | Forecast for optimal-start; measured solar gain. |
 | External-temperature input | no | — | TRV number entity Poise feeds the true room temperature to (operative mode). |
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
-| Adaptive cooling edge | no | off | Lift the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band (ADR-0023 §1). |
-| Compressor guard · min-off · mode-hold | no | on · 300 s · 300 s | Single-AC anti-short-cycle (Tuning options): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
+| Adaptive cooling edge | no | auto | Active by default on cool-capable devices (`auto`): lifts the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band. `off` forces the fixed summer band; heat-only TRVs are unaffected either way (ADR-0023 §1). |
+| Compressor guard · min-off · mode-hold | no | auto · 300 s · 300 s | Single-AC anti-short-cycle (Tuning options): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
 | Actuator dynamics | no | auto | Controller time constants per actuator class — `auto` (classify from the learned model) or force `fast_air` / `slow_hydronic` / `very_slow`; faster profiles retune the PI/MPC and throttle setpoint nudges for self-regulating climate entities (ADR-0052). |
 | Field-trace recording | no | off | Advanced/diagnostic: append one compact JSONL line per tick to `config/poise_traces/<id>.jsonl` (EKF drive inputs + model snapshot + decision), rotated at ~20 MB. For offline golden-file replay analysis (ADR-0011); pure observation, never touches control. |
 | Outdoor cooling / heating lockout | no | 16 / 22 °C | Suppress cooling below / heating above these outdoor temperatures (ADR-0047). |
@@ -111,9 +110,11 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Controls boiler | no | off | This zone contributes to the *Poise System* boiler-demand aggregate. |
 | Compressor group · declared power · design flow temp · source policy | no | — | Multi-zone resource-coordination hints (shadow stage). |
 
+> **Climate mode is set on the thermostat, not in the options.** A zone's heat/cool mode (internally `auto` / `heat_only` / `cool_only`) is chosen on the Poise `climate` entity via its HVAC mode (`heat` / `cool` / `auto` / `off`, per device capability); it is store-owned and persists across restarts — it is not a config-flow field. A heat-only TRV only ever exposes `heat` / `off`.
+
 ### System (optional multi-zone hub)
 
-A single *Poise System* entry aggregates the call-for-heat of opt-in zones into one boiler-demand sensor. **Boiler actuation is opt-in:** leave the on/off actions empty and the hub stays purely diagnostic (wire your own automation off the sensor); set them to switch a boiler with activation delay, keep-alive and minimum on/off cycling. Options: boiler count / power thresholds, on/off actions, activation-delay · keep-alive · min-on · min-off, max-power & current-power sensors, max flow temperature, flow hysteresis, and default heat source.
+A single *Poise System* entry aggregates the call-for-heat of opt-in zones into one boiler-demand sensor. **Boiler actuation is opt-in:** leave the on/off actions empty and the hub stays purely diagnostic (wire your own automation off the sensor); set them to switch a boiler with activation delay, keep-alive and minimum on/off cycling. The **min-on / min-off timers are clamped up to a 120 s floor** — a physical anti-short-cycle dwell a too-short setting can never undercut (`keep-alive = 0` remains a valid "off"). Options: boiler count / power thresholds, on/off actions, activation-delay · keep-alive · min-on · min-off, max-power & current-power sensors, max flow temperature, flow hysteresis, and default heat source.
 
 ### Card (dashboard display)
 
