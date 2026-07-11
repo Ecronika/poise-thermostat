@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.161.1-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.162.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -49,6 +49,27 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
 - **Multi-zone resource coordination** — via the *Poise System* hub (ADR-0038/0039): boiler-demand aggregate + opt-in boiler actuation, plus **load-shedding, compressor-group protection and a flow-temperature allocator computed as diagnostic shadows** (smallest-gap shedding, per-group min-run/off, highest-request-wins flow with anti-hunt hysteresis — the last harness-validated against oscillation, ADR-0013). Zone-side / generator-side enforcement is the next stage.
 - **Efficiency report** — heating-degree-hour savings in kWh / €.
+
+## Manuelle Eingriffe & Rückkehr zur Automatik
+
+Ein manueller Sollwert ist ein **temporärer Hold**, kein Dauerzustand: Poise übernimmt den von Hand gestellten Wert und kehrt anschließend automatisch in den geregelten Betrieb zurück. **Wann** zurückgekehrt wird, ist konfigurierbar (*Optionen → „Manuelle Eingriffe"*).
+
+| Eingriff | gilt bis | wie beenden |
+| --- | --- | --- |
+| **Manueller Sollwert** | Policy `schedule` → bis zum nächsten Schaltpunkt; `timer` → fester Timer (Default 2 h); `permanent` → bis zum Widerruf | Modus wählen, X auf der Card, `poise.resume_schedule`, oder Ablauf abwarten |
+| **Boost-Preset** | Default 60 min, danach Rückkehr zum vorherigen Preset | Ablauf abwarten oder anderes Preset wählen |
+| **Eco / Comfort / Away** | Zustandswahl (kein Timer); **Away** endet über die Anwesenheit | anderes Preset / Modus wählen |
+| **HVAC-Modus** | persistent — das ist **Konfiguration**, kein Override | Modus erneut wählen |
+
+**Prioritätenkette** — der jeweils höhere Rang gewinnt:
+
+**Fenster / Frost / Schimmel  >  manueller Sollwert  >  Preset  >  Zeitplan / Anwesenheit**
+
+Sicherheits- und Kontextlagen (offenes Fenster, Frost- und Schimmelschutz) sind nie verhandelbar und setzen sich immer gegen einen manuellen Sollwert durch; dieser schlägt das aktive Preset, und das Preset schlägt Zeitplan und Anwesenheit.
+
+**Wie beenden:** einen HVAC-Modus wählen, das **X** auf der Card antippen, den Service `poise.resume_schedule` aufrufen (Zone oder alle Zonen), oder den Ablauf abwarten.
+
+> **Migration:** Bestehende Installationen behalten das heutige Verhalten (`timer` / 2 h). `schedule` ist nur der Default für **neu eingerichtete** Zonen.
 
 ## Scope & Non-Goals
 
