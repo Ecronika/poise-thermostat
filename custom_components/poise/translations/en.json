@@ -366,7 +366,7 @@
     },
     "external_temp_implausible": {
       "title": "Poise: external-temperature input implausible",
-      "description": "The configured external-temperature input for zone `{name}` (`{entity}`) does not look like a temperature input, so Poise has stopped feeding it to avoid writing room temperatures into an unrelated `number` entity — pick a different entity in the zone's options."
+      "description": "The configured external-temperature input for zone `{name}` (`{entity}`) does not look like a temperature input, so Poise has stopped feeding it to avoid writing room temperatures into an unrelated `number` entity — pick a different entity in the zone's reconfigure."
     }
   }
 }

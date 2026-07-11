@@ -231,7 +231,7 @@
     },
     "external_temp_implausible": {
       "title": "Poise: Externer Temperatureingang unplausibel",
-      "description": "Der konfigurierte externe Temperatureingang für die Zone `{name}` (`{entity}`) sieht nicht wie ein Temperatureingang aus. Poise hat aufgehört, ihn zu beliefern, um zu vermeiden, dass Raumtemperaturen in eine nicht zugehörige `number`-Entität geschrieben werden — wähle in den Optionen der Zone eine andere Entität."
+      "description": "Der konfigurierte externe Temperatureingang für die Zone `{name}` (`{entity}`) sieht nicht wie ein Temperatureingang aus. Poise hat aufgehört, ihn zu beliefern, um zu vermeiden, dass Raumtemperaturen in eine nicht zugehörige `number`-Entität geschrieben werden — wähle beim Neukonfigurieren der Zone eine andere Entität."
     }
   },
   "options": {
