@@ -165,6 +165,7 @@ from .control.outcome_scoring import (
 from .control.override import (
     OverrideConfig,
     OverrideMode,
+    hold_ends_at_preheat,
     hold_expired,
     mode_comfort_base,
     resolve_boost_expiry,
@@ -596,10 +597,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         The nearer of the upcoming setback/comfort edges; None when there is no
         upcoming switchpoint (always-comfort) -> the timer fallback applies.
 
-        TODO ADR-0059 §3: when optimal-start is active and its preheat-start is
-        earlier than a comfort-start switchpoint, end the hold at the preheat so
-        the room is warm at comfort time. The preheat lead is only resolved in
-        the tick (model/forecast), not here, so we use the plain switchpoint.
+        This is the plain set-time switchpoint for the *announced* expiry. ADR-0059
+        §3 (end the hold already at the optimal-start preheat-start, so the room is
+        warm at comfort time) is resolved in the tick -- where the model/forecast
+        preheat decision lives -- by ``hold_ends_at_preheat`` in ``_run_once``.
         """
         sched = self._schedule.state_at(self._local_minute())
         cands = [
@@ -661,6 +662,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             payload["entity_id"] = self._climate_entity_id
         self.hass.bus.async_fire("poise_override_ended", payload)
 
+    def _end_hold(self, reason: str) -> None:
+        """Tear down an active manual hold and announce why (ADR-0059 §1/§3)."""
+        self._override = None
+        self._override_set_wall = None
+        self._override_expires_at = None
+        self._override_requested = None
+        self._override_expiry_is_switchpoint = False
+        self._dirty = True
+        self._fire_override_ended(reason)
+
     def _expire_timed_states(self, home: bool | None) -> None:
         """Expire the timed Boost + manual hold on a tick (ADR-0059 §1/§2).
 
@@ -694,13 +705,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             else:
                 # timer policy, or schedule with no switchpoint / max_h-capped.
                 reason = "expired_timer"
-            self._override = None
-            self._override_set_wall = None
-            self._override_expires_at = None
-            self._override_requested = None
-            self._override_expiry_is_switchpoint = False
-            self._dirty = True
-            self._fire_override_ended(reason)
+            self._end_hold(reason)
 
     def set_climate_mode(self, mode: str) -> None:
         self._climate_mode = mode
@@ -1840,10 +1845,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._expire_timed_states(_home)
         _is_away = self._preset is OverrideMode.AWAY or _home is False
         _base_preset = OverrideMode.NONE if _is_away else self._preset
+        _comfort_target = mode_comfort_base(
+            _base_preset, self._comfort_base, self._override_cfg
+        )
         plan = plan_preheat(
-            comfort_base=mode_comfort_base(
-                _base_preset, self._comfort_base, self._override_cfg
-            ),
+            comfort_base=_comfort_target,
             is_comfort=sched.is_comfort,
             setback_offset=sched.setback_offset,
             minutes_to_comfort=float(sched.minutes_to_comfort),
@@ -1865,6 +1871,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         preheating = plan.preheating
         preheat_outdoor = plan.preheat_outdoor
         coasting = plan.coasting
+        # ADR-0059 §3: end a schedule-hold the moment optimal-start *begins*
+        # preheating toward the comfort window its expiry points at, when the
+        # preheat target is warmer than the held value -- so the room is warm at
+        # comfort time instead of the hold clamping the preheat into a cold
+        # block-start (Danfoss schedule_with_preheat). Rising edge only (so a hold
+        # set *during* an active preheat is respected); runs before the latch below.
+        if self._override is not None and hold_ends_at_preheat(
+            policy=self._override_policy,
+            preheat_started=preheating and not self._was_preheating,
+            expiry_is_switchpoint=self._override_expiry_is_switchpoint,
+            preheat_target=_comfort_target,
+            held_value=self._override,
+        ):
+            self._end_hold("schedule_point")
         # ADR-0025/0034 latch: carry this tick's engage state to the next tick so
         # the planner can hold instead of re-chattering at the deadline boundary.
         self._was_preheating = preheating
