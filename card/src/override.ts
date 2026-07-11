@@ -24,6 +24,20 @@ export function clockLabel(iso: unknown, locale?: string): string | null {
   });
 }
 
+// ADR-0059 (VT#1980 — "UI ≠ internal state"): the actually commanded / held
+// setpoint is HA's `temperature` attribute (= target_temperature, the clamped
+// write target) — NOT `heat_sp`, which is only the comfort-band lower edge and
+// is always set, so a `?? temperature` fallback would never fire. Reading
+// `heat_sp` here shows the band edge instead of the held value and mis-explains
+// an upward clamp. Null-safe: degrades to null when `temperature` is absent
+// (never falls back to the band edge), so the caller labels the hold without a
+// bogus degree value rather than crashing.
+export function heldSetpoint(a: Record<string, unknown>): number | null {
+  const v = a["temperature"];
+  const n = typeof v === "string" ? parseFloat(v) : (v as number);
+  return typeof n === "number" && !Number.isNaN(n) ? n : null;
+}
+
 export interface HoldView {
   label: string; // "Manuell 22.5°" or "Manuell (dauerhaft)"
   minutes: number | null; // remaining minutes; null when permanent/unknown

@@ -25,6 +25,7 @@ import { CARD_VERSION, checkCardVersion } from "./version.ts";
 import {
   clampLabel,
   clockLabel,
+  heldSetpoint,
   holdView,
   minutesUntil,
   presetChip,
@@ -458,7 +459,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   // token, like the preheating/coasting chips.
   private _holdPill(a: Record<string, unknown>, lang?: string) {
     if (!a["override_active"]) return nothing;
-    const sp = num(a["heat_sp"]) ?? num(a["temperature"]);
+    const sp = heldSetpoint(a);
     const v = holdView(lang, sp, a["override_policy"], a["override_expires_at"]);
     return html`<div class="hold">
       <div class="chip hold-chip">
@@ -499,7 +500,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
             "mdi:arrow-collapse-vertical",
             clampLabel(
               lang,
-              num(a["heat_sp"]) ?? num(a["temperature"]),
+              heldSetpoint(a),
               num(a["override_requested"]),
             ),
           ),
