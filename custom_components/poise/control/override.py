@@ -142,6 +142,46 @@ def hold_expired(
     )
 
 
+def hold_ends_at_preheat(
+    *,
+    policy: str,
+    preheat_started: bool,
+    expiry_is_switchpoint: bool,
+    preheat_target: float | None,
+    held_value: float,
+) -> bool:
+    """True when a schedule-hold must end at the optimal-start preheat (ADR-0059 §3).
+
+    A ``schedule``-policy hold whose announced expiry is the next comfort
+    switchpoint would otherwise clamp the setpoint through the whole optimal-start
+    preheat ramp, so the room only begins warming *at* the comfort switchpoint -- a
+    cold block-start. Ending it the moment preheating begins (Danfoss
+    ``schedule_with_preheat`` semantics; ADR-0025 physics) lets the identified model
+    carry the room to comfort on time; the reason stays ``schedule_point`` (the
+    schedule's comfort window ends it, only pulled forward to the preheat).
+
+    Guards:
+
+    * only the **rising edge** of preheating triggers this (``preheat_started``) --
+      a hold the user sets *during* an already-running preheat is deliberate and is
+      never instantly killed;
+    * only ``schedule`` policy -- ``timer``/``permanent`` holds carry a chosen
+      duration and are never shortened;
+    * only when ``preheat_target`` is **warmer** than the held value -- a hold
+      already at/above the target keeps the room warm enough, so it runs to its
+      normal switchpoint;
+    * ``expiry_is_switchpoint`` gates out schedule holds whose expiry is the timer
+      fallback (no schedule) or the ``max_h`` cap, not a real switchpoint.
+    """
+    return (
+        policy == "schedule"
+        and preheat_started
+        and expiry_is_switchpoint
+        and preheat_target is not None
+        and preheat_target > held_value
+    )
+
+
 def resolve_boost_expiry(*, set_at: float, boost_duration_min: float) -> float:
     """Wall-clock expiry of a timed Boost preset (ADR-0059 §2).
 
