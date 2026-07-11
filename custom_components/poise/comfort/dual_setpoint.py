@@ -57,7 +57,7 @@ def decide(
     dewpoint: float | None = None,
     priority: float = 1.0,  # 0 = efficiency (wide band), 1 = comfort (tight band)
     occupied: bool = True,  # False during an unoccupied setback (review V3)
-    adaptive_cool: bool = False,  # ADR-0023 §1: EN adaptive cooling edge (opt-in)
+    adaptive_cool: bool = False,  # capability-default (auto: active if cool-capable)
     adaptive_cap: float = 26.0,  # ASR office ceiling for the adaptive cool edge
     eco_widen: float = 0.0,  # ADR-0058: presence Eco band-widening (both edges)
     cool_ceiling_override: float | None = None,  # ADR-0058: unoccupied cool ceiling
