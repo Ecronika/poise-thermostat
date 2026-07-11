@@ -137,6 +137,7 @@ from .const import (
     WRITE_DEADBAND_C,
 )
 from .contracts import ActuatorCommand, ActuatorPath
+from .control.cooling import override_mode
 from .control.cover_shading import (
     predict_peak_operative,
     shading_target_position,
@@ -2210,8 +2211,38 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # idle (temp in band) + humidity asks + the device can dry; heat/cool/
             # off/manual pass through (temperature + safety primary). Capability-
             # gated: a heat-only TRV has no "dry" mode -> dry_ok False -> no-op.
+            # ADR-0059 control-loop fix: an ACTIVE manual override must DRIVE the
+            # heat/cool/idle direction, not only set the written value. Collapse
+            # the band to a hysteresis window around the commanded (clamped)
+            # override and reuse the capability/outdoor-gated decide_mode, so a
+            # reversible AC flips to cool/heat toward the manual value instead of
+            # idling in its last mode. window/frozen keep precedence (they replace
+            # the "manual" tag upstream, so mode != "manual" there); an "idle"
+            # ov_mode still flows through the seam so dry-in-deadband can apply.
+            # The WRITTEN target is unchanged -- only the mode is derived here.
+            _base_mode = mode
+            if self._override is not None and not window_open and not frozen:
+                _base_mode = override_mode(
+                    room=room_decide,
+                    override=target,
+                    hysteresis=0.5,
+                    outdoor=t_out_eff,
+                    climate_mode=self._climate_mode,
+                    can_heat=can_heat,
+                    can_cool=can_cool,
+                    cool_min_outdoor=(
+                        self._cool_min_outdoor
+                        if self._cool_lockout_enabled
+                        else None
+                    ),
+                    heat_max_outdoor=(
+                        self._heat_max_outdoor
+                        if self._heat_lockout_enabled
+                        else None
+                    ),
+                )
             final_mode = mode_arbitration(
-                base_mode=mode,
+                base_mode=_base_mode,
                 humidity_action=_hum_action,
                 dry_ok="dry" in act_modes,
             )
