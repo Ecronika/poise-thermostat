@@ -103,8 +103,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const st = this.hass.states[id];
     if (!st) return; // entity removed between render and click (M10)
     const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
-    const cur =
-      num(st.attributes["heat_sp"]) ?? num(st.attributes["temperature"]) ?? 21;
+    // ADR-0059 Defekt 1: re-base the +/- nudge from the SAME value the dial
+    // shows (`_pending ?? heldSetpoint(a) ?? …`, the held/commanded `temperature`),
+    // NOT the `heat_sp` band edge — else a nudge on a 23° hold jumps to ~20.7.
+    const cur = this._pending ?? heldSetpoint(st.attributes) ?? 21;
     this.hass.callService("climate", "set_temperature", {
       entity_id: id,
       temperature: Math.round((cur + delta * step) * 10) / 10,
@@ -145,7 +147,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         samples.push({
           t: ts,
           op: num(attrs["operative_temperature"]) ?? num(attrs["current_temperature"]),
-          sp: num(attrs["heat_sp"]) ?? num(attrs["temperature"]),
+          // ADR-0059 Defekt 1: plot the commanded setpoint (`temperature`), not
+          // the `heat_sp` band edge (the comfort band is shaded from low/high).
+          sp: num(attrs["temperature"]),
         });
       }
       this._history = samples;
@@ -231,7 +235,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   private _dial(a: Record<string, unknown>, lang?: string) {
     const op = num(a["operative_temperature"]) ?? num(a["current_temperature"]);
-    const actualSp = num(a["heat_sp"]) ?? num(a["temperature"]);
+    // ADR-0059 Defekt 1: the dial centre number + handle marker show the
+    // commanded/held setpoint (`temperature`), NOT `heat_sp` — the latter is
+    // only the comfort-band lower edge (the band arc below keeps low/high).
+    const actualSp = heldSetpoint(a);
     const cfg: DialConfig = {
       min: num(a["min_temp"]) ?? DIAL.min,
       max: num(a["max_temp"]) ?? DIAL.max,
@@ -374,10 +381,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const st = this.hass.states[id];
     if (!st) return;
     const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
+    // ADR-0059 Defekt 1: arrow keys re-base from the shown/held setpoint
+    // (mirrors the dial's `_pending ?? heldSetpoint(a) ?? … min`), not the
+    // `heat_sp` band edge — keeps the keyboard step consistent with the display.
     const cur =
-      num(st.attributes["heat_sp"]) ??
-      num(st.attributes["temperature"]) ??
-      this._dialCfg.min;
+      this._pending ?? heldSetpoint(st.attributes) ?? this._dialCfg.min;
     const next = setpointForKey(ev.key, cur, step, this._dialCfg);
     if (next == null) return;
     ev.preventDefault();
