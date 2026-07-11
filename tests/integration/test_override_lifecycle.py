@@ -44,8 +44,10 @@ from custom_components.poise.const import (
     CONF_PRESENCE_HOME,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
+    CONF_WINDOW_SENSOR,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
+    FROST_FLOOR_C,
     OVERRIDE_POLICY_SCHEDULE,
     OVERRIDE_POLICY_TIMER,
 )
@@ -417,3 +419,79 @@ async def test_presence_change_ends_hold(hass: HomeAssistant) -> None:
 
     assert coord._override is None
     assert any(e.data["reason"] == "presence_change" for e in events)
+
+
+# --- Schedy#35: hold expiry under an open window returns to the window floor ----
+async def test_expiry_under_open_window_returns_to_plan_not_manual(
+    hass: HomeAssistant,
+) -> None:
+    """A manual hold whose timer lapses while the window is open expires silently:
+    _expire_timed_states runs before the solver even under an active layer, so the
+    hold clears and the command stays at the window frost/mould floor -- it never
+    snaps back to the stale held value (Schedy#35)."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass)
+    hass.states.async_set("binary_sensor.window", "off", {"device_class": "window"})
+    entry = await _setup_zone(
+        hass,
+        data=_room_data(**{CONF_WINDOW_SENSOR: "binary_sensor.window"}),
+        options={
+            CONF_OVERRIDE_POLICY: OVERRIDE_POLICY_TIMER,
+            CONF_OVERRIDE_TIMER_H: 2.0,
+        },
+    )
+    coord = entry.runtime_data
+    eid = _climate_eid(hass, entry)
+
+    coord.set_override(24.0)
+    assert coord._override == 24.0
+    events = async_capture_events(hass, "poise_override_ended")
+
+    # the window opens AND the announced expiry falls into the past: the tick must
+    # expire the hold under the active window layer, not chase the held value.
+    hass.states.async_set("binary_sensor.window", "on", {"device_class": "window"})
+    coord._override_expires_at = dt_util.utcnow().timestamp() - 1.0
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coord._override is None
+    assert coord._override_expires_at is None
+    assert any(e.data["reason"] == "expired_timer" for e in events)
+    state = hass.states.get(eid)
+    assert state is not None
+    assert state.attributes["override_active"] is False
+    # the window layer keeps regulating at the frost/mould floor, NOT the held 24.0
+    assert abs(coord._last_target - FROST_FLOOR_C) < 0.05
+
+
+# --- VT#1961: a second Boost press keeps the first frozen preset (not BOOST) ---
+async def test_double_boost_keeps_frozen_previous_preset(
+    hass: HomeAssistant,
+) -> None:
+    """The first set_preset(BOOST) freezes the pre-boost preset as the restore
+    target; pressing Boost again only re-arms the timer -- it must NOT re-freeze
+    BOOST onto itself, so the return target stays the original preset (VT#1961)."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass)
+    entry = await _setup_zone(hass, options={CONF_BOOST_DURATION_MIN: 60.0})
+    coord = entry.runtime_data
+
+    coord.set_preset(OverrideMode.COMFORT)
+    coord.set_preset(OverrideMode.BOOST)
+    assert coord.preset is OverrideMode.BOOST
+    assert coord._boost_prev_preset is OverrideMode.COMFORT
+
+    # a second Boost press re-arms from now but must leave the frozen restore
+    # target untouched -- never stacking BOOST onto itself (VT#1961).
+    coord.set_preset(OverrideMode.BOOST)
+    assert coord.preset is OverrideMode.BOOST
+    assert coord._boost_prev_preset is OverrideMode.COMFORT
+
+    # and the expiry restores that original preset, not BOOST
+    coord._boost_expires_at = dt_util.utcnow().timestamp() - 1.0
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.preset is OverrideMode.COMFORT
+    assert coord._boost_expires_at is None
