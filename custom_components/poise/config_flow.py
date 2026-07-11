@@ -539,7 +539,7 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                             CONF_HEAT_MAX_OUTDOOR, default=DEFAULT_HEAT_MAX_OUTDOOR_C
                         ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
-                                min=0.0,
+                                min=5.0,
                                 max=45.0,
                                 step=0.5,
                                 unit_of_measurement="°C",

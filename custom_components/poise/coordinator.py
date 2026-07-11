@@ -192,6 +192,7 @@ from .control.window_auto import (
 )
 from .devices.capability import classify_number_entity, climate_capability
 from .devices.model_fixes import (
+    ext_temp_number_is_implausible,
     is_external_sensor_select,
     is_low_battery,
     looks_like_external_temp_number,
@@ -638,7 +639,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._ekf.seed_beta_h(prior)
         # F2: vet the configured external-temp number once, now that _active_issues
         # has been re-adopted (F17) so a stale issue can be cleared on recovery.
-        self._validate_configured_ext_temp()
+        await self._validate_configured_ext_temp()
 
     async def async_apply_options(self, entry: ConfigEntry) -> None:
         """Apply changed tuning options in place, without a reload (A10).
@@ -828,15 +829,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._active_issues.discard(issue_id)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
-    def _validate_configured_ext_temp(self) -> None:
+    async def _validate_configured_ext_temp(self) -> None:
         """F2: vet the *configured* external-temp number once (not per tick).
 
-        The auto-detected input is already screened by
-        looks_like_external_temp_number; the configured CONF_TRV_EXTERNAL_TEMP
-        bypassed that and, if it were a plain setpoint, we would overwrite it with
-        the room temperature every tick. Resolve its device_class from the entity
-        registry and screen it the same way. On failure drop the entity (so the
-        per-tick feed never writes to it) and raise a repair issue; when valid or
+        A value the user picked EXPLICITLY via CONF_TRV_EXTERNAL_TEMP is trusted
+        unless it shows a POSITIVE non-temperature signal (a non-temperature
+        device_class or unit, e.g. a valve's "%") — so a legitimately
+        renamed/localised temperature input is NOT dropped on upgrade. On a real
+        mismatch: stop feeding it AND hand the TRV's sensor source back to
+        internal, or the device would keep regulating against a now-frozen
+        external value (AR-12); then raise a repair issue. When plausible or
         unset, clear it. A registry miss must never block setup.
         """
         issue_id = f"external_temp_implausible_{self._entry_id}"
@@ -849,8 +851,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
             reg = er.async_get(self.hass)
             ent = reg.async_get(entity_id)
-            device_class = ent.original_device_class if ent is not None else None
-            valid = looks_like_external_temp_number(entity_id, device_class)
+            device_class: str | None = None
+            unit: str | None = None
+            if ent is not None:
+                device_class = ent.device_class or ent.original_device_class
+                unit = ent.unit_of_measurement
+            st = self.hass.states.get(entity_id)
+            if st is not None:
+                device_class = device_class or st.attributes.get("device_class")
+                unit = unit or st.attributes.get("unit_of_measurement")
+            implausible = ext_temp_number_is_implausible(entity_id, device_class, unit)
         except Exception:  # noqa: BLE001 - a registry miss must not block setup
             _LOGGER.debug(
                 "Poise: external-temp validation failed for %s",
@@ -858,12 +868,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 exc_info=True,
             )
             return
-        if valid:
+        if not implausible:
             self._issue(issue_id, False, translation_key="external_temp_implausible")
             return
-        # Implausible: never feed it. Drop to None so the per-tick write path
-        # (ext_num) cannot target it, and surface a repair issue for the user.
+        # Implausible: never feed it, and hand the TRV sensor source back to
+        # internal so the device does not regulate against a frozen value (AR-12).
         self._trv_ext_temp = None
+        try:
+            from . import _restore_trv_internal
+
+            await _restore_trv_internal(self.hass, self._actuator)
+        except Exception:  # noqa: BLE001 - best-effort restore must not block setup
+            _LOGGER.debug(
+                "Poise: TRV sensor-source restore after ext-temp reject failed",
+                exc_info=True,
+            )
         self._issue(
             issue_id,
             True,
