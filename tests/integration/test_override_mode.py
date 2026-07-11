@@ -111,15 +111,18 @@ async def _setup(hass: HomeAssistant) -> MockConfigEntry:
 async def test_override_below_band_drives_cool(hass: HomeAssistant) -> None:
     """Reversible AC in heat + room in the dead-band + override below the room ->
     the tick nudges it into cool and writes the override value (ADR-0059)."""
-    set_temp = async_mock_service(hass, "climate", "set_temperature")
-    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     _sensors(hass)
     _reversible_ac(hass, state="heat")  # the bug: stuck in heat, never cooling
     entry = await _setup(hass)
 
-    # isolate the override tick from the setup/idle-park tick
-    set_temp.clear()
-    set_mode.clear()
+    # Re-arm the recorders AFTER setup (fresh, empty lists). Forwarding the CLIMATE
+    # platform registers HA's real climate entity services, which shadow the
+    # pre-setup mocks and reject the bare-state actuator ("Referenced entities
+    # climate.ac are missing or not currently available"). Re-registering makes
+    # THIS override tick's set_hvac_mode / set_temperature reach the recorder and
+    # isolates it from the setup/idle-park tick.
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     entry.runtime_data.set_override(21.0)  # below the room -> should cool
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
@@ -135,14 +138,15 @@ async def test_override_below_band_drives_cool(hass: HomeAssistant) -> None:
 async def test_override_above_band_drives_heat(hass: HomeAssistant) -> None:
     """Symmetric: an override ABOVE the room drives heat (not the last cool mode),
     still writing the override value."""
-    set_temp = async_mock_service(hass, "climate", "set_temperature")
-    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     _sensors(hass)
     _reversible_ac(hass, state="cool")
     entry = await _setup(hass)
 
-    set_temp.clear()
-    set_mode.clear()
+    # Re-arm the recorders AFTER setup so the post-setup override tick's calls are
+    # captured, not swallowed by the real climate entity service (see the cool
+    # test for the full rationale).
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
     entry.runtime_data.set_override(23.5)  # above the room -> should heat
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
