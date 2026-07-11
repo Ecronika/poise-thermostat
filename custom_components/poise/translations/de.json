@@ -228,6 +228,10 @@
     "mould_protection_inactive": {
       "title": "Poise: Schimmelschutz inaktiv",
       "description": "Der Feuchtesensor `{entity}` dieses Raums ist ausgefallen, daher kann Poise die relative Luftfeuchte nicht überwachen und den schimmelsicheren Mindest-Sollwert nicht anheben. Prüfe den Sensor; bis dahin regelt Poise ohne Schimmelschutz weiter. Der Hinweis verschwindet automatisch, sobald der Sensor wieder plausible Werte liefert."
+    },
+    "external_temp_implausible": {
+      "title": "Poise: Externer Temperatureingang unplausibel",
+      "description": "Der konfigurierte externe Temperatureingang für die Zone `{name}` (`{entity}`) sieht nicht wie ein Temperatureingang aus. Poise hat aufgehört, ihn zu beliefern, um zu vermeiden, dass Raumtemperaturen in eine nicht zugehörige `number`-Entität geschrieben werden — wähle in den Optionen der Zone eine andere Entität."
     }
   },
   "options": {
@@ -267,12 +271,16 @@
             "data": {
               "adaptive_cool": "Adaptive Sommer-Kühlkante (EN 16798)",
               "cool_min_outdoor": "Kühl-Außensperre — kühlt nur über dieser °C (für lastreiche Räume niedrig setzen)",
-              "heat_max_outdoor": "Heiz-Außensperre — heizt nur unter dieser °C"
+              "cool_lockout_enabled": "Kühl-Sperre aktiv",
+              "heat_max_outdoor": "Heiz-Außensperre — heizt nur unter dieser °C",
+              "heat_lockout_enabled": "Heiz-Sperre aktiv"
             },
             "data_description": {
               "adaptive_cool": "Kühlkante folgt dem gleitenden Außenmittel (EN 16798-1), gedeckelt durch den ASR-Deckel unter Erweitert.",
               "cool_min_outdoor": "Kühlt nur, wenn es draußen wärmer ist; für Räume mit hohen internen Lasten niedrig setzen.",
-              "heat_max_outdoor": "Notbremse — heizt nur unter dieser Außentemperatur. Gespart wird über Zeitplan und Anwesenheit, nicht hierüber."
+              "cool_lockout_enabled": "Wenn aus, ist die Kühl-Außensperre deaktiviert — Kühlen ist unabhängig von der Außentemperatur erlaubt.",
+              "heat_max_outdoor": "Notbremse — heizt nur unter dieser Außentemperatur. Gespart wird über Zeitplan und Anwesenheit, nicht hierüber.",
+              "heat_lockout_enabled": "Wenn aus, ist die Heiz-Außensperre deaktiviert — Heizen ist unabhängig von der Außentemperatur erlaubt."
             }
           },
           "presence": {
