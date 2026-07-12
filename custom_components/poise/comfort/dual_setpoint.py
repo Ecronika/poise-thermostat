@@ -97,10 +97,15 @@ def decide(
         COOLING_LOWER[category],
         cool_ceiling,
     )
-    # ADR-0023 §1 (live, capability-default): lift the cooling edge from
-    # the fixed summer band to the EN adaptive upper (capped at the ASR ceiling),
-    # so a room within the adaptive comfort band is not over-cooled toward 23 °C.
-    if adaptive_cool:
+    # ADR-0061: the EN adaptive (free-running) cooling raise applies ONLY to an
+    # UNOCCUPIED room. An occupied, actively-conditioned space is "mechanically
+    # cooled" in the norm sense and uses the FIXED EN category band — the adaptive
+    # comfort model explicitly excludes mechanically-cooled spaces (EN 16798-1 /
+    # ASHRAE 55). This also un-masks the comfort/efficiency slider on the cooling
+    # edge (previously the adaptive raise overrode it). When unoccupied the room
+    # may free-run and drift toward the ASR cap to save energy (composed with the
+    # ADR-0058 Eco relaxation). ADR-0023 §1 keeps the shadow free-running band.
+    if adaptive_cool and not occupied:
         cool_op, _raised = adaptive_cool_edge(
             fixed_cool_op=cool_op,
             t_rm=t_rm,
