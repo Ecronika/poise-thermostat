@@ -136,7 +136,7 @@ from .const import (
     UNAVAILABLE_SAFE_AFTER_S,
     WRITE_DEADBAND_C,
 )
-from .contracts import ActuatorCommand, ActuatorPath
+from .contracts import ActuatorCommand, ActuatorPath, Source
 from .control.cooling import override_mode
 from .control.cover_shading import (
     predict_peak_operative,
@@ -341,6 +341,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._entry_id = entry.entry_id
         self._data_snapshot: dict[str, Any] = dict(entry.data)  # F14 reconfigure guard
         self._save_failures = 0  # F24: consecutive store-save failures
+        self._tick_failures = 0  # F12: consecutive _run_once failures
         self._active_issues: set[str] = set()
         self._lock = asyncio.Lock()
         self._enabled = True
@@ -430,6 +431,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._tau_settle: TauSettle | None = None  # settle-based τ-confidence (T343)
         self._tau_last_mono: float | None = None  # real dt for the τ settle EWMA
         self._outcome_session = OutcomeSession()
+        self._hdh_last_mono: float | None = None  # F9: real dt for HDH/outcome obs
         self._hdh = HdhSavings()
         self._hdh_cfg = HdhConfig(
             annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
@@ -518,6 +520,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._valve_idle_steps: str | None = None
         self._forecast: list[tuple[float, float]] = []
         self._forecast_at: float | None = None
+        self._forecast_fail_at: float | None = None  # F10: backoff after a failure
 
     @property
     def enabled(self) -> bool:
@@ -816,9 +819,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     if self._override is not None and isinstance(orq, (int, float))
                     else None
                 )
-                pol = data.get("override_policy")
-                if isinstance(pol, str) and pol:
-                    self._override_policy = pol
+                # F13: ``override_policy`` (like the rest of the ADR-0059 hold/Boost
+                # tuning) is a "hot-apply-fähig" config-entry OPTION, already correctly
+                # read from options/data by ``_read_override_options`` in ``__init__``
+                # -- restoring it from the persisted store here would silently revert
+                # a user's option change on every restart. Deliberately not restored.
                 oea = data.get("override_expires_at")
                 self._override_expires_at = (
                     float(oea)
@@ -830,6 +835,23 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._override_expiry_is_switchpoint = bool(
                     data.get("override_expiry_is_switchpoint", False)
                 )
+                # F7: a hold persisted by a pre-ADR-0059 build (or one that otherwise
+                # lost its expiry) restores with ``_override_expires_at is None`` --
+                # not "permanent" but simply never computed. Recompute it now the same
+                # way a fresh override-set does, so the hold still expires on real
+                # elapsed time instead of silently running forever after a restart.
+                if (
+                    self._override is not None
+                    and self._override_expires_at is None
+                    and self._override_set_wall is not None
+                ):
+                    self._override_expires_at = resolve_hold_expiry(
+                        policy=self._override_policy,
+                        set_at=self._override_set_wall,
+                        timer_h=self._override_timer_h,
+                        max_h=self._override_max_h,
+                        minutes_to_switchpoint=self._minutes_to_switchpoint(),
+                    )
                 try:
                     bpp = data.get("boost_prev_preset")
                     self._boost_prev_preset = (
@@ -909,78 +931,94 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         live state, so an options change does **not** discard the learned EKF
         transient that a full reload would. Structural inputs are not options.
         """
-        data = {**entry.data, **entry.options}
-        self._read_override_options(data)  # ADR-0059 §1/§2 hot-apply
-        self._comfort_base = float(data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE))
-        self._hdh_cfg = HdhConfig(
-            annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
-            price_eur_kwh=report_price_eur_kwh(
-                data.get(CONF_PRICE_EUR_KWH),
-                data.get(CONF_SOURCE_POLICY),
-                gas=DEFAULT_PRICE_GAS_EUR_KWH,
-                electric=DEFAULT_PRICE_EUR_KWH,
-            ),
-        )
-        self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
-        self._compressor_guard = str(
-            data.get(CONF_COMPRESSOR_GUARD, COMPRESSOR_GUARD_AUTO)
-        )
-        _cmo = data.get(CONF_COMPRESSOR_MIN_OFF)
-        self._comp_min_off_opt = float(_cmo) if _cmo is not None else None
-        _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
-        self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
-        self._trace_enabled = bool(data.get(CONF_TRACE_RECORDING, False))
-        self._presence_home_entities = as_entity_list(data.get(CONF_PRESENCE_HOME))
-        self._occupancy_entities = as_entity_list(data.get(CONF_OCCUPANCY_SENSOR))
-        self._presence_cfg = PresenceConfig(
-            absence_after_min=float(
-                data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
-            ),
-            eco_delta=self._override_cfg.eco_offset,
-        )
-        self._thermal_shock_delta = float(
-            data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
-        )
-        self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
-        self._adaptive_cool_cfg = data.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL)
-        # F11: mirror the init guard (AR-34) so a corrupt category string cannot
-        # throw in the hot-apply either; fall back to the norm default.
-        try:
-            self._category = Category(data.get(CONF_CATEGORY, "II"))
-        except ValueError:
-            self._category = Category("II")
-        # AR-04: climate_mode is Store-owned — the climate entity sets it live via
-        # set_climate_mode() and it is persisted in the payload. Do NOT re-apply the
-        # (stale) options form value here; that clobbered the live selection on every
-        # options submit (double ownership).
-        self._cool_min_outdoor = float(
-            data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
-        )
-        self._heat_max_outdoor = float(
-            data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
-        )
-        # F4a: keep the lockout toggles in lockstep with the init read.
-        self._heat_lockout_enabled = bool(
-            data.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
-        )
-        self._cool_lockout_enabled = bool(
-            data.get(CONF_COOL_LOCKOUT_ENABLED, DEFAULT_COOL_LOCKOUT_ENABLED)
-        )
-        self._priority = (
-            float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT)) / 100.0
-        )
-        delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
-        start = parse_hhmm(data.get(CONF_COMFORT_START))
-        end = parse_hhmm(data.get(CONF_COMFORT_END))
-        if start is not None and end is not None and delta > 0.0:
-            self._schedule = ComfortSchedule.from_windows(
-                [ComfortWindow(start, end)], delta
+        # F14: the field mutations below race a concurrent tick (``_run_once``
+        # reads many of these same attributes without any lock of its own) --
+        # an options submit landing mid-tick could observe a torn mix of old and
+        # new tuning. Take the same lock ``_async_update_data`` holds across a
+        # tick to make this update atomic with respect to any tick. This MUST
+        # NOT include ``async_request_refresh()`` below: ``asyncio.Lock`` is not
+        # reentrant, and ``async_request_refresh`` awaits ``_async_update_data``,
+        # which acquires this same lock -- held across that call, it would
+        # deadlock immediately.
+        async with self._lock:
+            data = {**entry.data, **entry.options}
+            self._read_override_options(data)  # ADR-0059 §1/§2 hot-apply
+            self._comfort_base = float(
+                data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
             )
-        else:
-            self._schedule = ComfortSchedule.always_comfort()
-        self._optimal_start = bool(data.get(CONF_OPTIMAL_START, True))
-        self._optimal_stop = self._optimal_start
-        self._operative_input = bool(data.get(CONF_OPERATIVE_INPUT, False))
+            self._hdh_cfg = HdhConfig(
+                annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
+                price_eur_kwh=report_price_eur_kwh(
+                    data.get(CONF_PRICE_EUR_KWH),
+                    data.get(CONF_SOURCE_POLICY),
+                    gas=DEFAULT_PRICE_GAS_EUR_KWH,
+                    electric=DEFAULT_PRICE_EUR_KWH,
+                ),
+            )
+            self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
+            self._compressor_guard = str(
+                data.get(CONF_COMPRESSOR_GUARD, COMPRESSOR_GUARD_AUTO)
+            )
+            _cmo = data.get(CONF_COMPRESSOR_MIN_OFF)
+            self._comp_min_off_opt = float(_cmo) if _cmo is not None else None
+            _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
+            self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
+            self._trace_enabled = bool(data.get(CONF_TRACE_RECORDING, False))
+            self._presence_home_entities = as_entity_list(data.get(CONF_PRESENCE_HOME))
+            self._occupancy_entities = as_entity_list(data.get(CONF_OCCUPANCY_SENSOR))
+            self._presence_cfg = PresenceConfig(
+                absence_after_min=float(
+                    data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
+                ),
+                eco_delta=self._override_cfg.eco_offset,
+            )
+            self._thermal_shock_delta = float(
+                data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
+            )
+            self._cool_hard_cap = float(
+                data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C)
+            )
+            self._adaptive_cool_cfg = data.get(
+                CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL
+            )
+            # F11: mirror the init guard (AR-34) so a corrupt category string cannot
+            # throw in the hot-apply either; fall back to the norm default.
+            try:
+                self._category = Category(data.get(CONF_CATEGORY, "II"))
+            except ValueError:
+                self._category = Category("II")
+            # AR-04: climate_mode is Store-owned — the climate entity sets it live
+            # via set_climate_mode() and it is persisted in the payload. Do NOT
+            # re-apply the (stale) options form value here; that clobbered the
+            # live selection on every options submit (double ownership).
+            self._cool_min_outdoor = float(
+                data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
+            )
+            self._heat_max_outdoor = float(
+                data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
+            )
+            # F4a: keep the lockout toggles in lockstep with the init read.
+            self._heat_lockout_enabled = bool(
+                data.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
+            )
+            self._cool_lockout_enabled = bool(
+                data.get(CONF_COOL_LOCKOUT_ENABLED, DEFAULT_COOL_LOCKOUT_ENABLED)
+            )
+            self._priority = (
+                float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT)) / 100.0
+            )
+            delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
+            start = parse_hhmm(data.get(CONF_COMFORT_START))
+            end = parse_hhmm(data.get(CONF_COMFORT_END))
+            if start is not None and end is not None and delta > 0.0:
+                self._schedule = ComfortSchedule.from_windows(
+                    [ComfortWindow(start, end)], delta
+                )
+            else:
+                self._schedule = ComfortSchedule.always_comfort()
+            self._optimal_start = bool(data.get(CONF_OPTIMAL_START, True))
+            self._optimal_stop = self._optimal_start
+            self._operative_input = bool(data.get(CONF_OPERATIVE_INPUT, False))
         await self.async_request_refresh()
 
     def attach_listeners(self, entry: ConfigEntry) -> None:
@@ -1173,13 +1211,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         now = dt_util.now()
         return int(now.hour * 60 + now.minute)
 
-    def _window_open(self) -> bool:
-        # OR across the picker: any configured contact reporting "on" = open.
+    def _window_open(self) -> tuple[bool, bool]:
+        """OR across the picker: any configured contact reporting "on" = open.
+
+        Returns ``(sensor_open, sensor_unavailable)``. F4a / ADR-0041 §5: a
+        contact that drops off (``unavailable``/``unknown``) previously read
+        as indistinguishable from "closed" here (neither is ``== "on"``), so a
+        window sensor that had merely lost battery/network silently held the
+        zone in full heating with no signal and no warning. The failsafe is
+        "heizen wie ohne Sensor" -- flag it (repair issue, at the call site)
+        and let the caller fall back to slope/auto-detection instead of
+        trusting stale/missing "closed" data. A confirmed "on" from any OTHER
+        still-working contact is trusted regardless (real positive evidence
+        beats a sibling sensor's dropout), so this never early-returns.
+        """
+        open_found = False
+        unavailable = False
         for entity_id in self._windows:
             state = self.hass.states.get(entity_id)
-            if state is not None and state.state == "on":
-                return True
-        return False
+            if state is None or state.state in ("unavailable", "unknown"):
+                unavailable = True
+                continue
+            if state.state == "on":
+                open_found = True
+        return open_found, unavailable
 
     def _capability(self) -> tuple[bool, bool]:
         act = self.hass.states.get(self._actuator)
@@ -1207,13 +1262,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """Mean forecast outdoor temp over the preheat window (ADR-0025).
 
         Refreshes the cached hourly forecast at most every FORECAST_TTL_S. A
-        missing weather entity or any failure degrades to ``fallback`` (the
-        constant current outdoor), so optimal-start never depends on a forecast.
+        missing weather entity degrades to ``fallback`` (the constant current
+        outdoor), so optimal-start never depends on a forecast.
+
+        F10: a fetch failure no longer hardcodes ``fallback`` -- it falls through
+        to ``mean_forecast_outdoor`` on the last successfully cached samples (if
+        any), which is normally a better preheat estimate than a flat constant,
+        and degrades to ``fallback`` itself only once that cache is empty/expired
+        beyond use. A failure also starts a FORECAST_TTL_S backoff
+        (``_forecast_fail_at``) before the next retry, instead of re-attempting
+        the (possibly slow/rate-limited) service call on every single tick for as
+        long as the weather integration stays down.
         """
         if not self._weather:
             return fallback
         now = self._clock.monotonic()
-        if self._forecast_at is None or (now - self._forecast_at) >= FORECAST_TTL_S:
+        stale = self._forecast_at is None or (now - self._forecast_at) >= FORECAST_TTL_S
+        backed_off = (
+            self._forecast_fail_at is not None
+            and (now - self._forecast_fail_at) < FORECAST_TTL_S
+        )
+        if stale and not backed_off:
             try:
                 async with asyncio.timeout(_WEATHER_CALL_TIMEOUT_S):
                     resp = await self.hass.services.async_call(
@@ -1227,9 +1296,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     resp, self._weather, dt_util.utcnow()
                 )
                 self._forecast_at = now
+                self._forecast_fail_at = None
             except Exception:  # noqa: BLE001 - forecast must never break the tick
-                _LOGGER.debug("Poise: weather forecast unavailable; constant outdoor")
-                return fallback
+                _LOGGER.debug("Poise: weather forecast unavailable; using stale cache")
+                self._forecast_fail_at = now
         return mean_forecast_outdoor(self._forecast, horizon_min, fallback)
 
     def _learn(self, room: float, t_out: float) -> None:
@@ -1253,16 +1323,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._last_mono = now
 
     def _observe_window_auto(
-        self, room: float, t_out: float, *, cooling: bool = False
+        self,
+        room: float,
+        t_out: float,
+        *,
+        cooling: bool = False,
+        sensor_unavailable: bool = False,
     ) -> None:
         """Feed the sensorless slope detector (ADR-0041).
 
-        Skipped when a window sensor exists (measured > estimated, ADR-0012).
+        Skipped only while a configured window sensor is actually reporting
+        (decision §2: "Sensor schlägt Heuristik (Exklusivität, wie VTherm)" --
+        deliberate, not amended by the stage-2 Nachtrag, which documents the
+        *combination* wiring of ``effective_window_open`` without retracting
+        the exclusivity policy). F4b: a configured-but-*unavailable* sensor is
+        the one documented exception -- §5's failsafe ("heizen wie ohne
+        Sensor") requires the slope detector to actually be live to fall back
+        to, so it keeps stepping (instead of staying cold forever, as the
+        previous unconditional ``if self._windows: return`` did) whenever the
+        sensor itself cannot currently report.
         Observes every tick — a window can open whether or not we heat. The open
         threshold is adapted to the learned tau once the model is identified
         (steeper natural cooling -> higher threshold), else the fixed default.
         """
-        if self._windows:
+        if self._windows and not sensor_unavailable:
             return
         now = self._clock.monotonic()
         cfg = self._window_auto_cfg
@@ -1441,13 +1525,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._save_counter += 1
         if self._save_counter >= EKF_SAVE_EVERY_TICKS or self._dirty:
             self._save_counter = 0
-            self._dirty = False
             try:
                 await self._store.save(self._save_payload())
+                # F6: only clear the dirty flag on a SUCCESSFUL save. Clearing it
+                # unconditionally (as before) marked a fresh override/preset/enabled
+                # change as "persisted" even when the write itself failed, so a
+                # crash/restart in that window silently lost the user's intent
+                # until the next periodic (30-tick) save happened to succeed.
+                self._dirty = False
                 self._note_save_result(ok=True)
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Poise: failed to persist learned model")
                 self._note_save_result(ok=False)
+
+    def _mark_actuated(self) -> None:
+        """Set the AR-11 teardown-park gate, persisting the flip (F16).
+
+        A bare ``self._has_actuated = True`` never set ``_dirty``, so a restart
+        shortly after the FIRST actuation of a run (e.g. mid a sensor outage,
+        where the periodic 30-tick save is not running either) could still
+        restore ``has_actuated=False`` — teardown then would not park an
+        actuator Poise had, in fact, already commanded. Only the first flip
+        needs to persist; repeating it is a harmless no-op write skip.
+        """
+        if not self._has_actuated:
+            self._dirty = True
+        self._has_actuated = True
 
     def _note_save_result(self, *, ok: bool) -> None:
         """Escalate a persistently failing store to a repair issue (F24).
@@ -1525,7 +1628,28 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     async def _async_update_data(self) -> dict[str, Any]:
         async with self._lock:
             _t0 = time.perf_counter()
-            data = await self._run_once()
+            # F12: a tick that raises out of ``_run_once`` was previously invisible
+            # beyond DataUpdateCoordinator's own generic "update failed" log/entity
+            # unavailability -- no Poise-specific signal, no persistence, nothing to
+            # distinguish a one-off transient blip from a zone stuck failing every
+            # tick. Track consecutive failures the same way ``_note_save_result``
+            # already does for the store, and surface a repair issue after N in a
+            # row; the exception itself is always re-raised unchanged so
+            # DataUpdateCoordinator's own failure handling is untouched.
+            try:
+                data = await self._run_once()
+            except Exception:
+                self._tick_failures += 1
+                self._issue(
+                    f"tick_failing_{self._entry_id}",
+                    self._tick_failures >= 3,  # after 3 consecutive failures
+                    translation_key="tick_failing",
+                )
+                raise
+            self._tick_failures = 0
+            self._issue(
+                f"tick_failing_{self._entry_id}", False, translation_key="tick_failing"
+            )
             # ADR-0020: the tick's wall-time (it holds the lock across the forecast
             # and any trace append) against the budget — an early scaling signal.
             self._tick_budget.observe((time.perf_counter() - _t0) * 1000.0)
@@ -1541,9 +1665,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
     def _emit_health_issues(self) -> tuple[bool, bool, bool, bool]:
         """Raise/clear device-health repair issues; return the status flags."""
+        # F2: an actuator that dropped off the network (Zigbee/MQTT gone) keeps a
+        # registered State object with state=="unavailable" -- states.get(...) is
+        # None only for a never-registered/removed entity, which is the rarer
+        # case. Checking only the None case missed the common real-world failure
+        # (device offline), so no repair issue ever fired for it.
+        _act_health = self.hass.states.get(self._actuator)
         self._issue(
             f"actuator_unavailable_{self._entry_id}",
-            self.hass.states.get(self._actuator) is None,
+            _act_health is None or _act_health.state == "unavailable",
             translation_key="actuator_unavailable",
             placeholders={"entity": self._actuator},
         )
@@ -1644,7 +1774,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     ),
                 )
                 self._last_target = plan.setpoint
-                self._has_actuated = True  # AR-11: real actuator write
+                self._mark_actuated()  # AR-11 (+F16: persist the flip)
         except Exception:  # noqa: BLE001 - safe-state write must never kill the tick
             _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
 
@@ -1657,6 +1787,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             placeholders={"entity": self._temp},
         )
         if air is None:
+            # Review F5: a fully unavailable room sensor is at least as untrustworthy
+            # as an open window or a frozen reading, so it must drop the same
+            # learning/window-auto anchors as the V5 pause branch below -- otherwise
+            # the eventual reconnect re-anchors ``_last_mono``/``_prev_room_mono``
+            # across the whole outage and the EKF integrates a real-looking dt over
+            # an interval it never actually observed (ADR-0012/0024). The slope
+            # detector's own reference point is reset too (``_wa_ref_*``,
+            # ``_wa_prev_mono``): letting it survive an outage would let the next
+            # good sample compute a rate/dt across the *sensor* gap rather than
+            # real room movement, which is exactly the false-open risk the V6
+            # quantized-slope anchor was built to avoid.
+            self._last_mono = None
+            self._prev_room = None
+            self._prev_room_mono = None
+            self._heatup_acc.reset()
+            self._wa_ref_room = None
+            self._wa_ref_mono = None
+            self._wa_prev_mono = None
             # F5: a user intent set via the switch/select (enabled / preset / mode)
             # while the room sensor is down must still be persisted — the normal
             # save sits after this early return, so flush a pending change here too.
@@ -1695,8 +1843,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._emit_health_issues()
         )
         now = self._clock.monotonic()
-        reading = ingest_temperature([RawSample(air, now)], now=now)
+        # F3: feed the last known-good room value so an implausible raw sample
+        # (Zigbee glitch, a misread °F number, ...) degrades to that recent real
+        # reading ("derived") instead of skipping straight past it to the
+        # hardcoded 20.0 °C default -- the ladder's middle rung was dead code
+        # without this (ADR-0012 degradation ladder).
+        reading = ingest_temperature(
+            [RawSample(air, now)], now=now, last_good=self._prev_room
+        )
         room = reading.value
+        # F3: a DEFAULT-source reading means there is no trustworthy room value
+        # AT ALL (an implausible raw sample AND no prior good reading to derive
+        # from) -- treat it exactly like a frozen/stale sensor (fail toward
+        # warmth): control degrades to the health floor and learning pauses,
+        # instead of regulating on -- and teaching the EKF -- a fabricated
+        # constant (measured/estimated boundary, ADR-0012/0026).
+        frozen = frozen or reading.source is Source.DEFAULT
         t_out = self._read(self._outdoor)
         # internal EN 16798-1 running mean, used when no external T_rm sensor.
         if t_out is not None:
@@ -1721,7 +1883,19 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # outdoor + a solar radiant bump; a measured globe/MRT sensor overrides.
         mrt_internal = virtual_mrt(room, t_out_eff, q_solar)
         t_mrt, mrt_source = select_mrt(self._read(self._mrt), mrt_internal)
-        sensor_window_open = self._window_open()
+        sensor_window_open, _window_sensor_unavailable = self._window_open()
+        self._issue(
+            f"window_sensor_unavailable_{self._entry_id}",
+            _window_sensor_unavailable,
+            translation_key="window_sensor_unavailable",
+            placeholders={"entity": ", ".join(self._windows)},
+        )
+        # F4a/ADR-0041 §5: a dropped-off window contact must not silently pin
+        # "closed" -- an unavailable sensor already reads as
+        # ``sensor_window_open=False`` above (indistinguishable from a real
+        # "closed"), so the OR with ``auto_open`` (F4b: the slope detector now
+        # always runs, sensor or not) is what actually supplies the "heizen
+        # wie ohne Sensor" failsafe signal here.
         window_open = effective_window_open(
             sensor_open=sensor_window_open,
             auto_open=self._window_auto.open,
@@ -1760,19 +1934,39 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         device_max = self._device_max()
 
         if should_learn(window_open=window_open, frozen=frozen):
-            self._learn(room, t_out_eff)
-            self._observe_seasonless(room, t_out_eff)
+            # F3: only ever teach the EKF from a genuinely MEASURED room reading --
+            # a DERIVED value (carried forward from ``last_good`` after a single
+            # implausible raw sample) is a reasonable, frost-safe value to
+            # *control* on, but it is not new information about the thermal
+            # plant, so feeding it to the EKF would teach it a zero/stale delta
+            # as if the room had truly stopped moving (ADR-0012 / ADR-0026). This
+            # tick's learning step is simply skipped -- unlike the V5 pause below,
+            # the anchors are deliberately left untouched: a single glitchy
+            # sample is not the "contaminated interval" the V5 reset guards
+            # against, and dropping ``self._prev_room`` here would erase the very
+            # last-good value future ticks need to keep deriving from, regressing
+            # a short flaky-sensor spell to the hard default one tick early.
+            if reading.source is Source.MEASURED:
+                self._learn(room, t_out_eff)
+                self._observe_seasonless(room, t_out_eff)
         else:
-            # V5: while learning is paused (open window / frozen sensor) drop the
-            # time anchors, so the first step after resumption re-anchors from that
-            # tick instead of integrating the whole contaminated interval. A short
-            # Stoßlüften would otherwise poison the EKF with a real-looking sub-hour
-            # dt (the 0<dt<1h guard only rejects long gaps). ADR-0024.
+            # V5: while learning is paused (open window / frozen sensor, which
+            # now also covers a DEFAULT-source reading -- see the ``frozen =``
+            # assignment above) drop the time anchors, so the first step after
+            # resumption re-anchors from that tick instead of integrating the
+            # whole contaminated interval. A short Stoßlüften would otherwise
+            # poison the EKF with a real-looking sub-hour dt (the 0<dt<1h guard
+            # only rejects long gaps). ADR-0024.
             self._last_mono = None
             self._prev_room = None
             self._prev_room_mono = None
             self._heatup_acc.reset()  # drop the heat-up anchor across the pause too
-        self._observe_window_auto(room, t_out_eff, cooling=self._was_cooling)
+        self._observe_window_auto(
+            room,
+            t_out_eff,
+            cooling=self._was_cooling,
+            sensor_unavailable=_window_sensor_unavailable,
+        )
 
         # mould floor + dewpoint cap from humidity
         mold_min = None
@@ -1835,6 +2029,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             if s in ("home", "on", "true"):
                 return True
             if s in ("not_home", "off", "false", "away"):
+                return False
+            # F8: a person/device_tracker can report a named zone ("Work", "Gym",
+            # ...) as its state -- that is a resolved, confident "not home", not a
+            # sensor failure. Falling through to None here made ``any_present``'s
+            # fail-safe (unresolved -> present) misread a person confirmed to be
+            # away at a custom zone as "home", the opposite of a fail-safe. Any
+            # other domain's odd/custom state is left genuinely unresolved (None).
+            if entity_id.split(".", 1)[0] in ("person", "device_tracker"):
                 return False
             return None
 
@@ -1984,6 +2186,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
 
         act_state = self.hass.states.get(self._actuator)
+        # F2: a genuinely offline actuator (state=="unavailable") reports no
+        # trustworthy setpoint, so should_write()'s "actual is None -> write"
+        # rule fired on EVERY tick -- a write storm into a dead Zigbee/MQTT
+        # device. Setpoint (and mode-nudge) writes are gated on this below.
+        _actuator_online = act_state is not None and act_state.state != "unavailable"
         # ADR-0051 activation: on a hot day raise the cooling setpoint toward the
         # EN adaptive upper (capped; the default ASR-26 cap makes it a no-op
         # until the cap is raised), rate-limited <=0.5 K/tick. Cooling-only:
@@ -2220,48 +2427,88 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         await self._notify_failure(failed)
 
         _mode_nudge_blocked = ""  # ADR-0046 §8: compressor-guard suppression reason
+        # F1: default for the unconditional shadow block below (no live mode nudge
+        # is even considered while disabled, so "not blocked" is the honest value).
+        _guard_block: str | None = None
+        # H1/A2: keep a controllable actuator in the mode that matches our
+        # write — cool when we cool, heat otherwise — so it follows our
+        # setpoint instead of its own off/auto schedule (TRVZB system_mode).
+        act_modes = (act_state.attributes.get("hvac_modes") or []) if act_state else []
+        # ADR-0050 S2c: fold active drying into the mode — dry wins ONLY when
+        # idle (temp in band) + humidity asks + the device can dry; heat/cool/
+        # off/manual pass through (temperature + safety primary). Capability-
+        # gated: a heat-only TRV has no "dry" mode -> dry_ok False -> no-op.
+        # ADR-0059 control-loop fix: an ACTIVE manual override must DRIVE the
+        # heat/cool/idle direction, not only set the written value. Collapse
+        # the band to a hysteresis window around the commanded (clamped)
+        # override and reuse the capability/outdoor-gated decide_mode, so a
+        # reversible AC flips to cool/heat toward the manual value instead of
+        # idling in its last mode. window/frozen keep precedence (they replace
+        # the "manual" tag upstream, so mode != "manual" there); an "idle"
+        # ov_mode still flows through the seam so dry-in-deadband can apply.
+        # The WRITTEN target is unchanged -- only the mode is derived here.
+        # F1: this mode/guard-policy resolution used to sit entirely inside
+        # ``if self._enabled:`` below, but the unconditional shadow block
+        # further down (multi_lifecycle observation, ADR-0046 P2) reads
+        # ``final_mode``/``_guard_pol``/``_g_min_off``/``_g_mode_hold`` on
+        # EVERY tick regardless of ``self._enabled`` -- a disabled zone raised
+        # an UnboundLocalError there every tick (swallowed by the shadow
+        # block's broad except), which silently froze the wall-clock
+        # compressor lifecycle for the whole time the zone stayed disabled.
+        # Resolving them here, unconditionally, keeps that shadow tracking
+        # alive (ADR-0026: shadow estimators always run) while only the
+        # actual mode/setpoint WRITES below stay enabled-gated.
+        _base_mode = mode
+        if (
+            self._enabled
+            and self._override is not None
+            and not window_open
+            and not frozen
+        ):
+            _base_mode = override_mode(
+                room=room_decide,
+                override=target,
+                hysteresis=0.5,
+                outdoor=t_out_eff,
+                climate_mode=self._climate_mode,
+                can_heat=can_heat,
+                can_cool=can_cool,
+                cool_min_outdoor=(
+                    self._cool_min_outdoor if self._cool_lockout_enabled else None
+                ),
+                heat_max_outdoor=(
+                    self._heat_max_outdoor if self._heat_lockout_enabled else None
+                ),
+            )
+        final_mode = mode_arbitration(
+            base_mode=_base_mode,
+            humidity_action=_hum_action,
+            dry_ok="dry" in act_modes,
+        )
+        # ADR-0046 §8 (live): hold back a mode nudge that would short-cycle the
+        # compressor — start it within min-off, or flip cool<->dry within
+        # mode-hold. Capability-gated (cool/dry only) + kill switch; never a
+        # stop and never a safety action. The comfort request stands and
+        # re-fires once the lock clears, so _mode_nudge_blocked reads as intent
+        # (a blocked dry entry keeps dry_active latched, surfaced on the card).
+        _guard_prof = PROFILES[self._dynamics]
+        _g_min_off = (
+            self._comp_min_off_opt
+            if self._comp_min_off_opt is not None
+            else _guard_prof.compressor_min_off_s
+        )
+        _g_mode_hold = (
+            self._comp_mode_hold_opt
+            if self._comp_mode_hold_opt is not None
+            else _guard_prof.compressor_mode_hold_s
+        )
+        _guard_pol = _lifecycle.resolve_guard_policy(
+            enabled=self._compressor_guard != COMPRESSOR_GUARD_OFF,
+            can_condition=can_cool or "dry" in act_modes,
+            min_off_s=_g_min_off,
+            mode_hold_s=_g_mode_hold,
+        )
         if self._enabled:
-            # H1/A2: keep a controllable actuator in the mode that matches our
-            # write — cool when we cool, heat otherwise — so it follows our
-            # setpoint instead of its own off/auto schedule (TRVZB system_mode).
-            act_modes = (
-                (act_state.attributes.get("hvac_modes") or []) if act_state else []
-            )
-            # ADR-0050 S2c: fold active drying into the mode — dry wins ONLY when
-            # idle (temp in band) + humidity asks + the device can dry; heat/cool/
-            # off/manual pass through (temperature + safety primary). Capability-
-            # gated: a heat-only TRV has no "dry" mode -> dry_ok False -> no-op.
-            # ADR-0059 control-loop fix: an ACTIVE manual override must DRIVE the
-            # heat/cool/idle direction, not only set the written value. Collapse
-            # the band to a hysteresis window around the commanded (clamped)
-            # override and reuse the capability/outdoor-gated decide_mode, so a
-            # reversible AC flips to cool/heat toward the manual value instead of
-            # idling in its last mode. window/frozen keep precedence (they replace
-            # the "manual" tag upstream, so mode != "manual" there); an "idle"
-            # ov_mode still flows through the seam so dry-in-deadband can apply.
-            # The WRITTEN target is unchanged -- only the mode is derived here.
-            _base_mode = mode
-            if self._override is not None and not window_open and not frozen:
-                _base_mode = override_mode(
-                    room=room_decide,
-                    override=target,
-                    hysteresis=0.5,
-                    outdoor=t_out_eff,
-                    climate_mode=self._climate_mode,
-                    can_heat=can_heat,
-                    can_cool=can_cool,
-                    cool_min_outdoor=(
-                        self._cool_min_outdoor if self._cool_lockout_enabled else None
-                    ),
-                    heat_max_outdoor=(
-                        self._heat_max_outdoor if self._heat_lockout_enabled else None
-                    ),
-                )
-            final_mode = mode_arbitration(
-                base_mode=_base_mode,
-                humidity_action=_hum_action,
-                dry_ok="dry" in act_modes,
-            )
             desired_hvac = resolve_desired_mode(
                 final_mode=final_mode,
                 current_device_mode=act_state.state if act_state else None,
@@ -2278,29 +2525,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 act_state.state if act_state else None,
                 desired_hvac,
                 supported=desired_hvac in act_modes,
-            )
-            # ADR-0046 §8 (live): hold back a mode nudge that would short-cycle the
-            # compressor — start it within min-off, or flip cool<->dry within
-            # mode-hold. Capability-gated (cool/dry only) + kill switch; never a
-            # stop and never a safety action. The comfort request stands and
-            # re-fires once the lock clears, so _mode_nudge_blocked reads as intent
-            # (a blocked dry entry keeps dry_active latched, surfaced on the card).
-            _guard_prof = PROFILES[self._dynamics]
-            _g_min_off = (
-                self._comp_min_off_opt
-                if self._comp_min_off_opt is not None
-                else _guard_prof.compressor_min_off_s
-            )
-            _g_mode_hold = (
-                self._comp_mode_hold_opt
-                if self._comp_mode_hold_opt is not None
-                else _guard_prof.compressor_mode_hold_s
-            )
-            _guard_pol = _lifecycle.resolve_guard_policy(
-                enabled=self._compressor_guard != COMPRESSOR_GUARD_OFF,
-                can_condition=can_cool or "dry" in act_modes,
-                min_off_s=_g_min_off,
-                mode_hold_s=_g_mode_hold,
             )
             _guard_block = _lifecycle.guard_block_reason(
                 _guard_pol,
@@ -2357,11 +2581,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     regulation_period_s=_wprof.regulation_period_s,
                 )
             )
-            if not _reg_throttled and should_write(
-                actual_sp,
-                snap_to_step(target, step),
-                mode_changed=mode_changed,
-                deadband=WRITE_DEADBAND_C,
+            if (
+                _actuator_online
+                and not _reg_throttled
+                and should_write(
+                    actual_sp,
+                    snap_to_step(target, step),
+                    mode_changed=mode_changed,
+                    deadband=WRITE_DEADBAND_C,
+                )
             ):
                 cmd = ActuatorCommand(
                     actuator_id=self._actuator,
@@ -2374,7 +2602,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     await actuator_mod.write(self.hass, cmd)
                     self._last_written_mode = final_mode
                     self._last_sp_write_ts = now
-                    self._has_actuated = True  # AR-11: real actuator write
+                    self._mark_actuated()  # AR-11 (+F16: persist the flip)
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
                         "Poise: actuator write failed for %s", self._actuator
@@ -2466,7 +2694,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             reason="frost_rescue",
                         ),
                     )
-                    self._has_actuated = True  # AR-11: real actuator write
+                    self._mark_actuated()  # AR-11 (+F16: persist the flip)
                 except Exception:  # noqa: BLE001 - frost rescue write is best-effort
                     _LOGGER.exception(
                         "Poise: frost rescue write failed for %s", self._actuator
@@ -2672,11 +2900,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         }
         try:
             _tick_min = TICK_INTERVAL_S / 60.0
+            # F9: real elapsed dt (event-driven refreshes book < 60 s, not a flat
+            # tick -- same reasoning as the CA/offset dt below), capped so a masked
+            # gap adds ~2 ticks instead of silently over/under-crediting the HDH
+            # savings estimate and the outcome-session heating-time integral.
+            if self._hdh_last_mono is not None:
+                _hd = (now - self._hdh_last_mono) / 60.0
+                _hdh_dt = min(max(_hd, 0.0), 2.0 * _tick_min)
+            else:
+                _hdh_dt = _tick_min
+            self._hdh_last_mono = now
             self._hdh = self._hdh.observe(
                 comfort=self._comfort_base,
                 setpoint=decision.heat_sp,
                 outdoor=t_out_eff,
-                dt_min=_tick_min,
+                dt_min=_hdh_dt,
                 now_month=dt_util.now().month,
                 cfg=self._hdh_cfg,
             )
@@ -2686,7 +2924,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 target=decision.heat_sp,
                 heating=heating,
                 controlling=self._enabled,
-                dt_min=_tick_min,
+                dt_min=_hdh_dt,
                 expected_minutes=model_expected_minutes(
                     self._ekf.get_model() if self._ekf.identified else None,
                     room=room,
