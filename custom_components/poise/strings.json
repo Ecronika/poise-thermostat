@@ -380,7 +380,7 @@
     },
     "frost_zone_not_boiler": {
       "title": "Poise: freezing room not controlling the shared boiler",
-      "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable \"This zone controls the boiler\" in its options (a cooling-only room can be ignored). This issue clears automatically once no such room is freezing."
+      "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable 'This room may request the shared boiler' under Reconfigure → Shared plant (multi-zone) (a cooling-only room can be left off). This issue clears automatically once no such room is freezing."
     },
     "hub_frost_zone_unavailable": {
       "title": "Poise: room sensor lost — heating on frost protection",
@@ -401,6 +401,10 @@
     "external_temp_implausible": {
       "title": "Poise: external-temperature input implausible",
       "description": "The configured external-temperature input for zone `{name}` (`{entity}`) does not look like a temperature input, so Poise has stopped feeding it to avoid writing room temperatures into an unrelated `number` entity — pick a different entity in the zone's reconfigure."
+    },
+    "heating_failure": {
+      "title": "Heating failure — {zone}",
+      "description": "{zone} is not warming up despite a heating demand. Check the TRV/valve, the radiator, or the boiler. Poise keeps commanding heat; this notice clears automatically once the room warms."
     }
   }
 }

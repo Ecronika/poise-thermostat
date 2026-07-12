@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.163.0"
+VERSION: Final = "0.164.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -18,6 +18,10 @@ HUB_ZONE_STALE_AFTER_S: Final = 180.0
 DEFAULT_TARGET_C: Final = 21.0
 FROST_FLOOR_C: Final = 7.0
 DEVICE_MAX_C: Final = 30.0
+# P2-1: while a window is open, suppress the mould floor (heating toward ~24 °C
+# fights the ventilation) for this many seconds — the frost floor always remains.
+# DIN 4108-2 is a steady-state criterion, not a minute-scale window event.
+WINDOW_MOULD_SUPPRESS_S: Final = 1800.0
 BANGBANG_HYSTERESIS_C: Final = 0.3
 # Only (re)write the actuator setpoint on a change of at least this much, or a
 # mode change — spares battery/Zigbee TRVs from per-tick traffic (ADR-0012).

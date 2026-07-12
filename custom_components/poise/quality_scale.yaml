@@ -24,11 +24,16 @@ rules:
     status: exempt
     comment: No external Python dependencies (manifest requirements: []).
   action-setup:
-    status: exempt
-    comment: No custom service actions; control uses standard climate/number services.
+    status: done
+    comment: >-
+      poise.resume_schedule is registered in async_setup (clears a manual hold and
+      resumes the schedule, per ADR-0059); all other control uses standard
+      climate/number services.
   docs-actions:
-    status: exempt
-    comment: No custom service actions to document.
+    status: done
+    comment: >-
+      poise.resume_schedule is documented via services.yaml (name/description +
+      target selector).
   test-before-configure:
     status: exempt
     comment: >-
@@ -52,7 +57,10 @@ rules:
   docs-installation-parameters: done  # README Configuration table covers setup params
   action-exceptions:
     status: exempt
-    comment: No custom service actions.
+    comment: >-
+      The sole custom action (poise.resume_schedule) takes no free-form input and
+      skips non-applicable zones defensively, so it raises no user-facing
+      exceptions.
   reauthentication-flow:
     status: exempt
     comment: No authentication; fully local, no credentials.
@@ -109,7 +117,7 @@ rules:
     comment: Add automation/dashboard examples.
 
   # ---------------- Platinum ----------------
-  strict-typing: done  # mypy --strict over all 63 modules (no ignore_errors)
+  strict-typing: done  # mypy --strict over the whole integration (no ignore_errors)
   async-dependency:
     status: exempt
     comment: No external dependency; the integration is fully async.

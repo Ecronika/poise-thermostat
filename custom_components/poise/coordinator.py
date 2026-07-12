@@ -22,7 +22,6 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import (
     ConfigEntryError,
     ConfigEntryNotReady,
-    ServiceNotFound,
 )
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -134,6 +133,7 @@ from .const import (
     SENSOR_FREEZE_AFTER_S,
     TICK_INTERVAL_S,
     UNAVAILABLE_SAFE_AFTER_S,
+    WINDOW_MOULD_SUPPRESS_S,
     WRITE_DEADBAND_C,
 )
 from .contracts import ActuatorCommand, ActuatorPath, Source
@@ -232,7 +232,6 @@ from .multi.shadow import evaluate_thermal_shadow
 from .safety.heating_failure import (
     HeatingFailureDetector,
     actuator_running,
-    failure_notification_action,
 )
 from .safety.sensor_watchdog import (
     frozen_safe_target,
@@ -333,11 +332,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._last_q_solar: float = 0.0
         self._unavailable_since: float | None = None  # review #7: sustained loss
         self._save_counter = 0
-        self._failure_notified = False
         # Silver log-when-unavailable: log the loss/recovery of the room sensor
         # exactly once each, not every 60 s tick.
         self._unavailable_logged = False
-        self._notif_id = f"poise_heating_failure_{entry.entry_id}"
         self._entry_id = entry.entry_id
         self._data_snapshot: dict[str, Any] = dict(entry.data)  # F14 reconfigure guard
         self._save_failures = 0  # F24: consecutive store-save failures
@@ -360,6 +357,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._prev_home: bool | None = None  # §1 house-gate flip tracking
         self._last_presence_level: str = "comfort"  # cached for the §5 stat
         self._last_window_open: bool = False  # cached for the §5 stat
+        # P2-1: monotonic stamp of the current open-window episode's rising edge;
+        # gates the mould write-floor for its first WINDOW_MOULD_SUPPRESS_S.
+        self._window_open_since: float | None = None
         self._climate_entity_id: str | None = None  # for the ended-event payload
         # ADR-0046 P2: per-device anti-short-cycle lifecycle (wall-clock, survives
         # restart). Shadow-only today — tracks the actuator's run-state + health to
@@ -1251,6 +1251,19 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 return float(mx)
         return DEVICE_MAX_C
 
+    def _device_min(self) -> float | None:
+        """The actuator's own ``min_temp`` (a physical write floor), if known.
+
+        Returns ``None`` when absent/non-numeric so resolve_write_target skips
+        the SAFETY floor clamp entirely (review P3-1).
+        """
+        act = self.hass.states.get(self._actuator)
+        if act is not None:
+            mn = act.attributes.get("min_temp")
+            if isinstance(mn, (int, float)):
+                return float(mn)
+        return None
+
     def _sun_elevation(self) -> float | None:
         sun = self.hass.states.get("sun.sun")
         if sun is None:
@@ -1458,35 +1471,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _LOGGER.debug("Poise trace capture failed", exc_info=True)
 
     async def _notify_failure(self, failed: bool) -> None:
-        action = failure_notification_action(failed, self._failure_notified)
-        if action == "create":
-            self._failure_notified = True
-            data: dict[str, Any] = {
-                "title": f"Poise: heating failure — {self.zone_name}",
-                "message": (
-                    f"{self.zone_name} is not warming up despite a heating "
-                    "demand. Check the valve, radiator or boiler."
-                ),
-                "notification_id": self._notif_id,
-            }
-        elif action == "dismiss":
-            self._failure_notified = False
-            data = {"notification_id": self._notif_id}
-        else:
-            return
-        # A persistent notification is best-effort user feedback. If the notify
-        # service is unavailable (e.g. a startup/shutdown race where the
-        # persistent_notification integration isn't registered yet), it must
-        # never propagate and take down the safety-critical control tick.
-        try:
-            await self.hass.services.async_call(
-                "persistent_notification", action, data, blocking=False
-            )
-        except ServiceNotFound:
-            _LOGGER.debug(
-                "persistent_notification.%s unavailable; skipping notification",
-                action,
-            )
+        """Surface a persistent heating failure as a translated repair issue.
+
+        P2-8: replaces the former English persistent_notification with a repair
+        issue (raised while ``failed``, cleared when it recovers) so the message
+        is localised via ``translations/*`` like every other Poise diagnostic.
+        """
+        self._issue(
+            f"heating_failure_{self._entry_id}",
+            failed,
+            translation_key="heating_failure",
+            placeholders={"zone": self.zone_name},
+        )
 
     def _save_payload(self) -> dict[str, Any]:
         return {
@@ -1596,17 +1592,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 continue
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             self._active_issues.discard(issue_id)
-        if self._failure_notified:
-            self._failure_notified = False
-            try:
-                await self.hass.services.async_call(
-                    "persistent_notification",
-                    "dismiss",
-                    {"notification_id": self._notif_id},
-                    blocking=False,
-                )
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception("Poise: notification dismiss on unload failed")
 
     def structural_unchanged(self, entry: ConfigEntry) -> bool:
         """True if only tuning options changed since setup (F14).
@@ -2167,6 +2152,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # ADR-0059 §5: cache the presence level + window state so a user setpoint
         # nudge recorded in set_override (no tick context) can skip AWAY/window.
         self._last_presence_level = _level.value
+        # P2-1: track the rising edge of the open-window episode on the tick's
+        # monotonic clock (``now``, established ~line 1849) so the mould floor can
+        # be suppressed for its first WINDOW_MOULD_SUPPRESS_S below.
+        if window_open:
+            if self._window_open_since is None:
+                self._window_open_since = now
+        else:
+            self._window_open_since = None
         self._last_window_open = window_open
         _eco_widen: float
         _cool_ceiling: float | None
@@ -2259,6 +2252,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
         else:
             cool_write = decision.write_setpoint
+        # P2-1: DIN 4108-2 is a steady-state criterion. Under an open window the
+        # write target collapses to the floor (= max(frost, mould)); a humid room
+        # would then heat toward ~24 C against the ventilation. Suppress only the
+        # mould component for the first WINDOW_MOULD_SUPPRESS_S of the episode --
+        # the frost floor (FROST_FLOOR_C) is NEVER suppressed. Diagnostics keep
+        # the real ``mold_min`` (see the ``mould_floor`` attribute below).
+        mold_min_write = (
+            None
+            if (
+                window_open
+                and self._window_open_since is not None
+                and (now - self._window_open_since) < WINDOW_MOULD_SUPPRESS_S
+            )
+            else mold_min
+        )
         wt = resolve_write_target(
             window_open=window_open,
             override=self._override,
@@ -2267,8 +2275,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             write_setpoint=cool_write,
             comfort_mode=decision.mode,
             frost_floor=FROST_FLOOR_C,
-            mold_min=mold_min,
+            mold_min=mold_min_write,
             device_max=device_max,
+            device_min=self._device_min(),
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
