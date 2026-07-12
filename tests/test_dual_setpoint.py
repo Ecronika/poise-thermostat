@@ -164,11 +164,12 @@ def test_unoccupied_setback_still_mould_protected() -> None:
     assert d.heat_sp == 16.0  # mould floor holds even when unoccupied
 
 
-def test_adaptive_cool_lifts_summer_cooling_edge() -> None:
-    """Büro-Technik over-cooling fix: warm running mean + cool-capable device.
-    Without the adaptive edge the cool setpoint sits at the fixed Cat-I summer
-    floor (23.5) and a mild-warm room is cooled; with it the edge lifts toward the
-    EN adaptive upper (capped at ASR 26), so the room is within comfort -> idle."""
+def test_adaptive_cool_edge_gated_on_occupancy() -> None:
+    """ADR-0061: the EN adaptive (free-running) cooling raise applies ONLY to an
+    UNOCCUPIED room. An occupied, actively-conditioned space uses the fixed EN
+    category band (the adaptive model excludes mechanically-cooled spaces —
+    EN 16798-1 / ASHRAE 55). Warm running mean + cool-capable device, room 24.5,
+    Cat I; without the raise the room is cooled, with it (only empty) it idles."""
     fixed = decide(
         t_rm=21.0,
         room=24.5,
@@ -178,7 +179,7 @@ def test_adaptive_cool_lifts_summer_cooling_edge() -> None:
         can_cool=True,
         t_out=24.0,
     )
-    adaptive = decide(
+    occupied = decide(
         t_rm=21.0,
         room=24.5,
         category=Category.I,
@@ -187,8 +188,24 @@ def test_adaptive_cool_lifts_summer_cooling_edge() -> None:
         can_cool=True,
         t_out=24.0,
         adaptive_cool=True,
+        occupied=True,
     )
-    assert fixed.mode == "cool"  # fixed band over-cools the mild-warm room
+    unoccupied = decide(
+        t_rm=21.0,
+        room=24.5,
+        category=Category.I,
+        comfort_base=21.0,
+        can_heat=False,
+        can_cool=True,
+        t_out=24.0,
+        adaptive_cool=True,
+        occupied=False,
+    )
+    assert fixed.mode == "cool"  # fixed band cools the mild-warm room
     assert fixed.cool_sp == 23.5
-    assert adaptive.cool_sp == 26.0  # lifted to the ASR-capped adaptive upper
-    assert adaptive.mode == "idle"  # room is inside the adaptive band -> no cooling
+    # Occupied + adaptive on: the adaptive raise is gated OFF -> fixed band cools.
+    assert occupied.cool_sp == 23.5
+    assert occupied.mode == "cool"
+    # Unoccupied: free-running -> edge lifts to the ASR-capped adaptive upper -> idle.
+    assert unoccupied.cool_sp == 26.0
+    assert unoccupied.mode == "idle"
