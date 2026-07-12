@@ -3203,7 +3203,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "valve_closing_steps": closing_steps,
             "valve_idle_steps": idle_steps,
             **shadow_objs,
-             "tpi_valve_entity": self._valve_entity,
+            "tpi_valve_entity": self._valve_entity,
             "seasonless_phase": self._seasonless.phase,
             "seasonless_rate": (
                 round(p, 3)
