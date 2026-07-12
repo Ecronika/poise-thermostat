@@ -15,14 +15,36 @@ from custom_components.poise.actuator import service_call_for, write
 from custom_components.poise.contracts import ActuatorCommand, ActuatorPath
 
 
-def _cmd(path=ActuatorPath.SETPOINT, value=21.5):
-    return ActuatorCommand("climate.trv", path, value, "heat", "heat", None)
+def _cmd(path=ActuatorPath.SETPOINT, value=21.5, hvac_mode="heat"):
+    return ActuatorCommand("climate.trv", path, value, hvac_mode, "heat", None)
 
 
 def test_service_call_for_setpoint() -> None:
+    # P2-3: a conditioning mode rides along in set_temperature (atomic switch)
     domain, service, data = service_call_for(_cmd(value=21.5))
     assert (domain, service) == ("climate", "set_temperature")
-    assert data == {"entity_id": "climate.trv", "temperature": 21.5}
+    assert data == {
+        "entity_id": "climate.trv",
+        "temperature": 21.5,
+        "hvac_mode": "heat",
+    }
+
+
+def test_setpoint_rides_hvac_mode_atomically() -> None:
+    # P2-3: each conditioning mode is carried in the single set_temperature call
+    for mode in ("heat", "cool", "dry", "heat_cool"):
+        _, _, data = service_call_for(_cmd(value=24.0, hvac_mode=mode))
+        assert data["hvac_mode"] == mode
+        assert data["temperature"] == 24.0
+
+
+def test_setpoint_omits_non_conditioning_mode() -> None:
+    # P2-3: off/idle/fan_only carry no setpoint semantics -> no atomic mode ride,
+    # so the guard-held switch is never bypassed by the setpoint write.
+    for mode in ("off", "idle", "fan_only", "auto"):
+        _, _, data = service_call_for(_cmd(value=24.0, hvac_mode=mode))
+        assert "hvac_mode" not in data
+        assert data == {"entity_id": "climate.trv", "temperature": 24.0}
 
 
 def test_service_call_for_unsupported_path_raises() -> None:
@@ -51,7 +73,7 @@ def test_write_issues_exactly_one_nonblocking_service_call() -> None:
         (
             "climate",
             "set_temperature",
-            {"entity_id": "climate.trv", "temperature": 20.0},
+            {"entity_id": "climate.trv", "temperature": 20.0, "hvac_mode": "heat"},
             False,
         )
     ]

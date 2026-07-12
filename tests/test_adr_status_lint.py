@@ -25,6 +25,20 @@ ALLOWED_BASES = {
     "Gültig",
 }
 
+# The Wirkung (actuation-effect) vocabulary from docs/adr/README.md
+# ("Wirkungs-Konventionen") — orthogonal to Status. Every ADR header carries a
+# ``**Wirkung:** <token>`` field right after the ``**Status:**`` token.
+ALLOWED_WIRKUNG = {
+    "Live-A",  # actuates in the live write path
+    "Live-D",  # runs every tick, diagnostic only
+    "Shadow",  # computed, never writes
+    "teilw.",  # partially wired
+    "Harness",  # test-only
+    "Doku",  # documentation/decision only
+    "Gültig",  # meta/process record
+    "n.a.",  # not applicable / not yet built
+}
+
 
 def _base(status: str) -> str:
     """The bare status word(s): drop any ``(… %)`` / ``(Shadow, …)`` detail and
@@ -50,6 +64,31 @@ def _headers() -> dict[str, str]:
             if m:
                 out[num.group(1)] = m.group(1).strip()
                 break
+        else:
+            raise AssertionError(f"{path.name}: no '**Status:** … ·' header line")
+    return out
+
+
+def _wirkungen() -> dict[str, str]:
+    """The ``**Wirkung:** <token>`` value from each ADR's status line — parsed in
+    the same style as ``_headers()`` (the field sits on the ``**Status:**`` line,
+    ``·``-separated). Raises if an ADR header carries no ``**Wirkung:**`` field so
+    a newly added ADR that forgets the dimension fails the lint."""
+    out: dict[str, str] = {}
+    for path in sorted(ADR_DIR.glob("ADR-*.md")):
+        num = re.match(r"ADR-(\d{4})-", path.name)
+        if num is None:
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.startswith("**Status:**"):
+                continue
+            m = re.search(r"\*\*Wirkung:\*\*\s*([^·\n]+?)\s*(?:·|$)", line)
+            if m is None:
+                raise AssertionError(
+                    f"{path.name}: '**Status:**' line lacks '**Wirkung:** <token>'"
+                )
+            out[num.group(1)] = m.group(1).strip()
+            break
         else:
             raise AssertionError(f"{path.name}: no '**Status:** … ·' header line")
     return out
@@ -87,3 +126,14 @@ def test_adr_index_status_matches_header() -> None:
 def test_adr_statuses_are_from_the_allowed_set() -> None:
     unknown = {n: s for n, s in _headers().items() if _base(s) not in ALLOWED_BASES}
     assert not unknown, f"unknown ADR status base(s): {unknown}"
+
+
+def test_every_adr_has_a_wirkung_field() -> None:
+    # _wirkungen() itself raises if any ADR header lacks a '**Wirkung:**' field;
+    # this asserts every ADR file is covered (parity with the status headers).
+    assert set(_wirkungen()) == set(_headers())
+
+
+def test_adr_wirkung_tokens_are_from_the_allowed_set() -> None:
+    unknown = {n: w for n, w in _wirkungen().items() if w not in ALLOWED_WIRKUNG}
+    assert not unknown, f"unknown ADR Wirkung token(s): {unknown}"
