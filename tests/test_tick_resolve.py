@@ -302,6 +302,72 @@ def test_device_max_never_undercuts_health_floor() -> None:
     assert cool.target <= 22.0
 
 
+def test_write_target_window_beats_active_override() -> None:
+    # P1-1: an open window must win over an active manual hold — the room drops to
+    # the floor, NOT the held value. Catches an "override before window" mutation.
+    wt = resolve_write_target(
+        window_open=True,
+        override=22.0,
+        heat_sp=21.0,
+        cool_sp=26.0,
+        write_setpoint=21.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=16.0,
+        device_max=30.0,
+    )
+    assert wt.target == 16.0 and wt.mode == "off"  # window floor, not the 22.0 hold
+    assert wt.override_clamped is False  # override branch was not taken
+
+
+def test_write_target_window_beats_out_of_band_override() -> None:
+    # P1-1 (second mutation-catcher): even an out-of-band override yields the floor
+    # under an open window, never the clamped hold.
+    wt = resolve_write_target(
+        window_open=True,
+        override=40.0,
+        heat_sp=20.0,
+        cool_sp=24.0,
+        write_setpoint=20.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=15.0,
+        device_max=30.0,
+    )
+    assert wt.mode == "off" and wt.target == 15.0
+
+
+def test_write_target_floor_clamped_up_to_device_min() -> None:
+    # P3-1: a device whose own min_temp exceeds the floor holds min_temp; writing
+    # below it thrashes the echo-compare. The written floor is clamped up to it.
+    wt = resolve_write_target(
+        window_open=True,
+        override=None,
+        heat_sp=21.0,
+        cool_sp=26.0,
+        write_setpoint=21.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=30.0,
+        device_min=17.0,
+    )
+    assert wt.target == 17.0 and wt.mode == "off"  # device min, not the 7.0 floor
+    # unchanged when device_min is not supplied
+    wt2 = resolve_write_target(
+        window_open=True,
+        override=None,
+        heat_sp=21.0,
+        cool_sp=26.0,
+        write_setpoint=21.0,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=30.0,
+    )
+    assert wt2.target == 7.0
+
+
 def test_resolve_desired_mode() -> None:
     from custom_components.poise.control.tick_resolve import resolve_desired_mode as r
 
