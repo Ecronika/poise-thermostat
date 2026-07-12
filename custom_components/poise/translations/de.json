@@ -185,6 +185,10 @@
       "title": "Poise: Raumsensor eingefroren",
       "description": "Der Raumtemperatur-Sensor `{entity}` hat sich lange nicht verändert und steckt möglicherweise fest (leere Batterie, hängende Integration). Poise hat das Lernen für diesen Raum pausiert; die Regelung läuft mit dem letzten Wert weiter. Der Hinweis verschwindet, sobald der Sensor wieder aktualisiert."
     },
+    "window_sensor_unavailable": {
+      "title": "Poise: Fenstersensor nicht verfügbar",
+      "description": "Der/die konfigurierte(n) Fenstersensor(en) `{entity}` sind nicht verfügbar, daher kann Poise für diesen Raum keinen echten Auf/Zu-Zustand lesen. Poise weicht auf die slope-basierte Auto-Erkennung aus (heizt wie ohne Sensor), bis er zurückkehrt. Prüfe Sensor bzw. Gerät — der Hinweis verschwindet danach automatisch."
+    },
     "device_schedule": {
       "title": "Poise: Eigener Zeitplan des Thermostats aktiv",
       "description": "Das gesteuerte Thermostat `{entity}` hat seinen internen Wochenplan eingeschaltet. Der kämpft gegen die Poise-Regelung. Schalte den Geräte-Zeitplan aus; Poise übernimmt dann den Sollwert."
@@ -220,6 +224,10 @@
     "persistence_failed": {
       "title": "Poise: Gelerntes Modell kann nicht gespeichert werden",
       "description": "Poise konnte sein gelerntes Modell und die Einstellungen wiederholt nicht speichern — Lernfortschritt und jüngste Änderungen können beim nächsten Neustart verloren gehen. Prüfe den Speicherplatz und das Home-Assistant-Verzeichnis `.storage`. Der Hinweis verschwindet automatisch, sobald ein Speichern gelingt."
+    },
+    "tick_failing": {
+      "title": "Poise: Regelungs-Tick schlägt wiederholt fehl",
+      "description": "Poises Regelungs-Update ist für diesen Raum mehrmals hintereinander fehlgeschlagen; Heizen/Kühlen läuft nicht zuverlässig. Prüfe das Home-Assistant-Protokoll auf die zugrunde liegende Fehlermeldung. Der Hinweis verschwindet automatisch, sobald ein Tick wieder gelingt."
     },
     "required_entity_disabled": {
       "title": "Poise: benötigte Entität ist deaktiviert",

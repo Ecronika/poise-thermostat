@@ -346,6 +346,10 @@
       "title": "Poise: room sensor frozen",
       "description": "The room temperature sensor `{entity}` has not changed for a long time and may be stuck (dead battery, stalled integration). Poise paused learning for this room; control continues on the last value. The issue clears once the sensor updates again."
     },
+    "window_sensor_unavailable": {
+      "title": "Poise: window sensor unavailable",
+      "description": "The configured window sensor(s) `{entity}` are unavailable, so Poise cannot read a real open/closed state for this room. Poise falls back to slope-based auto-detection (heating as if no sensor were configured) until it returns. Check the sensor or device; this issue clears automatically."
+    },
     "mould_protection_inactive": {
       "title": "Poise: mould protection inactive",
       "description": "The configured humidity sensor `{entity}` is unavailable, so Poise cannot compute the mould-avoidance minimum temperature for this room. Frost protection still applies, but mould protection is off until the sensor returns. Check the humidity sensor; this issue clears automatically."
@@ -385,6 +389,10 @@
     "persistence_failed": {
       "title": "Poise: cannot save learned model",
       "description": "Poise has repeatedly failed to write its learned model and settings to storage, so learning and your recent changes may be lost on the next restart. Check the disk and the Home Assistant `.storage` directory. This issue clears automatically once a save succeeds."
+    },
+    "tick_failing": {
+      "title": "Poise: control tick repeatedly failing",
+      "description": "Poise's control update has failed several times in a row for this room; heating/cooling control is not running reliably. Check the Home Assistant log for the underlying error. This issue clears automatically once a tick succeeds again."
     },
     "required_entity_disabled": {
       "title": "Poise: a required entity is disabled",
