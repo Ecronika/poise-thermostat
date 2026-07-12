@@ -1341,7 +1341,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         Sensor") requires the slope detector to actually be live to fall back
         to, so it keeps stepping (instead of staying cold forever, as the
         previous unconditional ``if self._windows: return`` did) whenever the
-        sensor itself cannot currently report.
+        sensor itself cannot currently report. The healthy-sensor case is a
+        bare skip here -- the call site (just before ``effective_window_open``)
+        already force-resets ``self._window_auto``/the ``_wa_*`` anchors to a
+        clean, non-latched state the moment the sensor is healthy again, in the
+        SAME tick, before this function would otherwise get a chance to.
         Observes every tick — a window can open whether or not we heat. The open
         threshold is adapted to the learned tau once the model is identified
         (steeper natural cooling -> higher threshold), else the fixed default.
@@ -1890,12 +1894,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             translation_key="window_sensor_unavailable",
             placeholders={"entity": ", ".join(self._windows)},
         )
+        # F4b follow-up: a healthy, configured sensor is authoritative (ADR-0041
+        # §2 exclusivity) and ``_observe_window_auto`` below will not step the
+        # slope detector again while it stays healthy -- so ``step_window_auto``'s
+        # own anti-stick max-duration timer never gets another chance to run
+        # either. An ``open=True`` (or any stale slope/anchor state) latched
+        # during a PRIOR sensor dropout (the §5 failsafe just below) would
+        # therefore stick forever: the sensor correctly reports "closed" but the
+        # OR with a frozen ``auto_open=True`` would pin the effective signal
+        # "open" regardless -- a real room-stays-cold regression, and worse than
+        # the pre-F4a behaviour (which never ran the detector at all while a
+        # sensor was configured, so it could never latch). Reset BEFORE computing
+        # ``window_open`` below (not deferred into ``_observe_window_auto``,
+        # which only runs later this same tick) so the reset takes effect in the
+        # very tick the sensor recovers, not one tick late.
+        if self._windows and not _window_sensor_unavailable:
+            if self._window_auto != WindowAutoState():
+                self._window_auto = WindowAutoState()
+                self._dirty = True
+            self._wa_ref_room = None
+            self._wa_ref_mono = None
+            self._wa_prev_mono = None
         # F4a/ADR-0041 §5: a dropped-off window contact must not silently pin
         # "closed" -- an unavailable sensor already reads as
         # ``sensor_window_open=False`` above (indistinguishable from a real
-        # "closed"), so the OR with ``auto_open`` (F4b: the slope detector now
-        # always runs, sensor or not) is what actually supplies the "heizen
-        # wie ohne Sensor" failsafe signal here.
+        # "closed"), so the OR with ``auto_open`` is what actually supplies the
+        # "heizen wie ohne Sensor" failsafe signal here.
         window_open = effective_window_open(
             sensor_open=sensor_window_open,
             auto_open=self._window_auto.open,
@@ -2532,6 +2556,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 dt_util.utcnow().timestamp(),
                 desired=desired_hvac,
                 current=act_state.state if act_state else None,
+                # F11 (review, refuted as a bug): an active manual override is
+                # deliberately exempt from the compressor-guard hold, same as a
+                # genuine safety trip (open window / frozen sensor) -- ADR-0046's
+                # Nachtrag (2026-07-04, v0.140.0 -> v0.145.0) states this
+                # explicitly: "is_safety unverändert (Fenster->off/Frost/
+                # Override/Frozen nie geblockt)". A user's manual intent must not
+                # be held hostage by a min-off/mode-hold timer.
                 is_safety=window_open or frozen or self._override is not None,
             )
             if _mode_nudge and _guard_block:
@@ -2664,7 +2695,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 mold_min=mold_min,
                 deadband=WRITE_DEADBAND_C,
             )
-            if rescue is not None:
+            # F2 follow-up: ``frost_rescue_target`` treats "unavailable" as
+            # "inactive" on purpose (an off/unknown/unavailable device below the
+            # floor all legitimately need the rescue floor) -- but that means it
+            # returns a non-None target on EVERY tick for a genuinely offline
+            # actuator, and unlike the enabled-branch setpoint write above, this
+            # write was never gated on ``_actuator_online``: a disabled zone with
+            # a dead actuator got a real ``climate.set_temperature`` dispatched
+            # into the void every single tick. Off/unknown (actuator present,
+            # just not in "heat") still get the rescue write as before.
+            if rescue is not None and _actuator_online:
                 _rmodes = (
                     (act_state.attributes.get("hvac_modes") or []) if act_state else []
                 )
