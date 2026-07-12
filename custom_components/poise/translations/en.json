@@ -97,11 +97,13 @@
     "abort": {
       "already_configured": "This thermostat is already configured.",
       "reconfigure_successful": "Poise was updated.",
-      "actuator_in_use": "This thermostat is already controlled by the Poise zone “{zone}”. Each thermostat can belong to only one zone."
+      "actuator_in_use": "This thermostat is already controlled by the Poise zone “{zone}”. Each thermostat can belong to only one zone.",
+      "imperial_not_supported": "Poise requires a metric (°C) Home Assistant. Imperial/°F systems are not supported — the control path is Celsius-only."
     },
     "error": {
       "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly.",
-      "invalid_boiler_action": "That boiler action could not be read. Use the format entity_id/domain.service[/attr:value], e.g. switch.boiler/switch.turn_on — or leave it empty to stay diagnostic-only."
+      "invalid_boiler_action": "That boiler action could not be read. Use the format entity_id/domain.service[/attr:value], e.g. switch.boiler/switch.turn_on — or leave it empty to stay diagnostic-only.",
+      "heat_cool_only": "This device only supports the combined heat/cool (dual-setpoint) mode. Poise writes one setpoint per actuator and can't drive it — pick a device with a single heat or cool target."
     }
   },
   "options": {

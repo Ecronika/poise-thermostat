@@ -96,12 +96,14 @@
     },
     "error": {
       "sensor_on_actuator": "Der Raumsensor sitzt am selben Gerät wie das Thermostat — das ist dessen eingebauter Fühler, der den Heizkörper misst, nicht den Raum. Wähle einen separaten, freistehenden Raumsensor, damit Poise den Raum korrekt lernt.",
-      "invalid_boiler_action": "Diese Kessel-Aktion konnte nicht gelesen werden. Format: entity_id/domain.service[/attr:value], z. B. switch.boiler/switch.turn_on — oder leer lassen für reinen Diagnosebetrieb."
+      "invalid_boiler_action": "Diese Kessel-Aktion konnte nicht gelesen werden. Format: entity_id/domain.service[/attr:value], z. B. switch.boiler/switch.turn_on — oder leer lassen für reinen Diagnosebetrieb.",
+      "heat_cool_only": "Dieses Gerät unterstützt nur den kombinierten Heiz-/Kühl-Modus (Dual-Sollwert). Poise schreibt einen Sollwert pro Aktor und kann es nicht steuern — wähle ein Gerät mit einzelnem Heiz- oder Kühl-Ziel."
     },
     "abort": {
       "already_configured": "Dieses Thermostat ist bereits konfiguriert.",
       "reconfigure_successful": "Poise wurde aktualisiert.",
-      "actuator_in_use": "Dieses Thermostat wird bereits von der Poise-Zone „{zone}“ gesteuert. Jedes Thermostat kann nur zu einer Zone gehören."
+      "actuator_in_use": "Dieses Thermostat wird bereits von der Poise-Zone „{zone}“ gesteuert. Jedes Thermostat kann nur zu einer Zone gehören.",
+      "imperial_not_supported": "Poise benötigt ein metrisches (°C) Home Assistant. Imperiale/°F-Systeme werden nicht unterstützt — der Regelpfad ist ausschließlich °C."
     }
   },
   "entity": {
