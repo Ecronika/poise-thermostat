@@ -125,6 +125,7 @@ from .const import (
     DOMAIN,
     EKF_SAVE_EVERY_TICKS,
     ENTRY_TYPE_SYSTEM,
+    EXTERNAL_FEED_KEEPALIVE_S,
     FORECAST_TTL_S,
     FROST_FLOOR_C,
     LOW_BATTERY_PCT,
@@ -183,6 +184,7 @@ from .control.scoring_expectation import model_expected_minutes
 from .control.tick_budget import TickBudget
 from .control.tick_resolve import (
     cool_drive_signal,
+    external_feed_due,
     frost_rescue_target,
     heat_drive_signal,
     idle_park,
@@ -323,6 +325,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._has_actuated = False
         self._last_sp_write_ts: float | None = None  # ADR-0052 §4 nudge throttle
         self._last_fed: float | None = None
+        self._last_fed_ts: float = 0.0  # P2-2 external-feed keep-alive (monotonic)
         self._dirty = False  # override/enabled/mode changed -> persist next save
         self._store = PoiseStore(hass, entry.entry_id)
         self._failure = HeatingFailureDetector()
@@ -2685,8 +2688,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                         else room,
                         1,
                     )
-                    if should_write(
-                        self._last_fed, fed, mode_changed=False, deadband=0.1
+                    if external_feed_due(
+                        self._last_fed,
+                        fed,
+                        last_fed_ts=self._last_fed_ts,
+                        now=now,
+                        keepalive_s=EXTERNAL_FEED_KEEPALIVE_S,
+                        deadband=0.1,
                     ):
                         try:
                             await self.hass.services.async_call(
@@ -2696,6 +2704,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                                 blocking=False,
                             )
                             self._last_fed = fed
+                            self._last_fed_ts = now
                         except Exception:  # noqa: BLE001 - feed is best-effort
                             _LOGGER.exception(
                                 "Poise: external-temp write failed for %s", ext_num

@@ -27,6 +27,12 @@ BANGBANG_HYSTERESIS_C: Final = 0.3
 # mode change — spares battery/Zigbee TRVs from per-tick traffic (ADR-0012).
 WRITE_DEADBAND_C: Final = 0.2
 
+# P2-2: re-push the room temperature to a TRV external-temperature input at least
+# this often, even when the value is unchanged. Some TRVs time out an external
+# input and silently fall back to their own (mounted) sensor, so a stable room
+# would otherwise let the feed go stale. 0 disables the time-based re-push.
+EXTERNAL_FEED_KEEPALIVE_S: Final = 600.0
+
 # Thermal model defaults (ADR-0009; ~6.7 h time constant, moderate residential room)
 DEFAULT_ALPHA_PER_S: Final = 0.15 / 3600.0
 DEFAULT_FULL_POWER_RISE_C: Final = 20.0
