@@ -38,6 +38,7 @@ from custom_components.poise.const import (
     CONF_WINDOW_SENSOR,
     DOMAIN,
 )
+from custom_components.poise.control.window_auto import WindowAutoState
 
 ROOM_DATA: dict[str, Any] = {
     CONF_NAME: "Test Room",
@@ -139,3 +140,38 @@ async def test_unavailable_sensor_raises_issue_and_falls_back_to_slope(
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+
+
+async def test_recovered_sensor_clears_a_latched_auto_open(
+    hass: HomeAssistant,
+) -> None:
+    """F4b follow-up: an ``open=True`` latched by the slope detector during a
+    PRIOR sensor dropout (the §5 failsafe) must not survive the sensor coming
+    back healthy -- ``_observe_window_auto`` stops stepping once a configured
+    sensor reports again, so ``step_window_auto``'s own anti-stick timer never
+    gets another chance to fire; left alone, ``effective_window_open``'s OR
+    would pin the room "window open" forever even though the real, healthy
+    sensor correctly reports closed."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass, room=18.0, sp=20.0, window_state="off")
+    entry = await _setup(hass)
+    coord: Any = entry.runtime_data
+
+    # simulate a slope-detected "open" latched while the sensor was previously
+    # unavailable (rather than relying on many ticks of a real temperature
+    # drop to trigger it organically).
+    coord._window_auto = WindowAutoState(
+        ema_slope=10.0, n_points=5, open=True, minutes_open=12.0
+    )
+
+    # the sensor is healthy and reports closed.
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    assert coord.data is not None
+    assert coord.data["window_open"] is False, (
+        "a stale auto-detected open must not outlive a healthy, closed sensor"
+    )
+    assert coord._window_auto.open is False
+    assert coord.data["window_auto_detected"] is False

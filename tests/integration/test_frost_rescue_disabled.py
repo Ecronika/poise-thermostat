@@ -168,3 +168,37 @@ async def test_disabled_zone_shadow_does_not_crash(
     # placeholder instead of a real resolver verdict.
     assert data.get("multi_reason") != "shadow_error"
     assert "shadow evaluation failed" not in caplog.text
+
+
+async def test_disabled_zone_does_not_spam_an_offline_actuator(
+    hass: HomeAssistant,
+) -> None:
+    """Review F2 follow-up: ``frost_rescue_target`` treats "unavailable" as
+    "inactive" on purpose (an off/unknown/unavailable device below the floor
+    all legitimately need the rescue floor) -- but that meant a genuinely
+    offline actuator (state == "unavailable") got a real rescue write
+    dispatched into the void on EVERY tick, unlike the enabled-branch setpoint
+    write, which is gated on ``_actuator_online``. A disabled zone with a dead
+    actuator must not be written to at all.
+    """
+    _actuator(hass, state="off", sp=5.0, modes=["heat", "off"])
+    entry = await _setup(hass)
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
+    coord: Any = entry.runtime_data
+
+    # the actuator drops off the network entirely.
+    hass.states.async_set("climate.trv", "unavailable", {})
+
+    coord.set_enabled(False)
+    for _ in range(3):
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+
+    assert not set_temp, (
+        f"a dead actuator must not be written to: {[c.data for c in set_temp]}"
+    )
+    assert not set_mode, (
+        f"a dead actuator must not get a mode nudge either: "
+        f"{[c.data for c in set_mode]}"
+    )
