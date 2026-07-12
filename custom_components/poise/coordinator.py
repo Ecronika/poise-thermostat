@@ -2623,6 +2623,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
             if (
                 _actuator_online
+                # P2-3: while the compressor guard holds a pending mode switch,
+                # defer the *new regime's* setpoint. Writing it now would push a
+                # cool setpoint into a device still in heat (or vice versa); we
+                # hold the old regime until the guard clears, then the atomic
+                # write (mode carried in set_temperature) flips both together.
+                and not _mode_nudge_blocked
                 and not _reg_throttled
                 and should_write(
                     actual_sp,
@@ -2635,7 +2641,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     actuator_id=self._actuator,
                     path=ActuatorPath.SETPOINT,
                     value=target,
-                    hvac_mode=final_mode,
+                    # P2-3: carry the *device* mode (not the comfort final_mode)
+                    # so service_call_for can switch mode+setpoint atomically.
+                    hvac_mode=desired_hvac,
                     reason="tick",
                 )
                 try:

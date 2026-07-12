@@ -41,6 +41,9 @@ class PoiseWindowBypassSwitch(CoordinatorEntity[PoiseCoordinator], SwitchEntity)
 
     _attr_has_entity_name = True
     _attr_translation_key = "window_bypass"
+    # P2-9: the bypass stays enabled by default (unlike the diagnostic sensors) —
+    # it is the user-facing escape hatch, so a fresh install shows it.
+    _attr_entity_registry_enabled_default = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:window-open-variant"
 

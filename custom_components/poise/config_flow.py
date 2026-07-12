@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.components.climate import HVACMode
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -21,6 +22,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
+from homeassistant.util.unit_system import US_CUSTOMARY_UNITS
 
 from .adaptive_cool import adaptive_cool_mode
 from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
@@ -776,6 +778,24 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
     )
 
 
+def _heat_cool_only(hass: HomeAssistant, actuator: str) -> bool:
+    """P2-4: True when the actuator can only condition via ``heat_cool`` (dual
+    target_temp_high/low) and offers no single-target ``heat`` or ``cool`` mode.
+
+    Poise writes one ``temperature`` per actuator, so such a device rejects the
+    call and can't be driven. If ``hvac_modes`` is missing (the actuator is
+    unavailable at validation time) return False so the flow isn't blocked.
+    """
+    state = hass.states.get(actuator)
+    modes = state.attributes.get("hvac_modes") if state is not None else None
+    if not modes:
+        return False
+    mode_set = set(modes)
+    return HVACMode.HEAT_COOL in mode_set and not (
+        {HVACMode.HEAT, HVACMode.COOL} & mode_set
+    )
+
+
 def _validate_boiler_actions(user_input: Mapping[str, Any]) -> dict[str, str]:
     """Reject a boiler on/off action that doesn't parse (F11).
 
@@ -817,6 +837,10 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        # P1-2: Poise's control path is Celsius-only — reject imperial/°F Home
+        # Assistant installs up front rather than silently mis-controlling.
+        if self.hass.config.units is US_CUSTOMARY_UNITS:
+            return self.async_abort(reason="imperial_not_supported")
         # AR-30: offer the singleton system hub only once at least one room entry
         # exists — a hub with no zones to aggregate has nothing to do, so a fresh
         # install starts with just "room" (system appears on a later add).
@@ -835,6 +859,10 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             data = flatten_sections(user_input, ("accuracy",))
             act = data[CONF_ACTUATOR]
             reg = er.async_get(self.hass)
+            # P2-4: reject a heat_cool-only actuator (dual setpoint) — Poise writes
+            # a single ``temperature`` and can't drive it.
+            if _heat_cool_only(self.hass, act):
+                errors[CONF_ACTUATOR] = "heat_cool_only"
             # (b) the room sensor must be free-standing — not the actuator's own
             # built-in sensor (same device), or the model learns the wrong room.
             te = reg.async_get(data[CONF_TEMP_SENSOR])
@@ -880,6 +908,10 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
+        # P1-2: same Celsius-only gate on reconfigure — an entry can't be
+        # reconfigured into an imperial/°F system either.
+        if self.hass.config.units is US_CUSTOMARY_UNITS:
+            return self.async_abort(reason="imperial_not_supported")
         entry = self._get_reconfigure_entry()
         is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
         errors: dict[str, str] = {}
@@ -921,6 +953,10 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             ae = reg.async_get(flat[CONF_ACTUATOR])
             if te and ae and te.device_id and te.device_id == ae.device_id:
                 errors[CONF_TEMP_SENSOR] = "sensor_on_actuator"
+            # P2-4: reject a heat_cool-only actuator (dual setpoint) — mirrors
+            # async_step_room; Poise writes a single ``temperature``.
+            if _heat_cool_only(self.hass, flat[CONF_ACTUATOR]):
+                errors[CONF_ACTUATOR] = "heat_cool_only"
             if not errors:
                 # F5: reuse the hub-existence captured when the form was RENDERED so
                 # a hub added/removed between render and submit can't flip which

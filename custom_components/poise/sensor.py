@@ -59,6 +59,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="t_rm",
         translation_key="t_rm",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=_TEMP,
         state_class=_MEAS,
@@ -69,6 +70,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="mrt",
         translation_key="mrt",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=_TEMP,
         state_class=_MEAS,
@@ -89,6 +91,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="q_solar",
         translation_key="q_solar",
+        entity_registry_enabled_default=False,
         state_class=_MEAS,
         entity_category=_DIAG,
         suggested_display_precision=2,
@@ -97,6 +100,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="beta_s",
         translation_key="beta_s",
+        entity_registry_enabled_default=False,
         state_class=_MEAS,
         entity_category=_DIAG,
         suggested_display_precision=2,
@@ -105,6 +109,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="tau_hours",
         translation_key="tau_hours",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=UnitOfTime.HOURS,
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -123,6 +128,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="identification_progress",
         translation_key="identification_progress",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=PERCENTAGE,
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -141,6 +147,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="mpc_power",
         translation_key="mpc_power",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=PERCENTAGE,
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -150,6 +157,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="mpc_weight",
         translation_key="mpc_weight",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=PERCENTAGE,
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -163,6 +171,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="ca_deviation_k",
         translation_key="ca_deviation_k",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=UnitOfTemperature.KELVIN,
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -172,6 +181,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="ca_cycles_per_h",
         translation_key="ca_cycles_per_h",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement="/h",
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -181,6 +191,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="ca_time_in_band",
         translation_key="ca_time_in_band",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement=PERCENTAGE,
         state_class=_MEAS,
         entity_category=_DIAG,
@@ -192,6 +203,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="compressor_guard_blocked",
         translation_key="compressor_guard_blocked",
+        entity_registry_enabled_default=False,
         state_class=_MEAS,
         entity_category=_DIAG,
         suggested_display_precision=0,
@@ -201,6 +213,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
     PoiseSensorDescription(
         key="tick_duration_ms",
         translation_key="tick_duration_ms",
+        entity_registry_enabled_default=False,
         native_unit_of_measurement="ms",
         state_class=_MEAS,
         entity_category=_DIAG,
