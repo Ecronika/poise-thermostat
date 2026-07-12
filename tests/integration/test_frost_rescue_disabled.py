@@ -143,3 +143,28 @@ async def test_disabled_cool_only_device_left_alone(hass: HomeAssistant) -> None
     await _disable_and_tick(hass, entry)
 
     assert len(set_temp) == before_t, "a cool-only device has no frost duty"
+
+
+async def test_disabled_zone_shadow_does_not_crash(
+    hass: HomeAssistant, caplog: Any
+) -> None:
+    """Review F1: a disabled zone must not raise UnboundLocalError in the
+    unconditional shadow block (final_mode / _guard_pol / _guard_block were only
+    defined inside ``if self._enabled:``) — that crashed every tick, was swallowed
+    by the shadow block's broad except, and silently froze the wall-clock
+    compressor-lifecycle tracking for as long as the zone stayed disabled.
+    """
+    _actuator(hass, state="off", sp=5.0, modes=["heat", "cool", "off"])
+    entry = await _setup(hass)
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    coord: Any = entry.runtime_data
+
+    await _disable_and_tick(hass, entry)
+
+    assert coord.last_update_success is True
+    data = coord.data or {}
+    # A crash in the shadow block leaves this stuck at the neutral "shadow_error"
+    # placeholder instead of a real resolver verdict.
+    assert data.get("multi_reason") != "shadow_error"
+    assert "shadow evaluation failed" not in caplog.text
