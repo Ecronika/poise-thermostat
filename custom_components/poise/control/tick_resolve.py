@@ -72,6 +72,7 @@ def resolve_write_target(
     frost_floor: float,
     mold_min: float | None,
     device_max: float,
+    device_min: float | None = None,
 ) -> WriteTarget:
     """Final write target: window/override/comfort → setpoint + mode, then the
     unconditional norm envelope (ASR cap + frost/mould floor, skipped when
@@ -81,6 +82,11 @@ def resolve_write_target(
     the comfort band ``[heat_sp, cool_sp]`` (review V10) — true only when the
     override lies outside it. Inside the comfort window the band is tight so a
     far-off manual value is capped without feedback; the flag surfaces that.
+
+    ``device_min`` (the actuator's own ``min_temp``, when known) is a physical
+    SAFETY floor: a device silently holds its minimum, so writing below it makes
+    the echo-compare rewrite every tick (review P3-1). The floor is clamped up to
+    it in both heating and cooling.
     """
     floor = max(frost_floor, mold_min if mold_min is not None else frost_floor)
     override_clamped = False
@@ -111,6 +117,15 @@ def resolve_write_target(
         )
         floors.append(
             Constraint(floor, "norm_floor", ConstraintKind.FLOOR, Precedence.HEALTH)
+        )
+    if device_min is not None:
+        # P3-1: the actuator holds its own min_temp regardless — writing below it
+        # just thrashes the echo-compare each tick. Clamp up to it as a physical
+        # SAFETY floor, in both heating and cooling.
+        floors.append(
+            Constraint(
+                device_min, "device_min", ConstraintKind.FLOOR, Precedence.SAFETY
+            )
         )
     res = resolve_constraints(target, floors + caps)
     norm_binding = (
