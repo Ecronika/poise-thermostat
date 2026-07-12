@@ -215,7 +215,7 @@
     },
     "frost_zone_not_boiler": {
       "title": "Poise: frierender Raum steuert den geteilten Kessel nicht",
-      "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere in seinen Optionen \"Diese Zone steuert den Kessel\" (ein reiner Kühl-Raum kann ignoriert werden). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
+      "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere unter Reconfigure → Anlagen-Anbindung (Mehrzonen) die Option 'Dieser Raum darf den gemeinsamen Kessel anfordern' (ein reiner Kühlraum kann aus bleiben). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
     },
     "hub_frost_zone_unavailable": {
       "title": "Poise: Raumsensor verloren — Heizen im Frostschutz",
@@ -240,6 +240,10 @@
     "external_temp_implausible": {
       "title": "Poise: Externer Temperatureingang unplausibel",
       "description": "Der konfigurierte externe Temperatureingang für die Zone `{name}` (`{entity}`) sieht nicht wie ein Temperatureingang aus. Poise hat aufgehört, ihn zu beliefern, um zu vermeiden, dass Raumtemperaturen in eine nicht zugehörige `number`-Entität geschrieben werden — wähle beim Neukonfigurieren der Zone eine andere Entität."
+    },
+    "heating_failure": {
+      "title": "Heizausfall — {zone}",
+      "description": "{zone} wird trotz Heizanforderung nicht wärmer. Prüfe das TRV/Ventil, den Heizkörper oder den Kessel. Poise fordert weiter Wärme an; dieser Hinweis verschwindet automatisch, sobald der Raum wärmer wird."
     }
   },
   "options": {
