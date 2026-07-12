@@ -160,6 +160,32 @@ def should_write(
     return round(abs(target - actual), 3) >= deadband
 
 
+def external_feed_due(
+    last_fed: float | None,
+    fed: float,
+    *,
+    last_fed_ts: float,
+    now: float,
+    keepalive_s: float,
+    deadband: float = 0.1,
+) -> bool:
+    """Whether to (re)push the room temperature to a TRV external-temp input (P2-2).
+
+    Pushes when the fed value has moved by at least ``deadband`` K (the normal
+    trigger, via :func:`should_write`) OR when ``keepalive_s`` has elapsed since
+    the last push. The keep-alive matters because some TRVs time out an external-
+    temperature input and silently fall back to their internal (mounted) sensor,
+    so a perfectly stable room would otherwise let the feed go stale. ``now`` and
+    ``last_fed_ts`` share the caller's monotonic clock; a non-positive
+    ``keepalive_s`` disables the time-based re-push (value-move writes still fire).
+    """
+    if should_write(last_fed, fed, mode_changed=False, deadband=deadband):
+        return True
+    if keepalive_s > 0.0:
+        return (now - last_fed_ts) >= keepalive_s
+    return False
+
+
 def snap_to_step(value: float, step: float) -> float:
     """Round ``value`` to the actuator's setpoint resolution.
 
