@@ -1,6 +1,6 @@
 # ADR-0029: Generische Geräte-Quirks (devices/model_fixes)
 
-**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** ADR-0015 (Capability-Matrix), ADR-0012 (Repair-Issues), Charta „Allgemeingültigkeit" (keine modellspezifischen Sonderwege), Phase 3 · **Verifizierung:** Z2M-Geräteseite SRTS-A01 (vollständige Exposes), Live-29-Entitäten
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-20 · **Bezug:** ADR-0015 (Capability-Matrix), ADR-0012 (Repair-Issues), Charta „Allgemeingültigkeit" (keine modellspezifischen Sonderwege), Phase 3 · **Verifizierung:** Z2M-Geräteseite SRTS-A01 (vollständige Exposes), Live-29-Entitäten
 
 ## Kontext
 Die Aqara E1 (SRTS-A01) exponiert **keine** Ventilposition/`pi_heating_demand` (Firmware-Limit, code-verifiziert) — direkte Duty-Modulation bleibt unmöglich. Sie exponiert aber nützliche Funktionen, die der Regler beachten/nutzen sollte: einen **geräteinternen Wochenplan** (kämpft gegen Poise), eine **valve_alarm/Fault**-Meldung, **Batterie**, und einen **external_temperature_input**. Die Charta verbietet modellspezifische Sonderlösungen — alles muss **generisch** (capability-erkannt) sein.

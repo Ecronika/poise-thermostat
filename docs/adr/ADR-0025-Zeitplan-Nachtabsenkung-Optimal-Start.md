@@ -1,6 +1,6 @@
 # ADR-0025: Komfort-Zeitplan, Nachtabsenkung & Optimal-Start
 
-**Status:** Implementiert · **Datum:** 2026-06-19 · **Bezug:** ADR-0002/0009/0024 (EKF), ADR-0003 (Optimal-Stop), ADR-0023 (Dual-Setpoint) · **Verifizierung:** eigene EKF-Physik (`thermal_ekf.py`), Norm EN 16798-1; Wettbewerber-Optimal-Start **gegen realen Code verifiziert** (RoomMind/ThermoSmart/Versatile/Better Thermostat/Adaptive Climate/Vesta + eigenes ha-preheat, s. u.)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-19 · **Bezug:** ADR-0002/0009/0024 (EKF), ADR-0003 (Optimal-Stop), ADR-0023 (Dual-Setpoint) · **Verifizierung:** eigene EKF-Physik (`thermal_ekf.py`), Norm EN 16798-1; Wettbewerber-Optimal-Start **gegen realen Code verifiziert** (RoomMind/ThermoSmart/Versatile/Better Thermostat/Adaptive Climate/Vesta + eigenes ha-preheat, s. u.)
 
 ## Kontext
 Nach dem Hardware-Limit der Aqara-E1-TRVs (keine Ventilposition → keine Duty-Modulation; ADR-Notiz Livetest v0.7.1) bleibt der wirksamste Komforthebel die **zeitliche** Steuerung: Nachtabsenkung (Energie sparen, wenn niemand Komfort braucht) und **Optimal-Start** (rechtzeitig vorheizen, damit der Raum *zur gewünschten Zeit* warm ist, statt zu einer festen Uhrzeit erst loszuheizen). Beides fehlte Poise; der EKF liefert seit ADR-0024 eine ehrliche Aufheizphysik, die genau das ermöglicht.

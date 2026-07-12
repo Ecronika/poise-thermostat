@@ -1,6 +1,6 @@
 # ADR-0033: MPC Live-Verdrahtung — Stufe 1 (Shadow)
 
-**Status:** In Arbeit (70 %) · **Datum:** 2026-06-21 · **Bezug:** ADR-0001 (MPC), ADR-0009 (Gate), ADR-0026 (Schatten-Prinzip), ADR-0032 (Closed-Loop-Validierung) · **Verifizierung:** `control/mpc_shadow.py` + `tests/test_mpc_shadow.py`; volles Gate grün
+**Status:** In Arbeit (70 %) · **Wirkung:** Live-D · **Datum:** 2026-06-21 · **Bezug:** ADR-0001 (MPC), ADR-0009 (Gate), ADR-0026 (Schatten-Prinzip), ADR-0032 (Closed-Loop-Validierung) · **Verifizierung:** `control/mpc_shadow.py` + `tests/test_mpc_shadow.py`; volles Gate grün
 
 ## Kontext
 Der prädiktive Kern ist im Harness end-to-end validiert (ADR-0032), war im Live-Coordinator aber gar nicht eingebunden: Poise schreibt heute nur den normgeklemmten Komfort-Sollwert; der MPC (`control/mpc.py`/`mpc_controller.py`) lief nie gegen den **echten** EKF-State. Der Live-Pfad (`coordinator._run_once` → `comfort_decide` → `resolve_write_target`) ist getrennt vom Harness-Pfad (`pipeline.run_tick` + Controller mit trivialem COLD-State).

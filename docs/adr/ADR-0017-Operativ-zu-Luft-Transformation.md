@@ -1,6 +1,6 @@
 # ADR-0017: Operativ→Luft-Transformation
 
-**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E18, K4 · **Verifizierung:** Code-Review (kein echtes Feld-Vorbild — Befund)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-18 · **Bezug:** E18, K4 · **Verifizierung:** Code-Review (kein echtes Feld-Vorbild — Befund)
 
 ## Kontext
 Komfortband/Sollwert sind in Operativtemperatur formuliert; Wärmemodell und Aktor kennen nur Lufttemperatur (K4). Offen: Glättung des (MRT−Luft)-Offsets und Verhalten bei fehlendem MRT.

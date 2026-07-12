@@ -1,6 +1,6 @@
 # ADR-0048: Abgrenzung Luftqualität & Hygiene (Nicht-Ziele)
 
-**Status:** Implementiert · **Datum:** 2026-06-29 (umgesetzt 2026-06-30) · **Bezug:** ADR-0027 (Norm-Compliance), ADR-0046 (Achsen/Multi-Aktor), ADR-0010 (Schimmel-Schutz), ADR-0049 (CO₂-Anzeige) · **Verifizierung:** Wettbewerber-Scoping (VTherm, Better Thermostat, dual_smart_thermostat, Adaptive Climate, generic_thermostat, SmartIR) + GitHub-/Forum-Sentiment + Normabgrenzung (VDI 6022, DIN 4108-2, EN ISO 13788, EN 16798-1, ASR A3.5)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-29 (umgesetzt 2026-06-30) · **Bezug:** ADR-0027 (Norm-Compliance), ADR-0046 (Achsen/Multi-Aktor), ADR-0010 (Schimmel-Schutz), ADR-0049 (CO₂-Anzeige) · **Verifizierung:** Wettbewerber-Scoping (VTherm, Better Thermostat, dual_smart_thermostat, Adaptive Climate, generic_thermostat, SmartIR) + GitHub-/Forum-Sentiment + Normabgrenzung (VDI 6022, DIN 4108-2, EN ISO 13788, EN 16798-1, ASR A3.5)
 
 ## Kontext
 Poise ist ein **thermisches Komfort-/Setpoint-System** (norm-informierte Temperatur-, begrenzt Feuchte-Guardrails). Mit den geplanten Klima-/Büro-Funktionen (CO₂-Anzeige ADR-0049, Dry-Pfad ADR-0050) wächst die Versuchung, **Raumluftqualität, Lüftungsbemessung und Anlagenhygiene** zu beanspruchen — Felder, die Poise weder physikalisch noch sicher bedienen kann. Drei Altlasten/Anhänge laden zu Fehlversprechen ein:

@@ -1,6 +1,6 @@
 # ADR-0061: Kühlkante — fest bei Anwesenheit, adaptiv nur free-running
 
-**Status:** Implementiert (v0.165.0) · **Datum:** 2026-07-12 · **Bezug:** ADR-0023 (Dual-Setpoint + adaptive Kante §1), ADR-0051 (Hitzetag-Kühlband), ADR-0058 (Presence/Occupancy), ADR-0027 (Norm-Grenzen), ADR-0050 (Feuchte/Dry) · **Grundlage:** EN 16798-1 (adaptives Modell nur ohne mechanische Kühlung), ASHRAE 55, ASR A3.5, Live-Befund Büro Technik 2026-07-12 + Nutzererwartungs-/Norm-Recherche
+**Status:** Implementiert (v0.165.0) · **Wirkung:** Live-A · **Datum:** 2026-07-12 · **Bezug:** ADR-0023 (Dual-Setpoint + adaptive Kante §1), ADR-0051 (Hitzetag-Kühlband), ADR-0058 (Presence/Occupancy), ADR-0027 (Norm-Grenzen), ADR-0050 (Feuchte/Dry) · **Grundlage:** EN 16798-1 (adaptives Modell nur ohne mechanische Kühlung), ASHRAE 55, ASR A3.5, Live-Befund Büro Technik 2026-07-12 + Nutzererwartungs-/Norm-Recherche
 
 ## Kontext
 

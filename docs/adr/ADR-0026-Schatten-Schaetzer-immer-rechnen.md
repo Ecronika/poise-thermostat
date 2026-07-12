@@ -1,6 +1,6 @@
 # ADR-0026: Schatten-Schätzer — intern immer rechnen, extern nur Anzeige-/Verwendungsvorrang
 
-**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** ADR-0007 (Persistenz), ADR-0010 (Solar), ADR-0017 (Operativ/MRT), Phase 1/2 (Fahrplan), v0.9.0 (T_rm) · **Verifizierung:** Coordinator-Code (`coordinator.py`), `running_mean.py`
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-20 · **Bezug:** ADR-0007 (Persistenz), ADR-0010 (Solar), ADR-0017 (Operativ/MRT), Phase 1/2 (Fahrplan), v0.9.0 (T_rm) · **Verifizierung:** Coordinator-Code (`coordinator.py`), `running_mean.py`
 
 ## Kontext
 Optionale Eingangssensoren (T_rm, MRT, Solar …) können nachträglich entfernt werden. Wenn der zugehörige **interne Schätzer nur dann läuft, wenn der externe Sensor fehlt**, startet die Integration beim Entfernen **kalt** (keine Historie, schlechte erste Werte). Das ist vermeidbar.

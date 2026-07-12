@@ -16,6 +16,21 @@ Der Status jedes ADR wird **gegen den Code** bestimmt — nicht nur gegen die ge
 
 Reine Prozess-/Meta-Records (z. B. ADR-0000) tragen **Gültig**. Der frühere reine Entscheidungsstatus „akzeptiert" wird durch die umsetzungsbezogenen Stufen oben ersetzt. Der Status in der Tabelle entspricht dem Status-Header im jeweiligen ADR.
 
+### Wirkungs-Konventionen (Aktuierungswirkung)
+
+Zusätzlich zum **Status** (*wie weit umgesetzt*) trägt jeder ADR eine **Wirkung** (*ob und wie er den Aktor bewegt*) — die beiden Dimensionen sind **orthogonal**. Die Wirkung steht auf der Status-Zeile direkt hinter dem Status-Token (`**Status:** … · **Wirkung:** <Token> · **Datum:** …`) und ist genau **ein** Token aus:
+
+- **Live-A** — aktuiert im **Live-Schreibpfad** (bewegt Aktor/Sollwert echt).
+- **Live-D** — läuft jeden Tick, aber rein **diagnostisch** (berechnet/exponiert, kein Write).
+- **Shadow** — berechnet, schreibt **nie** (gated Schatten-Pfad, ADR-0026-Politik).
+- **teilw.** — **teilweise** verdrahtet (einzelne Stufen live, andere Shadow/offen).
+- **Harness** — nur **Test-/Harness-Pfad**, nicht im Produktions-Tick.
+- **Doku** — reine **Dokumentations-/Abgrenzungs-/Entscheidungs**-Entscheidung ohne Laufzeit-Code.
+- **Gültig** — **Meta-/Prozess**-Record (kein Aktuierungsbezug).
+- **n.a.** — **nicht anwendbar** / noch nicht gebaut.
+
+Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein `**Wirkung:**`-Feld mit einem Token aus dieser Menge trägt.
+
 | ADR | Titel | Status |
 |---|---|---|
 | [0000](ADR-0000-Format-und-Prozess.md) | ADR-Format und -Prozess | Gültig |

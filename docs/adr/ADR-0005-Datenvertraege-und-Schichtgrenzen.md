@@ -1,6 +1,6 @@
 # ADR-0005: Datenverträge & Schichtgrenzen
 
-**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E1, E2 · **Verifizierung:** Code-Review RoomMind/Versatile/ThermoSmart/Vesta (Thema A)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-18 · **Bezug:** E1, E2 · **Verifizierung:** Code-Review RoomMind/Versatile/ThermoSmart/Vesta (Thema A)
 
 ## Kontext
 Der Strukturplan reicht typisierte Objekte durch die Pipeline (`Reading → ThermalState → ComfortCorridor → ControlRequest → ActuatorCommand`). Offen ist, wie diese Verträge und die Modul-Abhängigkeiten technisch umzusetzen sind.

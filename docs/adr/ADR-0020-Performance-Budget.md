@@ -1,6 +1,6 @@
 # ADR-0020: Performance-Budget & Skalierung
 
-**Status:** In Arbeit (80 %) · **Datum:** 2026-06-18 · **Bezug:** E28 · **Verifizierung:** Code-Review RoomMind/BT/ThermoSmart/Vesta/Versatile (Thema M)
+**Status:** In Arbeit (80 %) · **Wirkung:** Live-D · **Datum:** 2026-06-18 · **Bezug:** E28 · **Verifizierung:** Code-Review RoomMind/BT/ThermoSmart/Vesta/Versatile (Thema M)
 
 ## Kontext
 Der MPC-Pfad (ADR-0001) ist die teuerste Komponente und läuft je Zone. Offen: Tick-Budget, Caching, Skalierungsstrategie.

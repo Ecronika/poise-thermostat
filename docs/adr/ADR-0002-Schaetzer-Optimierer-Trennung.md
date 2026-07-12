@@ -1,6 +1,6 @@
 # ADR-0002: Ein Schätzer (EKF) speist einen reinen Optimierer
 
-**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** K2, E1 · **Verifizierung:** V1
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-18 · **Bezug:** K2, E1 · **Verifizierung:** V1
 
 ## Kontext
 Beim Zusammenführen bringen RoomMind (6-State-EKF) **und** Better Thermostat (eigenes RC-Modell + skalarer Kalman) je ein eigenes Wärmemodell mit. Zwei Filter, die dieselbe Zeitkonstante τ/denselben Verlust schätzen, würden divergieren — die in der Konflikt-Analyse als **K2** beschriebene Kernkonfliktklasse („welches Modell besitzt die Wahrheit?").

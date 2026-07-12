@@ -1,6 +1,6 @@
 # ADR-0058: Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco)
 
-**Status:** In Arbeit (70 %) · **Datum:** 2026-07-05 · **Bezug:** ADR-0023 (Dual-Setpoint/Setback als `occupied`-Konsument, V3), ADR-0025 (Zeitplan/Optimal-Start), ADR-0042 (Preset/Override, Away), ADR-0052 (Aktor-Dynamikprofil), ADR-0053 (Lüfterumwälzung — `occupied`-Vorbedingung), ADR-0048 (Nicht-Ziele: kein Ortungsdienst), ADR-0008 (Config) · **Verifizierung:** Wettbewerb (Versatile Thermostat Presence/Motion nativ; Better Thermostat keine; tado Auto-Assist als v2-Referenz); EN 16798-1 (Bänder gelten für die Nutzungszeit); PIR/mmWave-Sensorik-Asymmetrie
+**Status:** In Arbeit (70 %) · **Wirkung:** Live-A · **Datum:** 2026-07-05 · **Bezug:** ADR-0023 (Dual-Setpoint/Setback als `occupied`-Konsument, V3), ADR-0025 (Zeitplan/Optimal-Start), ADR-0042 (Preset/Override, Away), ADR-0052 (Aktor-Dynamikprofil), ADR-0053 (Lüfterumwälzung — `occupied`-Vorbedingung), ADR-0048 (Nicht-Ziele: kein Ortungsdienst), ADR-0008 (Config) · **Verifizierung:** Wettbewerb (Versatile Thermostat Presence/Motion nativ; Better Thermostat keine; tado Auto-Assist als v2-Referenz); EN 16798-1 (Bänder gelten für die Nutzungszeit); PIR/mmWave-Sensorik-Asymmetrie
 
 ## Umsetzungsstand
 **v0.150.0 — Glue gelandet (live).** Pure `comfort/presence.py` (`resolve_presence`

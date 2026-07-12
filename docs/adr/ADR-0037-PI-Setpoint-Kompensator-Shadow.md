@@ -1,6 +1,6 @@
 # ADR-0037: PI-kompensierter Sollwert (Shadow) für setpoint-only-TRVs
 
-**Status:** In Arbeit (65 %) · **Datum:** 2026-06-22 · **Bezug:** ADR-0015 (Aktorpfad PI_SETPOINT), ADR-0026/0033 (Schatten-Prinzip), ADR-0011 (Harness vor Hardware), ADR-0036 (TPI-Shadow, Schwester) · **Verifizierung:** `tests/test_closed_loop.py` (Droop-Reduktion gegen RC-Plant), `tests/test_pi_shadow.py`
+**Status:** In Arbeit (65 %) · **Wirkung:** Live-D · **Datum:** 2026-06-22 · **Bezug:** ADR-0015 (Aktorpfad PI_SETPOINT), ADR-0026/0033 (Schatten-Prinzip), ADR-0011 (Harness vor Hardware), ADR-0036 (TPI-Shadow, Schwester) · **Verifizierung:** `tests/test_closed_loop.py` (Droop-Reduktion gegen RC-Plant), `tests/test_pi_shadow.py`
 
 ## Kontext
 TRVs ohne schreibbares Ventil regeln mit ihrer eigenen Proportionalsteuerung gegen einen Sollwert — und settlen im stationären Zustand **unter** dem Sollwert (Droop). Der gebaute, aber nie verdrahtete `PiCompensator` (`control/pi.py`, Versatile-Methode) schiebt einen kompensierten Sollwert (`kp·err + ki·∫err + k_ext·(room−external)`, Anti-Windup, ±offset_max), der den Droop aufhebt. Mangels Heizbedarf wird im Harness statt am Gerät validiert.

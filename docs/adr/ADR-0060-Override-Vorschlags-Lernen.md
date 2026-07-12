@@ -1,6 +1,6 @@
 # ADR-0060: Override-Vorschlags-Lernen (L2) & Modus-Saison-Hinweis
 
-**Status:** Vorgeschlagen · **Datum:** 2026-07-12 · **Bezug:** ADR-0059 (Override-Lebenszyklus — liefert die L1-Statistik, auf der L2 aufsetzt; dort als „v2" abgegrenzt), ADR-0012 (Repair-Issues / Fix-Flow), ADR-0027 (Norm-Klemme), ADR-0042 (Offset-Modell), ADR-0008 (Config-Reconfigure-Pfad), ADR-0011 (Golden-Replay über Feld-Traces) · **Grundlage:** `docs/Meinungsbild_Manueller-Eingriff-Sollwert-und-Modus.md` (ThermoCoach/Nest-Zweiphasen-Prinzip, verifiziert 2026-07-11)
+**Status:** Vorgeschlagen · **Wirkung:** Doku · **Datum:** 2026-07-12 · **Bezug:** ADR-0059 (Override-Lebenszyklus — liefert die L1-Statistik, auf der L2 aufsetzt; dort als „v2" abgegrenzt), ADR-0012 (Repair-Issues / Fix-Flow), ADR-0027 (Norm-Klemme), ADR-0042 (Offset-Modell), ADR-0008 (Config-Reconfigure-Pfad), ADR-0011 (Golden-Replay über Feld-Traces) · **Grundlage:** `docs/Meinungsbild_Manueller-Eingriff-Sollwert-und-Modus.md` (ThermoCoach/Nest-Zweiphasen-Prinzip, verifiziert 2026-07-11)
 
 > **Warum ein eigener ADR:** ADR-0059 hat den Override-**Lebenszyklus** (Gültigkeit, Rückkehr, Feedback) als v1 vollständig implementiert und die L1-Statistik (beobachten, nicht lernen) bereits mitgeliefert. Der **Vorschlags**-Teil (L2) und der optionale **Saison-Hinweis** wurden dort ausdrücklich als v2 abgegrenzt („die Statistik-/Vorschlagsmechanik erhält bei Umsetzung von L2 einen Nachtrag oder Folge-ADR", ADR-0059 §7). Dieser ADR ist dieser Folge-ADR. Er ändert **nichts** am ausgelieferten v1-Verhalten.
 

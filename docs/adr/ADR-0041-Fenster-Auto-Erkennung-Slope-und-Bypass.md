@@ -1,6 +1,6 @@
 # ADR-0041: Fenster-Auto-Erkennung per Temperatur-Slope + Bypass
 
-**Status:** Implementiert · **Datum:** 2026-06-23 · **Bezug:** ADR-0002/0024 (EKF, Lernpause), ADR-0012 (Fenster-Sicherheit & Degradationsleiter), ADR-0026 (Schatten-Schätzer-Prinzip), ADR-0027/0035 (Norm-Floors & Constraint-Solver), ADR-0011 (Pure-Core/Test-first) · **Grundlage:** `Meinungsbild_Override-und-Fenster-Slope.md` (quellcode- + issue-belegt)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-23 · **Bezug:** ADR-0002/0024 (EKF, Lernpause), ADR-0012 (Fenster-Sicherheit & Degradationsleiter), ADR-0026 (Schatten-Schätzer-Prinzip), ADR-0027/0035 (Norm-Floors & Constraint-Solver), ADR-0011 (Pure-Core/Test-first) · **Grundlage:** `Meinungsbild_Override-und-Fenster-Slope.md` (quellcode- + issue-belegt)
 
 ## Kontext
 Poise pausiert heute nur, wenn ein **Fenstersensor** konfiguriert ist (`_window_open()` im Coordinator). Die meisten Räume haben keinen Kontaktsensor — Stoßlüften bleibt unerkannt, Poise heizt dagegen. Der Coordinator berechnet ohnehin bereits die Raumtemperatur-Rate `rate = (room − prev_room)/dt_h` in °C/h (für `seasonless_rate`). Diese Größe ist die natürliche Eingabe einer slope-basierten Fenstererkennung — keine neue Messung nötig (ADR-0026).

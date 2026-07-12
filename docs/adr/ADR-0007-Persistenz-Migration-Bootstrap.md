@@ -1,6 +1,6 @@
 # ADR-0007: Persistenz, Migration & Bootstrap
 
-**Status:** In Arbeit (75 %) · **Datum:** 2026-06-18 · **Bezug:** E7, E8, K15 · **Verifizierung:** Code-Review RoomMind/BT/Vesta/ThermoSmart/Versatile (Thema C) · **Korrektur (Ist-Stand):** siehe Nachtrag — Throttle als Counter+Dirty (nicht Debounce), Race-Guard als Existenz-Guard (kein `_check_entities_ready`)
+**Status:** In Arbeit (75 %) · **Wirkung:** Live-A · **Datum:** 2026-06-18 · **Bezug:** E7, E8, K15 · **Verifizierung:** Code-Review RoomMind/BT/Vesta/ThermoSmart/Versatile (Thema C) · **Korrektur (Ist-Stand):** siehe Nachtrag — Throttle als Counter+Dirty (nicht Debounce), Race-Guard als Existenz-Guard (kein `_check_entities_ready`)
 
 ## Kontext
 Persistenzverlust bei Reload ist ein dokumentierter Hebel des eigenen Stacks; der Strukturplan verlangt koordinierten Bootstrap vor dem ersten Tick (K15). Offen: Mechanismus, Versionierung/Migration, Restore-Reihenfolge, Speicherhäufigkeit.

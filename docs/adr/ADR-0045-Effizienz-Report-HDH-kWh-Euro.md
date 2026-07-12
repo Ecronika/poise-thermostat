@@ -1,6 +1,6 @@
 # ADR-0045: Effizienz-Report — Heating-Degree-Hours → kWh/€
 
-**Status:** Implementiert · **Datum:** 2026-06-24 (verdrahtet 2026-06-30, v0.97.0) · **Bezug:** ADR-0025 (Setback/Schedule liefert die Einsparung), ADR-0011 (Test-first), ADR-0026 (Schatten-Prinzip) · **Grundlage:** `Konzept_Best-of-Integration.md` Feat 20; Vesta `climate.py`/`sensor.py` (quellcode-verifiziert, `portbusy/ha-vesta`)
+**Status:** Implementiert · **Wirkung:** Live-D · **Datum:** 2026-06-24 (verdrahtet 2026-06-30, v0.97.0) · **Bezug:** ADR-0025 (Setback/Schedule liefert die Einsparung), ADR-0011 (Test-first), ADR-0026 (Schatten-Prinzip) · **Grundlage:** `Konzept_Best-of-Integration.md` Feat 20; Vesta `climate.py`/`sensor.py` (quellcode-verifiziert, `portbusy/ha-vesta`)
 
 ## Kontext
 Eine der 5 echten Konzept-Lücken (Feat 20, ⬜): ein verständlicher €/kWh-Einsparungsreport für Laien (Adoptions-Hebel). **Quellcode-verifiziert (Vesta):** je Minute `ΔT_saved/ΔT_base/60` akkumulieren (`ΔT_base = max(1, comfort−outdoor)`), `saved_fraction = Σ_saved/Σ_eligible_min`, `saved_kWh = saved_fraction · Jahres-kWh/12`, `× Preis = €/Monat`, Monats-Reset, ~11 Sensor-Entities. **Korrekturen am Konzept (am Code geprüft):** *keine* Fraunhofer-kWh/m²-Raten — die Fallbacks sind feste Brüche; Fenster nutzt `comfort−Frostschutz`, nicht den Live-Sollwert. Es ist eine **Schätzung** aus einem konfigurierten Jahresverbrauch, keine kWh-Messung — ehrlich by design.

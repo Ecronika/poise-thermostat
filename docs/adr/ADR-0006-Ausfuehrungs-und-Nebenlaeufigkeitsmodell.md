@@ -1,6 +1,6 @@
 # ADR-0006: Ausführungs- & Nebenläufigkeitsmodell
 
-**Status:** Implementiert · **Datum:** 2026-06-18 · **Bezug:** E4, E6, K13 · **Verifizierung:** Code-Review (Thema B)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-18 · **Bezug:** E4, E6, K13 · **Verifizierung:** Code-Review (Thema B)
 
 ## Kontext
 Der Strukturplan verlangt einen **atomaren** Tick in fester Reihenfolge und definierte Behandlung eventgetriggerter Sofort-Eingriffe (K13). Offen: wie technisch serialisieren, welche Zeitbasis.

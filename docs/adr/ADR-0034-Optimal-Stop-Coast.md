@@ -1,6 +1,6 @@
 # ADR-0034: Optimal-Stop — vorausschauendes Ausrollen (Coast-down)
 
-**Status:** Implementiert · **Datum:** 2026-06-21 · **Bezug:** ADR-0025 (Zeitplan/Optimal-Start), ADR-0003 (Restwärme/Re-Entry-Klasse K5), ADR-0024 (EKF-`identified`), ADR-0032 (Closed-Loop) · **Verifizierung:** eigene EKF-Physik; Coast-Inversion **gegen RC-Plant validiert** (`tests/test_closed_loop.py::test_optimal_stop_coast_matches_plant`)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-21 · **Bezug:** ADR-0025 (Zeitplan/Optimal-Start), ADR-0003 (Restwärme/Re-Entry-Klasse K5), ADR-0024 (EKF-`identified`), ADR-0032 (Closed-Loop) · **Verifizierung:** eigene EKF-Physik; Coast-Inversion **gegen RC-Plant validiert** (`tests/test_closed_loop.py::test_optimal_stop_coast_matches_plant`)
 
 ## Kontext
 Optimal-Start (ADR-0025) heizt vorausschauend zum Komfortbeginn vor. Das symmetrische Gegenstück fehlte: am **Fensterende** weiter auf Komfort zu heizen verschenkt Energie, weil die Wärmemasse den Raum noch trägt. `optimal_stop.residual_fraction` existierte, ist aber ein MPC-**Störterm**, kein schedule-seitiger Ausroll-Entscheider. `ScheduleState` kannte nur die Zeit bis Komfort**beginn**, nicht bis Fenster**ende**.

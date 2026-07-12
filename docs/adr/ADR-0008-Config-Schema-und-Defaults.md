@@ -1,6 +1,6 @@
 # ADR-0008: Config-Schema & Default-Herleitung
 
-**Status:** In Arbeit (45 %) · **Datum:** 2026-06-18 · **Bezug:** E10, E11, G16, G19 · **Verifizierung:** Code-Review Vesta/ThermoSmart/Versatile/RoomMind/BT (Thema D)
+**Status:** In Arbeit (45 %) · **Wirkung:** teilw. · **Datum:** 2026-06-18 · **Bezug:** E10, E11, G16, G19 · **Verifizierung:** Code-Review Vesta/ThermoSmart/Versatile/RoomMind/BT (Thema D)
 
 ## Kontext
 Charta-Ziel ist ein „Zero-Question-Default"-Onboarding mit Progressive Disclosure (G19) und begründeten Defaults (G16/E11). Offen: Flow-Struktur, Auto-Discovery, Vererbung, Default-Herleitung.

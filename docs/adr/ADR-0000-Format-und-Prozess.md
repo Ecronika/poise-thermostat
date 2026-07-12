@@ -1,6 +1,6 @@
 # ADR-0000: ADR-Format und -Prozess
 
-**Status:** Gültig · **Datum:** 2026-06-18 · **Bezug:** Festlegung E27 aus `Offene_Festlegungen_und_Verifizierung.md`
+**Status:** Gültig · **Wirkung:** Gültig · **Datum:** 2026-06-18 · **Bezug:** Festlegung E27 aus `Offene_Festlegungen_und_Verifizierung.md`
 
 ## Kontext
 Das Designpaket (Best-of-Konzept, Charta, Konflikt-Analyse, Strukturplan, Festlegungs-Register) trifft viele Architektur- und Algorithmik-Entscheidungen. Es fehlt ein einheitliches, nachvollziehbares Gefäß, das **je Entscheidung** Kontext, Optionen, Wahl, Begründung, Konsequenzen und **Code-Beleg** festhält und unveränderlich dokumentiert. Das ist Grundsatz G3/G27 (Auditierbarkeit, Determinismus) auf Projektebene.
@@ -9,7 +9,16 @@ Das Designpaket (Best-of-Konzept, Charta, Konflikt-Analyse, Strukturplan, Festle
 Jede nicht-triviale Architektur-/Algorithmik-Entscheidung wird als **Architecture Decision Record (ADR)** im Ordner `docs/adr/` festgehalten, fortlaufend nummeriert (`ADR-NNNN-kurztitel.md`).
 
 **Pflichtfelder je ADR:**
-1. **Status** — `vorgeschlagen` → `akzeptiert` → ggf. `abgelöst durch ADR-XXXX` / `zurückgezogen`
+1. **Status** — `vorgeschlagen` → `akzeptiert` → ggf. `abgelöst durch ADR-XXXX` / `zurückgezogen` (Umsetzungsstufen s. `docs/adr/README.md`)
+1a. **Wirkung** — die **Aktuierungswirkung** des ADR im laufenden System, **orthogonal zum Status** (der Status misst *wie weit umgesetzt*, die Wirkung misst *ob und wie es den Aktor bewegt*). Steht auf der Status-Zeile direkt hinter dem Status-Token (`**Status:** … · **Wirkung:** <Token> · **Datum:** …`). Genau **ein** Token aus:
+   - **Live-A** — aktuiert im Live-Schreibpfad (bewegt den Aktor/Sollwert echt).
+   - **Live-D** — läuft in jedem Tick, aber rein **diagnostisch** (berechnet/exponiert, kein Write).
+   - **Shadow** — berechnet, schreibt **nie** (gated Schatten-Pfad, ADR-0026-Politik).
+   - **teilw.** — teilweise verdrahtet (einzelne Stufen live, andere Shadow/offen).
+   - **Harness** — nur Test-/Harness-Pfad, nicht im Produktions-Tick.
+   - **Doku** — reine Dokumentations-/Abgrenzungs-/Entscheidungs-Entscheidung ohne Laufzeit-Code.
+   - **Gültig** — Meta-/Prozess-Record (kein Aktuierungsbezug, z. B. dieser ADR).
+   - **n.a.** — nicht anwendbar / noch nicht gebaut.
 2. **Datum** + **Bezug** (E-/K-Punkte, Quelldokumente)
 3. **Kontext** — Problem, das entschieden werden muss
 4. **Entscheidungstreiber** — die maßgeblichen Kriterien

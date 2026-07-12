@@ -1,6 +1,6 @@
 # ADR-0009: EKF-Tuning & Konfidenz-Gating
 
-**Status:** In Arbeit (80 %) · **Datum:** 2026-06-18 · **Bezug:** E17, K11 · **Verifizierung:** Code-Review RoomMind `thermal_model.py`/`mpc_controller.py`, BT `mpc.py` (Thema E)
+**Status:** In Arbeit (80 %) · **Wirkung:** teilw. · **Datum:** 2026-06-18 · **Bezug:** E17, K11 · **Verifizierung:** Code-Review RoomMind `thermal_model.py`/`mpc_controller.py`, BT `mpc.py` (Thema E)
 
 ## Kontext
 Der EKF (ADR-0002) braucht konkrete Rausch-/Bounds-Werte; das Umschalten MPC↔Bang-Bang braucht eine Strategie (K11: weiche Übergänge statt harter Flips).

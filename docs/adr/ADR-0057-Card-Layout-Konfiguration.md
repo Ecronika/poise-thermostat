@@ -1,6 +1,6 @@
 # ADR-0057: Card-Layout & Konfiguration (Dichte, Bedienung, Abschnitte, Schimmel-Tick, UI-Editor)
 
-**Status:** Implementiert (Card v0.138.0) · **Datum:** 2026-07-03 · **Bezug:** ADR-0040 (Card-Vertrag/Auto-Registrierung), ADR-0016 (Entity-/Card-Vertrag), ADR-0049 (Monitoring-Ampel), ADR-0054/0055 (PMV-/CA-Lampen), ADR-0050/0051 (Schimmel-/Frostschutz-Floor), ADR-0012 (Diagnostics/Redaction), ADR-0026 (Shadow-first: Card ist reine Anzeige) · **Verifizierung:** pure `card-config` Unit-Tests (node --test), tsc, Bundle-Build; Backend-Attribut `mould_floor`/`dewpoint` CI-verdrahtet; Nutzer-Designentwürfe (Wohnzimmer-/Büro-Mockup)
+**Status:** Implementiert (Card v0.138.0) · **Wirkung:** Live-A · **Datum:** 2026-07-03 · **Bezug:** ADR-0040 (Card-Vertrag/Auto-Registrierung), ADR-0016 (Entity-/Card-Vertrag), ADR-0049 (Monitoring-Ampel), ADR-0054/0055 (PMV-/CA-Lampen), ADR-0050/0051 (Schimmel-/Frostschutz-Floor), ADR-0012 (Diagnostics/Redaction), ADR-0026 (Shadow-first: Card ist reine Anzeige) · **Verifizierung:** pure `card-config` Unit-Tests (node --test), tsc, Bundle-Build; Backend-Attribut `mould_floor`/`dewpoint` CI-verdrahtet; Nutzer-Designentwürfe (Wohnzimmer-/Büro-Mockup)
 
 ## Umsetzungsstand (v0.138.0 — implementiert)
 

@@ -1,6 +1,6 @@
 # ADR-0039: Kesselbedarf-Aggregat (Heizquellen-Synchronisation)
 
-**Status:** Implementiert · **Datum:** 2026-06-22 · **Bezug:** ADR-0038 (Hub/Zwei-Phasen), ADR-0013, ADR-0026/0033 (Schatten-/Stufen-Disziplin), ADR-0006 (monotone Zeit/Entprellung), ADR-0012 (Repair/Sicherheit), ADR-0011 (Harness) · **Verifizierung:** Harness (Kessel-Laufzeit-Reduktion, Frost-Override, Anti-Takt) + Live-Shadow; Community-Beleg `Meinungsbild_Mehrzonen-Koordination.md`
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-22 · **Bezug:** ADR-0038 (Hub/Zwei-Phasen), ADR-0013, ADR-0026/0033 (Schatten-/Stufen-Disziplin), ADR-0006 (monotone Zeit/Entprellung), ADR-0012 (Repair/Sicherheit), ADR-0011 (Harness) · **Verifizierung:** Harness (Kessel-Laufzeit-Reduktion, Frost-Override, Anti-Takt) + Live-Shadow; Community-Beleg `Meinungsbild_Mehrzonen-Koordination.md`
 
 ## Kontext
 Meinungsbild-Befund Nr. 1: bei mehreren Zonen an **einem** gemeinsamen Erzeuger (Kessel/Brenner) läuft dieser quasi durchgehend, weil der Raumbedarf unsynchron ist. Die Community löst das überwiegend als **Eigenbau** (Template-Sensor `any-TRV-heating` → Relais/virtueller Sollwert). Versatile-Issue #234 zeigt den **feld-akzeptierten Zuschnitt**: ein `binary_sensor` „Kessel soll an" + Pro-Zone-Flag, das eigentliche Schalten optional als Nutzer-Automation. Dieser Zuschnitt bedient **beide** im Meinungsbild belegten Lager — die „gib mir nur das Signal"-Eigenbauer (samt Hardware-Failsafe) **und** die „mach es für mich"-Nutzer.

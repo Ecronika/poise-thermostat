@@ -1,6 +1,6 @@
 # ADR-0018: Versionierung, Semver & Deprecation
 
-**Status:** In Arbeit (60 %) · **Datum:** 2026-06-18 · **Bezug:** E25 · **Verifizierung:** Code-Review BT/Versatile/Vesta/RoomMind/ThermoSmart (Thema I)
+**Status:** In Arbeit (60 %) · **Wirkung:** teilw. · **Datum:** 2026-06-18 · **Bezug:** E25 · **Verifizierung:** Code-Review BT/Versatile/Vesta/RoomMind/ThermoSmart (Thema I)
 
 ## Kontext
 Updates dürfen weder Lerndaten noch Konfiguration brechen (G25, ADR-0007). Offen: Versionsschema, Migrations- und Deprecation-Policy.

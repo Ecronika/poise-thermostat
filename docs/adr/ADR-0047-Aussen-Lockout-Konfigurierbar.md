@@ -1,6 +1,6 @@
 # ADR-0047: Konfigurierbarer Außen-Temperatur-Lockout (Heizen/Kühlen)
 
-**Status:** Implementiert · **Datum:** 2026-06-27 · **Bezug:** ADR-0023 (Außen-Gating), ADR-0041 (Fenster), ADR-0008 (Config/Defaults), ADR-0046 (Free-Cooling) · **Verifizierung:** Wettbewerber-Code (RoomMind/dual_smart/VTherm/BT/climate_group/Adaptive Climate) + Nutzer-Feedback, zusammengefasst in `Meinungsbild_Fenster-Kuehlen-Aussen-Lockout.md`
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-27 · **Bezug:** ADR-0023 (Außen-Gating), ADR-0041 (Fenster), ADR-0008 (Config/Defaults), ADR-0046 (Free-Cooling) · **Verifizierung:** Wettbewerber-Code (RoomMind/dual_smart/VTherm/BT/climate_group/Adaptive Climate) + Nutzer-Feedback, zusammengefasst in `Meinungsbild_Fenster-Kuehlen-Aussen-Lockout.md`
 
 ## Kontext
 ADR-0023 übernahm RoomMinds symmetrisches Außen-Gating als **feste Designkonstanten** in `control/cooling.py:decide_mode` (`cool_min_outdoor = 16 °C`, `heat_max_outdoor = 22 °C`) und führte ausdrücklich nur **drei** Config-Werte ein (`comfort_base`, `climate_mode`, `comfort_weight`) — die Lockouts sind **nicht** einstellbar. Auch ADR-0008 (Config-Schema/Defaults) nennt sie nicht. Problem: **lastdominierte Räume** (Sonnenraum West/Süd, Küche, Technik-/Server-/Grow-Raum, Dachgeschoss, Büro mit Geräten) brauchen Kühlung **trotz kühler Außenluft**; ein fixer 16-°C-Kühl-Lockout sperrt sie aus. Der eigentliche „nicht gegen Außenluft konditionieren"-Schutz ist ohnehin **Fenster→`off`** (ADR-0041, `tick_resolve.py:resolve_write_target`), nicht der Wetter-Proxy.

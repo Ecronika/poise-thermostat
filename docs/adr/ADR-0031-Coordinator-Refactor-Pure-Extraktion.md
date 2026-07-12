@@ -1,6 +1,6 @@
 # ADR-0031: `_run_once`-Refactor — pure Extraktion statt UseCase-Klassen
 
-**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** ADR-0005/0011 (pure-Core/dünne-Glue), externe Review #3, Charta G25/G27 · **Verifizierung:** Test-Gate, Verhaltens-Identität (Diagnostik-Dict unverändert)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-20 · **Bezug:** ADR-0005/0011 (pure-Core/dünne-Glue), externe Review #3, Charta G25/G27 · **Verifizierung:** Test-Gate, Verhaltens-Identität (Diagnostik-Dict unverändert)
 
 ## Kontext
 `_run_once` war auf **335 Zeilen** gewachsen und enthielt ungetestete **Entscheidungs**-Logik (Quellenauswahl der Schatten-Schätzer, finale Sollwert-/Modus-/Norm-Auflösung) — genau die Glue, die zuletzt von der OneDrive-Trunkierung getroffen wurde. Die externe Review schlug „UseCase-Klassen" (`SensorReadUseCase` …) vor.

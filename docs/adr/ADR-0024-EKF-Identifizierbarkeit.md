@@ -1,6 +1,6 @@
 # ADR-0024: EKF-Identifizierbarkeit & Parameter-Konfidenz
 
-**Status:** Implementiert · **Datum:** 2026-06-19 · **Bezug:** Livetest v0.6.0, ADR-0002/0009 · **Verifizierung:** RoomMind `thermal_model.py`/`mpc_controller.py`, Better Thermostat `mpc.py`
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-19 · **Bezug:** Livetest v0.6.0, ADR-0002/0009 · **Verifizierung:** RoomMind `thermal_model.py`/`mpc_controller.py`, Better Thermostat `mpc.py`
 
 ## Kontext
 Livetest: `tau_hours` = 200 (α an der Untergrenze 0,005). Bei stabil gehaltenem Raum ist der Wärmeverlust α schlecht **beobachtbar** (keine freie Auskühlung), und die gemeldete `confidence` 0,87 spiegelt nur die **Temperatur**-Verfolgung, nicht die **Parameter**-Korrektheit. Würde der MPC darauf vertrauen, steuerte er auf einem falschen Modell.

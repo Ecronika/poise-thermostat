@@ -1,6 +1,6 @@
 # ADR-0032: Closed-Loop-Validierung des prädiktiven Kerns im Harness
 
-**Status:** Implementiert · **Datum:** 2026-06-20 · **Bezug:** ADR-0011 („Harness vor Hardware"), ADR-0001 (MPC), ADR-0002/0024 (EKF), ADR-0009 (Gate), ADR-0025 (Optimal-Start) · **Verifizierung:** `tests/harness/closed_loop.py` + `tests/test_closed_loop.py`
+**Status:** Implementiert · **Wirkung:** Harness · **Datum:** 2026-06-20 · **Bezug:** ADR-0011 („Harness vor Hardware"), ADR-0001 (MPC), ADR-0002/0024 (EKF), ADR-0009 (Gate), ADR-0025 (Optimal-Start) · **Verifizierung:** `tests/harness/closed_loop.py` + `tests/test_closed_loop.py`
 
 ## Kontext
 MPC, Gate-Überblendung und Optimal-Start waren in Einzelteilen unit-getestet, aber **nie als geschlossener Lern→Identifizieren→Vorhersagen→Regeln-Kreis** gelaufen. Im realen System schaltet sich das erst in der kalten Saison scharf (EKF braucht echte Heizzyklen) — ein Live-Test im Sommer ist unmöglich. Größtes latentes Projektrisiko.

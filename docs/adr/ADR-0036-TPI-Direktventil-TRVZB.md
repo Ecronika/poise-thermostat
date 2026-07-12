@@ -1,6 +1,6 @@
 # ADR-0036: TPI-Direktventilansteuerung (Sonoff TRVZB-Klasse)
 
-**Status:** In Arbeit (70 %) · **Datum:** 2026-06-22 · **Bezug:** ADR-0004 (TPI), ADR-0011 („Harness vor Hardware"), ADR-0015 (Aktorpfad-Capability), ADR-0032 (Closed-Loop) · **Verifizierung:** `tests/test_closed_loop.py` (TPI gegen RC-Plant), `tests/test_capability.py`, `tests/test_actuator.py`; Quellen z2m/VTherm/HA-Community
+**Status:** In Arbeit (70 %) · **Wirkung:** Live-D · **Datum:** 2026-06-22 · **Bezug:** ADR-0004 (TPI), ADR-0011 („Harness vor Hardware"), ADR-0015 (Aktorpfad-Capability), ADR-0032 (Closed-Loop) · **Verifizierung:** `tests/test_closed_loop.py` (TPI gegen RC-Plant), `tests/test_capability.py`, `tests/test_actuator.py`; Quellen z2m/VTherm/HA-Community
 
 ## Kontext
 Mit dem Sonoff TRVZB liegt erstmals Hardware mit **schreibbarem Ventil** vor. Recherche (Zigbee2MQTT, Versatile Thermostat, HA-Community) korrigiert unsere bisherige Annahme: `valve_opening_degree` (FW v1.1.4+) ist eine **schreibbare Open-Position-Steuerung 0–100 %**, kein reines Max-Limit — VTherm steuert das Ventil genau darüber per TPI + externem Fühler. Mangels Heizbedarf (Sommer) wird **im Harness statt am Gerät** validiert.

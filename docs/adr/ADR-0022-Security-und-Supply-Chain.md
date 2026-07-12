@@ -1,6 +1,6 @@
 # ADR-0022: Security & Supply-Chain
 
-**Status:** In Arbeit (75 %) · **Datum:** 2026-06-18 · **Bezug:** E30, G28 · **Verifizierung:** Code-Review Versatile/RoomMind/ThermoSmart/BT/Vesta (Thema O)
+**Status:** In Arbeit (75 %) · **Wirkung:** teilw. · **Datum:** 2026-06-18 · **Bezug:** E30, G28 · **Verifizierung:** Code-Review Versatile/RoomMind/ThermoSmart/BT/Vesta (Thema O)
 
 ## Kontext
 Die Charta verlangt vollständige Lokalität und anonymisierte, nie automatische Exporte (G28). Offen: Abhängigkeitspolitik, Netzwerkverhalten, Export-/Diagnostics-Datenschutz.

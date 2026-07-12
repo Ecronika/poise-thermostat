@@ -1,6 +1,6 @@
 # ADR-0015: Aktorpfad-Capability-Matrix & coef_ext
 
-**Status:** In Arbeit (70 %) · **Datum:** 2026-06-18 · **Bezug:** E12, E21, K7 · **Verifizierung:** Code-Review ThermoSmart/BT (Thema K)
+**Status:** In Arbeit (70 %) · **Wirkung:** teilw. · **Datum:** 2026-06-18 · **Bezug:** E12, E21, K7 · **Verifizierung:** Code-Review ThermoSmart/BT (Thema K) · **Nachtrag:** §1 (`valve_opening_degree`-Ausschluss) revidiert durch ADR-0036 (s. u.)
 
 > **Nachtrag (2026-06-22):** Der Ausschluss von `valve_opening_degree` in §1 der Entscheidung ist durch **ADR-0036** überholt. Recherche (Zigbee2MQTT, Versatile Thermostat, HA-Community) hat gezeigt, dass `valve_opening_degree` (Sonoff TRVZB, FW ≥ 1.1.4) eine **schreibbare Live-Open-Position (0–100 %)** ist, kein Max-Limit — der schreibbare Ventilöffnungs-Pfad wurde daraufhin für den Sonoff TRVZB übernommen. `valve_closing_degree` bleibt ausgeschlossen (Firmware-Bug). Maßgeblich ist der Code: `valve_opening_degree` steht in `AUTO_VALVE_PATTERNS` in `devices/capability.py`.
 
