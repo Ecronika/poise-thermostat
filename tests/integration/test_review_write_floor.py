@@ -104,7 +104,8 @@ async def _setup(hass: HomeAssistant, *, data: dict[str, Any]) -> MockConfigEntr
 
 async def test_p1_1_window_beats_active_override(hass: HomeAssistant) -> None:
     """P1-1: a window opening while a manual hold is active drives the write to
-    the frost floor with mode ``off`` -- never the held value (window > override)."""
+    the frost floor -- never the held value (window > override). A heat-capable
+    TRV parks in ``heat`` at the floor (frost held by heating), never ``off``."""
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     _states(hass, room=19.0, sp=20.0, window_state="off")
@@ -129,8 +130,9 @@ async def test_p1_1_window_beats_active_override(hass: HomeAssistant) -> None:
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    off = [c for c in set_mode if c.data.get("hvac_mode") == "off"]
-    assert off, "an open window must command hvac mode off"
+    # a heat-capable TRV is parked in heat at the floor (frost held by heating);
+    # "off" is the cool-only case (V1 / resolve_desired_mode), so never here.
+    assert not [c for c in set_mode if c.data.get("hvac_mode") == "off"]
     assert abs(set_temp[-1].data["temperature"] - FROST_FLOOR_C) < 0.6, (
         f"window write must be the frost floor, not the held {held}"
     )
@@ -194,3 +196,55 @@ async def test_p3_1_device_min_temp_is_a_write_floor(hass: HomeAssistant) -> Non
     assert set_temp[-1].data["temperature"] >= 17.0 - 0.05, (
         "the write must respect the actuator min_temp (no sub-min write)"
     )
+
+
+async def test_p3_1_actuator_without_min_temp_writes_bare_floor(
+    hass: HomeAssistant,
+) -> None:
+    """P3-1 counterpart: an actuator that reports no ``min_temp`` yields
+    ``device_min=None`` -- the write falls back to the bare frost floor (no clamp)."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass, room=19.0, sp=20.0, window_state="off")
+    # strip min_temp from the actuator so _device_min() returns None
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 20.0,
+            "current_temperature": 19.0,
+            "target_temperature_step": 0.5,
+            "max_temp": 30,
+        },
+    )
+    entry = await _setup(hass, data=_room_data())
+    coord: Any = entry.runtime_data
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+
+    hass.states.async_set("binary_sensor.window", "on", {"device_class": "window"})
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    assert set_temp, "expected a write on the window-open tick"
+    assert set_temp[-1].data["temperature"] < 12  # bare frost floor, no min clamp
+
+
+async def test_p2_8_heating_failure_is_a_repair_issue(hass: HomeAssistant) -> None:
+    """P2-8: a heating failure is surfaced as the translated ``heating_failure``
+    repair issue (raised, then cleared on recovery) -- not an English notification."""
+    from homeassistant.helpers import issue_registry as ir
+
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass, room=19.0, sp=20.0)
+    entry = await _setup(hass, data=_room_data())
+    coord: Any = entry.runtime_data
+    reg = ir.async_get(hass)
+    issue_id = f"heating_failure_{coord._entry_id}"
+
+    await coord._notify_failure(True)
+    assert reg.async_get_issue(DOMAIN, issue_id) is not None
+    await coord._notify_failure(False)
+    assert reg.async_get_issue(DOMAIN, issue_id) is None
