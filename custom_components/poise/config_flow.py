@@ -839,7 +839,7 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         # P1-2: Poise's control path is Celsius-only — reject imperial/°F Home
         # Assistant installs up front rather than silently mis-controlling.
-        if self.hass.config.units is US_CUSTOMARY_UNITS:
+        if self.hass.config.units is US_CUSTOMARY_SYSTEM:
             return self.async_abort(reason="imperial_not_supported")
         # AR-30: offer the singleton system hub only once at least one room entry
         # exists — a hub with no zones to aggregate has nothing to do, so a fresh
@@ -910,7 +910,7 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         # P1-2: same Celsius-only gate on reconfigure — an entry can't be
         # reconfigured into an imperial/°F system either.
-        if self.hass.config.units is US_CUSTOMARY_UNITS:
+        if self.hass.config.units is US_CUSTOMARY_SYSTEM:
             return self.async_abort(reason="imperial_not_supported")
         entry = self._get_reconfigure_entry()
         is_system = entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM
