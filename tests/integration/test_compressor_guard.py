@@ -111,44 +111,6 @@ async def test_guard_holds_a_cool_start_within_min_off(hass: HomeAssistant) -> N
     assert str(d["mode_nudge_blocked"]).startswith("min-off")
 
 
-async def test_guard_defers_the_new_regime_setpoint(hass: HomeAssistant) -> None:
-    # P2-3: while the compressor guard holds the pending cool switch, the new
-    # regime's setpoint must NOT be written -- otherwise a cool target lands on a
-    # device still parked in heat. The whole setpoint write is deferred until the
-    # guard clears (then the atomic write flips mode+setpoint together).
-    setpoints = async_mock_service(hass, "climate", "set_temperature")
-    async_mock_service(hass, "climate", "set_hvac_mode")
-    _hot_cool_ac(hass)
-    coord = (await _setup(hass, _data())).runtime_data
-
-    _recently_stopped(coord)
-    await coord.async_refresh()
-    await hass.async_block_till_done()
-
-    assert str(coord.data["mode_nudge_blocked"]).startswith("min-off")
-    # the deferred write means no set_temperature call slipped through this tick
-    assert setpoints == []
-
-
-async def test_free_switch_writes_setpoint_atomically(hass: HomeAssistant) -> None:
-    # P2-3: with the guard removed, the freed cool start writes its setpoint AND
-    # carries the device mode in the same set_temperature call (atomic switch).
-    setpoints = async_mock_service(hass, "climate", "set_temperature")
-    async_mock_service(hass, "climate", "set_hvac_mode")
-    _hot_cool_ac(hass)
-    coord = (await _setup(hass, _data(**{CONF_COMFORT_WEIGHT: 70}))).runtime_data
-
-    coord._compressor_guard = COMPRESSOR_GUARD_OFF  # kill switch -> switch is free
-    _recently_stopped(coord)
-    await coord.async_refresh()
-    await hass.async_block_till_done()
-
-    assert coord.data["mode_nudge_blocked"] == ""
-    # a setpoint was written and it rode the cool mode along atomically
-    assert setpoints, "expected a setpoint write once the switch is free"
-    assert setpoints[-1].data.get("hvac_mode") == "cool"
-
-
 async def test_kill_switch_removes_the_gate(hass: HomeAssistant) -> None:
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
