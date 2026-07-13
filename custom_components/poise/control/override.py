@@ -251,6 +251,8 @@ def detect_external_setpoint(
         return None
     if round(abs(device_sp - last_written_sp), 3) < deadband:
         return None
-    if prev_device_sp is not None and round(abs(device_sp - prev_device_sp), 3) < deadband:
+    if prev_device_sp is not None and (
+        round(abs(device_sp - prev_device_sp), 3) < deadband
+    ):
         return None
     return device_sp
