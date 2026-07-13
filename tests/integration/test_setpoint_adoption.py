@@ -204,3 +204,29 @@ async def test_opt_out_disables_adoption(hass: HomeAssistant) -> None:
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord._override is None
+
+
+async def test_stable_device_offset_is_not_re_adopted(hass: HomeAssistant) -> None:
+    """Regression for the live 'ending a hold via the card X springs straight back
+    to manual' bug: the device settled Poise's write at a fixed offset (its own
+    re-quantise / min-max clamp) and reports that value UNCHANGED tick over tick.
+    It must NOT be re-adopted once the echo window lapses -- only a value the device
+    actually *moved* to (a fresh user action) is a genuine external change."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_trv(hass, setpoint=23.0)  # device is stuck at 23.0 (its settled value)
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    coord._last_written_sp = 20.0  # Poise commanded 20.0 ...
+    coord._last_sp_write_ts = 1000.0
+    coord._prev_device_sp = 23.0  # ... but the device settled at 23.0 and holds it
+    clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0  # echo window has lapsed
+    _set_trv(hass, setpoint=23.0)  # still 23.0 -- unchanged
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    # stable offset (device_sp == prev_device_sp) -> not a fresh move -> no adoption
+    assert coord._override is None
