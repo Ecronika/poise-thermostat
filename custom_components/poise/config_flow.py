@@ -34,6 +34,7 @@ from .const import (
     CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
+    CONF_ADOPT_EXTERNAL_SETPOINT,
     CONF_ANNUAL_KWH,
     CONF_BOILER_ACTIVATION_DELAY,
     CONF_BOILER_COUNT_THRESHOLD,
@@ -94,6 +95,7 @@ from .const import (
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ADAPTIVE_COOL,
+    DEFAULT_ADOPT_EXTERNAL_SETPOINT,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
     DEFAULT_BOILER_COUNT_THRESHOLD,
@@ -153,6 +155,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_OVERRIDE_TIMER_H,
         CONF_OVERRIDE_MAX_H,
         CONF_OVERRIDE_END_ON_PRESENCE,
+        CONF_ADOPT_EXTERNAL_SETPOINT,
         CONF_BOOST_DURATION_MIN,
         # CONF_OVERRIDE_SUGGESTIONS is latent (L2/v2, ADR-0059) and intentionally
         # not exposed in the UI yet; kept in const.py for the future override
@@ -653,6 +656,12 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                         vol.Required(
                             CONF_OVERRIDE_END_ON_PRESENCE,
                             default=DEFAULT_OVERRIDE_END_ON_PRESENCE,
+                        ): selector.BooleanSelector(),
+                        # P1-4a: adopt a device-side setpoint change (TRV wheel /
+                        # vendor app) as a manual hold instead of overwriting it.
+                        vol.Required(
+                            CONF_ADOPT_EXTERNAL_SETPOINT,
+                            default=DEFAULT_ADOPT_EXTERNAL_SETPOINT,
                         ): selector.BooleanSelector(),
                         vol.Required(
                             CONF_BOOST_DURATION_MIN,
