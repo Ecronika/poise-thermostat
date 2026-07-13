@@ -136,6 +136,55 @@ async def test_change_within_echo_window_is_not_adopted(hass: HomeAssistant) -> 
     assert coord._override is None
 
 
+async def test_adopted_hold_is_stable_across_ticks(hass: HomeAssistant) -> None:
+    """Regression for the v0.168.0 B1 bug: once a device-side setpoint is adopted,
+    the echo baseline is stamped so the *same* reading is not re-adopted every
+    subsequent tick. Guards three symptoms of the missing stamp:
+
+    * the announced expiry stays put between tick 1 and tick 2 (a re-adopt would
+      recompute it from now() forever, so the hold could never end);
+    * the L1 observation log does not grow tick over tick (store-save per tick);
+    * after ``resume_schedule`` the hold stays cleared and is not re-adopted.
+    """
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_trv(hass, setpoint=20.0)
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    coord._last_written_sp = 20.0
+    coord._last_sp_write_ts = 1000.0
+    clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+
+    # tick 1 — the wheel turns to 23.0 and is adopted as a hold
+    _set_trv(hass, setpoint=23.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._override == 23.0
+    expiry_1 = coord._override_expires_at
+    stats_1 = len(coord._override_stats)
+
+    # tick 2 — the device still reports 23.0 (nothing changed). Without the
+    # baseline stamp this re-adopts: expiry jumps and the log grows.
+    clock.t += 300.0  # well past the echo window again
+    _set_trv(hass, setpoint=23.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._override == 23.0
+    assert coord._override_expires_at == expiry_1  # expiry unchanged
+    assert len(coord._override_stats) == stats_1  # log did not grow
+
+    # resume — clear the hold, then one more tick with the device still at 23.0
+    coord.set_override(None, reason="user_resume")
+    clock.t += 300.0
+    _set_trv(hass, setpoint=23.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._override is None  # resume sticks; 23.0 is not re-adopted
+
+
 async def test_opt_out_disables_adoption(hass: HomeAssistant) -> None:
     """With the feature off, a device-side change is not adopted (legacy overwrite)."""
     async_mock_service(hass, "climate", "set_temperature")
