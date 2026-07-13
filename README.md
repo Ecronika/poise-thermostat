@@ -120,7 +120,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Outdoor / humidity / MRT / T_rm sensors | no | — | Improve accuracy (mould floor, operative temperature, running mean). |
 | Window sensor | no | — | Door/window contact for the open-window reaction (else the slope detector is used). |
 | Weather / irradiance | no | — | Forecast for optimal-start; measured solar gain. |
-| External-temperature input | no | — | TRV number entity Poise feeds the true room temperature to (operative mode). |
+| External-temperature input | no | — | TRV `number` entity Poise feeds the true room temperature to (operative mode). Re-pushed at least every 10 min even when unchanged, so TRVs that time out an external input (e.g. Danfoss ~30 min, Sonoff TRVZB ~1 h) never fall back to their own mounted sensor. |
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
 | Adaptive cooling edge | no | auto | Active by default on cool-capable devices (`auto`): lifts the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band. `off` forces the fixed summer band; heat-only TRVs are unaffected either way (ADR-0023 §1). |
 | Compressor guard · min-off · mode-hold | no | auto · 300 s · 300 s | Single-AC anti-short-cycle (Tuning options): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
