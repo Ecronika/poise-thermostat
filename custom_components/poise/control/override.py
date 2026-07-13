@@ -213,13 +213,14 @@ def detect_external_setpoint(
     now: float,
     echo_window_s: float,
     deadband: float,
+    prev_device_sp: float | None = None,
 ) -> float | None:
     """The device-side setpoint Poise should adopt as a manual hold, else ``None``.
 
     A reported setpoint is a genuine external change only when it differs from what
     Poise last commanded — an *echo* of our own write matches ``last_written_sp``
-    and must be ignored. Two guards keep lag and cold-start from raising a false
-    positive:
+    and must be ignored. Three guards keep lag, cold-start and a persistent device
+    offset from raising a false positive:
 
     * **No baseline** (``last_written_sp`` or ``last_write_ts`` is ``None``): Poise
       has not established control yet, so it cannot tell an echo from a change —
@@ -227,6 +228,15 @@ def detect_external_setpoint(
     * **Echo window**: within ``echo_window_s`` of our own write the device may
       still report its *pre-write* value (Zigbee/poll lag); suppress adoption so
       that lag is never read as a user change.
+    * **Stable offset** (``prev_device_sp``): a genuine user action *moves* the
+      setpoint this tick. A device that re-quantised, clamped (own min/max) or
+      otherwise settled our write at a fixed offset > ``deadband`` reports that
+      value unchanged tick-over-tick; without this guard it is re-adopted as a hold
+      the moment the echo window lapses — seen live: ending a hold via the card's X
+      springs straight back to "manual" (the schedule value the device settled at
+      gets re-read as a user change). Require an actual move since the previous
+      reading; a settled offset never fires. ``None`` (first observation) skips this
+      guard, which is safe because the *no baseline* guard already gates cold start.
 
     ``last_written_sp`` must be the value Poise actually commanded **after snapping
     to the device step** (what the device settles to), and ``deadband`` at least
@@ -240,5 +250,7 @@ def detect_external_setpoint(
     if (now - last_write_ts) < echo_window_s:
         return None
     if round(abs(device_sp - last_written_sp), 3) < deadband:
+        return None
+    if prev_device_sp is not None and round(abs(device_sp - prev_device_sp), 3) < deadband:
         return None
     return device_sp
