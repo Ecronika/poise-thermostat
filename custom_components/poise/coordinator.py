@@ -3211,6 +3211,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "adaptive_cool": adaptive_cool,
             "adaptive_cool_mode": adaptive_cool_mode(self._adaptive_cool_cfg),
             "heating": heating,
+            # Display contract (review 2026-07-13, D2-D4): publish the arbitrated
+            # direction (final_mode) and the actuator's own reported action so the
+            # entity's hvac_action stays truthful during an override (where the raw
+            # mode is "manual") and can prefer the device's real state. "cooling" is
+            # published symmetric to "heating" (raw intent) to close the asymmetry.
+            "cooling": cooling,
+            "final_mode": final_mode,
+            "actuator_hvac_action": (
+                act_state.attributes.get("hvac_action") if act_state else None
+            ),
+            "idle_park_mode": _idle_park_mode,
             "window_open": window_open,
             "window_auto_detected": self._window_auto.open,
             "window_auto_threshold": round(self._wa_open_threshold, 1),

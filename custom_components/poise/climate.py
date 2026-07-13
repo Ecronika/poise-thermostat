@@ -28,6 +28,7 @@ from .devices.hvac_modes import (
     available_hvac_modes,
     climate_mode_for_hvac,
     current_hvac_mode,
+    resolve_hvac_action,
 )
 
 _ATTRS = (
@@ -238,13 +239,20 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
 
     @property
     def hvac_action(self) -> HVACAction:
-        if not self.coordinator.enabled:
-            return HVACAction.OFF
-        if self._d.get("heating"):
-            return HVACAction.HEATING
-        if self._d.get("mode") == "cool":
-            return HVACAction.COOLING
-        return HVACAction.IDLE
+        # Display contract (review 2026-07-13, D2/D3): report what the zone is
+        # *doing now*. Prefer the actuator's own reported action; fall back to the
+        # arbitrated direction (final_mode) -- never the raw "manual" override tag,
+        # which used to collapse an active cooling/heating override to IDLE.
+        value = resolve_hvac_action(
+            enabled=self.coordinator.enabled,
+            final_mode=self._d.get("final_mode") or "idle",
+            actuator_action=self._d.get("actuator_hvac_action"),
+            idle_park_mode=self._d.get("idle_park_mode"),
+        )
+        try:
+            return HVACAction(value)
+        except ValueError:  # a device-passthrough action older HA cores may lack
+            return HVACAction.IDLE
 
     @property
     def preset_mode(self) -> str:
