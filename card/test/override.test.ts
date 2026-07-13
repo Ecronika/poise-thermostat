@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  airHint,
   clampLabel,
   clockLabel,
   heldSetpoint,
+  holdDirection,
   holdView,
   minutesUntil,
   presetChip,
@@ -46,6 +48,41 @@ test("holdView: missing setpoint still labels the hold", () => {
     holdView("en", null, "timer", "2026-07-11T22:00:00Z", NOW).label,
     "Manual",
   );
+});
+
+test("holdDirection: maps hvac_action to a localized direction word (V4)", () => {
+  assert.equal(holdDirection("de", "cooling"), "kühlt");
+  assert.equal(holdDirection("de", "heating"), "heizt");
+  assert.equal(holdDirection("de", "drying"), "entfeuchtet");
+  assert.equal(holdDirection("en", "cooling"), "cooling");
+  assert.equal(holdDirection("en", "COOLING"), "cooling"); // case-insensitive
+  // idle / off / unknown / absent -> no direction shown
+  assert.equal(holdDirection("de", "idle"), null);
+  assert.equal(holdDirection("de", "off"), null);
+  assert.equal(holdDirection("de", null), null);
+  assert.equal(holdDirection("de", undefined), null);
+});
+
+test("holdView: exposes the direction from hvac_action (V4)", () => {
+  // the reported defect: a cooling override must read "kühlt" on the pill
+  const cool = holdView("de", 22, "schedule", "2026-07-11T22:00:00Z", NOW, "cooling");
+  assert.equal(cool.direction, "kühlt");
+  assert.equal(cool.label, "Manuell 22.0°");
+  // permanent hold still carries the direction
+  const perm = holdView("de", 22, "permanent", null, NOW, "heating");
+  assert.equal(perm.direction, "heizt");
+  // no action -> null direction (back-compatible default)
+  assert.equal(holdView("de", 22, "schedule", null, NOW).direction, null);
+});
+
+test("airHint: shows air temperature only when it diverges from operative (V3a/D1)", () => {
+  assert.equal(airHint(21.4, 22.1), 22.1); // 0.7 K gap -> show air
+  assert.equal(airHint(21.4, 21.5), null); // 0.1 K < 0.3 threshold -> hide
+  assert.equal(airHint(22.0, 22.3), 22.3); // exactly at threshold -> show
+  assert.equal(airHint(22.0, 22.0), null); // identical -> hide
+  // absent values -> null (never invents a hint)
+  assert.equal(airHint(null, 22.1), null);
+  assert.equal(airHint(21.4, null), null);
 });
 
 test("clampLabel: explains the clamp from request vs effective setpoint", () => {
