@@ -33,6 +33,13 @@ WRITE_DEADBAND_C: Final = 0.2
 # would otherwise let the feed go stale. 0 disables the time-based re-push.
 EXTERNAL_FEED_KEEPALIVE_S: Final = 600.0
 
+# P1-4a: adopt a device-side setpoint change (TRV wheel / vendor app) as a manual
+# hold instead of overwriting it. ``ECHO_WINDOW`` suppresses adoption right after
+# Poise's own write, while the device may still report its pre-write value (lag).
+CONF_ADOPT_EXTERNAL_SETPOINT: Final = "adopt_external_setpoint"
+DEFAULT_ADOPT_EXTERNAL_SETPOINT: Final = True
+SETPOINT_ADOPT_ECHO_WINDOW_S: Final = 120.0
+
 # Thermal model defaults (ADR-0009; ~6.7 h time constant, moderate residential room)
 DEFAULT_ALPHA_PER_S: Final = 0.15 / 3600.0
 DEFAULT_FULL_POWER_RISE_C: Final = 20.0

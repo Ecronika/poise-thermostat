@@ -61,6 +61,7 @@ from .const import (
     CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
+    CONF_ADOPT_EXTERNAL_SETPOINT,
     CONF_ANNUAL_KWH,
     CONF_BOOST_DURATION_MIN,
     CONF_CATEGORY,
@@ -105,6 +106,7 @@ from .const import (
     DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ADAPTIVE_COOL,
     DEFAULT_ANNUAL_KWH,
+    DEFAULT_ADOPT_EXTERNAL_SETPOINT,
     DEFAULT_BOOST_DURATION_MIN,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
@@ -132,6 +134,7 @@ from .const import (
     MIN_PLAUSIBLE_TAU_H,
     OVERRIDE_POLICY_SCHEDULE,
     SENSOR_FREEZE_AFTER_S,
+    SETPOINT_ADOPT_ECHO_WINDOW_S,
     TICK_INTERVAL_S,
     UNAVAILABLE_SAFE_AFTER_S,
     WINDOW_MOULD_SUPPRESS_S,
@@ -166,6 +169,7 @@ from .control.outcome_scoring import (
 from .control.override import (
     OverrideConfig,
     OverrideMode,
+    detect_external_setpoint,
     hold_ends_at_preheat,
     hold_expired,
     mode_comfort_base,
@@ -319,6 +323,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._heatup_acc = HeatupAccumulator()
         self._last_target: float | None = None
         self._last_written_mode: str | None = None
+        self._last_written_sp: float | None = None  # P1-4a: last commanded (snapped)
         # AR-11: True once any setpoint/mode write to the actuator has SUCCEEDED
         # this run (tick, unavailable-safe, or frost rescue). Persisted + restored;
         # gates the teardown park so a zone that never actuated is not "parked".
@@ -511,6 +516,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._weather: str | None = data.get(CONF_WEATHER)
         self._irradiance: str | None = data.get(CONF_IRRADIANCE)
         self._trv_ext_temp: str | None = data.get(CONF_TRV_EXTERNAL_TEMP)
+        # P1-4a: adopt a device-side setpoint change (TRV wheel) as a manual hold.
+        self._adopt_external_setpoint: bool = bool(
+            data.get(CONF_ADOPT_EXTERNAL_SETPOINT, DEFAULT_ADOPT_EXTERNAL_SETPOINT)
+        )
         self._operative_input: bool = bool(data.get(CONF_OPERATIVE_INPUT, False))
         self._guards_resolved = False
         self._sched_entity: str | None = None
@@ -2624,8 +2633,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     regulation_period_s=_wprof.regulation_period_s,
                 )
             )
+            # P1-4a: a device-side setpoint change (TRV wheel / vendor app) that
+            # differs from what Poise last commanded is adopted as a manual hold
+            # with the zone's override policy, instead of being overwritten. Off
+            # while the device runs its own schedule (the schedule, not the user,
+            # moves the setpoint) and behind the opt-out; ``set_override`` clamps
+            # the adopted value to the norm envelope. Skipping this tick's write
+            # avoids overwriting the just-adopted value -- next tick's target
+            # already reflects the new hold.
+            _adopted_sp: float | None = (
+                detect_external_setpoint(
+                    device_sp=actual_sp,
+                    last_written_sp=self._last_written_sp,
+                    last_write_ts=self._last_sp_write_ts,
+                    now=now,
+                    echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
+                    deadband=max(WRITE_DEADBAND_C, step),
+                )
+                if (self._adopt_external_setpoint and not sched_active)
+                else None
+            )
+            if _adopted_sp is not None:
+                self.set_override(_adopted_sp, reason="device_adopt")
+                self._dirty = True  # persist the adopted hold across restarts
             if (
                 _actuator_online
+                and _adopted_sp is None  # P1-4a: adopted -> skip this tick's write
                 # P2-3: while the compressor guard holds a pending mode switch,
                 # defer the *new regime's* setpoint. Writing it now would push a
                 # cool setpoint into a device still in heat (or vice versa); we
@@ -2654,6 +2687,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     await actuator_mod.write(self.hass, cmd)
                     self._last_written_mode = final_mode
                     self._last_sp_write_ts = now
+                    self._last_written_sp = snap_to_step(target, step)  # P1-4a echo
                     self._mark_actuated()  # AR-11 (+F16: persist the flip)
                 except Exception:  # noqa: BLE001 - never let actuator I/O kill the tick
                     _LOGGER.exception(
