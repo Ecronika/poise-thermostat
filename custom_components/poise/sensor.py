@@ -60,7 +60,10 @@ def _timestamp(key: str) -> Callable[[dict[str, Any]], datetime | None]:
     def fn(data: dict[str, Any]) -> datetime | None:
         v = data.get(key)
         if isinstance(v, (int, float)):
-            return dt_util.utc_from_timestamp(float(v))
+            # annotate to pin the type: dt_util is Any under mypy (HA imports are
+            # ignore_missing_imports), which would otherwise leak a no-any-return.
+            ts: datetime = dt_util.utc_from_timestamp(float(v))
+            return ts
         return None
 
     return fn
@@ -291,5 +294,5 @@ class PoiseSensor(CoordinatorEntity[PoiseCoordinator], SensorEntity):  # type: i
         )
 
     @property
-    def native_value(self) -> float | str | None:
+    def native_value(self) -> float | str | datetime | None:
         return self.entity_description.value_fn(self.coordinator.data or {})
