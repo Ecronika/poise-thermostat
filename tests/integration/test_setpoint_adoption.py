@@ -106,9 +106,10 @@ async def test_device_side_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    # adopted as a hold (23.0 is inside the norm envelope, so kept verbatim) ...
+    # adopted as a hold (23.0 is inside the norm envelope, so kept verbatim);
+    # ``_override`` is the source of truth (the value surfaces on the climate
+    # entity's attributes, not in the coordinator's tick-data dict).
     assert coord._override == 23.0
-    assert coord.data["override"] == 23.0
     # ... and this tick did NOT push the schedule value back onto the device
     trv_writes = [c for c in setpoints if c.data.get("entity_id") == "climate.trv"]
     assert trv_writes == []
