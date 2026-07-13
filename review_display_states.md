@@ -163,6 +163,30 @@ Es gibt derzeit keinen Test, der `PoiseClimate.hvac_action` abdeckt (kein Treffe
 
 ---
 
+## Nachtrag (2026-07-13): Verifikation der Umsetzung in v0.170.1-alpha
+
+Geprüft wurde der Tag `v0.170.1-alpha` (Commit `d858512`) per Code-Diff gegen den Review-Stand (`e32c1ac`), lokalem Testlauf und CI-Status.
+
+### Korrekt umgesetzt
+
+- **V1 + V2 (in einem Schritt):** Der Coordinator publiziert `final_mode`, `actuator_hvac_action`, `idle_park_mode` und das symmetrische `cooling` (`coordinator.py`, Block „Display contract"). Die Entität leitet `hvac_action` über das neue pure `resolve_hvac_action()` ab (`devices/hvac_modes.py`): reale Geräte-Action als Ground Truth (heating/cooling/drying/fan/idle/preheating/defrosting, case-insensitive), Fallback auf die arbitrierte Richtung — nie mehr das rohe `"manual"`-Tag. Beide gemeldeten Defekte sind damit behoben; zusätzlich korrekt gelöst: Guard-gehaltener Kompressor liest „idle", Entfeuchten liest „drying", fan_only-Park liest „fan", „off"-Meldung des Geräts fällt auf Intent zurück, `ValueError`-Guard für HVACAction-Werte älterer Cores.
+- **V3a:** `airHint()` (Schwelle 0,3 K) zeigt die Luft-Temperatur sekundär unter der operativen Zahl („operativ · Luft 22,1°"), inkl. DE/EN-Übersetzungsschlüsseln und `title`-Kennzeichnung.
+- **V4:** Hold-Pill nennt die Richtung aus der (jetzt korrekten) `hvac_action` — „Manuell 22,0° · kühlt · 45 min" (`holdDirection()`/`holdView()`).
+- **V6:** Zustandsmatrix als pure Tests (`tests/test_hvac_action.py`, inkl. beider Defekt-Fälle), Wiring-Test (`tests/integration/test_hvac_action_wiring.py`), Card-Tests für `holdDirection`/`airHint`. Verifiziert: pure Python-Suite lokal grün, Card-Tests 52/52 grün, `tsc --noEmit` sauber, CI am Tag-Commit grün (inkl. HA-Runtime-Integrationstests; lokal nicht lauffähig, da der HA-Harness Python ≥ 3.12 verlangt).
+- **V3b/V5** (Operative-/Grund-Sensor) sind nicht enthalten — entspricht der empfohlenen Reihenfolge (späteres Paket), kein Mangel dieses Releases.
+
+### 🔴 Release-blockierende Regression: `poise-card` wird nicht mehr registriert
+
+Am Ende von `card/src/poise-card.ts` wurde — offenbar beim Einfügen der `.opair`-CSS-Regel am Style-Ende — der komplette nachfolgende Registrierungsblock mit entfernt: `window.customCards.push({type: "poise-card", …})`, `customElements.define("poise-card", PoiseCard)` und das Versions-Logging. Der Build-Einstieg ist genau diese Datei (`build.mjs: entryPoints: ["src/poise-card.ts"]`), und das ausgelieferte Bundle `custom_components/poise/frontend/poise-card.js` wurde nachweislich aus diesem Stand gebaut (es enthält die neuen `opair`/„kühlt"-Features): Es definiert nur noch `poise-card-editor`, `poise-system-card` und `poise-system-card-editor` — **kein `poise-card`**.
+
+**Wirkung:** Jedes Dashboard mit `type: custom:poise-card` zeigt in v0.170.1-alpha den roten HA-Fehler „Custom element doesn't exist: poise-card"; die Card fehlt zudem im Card-Picker. Die korrekt implementierten Card-Verbesserungen (V3a/V4) erreichen so keinen Nutzer; nur die Entitäts-Seite (korrigierte `hvac_action`) ist wirksam. Die System-Card ist nicht betroffen (registriert sich selbst).
+
+**Warum unbemerkt:** Die CI (`ci.yml`) enthält keinen Card-Job (kein `npm test`/`typecheck`), die Card-Unit-Tests importieren nur pure Module (die Registrierung ist ein Modul-Seiteneffekt), und `tsc` bemängelt entfernte Statements nicht.
+
+**Empfehlung (Hotfix v0.170.2):**
+1. Registrierungsblock am Ende von `poise-card.ts` wiederherstellen und das Bundle neu bauen.
+2. Regressions-Guard: Build-Check in `build.mjs` (nach dem esbuild-Lauf prüfen, dass das Bundle `customElements.define("poise-card"` enthält und sonst mit Fehler abbrechen) — plus Card-Job (`typecheck` + `test` + Build-Check) in der CI.
+
 ## Quellen
 
 - [Home Assistant Developer Docs — Climate entity (`hvac_action` = current action)](https://developers.home-assistant.io/docs/core/entity/climate/)
