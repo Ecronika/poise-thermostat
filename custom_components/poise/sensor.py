@@ -59,7 +59,9 @@ def _timestamp(key: str) -> Callable[[dict[str, Any]], datetime | None]:
 
     def fn(data: dict[str, Any]) -> datetime | None:
         v = data.get(key)
-        return dt_util.utc_from_timestamp(float(v)) if isinstance(v, (int, float)) else None
+        if isinstance(v, (int, float)):
+            return dt_util.utc_from_timestamp(float(v))
+        return None
 
     return fn
 
