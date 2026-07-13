@@ -63,3 +63,27 @@ def test_one_step_change_at_the_deadband_boundary_is_adopted() -> None:
 
 def test_echo_window_boundary_is_no_longer_suppressed() -> None:
     assert _d(device_sp=23.0, now=TS + EW) == 23.0
+
+
+def test_stable_device_offset_is_not_adopted() -> None:
+    # The device settled our write at a fixed offset > deadband (own re-quantise /
+    # min-max clamp) and reports it UNCHANGED tick over tick. Adopting it would
+    # re-read Poise's own settled write as a manual hold once the echo window lapses
+    # (the live "card-X resume springs back to manual" bug). A stable value (== the
+    # previous reading) is never a fresh user action.
+    assert _d(device_sp=23.0, prev_device_sp=23.0) is None
+    # even a large persistent gap from our command is ignored while it is stable
+    assert _d(device_sp=18.0, last_written_sp=21.0, prev_device_sp=18.0) is None
+
+
+def test_moved_device_setpoint_is_adopted() -> None:
+    # a genuine wheel turn MOVES the setpoint since the previous reading
+    assert _d(device_sp=23.0, prev_device_sp=20.0) == 23.0
+    assert _d(device_sp=18.0, last_written_sp=21.0, prev_device_sp=21.0) == 18.0
+
+
+def test_first_observation_without_prev_still_gated_by_baseline() -> None:
+    # prev is None on the very first reading -> the move guard is skipped, but the
+    # no-baseline / echo guards still apply, so cold start never false-adopts.
+    assert _d(device_sp=23.0, prev_device_sp=None) == 23.0  # baseline present here
+    assert _d(device_sp=23.0, prev_device_sp=None, last_written_sp=None) is None
