@@ -31,7 +31,12 @@ collect_ignore_glob = [] if _HA_MODERN else ["test_*.py"]
 
 
 if _HA_MODERN:
+    from datetime import timedelta
+
+    import homeassistant.util.dt as dt_util
     import pytest
+    from homeassistant.core import HomeAssistant
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
     @pytest.fixture(autouse=True)
     def _auto_enable_custom_integrations(
@@ -39,3 +44,20 @@ if _HA_MODERN:
     ) -> object:
         """Let Home Assistant discover ``custom_components/poise`` per test."""
         yield
+
+    @pytest.fixture(autouse=True)
+    async def _flush_delayed_store_writes(hass: HomeAssistant) -> object:
+        """Drain HA-core Store delayed writes before the lingering-timer check.
+
+        The config-entry and registry Stores persist via a delayed ``call_later``
+        write; under coverage instrumentation the loop runs slowly enough that the
+        timer is still pending when pytest-hacc's teardown asserts no lingering
+        timers, flaking ``test_config_flow`` with "Lingering timer …
+        ``Store._async_schedule_callback_delayed_write``" (review B-neu-2). Poise's
+        own store writes are synchronous (``async_save``); the culprit is HA core.
+        Advancing past the write delay — but under the 60 s coordinator interval,
+        so no extra tick fires — drains those writes deterministically.
+        """
+        yield
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=15))
+        await hass.async_block_till_done()
