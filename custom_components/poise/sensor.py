@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
+import homeassistant.util.dt as dt_util
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -38,7 +40,7 @@ from .coordinator import PoiseCoordinator
 class PoiseSensorDescription(SensorEntityDescription):  # type: ignore[misc]
     """Sensor description with a pull function over the coordinator data."""
 
-    value_fn: Callable[[dict[str, Any]], float | str | None]
+    value_fn: Callable[[dict[str, Any]], float | str | datetime | None]
 
 
 def _scaled(
@@ -47,6 +49,17 @@ def _scaled(
     def fn(data: dict[str, Any]) -> float | None:
         v = data.get(key)
         return round(float(v) * factor, digits) if isinstance(v, (int, float)) else None
+
+    return fn
+
+
+def _timestamp(key: str) -> Callable[[dict[str, Any]], datetime | None]:
+    """Read a wall-clock epoch float from the data and hand it to a TIMESTAMP
+    sensor as an aware datetime (``None`` when there is no active expiry)."""
+
+    def fn(data: dict[str, Any]) -> datetime | None:
+        v = data.get(key)
+        return dt_util.utc_from_timestamp(float(v)) if isinstance(v, (int, float)) else None
 
     return fn
 
@@ -219,6 +232,16 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         entity_category=_DIAG,
         suggested_display_precision=1,
         value_fn=_scaled("tick_ms_ewma", digits=1),
+    ),
+    # P1-4b: the manual-hold expiry as a first-class TIMESTAMP entity, so the
+    # override end-time is visible (and lands in history) without the Poise card.
+    # Enabled by default -- unlike the estimator diagnostics, this is user-facing.
+    PoiseSensorDescription(
+        key="override_expires_at",
+        translation_key="override_expires_at",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=_DIAG,
+        value_fn=_timestamp("override_expires_at"),
     ),
 )
 

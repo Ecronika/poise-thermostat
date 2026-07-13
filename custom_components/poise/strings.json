@@ -322,6 +322,9 @@
       },
       "tick_duration_ms": {
         "name": "Tick duration (ms)"
+      },
+      "override_expires_at": {
+        "name": "Override expires at"
       }
     },
     "binary_sensor": {
