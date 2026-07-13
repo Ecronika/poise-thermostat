@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.166.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.167.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -174,13 +174,14 @@ sections:
 
 ## Entities created
 
-**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), a per-zone **`switch`** that toggles the open-window bypass, and **16 diagnostic `sensor` entities** (each suffixed onto the room name):
+**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), a per-zone **`switch`** that toggles the open-window bypass, and **17 diagnostic `sensor` entities** (each suffixed onto the room name):
 
 - `operative_temperature`, `t_rm`, `mrt`, `q_solar`, `beta_s`, `tau_hours` — comfort inputs and learned physics.
 - `confidence`, `identification_progress`, `learning_phase` — model-learning progress.
 - `mpc_power`, `mpc_weight` — predictive-shadow output.
 - `ca_deviation_k`, `ca_cycles_per_h`, `ca_time_in_band` — the EN 15500-1 control-accuracy metric.
 - `compressor_guard_blocked`, `tick_duration_ms` — single-AC guard state and per-tick compute budget.
+- `override_expires_at` — the manual hold's end-time as a timestamp, enabled by default so the override is visible without the card (ADR-0059).
 
 Everything else Poise exposes for transparency lives as **attributes on the `climate` entity — not as standalone sensors** — so read them from `climate.<room>`'s state attributes rather than looking for a `sensor.<room>_…`: the comfort index (`pmv` / `ppd`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`, `fan_velocity_ms`), the actuator↔room reference-frame offset (`ref_offset*`, `cool_sp_compensated`), the transparency flags (`override_clamped`, `mould_floor`, `dewpoint`), and the per-device `tpi_*` / `pi_*` shadow values. (For example there is no `sensor.<room>_pmv`; read the `pmv` attribute from the climate entity instead.)
 
