@@ -46,9 +46,7 @@ def _base() -> dict[str, Any]:
 
 
 async def _entity(hass: HomeAssistant) -> tuple[PoiseClimate, Any]:
-    hass.states.async_set(
-        "sensor.room_temp", "20.0", {"device_class": "temperature"}
-    )
+    hass.states.async_set("sensor.room_temp", "20.0", {"device_class": "temperature"})
     hass.states.async_set(
         "climate.trv",
         "heat",
