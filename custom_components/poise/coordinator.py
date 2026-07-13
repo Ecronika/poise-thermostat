@@ -324,6 +324,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._last_target: float | None = None
         self._last_written_mode: str | None = None
         self._last_written_sp: float | None = None  # P1-4a: last commanded (snapped)
+        # P1-4a fix (v0.170.1): the device setpoint at the previous tick. A genuine
+        # user change *moves* the setpoint; a value the device merely settled our
+        # write at (its own re-quantise / min-max clamp) is stable tick-over-tick,
+        # so requiring a move blocks re-adopting our own settled write as a hold
+        # (the live "card-X resume springs back to manual" bug). Runtime-only.
+        self._prev_device_sp: float | None = None
         # AR-11: True once any setpoint/mode write to the actuator has SUCCEEDED
         # this run (tick, unavailable-safe, or frost rescue). Persisted + restored;
         # gates the teardown park so a zone that never actuated is not "parked".
@@ -2652,10 +2658,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     now=now,
                     echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
                     deadband=max(WRITE_DEADBAND_C, step),
+                    # P1-4a fix: only a value the device *moved* to is a user
+                    # change; a stable settle/clamp of our own write is not.
+                    prev_device_sp=self._prev_device_sp,
                 )
                 if (self._adopt_external_setpoint and not sched_active)
                 else None
             )
+            # P1-4a fix: remember this tick's device reading so next tick can tell a
+            # fresh move (user) from a value the device is merely holding (echo of
+            # our write, re-quantised/clamped). Updated every tick regardless of the
+            # branch below, so a settled offset never re-triggers adoption.
+            self._prev_device_sp = actual_sp
             if _adopted_sp is not None:
                 self.set_override(_adopted_sp, reason="device_adopt")
                 # B1 (review v0.168.0): the device now reports the adopted value,
