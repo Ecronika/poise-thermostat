@@ -757,3 +757,17 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .wrap.compact .presets, .wrap.compact .monitor, .wrap.compact .chips { gap: 4px; }
     `;
 }
+
+(window as unknown as { customCards: unknown[] }).customCards =
+  (window as unknown as { customCards: unknown[] }).customCards || [];
+(window as unknown as { customCards: unknown[] }).customCards.push({
+  type: "poise-card",
+  name: "Poise Thermostat",
+  preview: true,
+  description: "EN-16798 comfort band, operative temperature & shadow state for Poise.",
+});
+
+if (!customElements.get("poise-card")) {
+  customElements.define("poise-card", PoiseCard);
+}
+console.info(`%c POISE-CARD ${CARD_VERSION} `, "background:#2196f3;color:#fff");
