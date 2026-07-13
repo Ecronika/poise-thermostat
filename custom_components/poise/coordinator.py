@@ -1775,6 +1775,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     ),
                 )
                 self._last_target = plan.setpoint
+                # B2 (review v0.168.0): clear the adoption baseline so our own
+                # safe-state setpoint is never re-read as a user hold on recovery.
+                self._last_written_sp = None
                 self._mark_actuated()  # AR-11 (+F16: persist the flip)
         except Exception:  # noqa: BLE001 - safe-state write must never kill the tick
             _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
@@ -2655,6 +2658,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
             if _adopted_sp is not None:
                 self.set_override(_adopted_sp, reason="device_adopt")
+                # B1 (review v0.168.0): the device now reports the adopted value,
+                # so make it the echo baseline. Without this an in-band adoption
+                # (the common case, where no write follows because target==device)
+                # would be re-detected every tick -> set_override recomputes the
+                # expiry from now() forever (the hold never ends, resume_schedule /
+                # card-X are undone within a tick) and a store-save fires per tick.
+                # Out-of-band adoptions self-correct: the clamped write that follows
+                # re-stamps _last_written_sp below.
+                self._last_written_sp = snap_to_step(_adopted_sp, step)
+                self._last_sp_write_ts = now
                 self._dirty = True  # persist the adopted hold across restarts
             if (
                 _actuator_online
@@ -2795,6 +2808,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             reason="frost_rescue",
                         ),
                     )
+                    # B2: the frost floor is our own value, not user intent.
+                    self._last_written_sp = None
                     self._mark_actuated()  # AR-11 (+F16: persist the flip)
                 except Exception:  # noqa: BLE001 - frost rescue write is best-effort
                     _LOGGER.exception(
