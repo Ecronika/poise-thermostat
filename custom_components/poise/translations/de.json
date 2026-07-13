@@ -161,6 +161,9 @@
       },
       "tick_duration_ms": {
         "name": "Tick-Dauer (ms)"
+      },
+      "override_expires_at": {
+        "name": "Manueller Halt endet um"
       }
     },
     "binary_sensor": {
