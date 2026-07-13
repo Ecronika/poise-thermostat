@@ -1,10 +1,11 @@
-"""Default-enabled entity surface for a fresh zone (review P2-9).
+"""Default-enabled entity surface for a fresh zone (review P2-9 + P1-4b).
 
 A new install should show a *lean* set: the main climate entity, the
-window-bypass switch, and only the three most useful diagnostic sensors
-(operative temperature, learning phase, model confidence). Every other
-diagnostic sensor is registered but ``disabled_by == INTEGRATION`` so it
-stays out of the default dashboard until the user opts in.
+window-bypass switch, the three most useful diagnostic sensors (operative
+temperature, learning phase, model confidence) and -- since P1-4b -- the manual
+hold's expiry timestamp, so the override end-time is visible without the card.
+Every other diagnostic sensor is registered but ``disabled_by == INTEGRATION`` so
+it stays out of the default dashboard until the user opts in.
 
 CI-only: needs the pytest-homeassistant-custom-component harness (no HA in
 the dev sandbox).
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import homeassistant.util.dt as dt_util
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -53,16 +55,18 @@ ROOM_DATA: dict[str, Any] = {
 }
 
 # has_entity_name=True + device "Test Room" -> "test_room" slug prefix.
-# The three sensor suffixes come from the translated entity names:
+# The sensor suffixes come from the translated entity names:
 #   operative_temperature -> "Operative temperature"
 #   learning_phase        -> "Learning phase"
 #   confidence            -> "Model confidence"
+#   override_expires_at   -> "Override expires at"  (P1-4b, enabled by default)
 EXPECTED_ENABLED = {
     "climate.test_room",
     "switch.test_room_ignore_open_window_reaction",
     "sensor.test_room_operative_temperature",
     "sensor.test_room_learning_phase",
     "sensor.test_room_model_confidence",
+    "sensor.test_room_override_expires_at",
 }
 
 
@@ -118,3 +122,30 @@ async def test_default_enabled_entities_are_lean(hass: HomeAssistant) -> None:
     for key in ("mpc_power", "tick_duration_ms"):
         rep = by_unique[f"{entry.entry_id}_{key}"]
         assert rep.disabled_by is RegistryEntryDisabler.INTEGRATION
+
+
+async def test_override_expiry_sensor_renders_timestamp(hass: HomeAssistant) -> None:
+    """P1-4b: the override-expiry sensor turns the wall-clock epoch the coordinator
+    tracks into a timestamp state (and reads ``unknown`` while no hold is active)."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_room_and_actuator(hass, room=19.5, sp=18.0)
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_DATA, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    coord = entry.runtime_data
+    eid = "sensor.test_room_override_expires_at"
+
+    # no active hold -> the coordinator carries None -> the sensor is unknown
+    assert hass.states.get(eid).state == "unknown"
+
+    # an announced expiry (wall-clock epoch) renders as an ISO timestamp
+    expiry = 1_800_000_000.0
+    coord.data["override_expires_at"] = expiry
+    coord.async_update_listeners()
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == dt_util.utc_from_timestamp(expiry).isoformat()
