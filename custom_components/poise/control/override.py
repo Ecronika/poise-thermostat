@@ -191,3 +191,54 @@ def resolve_boost_expiry(*, set_at: float, boost_duration_min: float) -> float:
     (VT#1961 guard). Eco/Comfort/Away stay durationless state choices.
     """
     return set_at + boost_duration_min * 60.0
+
+
+# ---------------------------------------------------------------------------
+# P1-4a: adopt a device-side setpoint change as a manual hold.
+#
+# When the user turns the TRV wheel (or the vendor app), the actuator reports a
+# setpoint Poise did not command; the naive control loop overwrites it within one
+# tick. This pure detector decides whether the *reported* setpoint is a genuine
+# user change worth adopting as a hold, rather than an echo of Poise's own write.
+# It is policy-agnostic: the coordinator (glue) turns an adopted value into a hold
+# via ``resolve_hold_expiry`` with the zone's configured policy.
+# ---------------------------------------------------------------------------
+
+
+def detect_external_setpoint(
+    *,
+    device_sp: float | None,
+    last_written_sp: float | None,
+    last_write_ts: float | None,
+    now: float,
+    echo_window_s: float,
+    deadband: float,
+) -> float | None:
+    """The device-side setpoint Poise should adopt as a manual hold, else ``None``.
+
+    A reported setpoint is a genuine external change only when it differs from what
+    Poise last commanded — an *echo* of our own write matches ``last_written_sp``
+    and must be ignored. Two guards keep lag and cold-start from raising a false
+    positive:
+
+    * **No baseline** (``last_written_sp`` or ``last_write_ts`` is ``None``): Poise
+      has not established control yet, so it cannot tell an echo from a change —
+      return ``None`` and let the normal write path settle the device first.
+    * **Echo window**: within ``echo_window_s`` of our own write the device may
+      still report its *pre-write* value (Zigbee/poll lag); suppress adoption so
+      that lag is never read as a user change.
+
+    ``last_written_sp`` must be the value Poise actually commanded **after snapping
+    to the device step** (what the device settles to), and ``deadband`` at least
+    one device step, so a device echoing our command back — possibly re-quantised —
+    is never mistaken for a user change. ``now``/``last_write_ts`` share one
+    monotonic clock. The returned value is the raw reported setpoint (the caller
+    snaps and clamps it to the norm envelope before holding it).
+    """
+    if device_sp is None or last_written_sp is None or last_write_ts is None:
+        return None
+    if (now - last_write_ts) < echo_window_s:
+        return None
+    if round(abs(device_sp - last_written_sp), 3) < deadband:
+        return None
+    return device_sp
