@@ -23,6 +23,7 @@ import {
 } from "./dial.ts";
 import { CARD_VERSION, checkCardVersion } from "./version.ts";
 import {
+  airHint,
   clampLabel,
   clockLabel,
   heldSetpoint,
@@ -235,6 +236,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   private _dial(a: Record<string, unknown>, lang?: string) {
     const op = num(a["operative_temperature"]) ?? num(a["current_temperature"]);
+    // V3a (review 2026-07-13, D1): the big number is the operative temperature;
+    // show the air temperature as a secondary hint only when it diverges (the
+    // entity's more-info shows air, so an unlabelled gap looks like a bug).
+    const airH = airHint(op, num(a["current_temperature"]));
     // ADR-0059 Defekt 1: the dial centre number + handle marker show the
     // commanded/held setpoint (`temperature`), NOT `heat_sp` — the latter is
     // only the comfort-band lower edge (the band arc below keeps low/high).
@@ -323,7 +328,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           @click=${this._moreInfo}
           @keydown=${this._onActivateKey}
         >
-          <div class="op">${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
+          <div class="op" title=${t(lang, "operative")}>${op != null ? op.toFixed(1) : "—"}<span>°C</span></div>
+          ${airH != null
+            ? html`<div class="opair">${t(lang, "operative")} · ${t(lang, "air")} ${airH.toFixed(1)}°</div>`
+            : nothing}
           <div class="soll">${t(lang, "setpoint")} <b>${sp.toFixed(1)}°</b></div>
           ${validUntil
             ? html`<div class="valid">${t(lang, "valid_until")} ${validUntil}</div>`
@@ -468,10 +476,18 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   private _holdPill(a: Record<string, unknown>, lang?: string) {
     if (!a["override_active"]) return nothing;
     const sp = heldSetpoint(a);
-    const v = holdView(lang, sp, a["override_policy"], a["override_expires_at"]);
+    const v = holdView(
+      lang,
+      sp,
+      a["override_policy"],
+      a["override_expires_at"],
+      Date.now(),
+      a["hvac_action"],
+    );
     return html`<div class="hold">
       <div class="chip hold-chip">
         <ha-icon icon="mdi:hand-back-right"></ha-icon><span>${v.label}</span>
+        ${v.direction != null ? html`<em>· ${v.direction}</em>` : nothing}
         ${v.minutes != null
           ? html`<em>· ${v.minutes} ${t(lang, "min_left")}</em>`
           : nothing}
@@ -710,6 +726,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .wrap.compact .dialwrap { max-width: 150px; }
     .dialctr .op { font-size: 38px; font-weight: 600; line-height: 1; }
     .dialctr .op span { font-size: 16px; color: var(--secondary-text-color); }
+    .dialctr .opair { font-size: 11px; color: var(--secondary-text-color); margin-top: 2px; }
     .dialctr .soll { font-size: 13px; color: var(--secondary-text-color); margin-top: 4px; }
     .empty { padding: 24px 16px; color: var(--secondary-text-color); }
     .mould { stroke: var(--warning-color, #ff9800); stroke-width: 3; stroke-linecap: round; }
@@ -738,19 +755,5 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     .wrap.compact { padding: 6px 12px 12px; }
     .wrap.compact .dialctr .op { font-size: 30px; }
     .wrap.compact .presets, .wrap.compact .monitor, .wrap.compact .chips { gap: 4px; }
-  `;
+    `;
 }
-
-(window as unknown as { customCards: unknown[] }).customCards =
-  (window as unknown as { customCards: unknown[] }).customCards || [];
-(window as unknown as { customCards: unknown[] }).customCards.push({
-  type: "poise-card",
-  name: "Poise Thermostat",
-  preview: true,
-  description: "EN-16798 comfort band, operative temperature & shadow state for Poise.",
-});
-
-if (!customElements.get("poise-card")) {
-  customElements.define("poise-card", PoiseCard);
-}
-console.info(`%c POISE-CARD ${CARD_VERSION} `, "background:#2196f3;color:#fff");

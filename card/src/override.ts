@@ -42,27 +42,62 @@ export interface HoldView {
   label: string; // "Manuell 22.5°" or "Manuell (dauerhaft)"
   minutes: number | null; // remaining minutes; null when permanent/unknown
   permanent: boolean;
+  direction: string | null; // localized "kühlt"/"heizt"/"entfeuchtet"; null when idle
+}
+
+// Map the entity's hvac_action to a localized direction word for the Hold pill
+// (V4, review 2026-07-13): the pill should say *what* the hold is doing, not just
+// the value + time. idle/off/unknown -> null (no direction shown).
+export function holdDirection(lang: string | undefined, action: unknown): string | null {
+  const act = typeof action === "string" ? action.toLowerCase() : "";
+  if (act === "cooling") return t(lang, "cools");
+  if (act === "heating") return t(lang, "heats");
+  if (act === "drying") return t(lang, "dries");
+  return null;
 }
 
 // Compose the Hold-pill text. A `permanent` policy drops the countdown and reads
-// "Manual (permanent)"; otherwise the remaining minutes come from expires_at.
+// "Manual (permanent)"; otherwise the remaining minutes come from expires_at. The
+// optional `action` (entity hvac_action) adds the current direction word (V4).
 export function holdView(
   lang: string | undefined,
   setpoint: number | null,
   policy: unknown,
   expiresAt: unknown,
   now: number = Date.now(),
+  action: unknown = null,
 ): HoldView {
   const manual = t(lang, "manual");
+  const direction = holdDirection(lang, action);
   if (policy === "permanent") {
     return {
       label: `${manual} (${t(lang, "permanent")})`,
       minutes: null,
       permanent: true,
+      direction,
     };
   }
   const label = setpoint != null ? `${manual} ${setpoint.toFixed(1)}°` : manual;
-  return { label, minutes: minutesUntil(expiresAt, now), permanent: false };
+  return {
+    label,
+    minutes: minutesUntil(expiresAt, now),
+    permanent: false,
+    direction,
+  };
+}
+
+// V3a (review 2026-07-13, D1): the dial's big number shows the *operative*
+// temperature (air+radiation); the air temperature is a different, unlabelled
+// value the entity's more-info shows. Return the air value to display as a
+// secondary hint only when it diverges meaningfully (>= threshold K) from the
+// operative value; null when they agree, either is absent, or the gap is noise.
+export function airHint(
+  op: number | null,
+  air: number | null,
+  threshold = 0.3,
+): number | null {
+  if (op == null || air == null) return null;
+  return Math.abs(op - air) >= threshold ? air : null;
 }
 
 // Explanatory clamp label: "22.5° statt 24° (Normgrenze)" from the effective
