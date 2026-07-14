@@ -13,12 +13,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import Context, HomeAssistant, State
 from homeassistant.exceptions import (
     ConfigEntryError,
     ConfigEntryNotReady,
@@ -330,6 +331,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # so requiring a move blocks re-adopting our own settled write as a hold
         # (the live "card-X resume springs back to manual" bug). Runtime-only.
         self._prev_device_sp: float | None = None
+        # V2 (analysis 2026-07-14): HA ``Context`` ids of Poise's own actuator
+        # service calls (setpoint / mode nudge). The next tick reads the actuator
+        # state's context: if it is one of ours the change is our own write's echo
+        # (incl. a device re-quantise / min-max clamp under a push integration) and
+        # is re-baselined, never adopted -- the reliable signal the value/time
+        # heuristic can only approximate. Bounded so it never grows unbounded.
+        self._own_write_ctx_ids: deque[str] = deque(maxlen=16)
+        # V1: the device's reported setpoint captured immediately before our last
+        # write. Inside the echo window a legit echo can only be the commanded value
+        # or this pre-write value; anything else is a provable user change.
+        self._pre_write_sp: float | None = None
         # AR-11: True once any setpoint/mode write to the actuator has SUCCEEDED
         # this run (tick, unavailable-safe, or frost rescue). Persisted + restored;
         # gates the teardown park so a zone that never actuated is not "parked".
@@ -1502,6 +1514,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             placeholders={"zone": self.zone_name},
         )
 
+    def _own_ctx(self) -> Context:
+        """A fresh HA ``Context`` for one of Poise's own actuator service calls.
+
+        Its id is remembered (bounded) so the next tick can identify the resulting
+        state change as our own write's echo -- including a device re-quantise /
+        min-max clamp a push integration reports under this context -- and re-baseline
+        instead of mis-adopting it as an external change (V2, analysis 2026-07-14).
+        """
+        ctx = Context()
+        self._own_write_ctx_ids.append(ctx.id)
+        return ctx
+
     def _save_payload(self) -> dict[str, Any]:
         return {
             "ekf": self._ekf.to_dict(),
@@ -2605,6 +2629,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                         "set_hvac_mode",
                         {"entity_id": self._actuator, "hvac_mode": desired_hvac},
                         blocking=False,
+                        context=self._own_ctx(),  # V2: tag our own mode change
                     )
                 except Exception:  # noqa: BLE001 - mode nudge is best-effort
                     _LOGGER.exception(
@@ -2650,6 +2675,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # the adopted value to the norm envelope. Skipping this tick's write
             # avoids overwriting the just-adopted value -- next tick's target
             # already reflects the new hold.
+            # V2 (analysis 2026-07-14): the reliable "is this our own write's echo?"
+            # signal. If the actuator's current state carries a Context Poise itself
+            # created (setpoint / mode nudge), this reading is our write settling --
+            # including a device re-quantise / min-max clamp a push integration
+            # reports under our context -- so accept the device's *actual* value as
+            # the new echo baseline and never adopt it. Only a change under a
+            # foreign/unknown context (a user via IR/app, or an async echo a poll
+            # integration reports under a fresh context) reaches the value/time
+            # detector below. This is what the pure heuristic can only approximate,
+            # and why V2 ships together with V1.
+            _own_change = bool(
+                act_state is not None
+                and act_state.context is not None
+                and act_state.context.id in self._own_write_ctx_ids
+            )
+            if _own_change and actual_sp is not None:
+                # Accept the device's *actual* settled value (echo / clamp /
+                # re-quantise) as the echo baseline so future reports of it are
+                # recognised as echoes. Do NOT touch _last_sp_write_ts: the echo
+                # window and the ADR-0052 §4 regulation throttle both key off the
+                # real last-*write* time; refreshing it every echo tick would keep
+                # the window/throttle open as long as the device echoes our context
+                # and could defer a legitimate new-target write past its period.
+                self._last_written_sp = actual_sp
             _adopted_sp: float | None = (
                 detect_external_setpoint(
                     device_sp=actual_sp,
@@ -2657,12 +2706,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     last_write_ts=self._last_sp_write_ts,
                     now=now,
                     echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
-                    deadband=max(WRITE_DEADBAND_C, step),
+                    # V4 (B4): symmetric with the write deadband. The write path
+                    # reverts anything >= WRITE_DEADBAND_C from our command, so the
+                    # adopt path must be able to *detect* the same delta -- otherwise
+                    # a change on a coarse-step device is forever reverted but never
+                    # adopted. Own re-quantise is handled by V2/pre_write, not by
+                    # inflating the deadband to the step.
+                    deadband=WRITE_DEADBAND_C,
                     # P1-4a fix: only a value the device *moved* to is a user
                     # change; a stable settle/clamp of our own write is not.
                     prev_device_sp=self._prev_device_sp,
+                    # V1: inside the echo window, a value differing from BOTH our
+                    # command and the pre-write reading is a provable user change.
+                    pre_write_sp=self._pre_write_sp,
                 )
                 if (self._adopt_external_setpoint and not sched_active)
+                and not _own_change
                 else None
             )
             # P1-4a fix: remember this tick's device reading so next tick can tell a
@@ -2711,7 +2770,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     reason="tick",
                 )
                 try:
-                    await actuator_mod.write(self.hass, cmd)
+                    # V1: the device's reported setpoint just before this write is
+                    # the only other value a legit in-window echo can carry (poll
+                    # lag), so remember it for next tick's three-value adoption test.
+                    self._pre_write_sp = actual_sp
+                    # V2: tag the call so the resulting state change carries a
+                    # Context we recognise as our own next tick (echo / clamp).
+                    await actuator_mod.write(self.hass, cmd, context=self._own_ctx())
                     self._last_written_mode = final_mode
                     self._last_sp_write_ts = now
                     self._last_written_sp = snap_to_step(target, step)  # P1-4a echo

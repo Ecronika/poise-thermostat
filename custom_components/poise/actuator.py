@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from .contracts import ActuatorCommand, ActuatorPath
 
 if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+    from homeassistant.core import Context, HomeAssistant
 
 
 def service_call_for(command: ActuatorCommand) -> tuple[str, str, dict[str, Any]]:
@@ -38,7 +38,20 @@ def service_call_for(command: ActuatorCommand) -> tuple[str, str, dict[str, Any]
     raise NotImplementedError(f"actuator path not wired: {command.path}")
 
 
-async def write(hass: HomeAssistant, command: ActuatorCommand) -> None:
-    """Translate one arbitrated command into exactly one HA service call."""
+async def write(
+    hass: HomeAssistant,
+    command: ActuatorCommand,
+    context: Context | None = None,
+) -> None:
+    """Translate one arbitrated command into exactly one HA service call.
+
+    ``context`` tags the call so the resulting state change carries a Context the
+    coordinator recognises as its own (V2, analysis 2026-07-14): the next tick can
+    then tell our own write's echo -- including a device re-quantise / min-max clamp
+    a push integration reports under this same context -- from a genuine external
+    setpoint change, without guessing from the value alone.
+    """
     domain, service, data = service_call_for(command)
-    await hass.services.async_call(domain, service, data, blocking=False)
+    await hass.services.async_call(
+        domain, service, data, blocking=False, context=context
+    )
