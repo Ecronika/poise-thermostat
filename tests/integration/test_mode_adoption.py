@@ -229,9 +229,7 @@ async def test_return_to_plan_mode_ends_hold(hass: HomeAssistant) -> None:
 
     clock = _FakeClock(1000.0)
     coord._clock = clock
-    coord._mode_override = "fan_only"  # a fan_only hold is active
-    coord._override_set_wall = 1000.0
-    coord._override_expires_at = 1000.0 + 7200.0
+    coord._set_mode_override("fan_only")  # a fan_only hold is active (real expiry)
     coord._last_commanded_hvac = "fan_only"
     coord._last_hvac_cmd_ts = 1000.0
     coord._prev_device_mode = "fan_only"
@@ -255,9 +253,10 @@ async def test_off_hold_ends_when_user_turns_back_on(hass: HomeAssistant) -> Non
 
     clock = _FakeClock(1000.0)
     coord._clock = clock
-    coord._mode_override = "off"  # an off-hold is active
-    coord._override_set_wall = 1000.0
-    coord._override_expires_at = 1000.0 + 7200.0
+    # an off-hold is active -- create it the way production does so its wall-clock
+    # expiry is real. A hand-seeded stale timestamp would be treated as already
+    # expired by the tick-start expiry check and cleared before the escape runs.
+    coord._set_mode_override("off")
     clock.t = 1000.0 + 300.0
     _set_ac(hass, mode="cool", room=25.0)  # user switches it back on
 
