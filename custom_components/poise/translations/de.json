@@ -354,6 +354,7 @@
               "override_max_h": "Max. Haltedauer (Std.)",
               "override_end_on_presence_change": "Bei Anwesenheitswechsel (Haus) beenden",
               "adopt_external_setpoint": "Geräteseitige Sollwertänderung als Halt übernehmen",
+              "adopt_external_mode": "Geräteseitige Modusänderung als Halt übernehmen",
               "boost_duration_min": "Boost-Dauer (Min.)"
             },
             "data_description": {

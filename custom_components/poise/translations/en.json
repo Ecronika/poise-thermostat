@@ -209,6 +209,7 @@
               "override_max_h": "Max manual hold (h)",
               "override_end_on_presence_change": "End on home presence change",
               "adopt_external_setpoint": "Adopt device-side setpoint changes as a hold",
+              "adopt_external_mode": "Adopt device-side mode changes as a hold",
               "boost_duration_min": "Boost duration (min)"
             },
             "data_description": {
