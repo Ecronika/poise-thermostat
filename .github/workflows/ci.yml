@@ -115,6 +115,20 @@ jobs:
         run: |
           git diff --exit-code -- ../custom_components/poise/frontend/poise-card.js \
             || { echo "::error::poise-card.js is stale — run 'node build.mjs' in card/ and commit the result"; exit 1; }
+      - name: Guard — bundle registers the poise-card element (v0.170.2)
+        run: |
+          # The whole card is dead without the entry module's
+          # customElements.define("poise-card", …) side-effect (HA shows
+          # "Custom element doesn't exist: poise-card"). This slipped through once
+          # because source AND bundle were consistently missing it, so neither the
+          # freshness diff nor tsc/tests (they import pure modules) flagged it.
+          # build.mjs asserts the same on every build; this pins it on the committed
+          # artifact too — belt and suspenders against a hand-edited/stale bundle.
+          BUNDLE=../custom_components/poise/frontend/poise-card.js
+          for needle in 'customElements.define("poise-card"' 'customCards'; do
+            grep -qF "$needle" "$BUNDLE" \
+              || { echo "::error::committed bundle is missing \`$needle\` — the card would not register. Restore the registration block at the end of card/src/poise-card.ts and rebuild."; exit 1; }
+          done
       - name: Guard — card options are documented in the card README (ADR-0057)
         run: |
           # doc-drift guard: every user-facing card option must appear in
