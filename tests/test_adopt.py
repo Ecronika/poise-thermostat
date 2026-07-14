@@ -82,6 +82,37 @@ def test_moved_device_setpoint_is_adopted() -> None:
     assert _d(device_sp=18.0, last_written_sp=21.0, prev_device_sp=21.0) == 18.0
 
 
+def test_in_window_third_value_is_adopted_immediately() -> None:
+    # B1 fix (analysis 2026-07-14): inside the echo window a legit echo/lag can only
+    # report our command (== last_written) or the pre-write value. A value differing
+    # from BOTH by >= deadband is provably a fresh user change -> adopt in-window,
+    # instead of swallowing it and reverting minutes later.
+    assert (
+        _d(device_sp=26.0, now=TS + 50.0, last_written_sp=24.0, pre_write_sp=24.0)
+        == 26.0
+    )
+    assert (
+        _d(device_sp=26.0, now=TS + 50.0, last_written_sp=24.0, pre_write_sp=22.0)
+        == 26.0
+    )
+
+
+def test_in_window_pre_write_lag_is_suppressed() -> None:
+    # the device still reports its pre-write value (poll lag) -> not a user change
+    assert (
+        _d(device_sp=22.0, now=TS + 50.0, last_written_sp=24.0, pre_write_sp=22.0)
+        is None
+    )
+
+
+def test_in_window_without_pre_write_stays_conservative() -> None:
+    # no pre-write reference -> cannot prove a third value -> suppress in-window
+    assert (
+        _d(device_sp=26.0, now=TS + 50.0, last_written_sp=24.0, pre_write_sp=None)
+        is None
+    )
+
+
 def test_first_observation_without_prev_still_gated_by_baseline() -> None:
     # prev is None on the very first reading -> the move guard is skipped, but the
     # no-baseline / echo guards still apply, so cold start never false-adopts.
