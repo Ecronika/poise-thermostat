@@ -268,3 +268,74 @@ def detect_external_setpoint(
     ):
         return None
     return device_sp
+
+
+# ---------------------------------------------------------------------------
+# K2: adopt a device-side hvac_mode change as a manual mode-hold.
+#
+# When the user changes the device's mode (the IR remote on a split AC, the
+# vendor app), Poise's mode nudge currently commands it straight back. This pure
+# detector decides whether the *reported* mode is a genuine user change worth
+# adopting as a mode-hold, rather than an echo of Poise's own nudge. It is
+# categorical (modes are strings, not a continuum), so it has no deadband; the
+# coordinator (glue) turns an adopted mode into a hold with the zone's policy and
+# gates it behind the ``adopt_external_mode`` option and the Context check (a mode
+# change carrying Poise's own write context is our nudge echo, never adopted).
+# ---------------------------------------------------------------------------
+
+
+def detect_external_mode(
+    *,
+    device_mode: str | None,
+    desired_mode: str,
+    last_commanded_mode: str | None,
+    last_cmd_ts: float | None,
+    now: float,
+    echo_window_s: float,
+    supported_modes: tuple[str, ...] | frozenset[str] = (),
+    prev_mode: str | None = None,
+) -> str | None:
+    """The device-side hvac_mode Poise should adopt as a manual mode-hold, else ``None``.
+
+    Like ``detect_external_setpoint`` this is the value/time *fallback* — the
+    coordinator first uses HA ``Context`` to drop a mode change it caused itself (its
+    own nudge echo) and only calls this for a change from an unknown/foreign actor.
+    The guards, in order:
+
+    * **No usable reading** (``None`` / ``unknown`` / ``unavailable``): return ``None``.
+    * **Already where Poise wants it** (``device_mode == desired_mode``): nothing
+      external to adopt — the normal case.
+    * **Not adoptable**: a mode the device does not actually list in ``supported_modes``,
+      or ``heat_cool`` (dual-setpoint is out of scope for v1, B7): return ``None``.
+    * **No baseline** (``last_commanded_mode`` / ``last_cmd_ts`` ``None``): Poise has not
+      commanded a mode yet — cannot tell an echo from a change.
+    * **Echo of our command** (``device_mode == last_commanded_mode``): our own nudge
+      settling (even if ``desired_mode`` has since moved on — Poise will re-nudge),
+      never a user change.
+    * **Echo window**: within ``echo_window_s`` of our last mode command a differing
+      report may still be a lagging echo of an even earlier command; stay conservative
+      and suppress (the user change is adopted on the first tick past the window — the
+      in-window immediate path is deliberately out of scope, plan §7).
+    * **Stable mode** (``prev_mode``): a mode unchanged since the previous reading is not
+      a fresh user action; require an actual move (the mode-equivalent of the setpoint
+      stable-offset guard).
+
+    ``now`` / ``last_cmd_ts`` share one monotonic clock. The returned string is the raw
+    device mode; the caller applies it as a hold within the norm/​safety precedence
+    (window-open and frost still beat a mode-hold — a hold is comfort, not safety).
+    """
+    if device_mode is None or device_mode in ("unknown", "unavailable"):
+        return None
+    if device_mode == desired_mode:
+        return None
+    if device_mode not in supported_modes or device_mode == "heat_cool":
+        return None
+    if device_mode == last_commanded_mode:
+        return None
+    if last_commanded_mode is None or last_cmd_ts is None:
+        return None
+    if (now - last_cmd_ts) < echo_window_s:
+        return None
+    if prev_mode is not None and device_mode == prev_mode:
+        return None
+    return device_mode
