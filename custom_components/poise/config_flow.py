@@ -34,6 +34,7 @@ from .const import (
     CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
+    CONF_ADOPT_EXTERNAL_MODE,
     CONF_ADOPT_EXTERNAL_SETPOINT,
     CONF_ANNUAL_KWH,
     CONF_BOILER_ACTIVATION_DELAY,
@@ -95,6 +96,7 @@ from .const import (
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ADAPTIVE_COOL,
+    DEFAULT_ADOPT_EXTERNAL_MODE,
     DEFAULT_ADOPT_EXTERNAL_SETPOINT,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_BOILER_ACTIVATION_DELAY_S,
@@ -662,6 +664,12 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                         vol.Required(
                             CONF_ADOPT_EXTERNAL_SETPOINT,
                             default=DEFAULT_ADOPT_EXTERNAL_SETPOINT,
+                        ): selector.BooleanSelector(),
+                        # K2: adopt a device-side hvac_mode change (IR remote) as a
+                        # manual mode-hold instead of nudging it straight back.
+                        vol.Required(
+                            CONF_ADOPT_EXTERNAL_MODE,
+                            default=DEFAULT_ADOPT_EXTERNAL_MODE,
                         ): selector.BooleanSelector(),
                         vol.Required(
                             CONF_BOOST_DURATION_MIN,

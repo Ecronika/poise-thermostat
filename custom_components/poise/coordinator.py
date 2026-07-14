@@ -62,6 +62,7 @@ from .const import (
     CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
+    CONF_ADOPT_EXTERNAL_MODE,
     CONF_ADOPT_EXTERNAL_SETPOINT,
     CONF_ANNUAL_KWH,
     CONF_BOOST_DURATION_MIN,
@@ -106,6 +107,7 @@ from .const import (
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
     DEFAULT_ADAPTIVE_COOL,
+    DEFAULT_ADOPT_EXTERNAL_MODE,
     DEFAULT_ADOPT_EXTERNAL_SETPOINT,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_BOOST_DURATION_MIN,
@@ -170,6 +172,7 @@ from .control.outcome_scoring import (
 from .control.override import (
     OverrideConfig,
     OverrideMode,
+    detect_external_mode,
     detect_external_setpoint,
     hold_ends_at_preheat,
     hold_expired,
@@ -324,6 +327,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._heatup_acc = HeatupAccumulator()
         self._last_target: float | None = None
         self._last_written_mode: str | None = None
+        # K2: a device-side hvac_mode the user set (IR remote), adopted as a manual
+        # mode-hold that shares the setpoint hold's lifecycle. Pins ``desired_hvac``
+        # so Poise stops nudging it back; an ``off`` hold routes the zone through the
+        # disabled/frost-rescue branch (frost + mould protection stay active).
+        self._mode_override: str | None = None
+        # last hvac_mode Poise itself commanded (nudge / frost / safe-state) + its
+        # monotonic stamp -- the mode echo baseline (analogue of _last_written_sp).
+        self._last_commanded_hvac: str | None = None
+        self._last_hvac_cmd_ts: float | None = None
+        # device mode at the previous tick -- the mode move-guard (a mode unchanged
+        # since last reading is not a fresh user action).
+        self._prev_device_mode: str | None = None
         self._last_written_sp: float | None = None  # P1-4a: last commanded (snapped)
         # P1-4a fix (v0.170.1): the device setpoint at the previous tick. A genuine
         # user change *moves* the setpoint; a value the device merely settled our
@@ -538,6 +553,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._adopt_external_setpoint: bool = bool(
             data.get(CONF_ADOPT_EXTERNAL_SETPOINT, DEFAULT_ADOPT_EXTERNAL_SETPOINT)
         )
+        # K2: adopt a device-side hvac_mode change (IR remote) as a manual mode-hold.
+        self._adopt_external_mode: bool = bool(
+            data.get(CONF_ADOPT_EXTERNAL_MODE, DEFAULT_ADOPT_EXTERNAL_MODE)
+        )
         self._operative_input: bool = bool(data.get(CONF_OPERATIVE_INPUT, False))
         self._guards_resolved = False
         self._sched_entity: str | None = None
@@ -600,6 +619,35 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # mode_change or a resume on a hold-less zone raises no false event.
             if value is None and was_active:  # explicit clear of an active hold
                 self._fire_override_ended(reason or "user_resume")
+        self._dirty = True
+
+    def _set_mode_override(self, mode: str | None) -> None:
+        """Adopt (or clear) a device-side hvac_mode as a manual mode-hold (K2).
+
+        Shares the setpoint hold's lifecycle: if no hold is running yet it starts one
+        (set-time expiry via ``resolve_hold_expiry`` + the zone policy). A setpoint
+        hold already active this frame keeps its announced expiry -- the common case
+        where an IR remote sends mode + temperature in one frame, adopted together.
+        Cleared by ``_end_hold`` alongside the setpoint hold; never a safety layer.
+        """
+        self._mode_override = mode
+        if mode is not None and self._override_set_wall is None:
+            set_at = dt_util.utcnow().timestamp()
+            self._override_set_wall = set_at
+            mins = self._minutes_to_switchpoint()
+            self._override_expires_at = resolve_hold_expiry(
+                policy=self._override_policy,
+                set_at=set_at,
+                timer_h=self._override_timer_h,
+                max_h=self._override_max_h,
+                minutes_to_switchpoint=mins,
+            )
+            self._override_expiry_is_switchpoint = (
+                self._override_policy == OVERRIDE_POLICY_SCHEDULE
+                and mins is not None
+                and mins > 0
+                and set_at + mins * 60.0 <= set_at + self._override_max_h * 3600.0
+            )
         self._dirty = True
 
     def _read_override_options(self, data: dict[str, Any]) -> None:
@@ -698,6 +746,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     def _end_hold(self, reason: str) -> None:
         """Tear down an active manual hold and announce why (ADR-0059 §1/§3)."""
         self._override = None
+        self._mode_override = None  # K2: mode-hold shares the setpoint hold's end
         self._override_set_wall = None
         self._override_expires_at = None
         self._override_requested = None
@@ -722,8 +771,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # timed Boost (§2): restore the frozen preset; then Boost is stateless.
         if self._boost_expires_at is not None and now >= self._boost_expires_at:
             self.set_preset(self._boost_prev_preset or OverrideMode.NONE)
-        # manual hold (§1): value-independent expiry announced at set-time.
-        if self._override is not None and hold_expired(
+        # manual hold (§1): value-independent expiry announced at set-time. K2: a
+        # mode-hold (possibly without a setpoint hold) expires on the same triggers.
+        if (
+            self._override is not None or self._mode_override is not None
+        ) and hold_expired(
             expires_at=self._override_expires_at,
             now=now,
             presence_changed=presence_changed,
@@ -832,13 +884,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._preset = OverrideMode.NONE
                 ov = data.get("override")
                 self._override = float(ov) if isinstance(ov, (int, float)) else None
+                # K2: restore a manual mode-hold (shares the setpoint hold lifecycle
+                # restored below, so it expires on real elapsed wall-clock time).
+                mov = data.get("mode_override")
+                self._mode_override = mov if isinstance(mov, str) else None
+                # K2: the shared hold lifecycle is active if EITHER a setpoint or a
+                # mode hold was persisted (an ``off`` hold carries no setpoint).
+                _hold_active = (
+                    self._override is not None or self._mode_override is not None
+                )
                 # C5: restore the *wall-clock* set-time so the 2 h auto-revert
                 # measures real elapsed time and a hold cannot outlive a restart.
                 osw = data.get("override_set_wall")
                 self._override_set_wall = (
-                    float(osw)
-                    if self._override is not None and isinstance(osw, (int, float))
-                    else None
+                    float(osw) if _hold_active and isinstance(osw, (int, float)) else None
                 )
                 # ADR-0059: restore the manual-hold + timed-Boost lifecycle on a
                 # wall-clock basis, each defensively, so a hold/Boost survives a
@@ -856,9 +915,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # a user's option change on every restart. Deliberately not restored.
                 oea = data.get("override_expires_at")
                 self._override_expires_at = (
-                    float(oea)
-                    if self._override is not None and isinstance(oea, (int, float))
-                    else None
+                    float(oea) if _hold_active and isinstance(oea, (int, float)) else None
                 )
                 # ADR-0059 §1: restore the reason-accuracy flag (default False so
                 # a pre-upgrade hold degrades to "expired_timer", never crashes).
@@ -871,7 +928,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # way a fresh override-set does, so the hold still expires on real
                 # elapsed time instead of silently running forever after a restart.
                 if (
-                    self._override is not None
+                    _hold_active
                     and self._override_expires_at is None
                     and self._override_set_wall is not None
                 ):
@@ -1546,6 +1603,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "preset": self._preset.value,
             "enabled": self._enabled,
             "override": self._override,
+            "mode_override": self._mode_override,  # K2: manual mode-hold
             "override_set_wall": self._override_set_wall,
             # ADR-0059 manual-hold + timed-Boost lifecycle (wall-clock; review C5).
             "override_requested": self._override_requested,
@@ -1793,6 +1851,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     blocking=False,
                 )
                 self._last_written_mode = plan.hvac_mode  # only after a real nudge
+                # K2: our own safe-state mode is never a user change (mode echo).
+                self._last_commanded_hvac = plan.hvac_mode
             if plan.write_setpoint and plan.setpoint is not None:
                 await actuator_mod.write(
                     self.hass,
@@ -2586,7 +2646,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             min_off_s=_g_min_off,
             mode_hold_s=_g_mode_hold,
         )
-        if self._enabled:
+        # V2/K2: is the actuator's current state Poise's own write echo (our Context)?
+        # Computed once, reused by the mode-adoption gate here and the setpoint gate
+        # below (a change under our own context is never adopted, mode or setpoint).
+        _own_change = bool(
+            act_state is not None
+            and act_state.context is not None
+            and act_state.context.id in self._own_write_ctx_ids
+        )
+        # K2: an ``off`` mode-hold routes the zone through the disabled/frost-rescue
+        # branch below (frost + mould protection stay active), exactly like a
+        # user-disabled zone. Read from the persisted hold at tick start; the tick
+        # that first adopts ``off`` still runs the enabled block (pins desired=off,
+        # skips the setpoint write) and only the next tick takes the frost route.
+        _off_held = self._mode_override == "off"
+        if self._enabled and not _off_held:
             desired_hvac = resolve_desired_mode(
                 final_mode=final_mode,
                 current_device_mode=act_state.state if act_state else None,
@@ -2594,6 +2668,40 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 can_heat=can_heat,
                 idle_park_mode=_idle_park_mode,
             )
+            # K2: adopt a device-side hvac_mode change (the IR remote) as a manual
+            # mode-hold instead of nudging it straight back. Behind the opt-out and
+            # the Context check (our own nudge echo is never adopted); off while a
+            # safety layer is active (window/frost beat a mode-hold -- it is comfort,
+            # not safety); only modes the device lists (heat_cool excluded, B7).
+            _cur_mode = act_state.state if act_state else None
+            _mode_adopt = (
+                detect_external_mode(
+                    device_mode=_cur_mode,
+                    desired_mode=desired_hvac,
+                    last_commanded_mode=self._last_commanded_hvac,
+                    last_cmd_ts=self._last_hvac_cmd_ts,
+                    now=now,
+                    echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
+                    supported_modes=tuple(act_modes),
+                    prev_mode=self._prev_device_mode,
+                )
+                if (
+                    self._adopt_external_mode
+                    and not window_open
+                    and not frozen
+                    and not _own_change
+                )
+                else None
+            )
+            self._prev_device_mode = _cur_mode
+            if _mode_adopt is not None:
+                self._set_mode_override(_mode_adopt)
+            # An active mode-hold pins the desired mode (no nudge; the setpoint keeps
+            # regulating within it) unless a safety layer has taken over this tick --
+            # window-open / frost still beat the hold (I6), and the hold resumes once
+            # the layer clears.
+            if self._mode_override is not None and not window_open and not frozen:
+                desired_hvac = self._mode_override
             # A device hvac_mode change this tick must carry its setpoint with it,
             # so it bypasses the §4 setpoint throttle below: a mode nudge without
             # its matching setpoint would e.g. flip an AC to cool while it still
@@ -2631,6 +2739,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                         blocking=False,
                         context=self._own_ctx(),  # V2: tag our own mode change
                     )
+                    # K2: stamp the mode echo baseline so our own nudge is never
+                    # re-read as an external mode change next tick.
+                    self._last_commanded_hvac = desired_hvac
+                    self._last_hvac_cmd_ts = now
                 except Exception:  # noqa: BLE001 - mode nudge is best-effort
                     _LOGGER.exception(
                         "Poise: set_hvac_mode(%s) failed for %s",
@@ -2685,11 +2797,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # integration reports under a fresh context) reaches the value/time
             # detector below. This is what the pure heuristic can only approximate,
             # and why V2 ships together with V1.
-            _own_change = bool(
-                act_state is not None
-                and act_state.context is not None
-                and act_state.context.id in self._own_write_ctx_ids
-            )
+            # ``_own_change`` is computed once above (shared with the K2 mode-adoption
+            # gate); reuse it here for the setpoint echo re-baseline.
             if _own_change and actual_sp is not None:
                 # Accept the device's *actual* settled value (echo / clamp /
                 # re-quantise) as the echo baseline so future reports of it are
@@ -2755,6 +2864,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             if (
                 _actuator_online
                 and _adopted_sp is None  # P1-4a: adopted -> skip this tick's write
+                # K2: an ``off`` mode-hold writes no setpoint (the adopting tick still
+                # runs this block; subsequent ticks take the frost-rescue branch). A
+                # setpoint into an off device would fight the user's off intent.
+                and self._mode_override != "off"
                 # P2-3: while the compressor guard holds a pending mode switch,
                 # defer the *new regime's* setpoint. Writing it now would push a
                 # cool setpoint into a device still in heat (or vice versa); we
@@ -2882,6 +2995,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                             {"entity_id": self._actuator, "hvac_mode": "heat"},
                             blocking=False,
                         )
+                        # K2: frost-rescue heat is our own safety mode, never a user
+                        # change -- stamp the mode echo baseline so it is not adopted.
+                        self._last_commanded_hvac = "heat"
+                        self._last_hvac_cmd_ts = now
                     except Exception:  # noqa: BLE001 - nudge is best-effort
                         _LOGGER.exception(
                             "Poise: frost rescue nudge failed for %s", self._actuator

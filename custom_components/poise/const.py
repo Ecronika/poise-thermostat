@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.171.0"
+VERSION: Final = "0.172.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -39,6 +39,12 @@ EXTERNAL_FEED_KEEPALIVE_S: Final = 600.0
 CONF_ADOPT_EXTERNAL_SETPOINT: Final = "adopt_external_setpoint"
 DEFAULT_ADOPT_EXTERNAL_SETPOINT: Final = True
 SETPOINT_ADOPT_ECHO_WINDOW_S: Final = 120.0
+# K2: adopt a device-side hvac_mode change (the IR remote / vendor app) as a manual
+# mode-hold with the same lifecycle as the setpoint hold, instead of nudging it
+# straight back. Off by opt-out for self-switching devices (Daikin-class); the mode
+# echo window reuses ``SETPOINT_ADOPT_ECHO_WINDOW_S``.
+CONF_ADOPT_EXTERNAL_MODE: Final = "adopt_external_mode"
+DEFAULT_ADOPT_EXTERNAL_MODE: Final = True
 
 # Thermal model defaults (ADR-0009; ~6.7 h time constant, moderate residential room)
 DEFAULT_ALPHA_PER_S: Final = 0.15 / 3600.0
