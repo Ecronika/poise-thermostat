@@ -136,6 +136,7 @@ _ATTRS = (
     "override_clamped",
     # ADR-0059 manual-hold + timed-Boost lifecycle (card contract).
     "override_active",
+    "mode_override",  # K2: the held device mode (off/dry/fan_only/…) or None
     "override_expires_at",
     "override_policy",
     "override_requested",

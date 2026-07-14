@@ -2664,6 +2664,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # that first adopts ``off`` still runs the enabled block (pins desired=off,
         # skips the setpoint write) and only the next tick takes the frost route.
         _off_held = self._mode_override == "off"
+        # M3: an off-hold is escapable at the device -- if the user switches the AC
+        # back on (a foreign-context mode change away from off), end the hold so the
+        # zone resumes control instead of holding a stale off while the device runs.
+        if (
+            _off_held
+            and not _own_change
+            and (act_state.state if act_state else None)
+            not in ("off", None, "unknown", "unavailable")
+        ):
+            self._end_hold("user_resume")
+            _off_held = False
         if self._enabled and not _off_held:
             desired_hvac = resolve_desired_mode(
                 final_mode=final_mode,
@@ -2697,9 +2708,28 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
                 else None
             )
-            self._prev_device_mode = _cur_mode
+            # M2: freeze the mode move-guard reference while the echo window is open,
+            # so an in-window observation of the user's mode never poisons the guard
+            # (the mode analogue of the setpoint prev-freeze; the B1 poisoning class).
+            if self._last_hvac_cmd_ts is None or (
+                now - self._last_hvac_cmd_ts
+            ) >= SETPOINT_ADOPT_ECHO_WINDOW_S:
+                self._prev_device_mode = _cur_mode
             if _mode_adopt is not None:
                 self._set_mode_override(_mode_adopt)
+            # M3: a mode-hold is escapable AT THE DEVICE -- if the user selects the
+            # plan mode again (a foreign-context change back to what Poise wants),
+            # end the hold instead of pinning them off it (detect_external_mode
+            # returns None for device==desired, so it is resolved here).
+            elif (
+                self._mode_override is not None
+                and not _own_change
+                and _cur_mode == desired_hvac
+                and _cur_mode != self._mode_override
+                and not window_open
+                and not frozen
+            ):
+                self._end_hold("user_resume")
             # An active mode-hold pins the desired mode (no nudge; the setpoint keeps
             # regulating within it) unless a safety layer has taken over this tick --
             # window-open / frost still beat the hold (I6), and the hold resumes once
@@ -2744,9 +2774,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                         context=self._own_ctx(),  # V2: tag our own mode change
                     )
                     # K2: stamp the mode echo baseline so our own nudge is never
-                    # re-read as an external mode change next tick.
+                    # re-read as an external mode change next tick. M2: only re-arm
+                    # the echo window on a mode *change* -- re-arming on every
+                    # identical re-nudge (a device that never follows) would keep the
+                    # window open forever and permanently block adoption (B1 class).
+                    if desired_hvac != self._last_commanded_hvac:
+                        self._last_hvac_cmd_ts = now
                     self._last_commanded_hvac = desired_hvac
-                    self._last_hvac_cmd_ts = now
                 except Exception:  # noqa: BLE001 - mode nudge is best-effort
                     _LOGGER.exception(
                         "Poise: set_hvac_mode(%s) failed for %s",
@@ -3437,7 +3471,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             "window_auto_threshold": round(self._wa_open_threshold, 1),
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
-            "override_active": self._override is not None,
+            # K2 (M4): a mode-hold (possibly without a setpoint) is an active hold too,
+            # so the Card shows the pill / "gilt bis …" / resume for it.
+            "override_active": (
+                self._override is not None or self._mode_override is not None
+            ),
+            "mode_override": self._mode_override,
             # ADR-0059 §4: the manual-hold lifecycle for the Card ("gilt bis …").
             "override_expires_at": _iso_utc(self._override_expires_at),
             "override_policy": self._override_policy,
