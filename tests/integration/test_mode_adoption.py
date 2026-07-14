@@ -92,7 +92,7 @@ async def _setup(hass: HomeAssistant, **extra: Any):
 async def test_device_mode_change_is_adopted_as_hold(hass: HomeAssistant) -> None:
     """The user switches the AC from heat to fan_only via the remote -> adopted as a
     mode-hold, and Poise does not nudge it back to its computed mode."""
-    nudges = async_mock_service(hass, "climate", "set_hvac_mode")
+    async_mock_service(hass, "climate", "set_hvac_mode")  # for the setup tick
     async_mock_service(hass, "climate", "set_temperature")
     _set_ac(hass, mode="heat")
     entry = await _setup(hass)
@@ -105,7 +105,9 @@ async def test_device_mode_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
     coord._prev_device_mode = "heat"
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0  # past the mode echo window
     _set_ac(hass, mode="fan_only")  # ... the user turned it to fan_only
-    nudges.clear()
+    # M1: re-register the recorder AFTER setup -- the climate platform load replaces
+    # pre-setup service mocks, so a pre-setup recorder never sees the tick's nudge.
+    nudges = async_mock_service(hass, "climate", "set_hvac_mode")
 
     await coord.async_refresh()
     await hass.async_block_till_done()
@@ -118,7 +120,7 @@ async def test_user_off_is_held_and_not_restarted(hass: HomeAssistant) -> None:
     """The user switches the AC off via the remote -> held ``off``; Poise does not
     re-nudge it on (subsumes the compressor-restart concern of C5) -- an off zone is
     routed through the disabled/frost-rescue branch, where frost + mould stay active."""
-    nudges = async_mock_service(hass, "climate", "set_hvac_mode")
+    async_mock_service(hass, "climate", "set_hvac_mode")  # for the setup tick
     async_mock_service(hass, "climate", "set_temperature")
     _set_ac(hass, mode="cool", room=25.0)  # was cooling
     entry = await _setup(hass)
@@ -131,7 +133,8 @@ async def test_user_off_is_held_and_not_restarted(hass: HomeAssistant) -> None:
     coord._prev_device_mode = "cool"
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     _set_ac(hass, mode="off", room=25.0)  # user turned it off
-    nudges.clear()
+    # M1: re-arm the recorder after setup (see note above).
+    nudges = async_mock_service(hass, "climate", "set_hvac_mode")
 
     await coord.async_refresh()
     await hass.async_block_till_done()
@@ -195,3 +198,69 @@ async def test_own_mode_nudge_echo_is_not_adopted(hass: HomeAssistant) -> None:
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord._mode_override is None
+
+
+async def test_nudge_recorder_is_armed_after_setup(hass: HomeAssistant) -> None:
+    """M1 self-test: a recorder re-registered AFTER setup DOES see the tick's nudge,
+    so the 'no re-nudge' assertions in the other tests are not vacuously true. A
+    heating zone whose device reads ``off`` genuinely nudges it to heat."""
+    async_mock_service(hass, "climate", "set_hvac_mode")  # for setup
+    async_mock_service(hass, "climate", "set_temperature")
+    _set_ac(hass, mode="off")  # device off, no mode-hold -> Poise wants heat -> nudge
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    nudges = async_mock_service(hass, "climate", "set_hvac_mode")  # re-arm after setup
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert any(c.data.get("entity_id") == "climate.ac" for c in nudges)
+
+
+async def test_return_to_plan_mode_ends_hold(hass: HomeAssistant) -> None:
+    """M3: a mode-hold is escapable at the device -- selecting the plan mode again
+    (a foreign-context change back to what Poise wants) ends the hold."""
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    async_mock_service(hass, "climate", "set_temperature")
+    _set_ac(hass, mode="fan_only")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    coord._mode_override = "fan_only"  # a fan_only hold is active
+    coord._override_set_wall = 1000.0
+    coord._override_expires_at = 1000.0 + 7200.0
+    coord._last_commanded_hvac = "fan_only"
+    coord._last_hvac_cmd_ts = 1000.0
+    coord._prev_device_mode = "fan_only"
+    clock.t = 1000.0 + 300.0
+    # the user selects heat again at the device -- the zone's plan mode for a cold room
+    _set_ac(hass, mode="heat")
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._mode_override is None  # hold ended, zone back under automatic control
+
+
+async def test_off_hold_ends_when_user_turns_back_on(hass: HomeAssistant) -> None:
+    """M3: an off-hold is escapable -- when the user switches the AC back on, the
+    hold ends so the zone resumes control instead of holding a stale off."""
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    async_mock_service(hass, "climate", "set_temperature")
+    _set_ac(hass, mode="off", room=25.0)
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    coord._mode_override = "off"  # an off-hold is active
+    coord._override_set_wall = 1000.0
+    coord._override_expires_at = 1000.0 + 7200.0
+    clock.t = 1000.0 + 300.0
+    _set_ac(hass, mode="cool", room=25.0)  # user switches it back on
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._mode_override is None  # off-hold ended; zone resumes control
