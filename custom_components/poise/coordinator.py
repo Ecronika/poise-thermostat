@@ -2667,6 +2667,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # M3: an off-hold is escapable at the device -- if the user switches the AC
         # back on (a foreign-context mode change away from off), end the hold so the
         # zone resumes control instead of holding a stale off while the device runs.
+        # ``_hold_resumed`` then suppresses this tick's adoption so we do not re-grab
+        # the mode the user just switched to as a fresh hold (resume != re-adopt).
+        _hold_resumed = False
         if (
             _off_held
             and not _own_change
@@ -2675,6 +2678,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         ):
             self._end_hold("user_resume")
             _off_held = False
+            _hold_resumed = True
         if self._enabled and not _off_held:
             desired_hvac = resolve_desired_mode(
                 final_mode=final_mode,
@@ -2705,15 +2709,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     and not window_open
                     and not frozen
                     and not _own_change
+                    and not _hold_resumed
                 )
                 else None
             )
             # M2: freeze the mode move-guard reference while the echo window is open,
             # so an in-window observation of the user's mode never poisons the guard
             # (the mode analogue of the setpoint prev-freeze; the B1 poisoning class).
-            if self._last_hvac_cmd_ts is None or (
-                now - self._last_hvac_cmd_ts
-            ) >= SETPOINT_ADOPT_ECHO_WINDOW_S:
+            if (
+                self._last_hvac_cmd_ts is None
+                or (now - self._last_hvac_cmd_ts) >= SETPOINT_ADOPT_ECHO_WINDOW_S
+            ):
                 self._prev_device_mode = _cur_mode
             if _mode_adopt is not None:
                 self._set_mode_override(_mode_adopt)
@@ -3001,13 +3007,29 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # protection (README promise) — but rescue-only, so a reasonable
             # manual setpoint above the floor is never fought; a cool-only device
             # has no frost duty and is left alone (frost_rescue_target -> None).
-            rescue = frost_rescue_target(
-                can_heat=can_heat,
-                actual_sp=_num_attr(act_state, "temperature"),
-                device_state=act_state.state if act_state else None,
-                frost_floor=FROST_FLOOR_C,
-                mold_min=mold_min,
-                deadband=WRITE_DEADBAND_C,
+            # K2: a user-held ``off`` (device switched off via the remote, Poise
+            # still enabled) is honoured like a disabled zone -- but unlike a truly
+            # disabled zone we must NOT treat the warm off device as perpetual frost
+            # demand (``frost_rescue_target`` rescues an off heater on principle),
+            # or we would restart the device the user deliberately switched off. So
+            # an off-HELD zone is rescued only when the ROOM is actually at the
+            # frost/mould floor; a disabled zone keeps the unconditional rescue.
+            _rescue_ok = (
+                (not _off_held)
+                or room <= FROST_FLOOR_C
+                or (mold_min is not None and room <= mold_min)
+            )
+            rescue = (
+                frost_rescue_target(
+                    can_heat=can_heat,
+                    actual_sp=_num_attr(act_state, "temperature"),
+                    device_state=act_state.state if act_state else None,
+                    frost_floor=FROST_FLOOR_C,
+                    mold_min=mold_min,
+                    deadband=WRITE_DEADBAND_C,
+                )
+                if _rescue_ok
+                else None
             )
             # F2 follow-up: ``frost_rescue_target`` treats "unavailable" as
             # "inactive" on purpose (an off/unknown/unavailable device below the
