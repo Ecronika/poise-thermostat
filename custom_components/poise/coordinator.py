@@ -2706,13 +2706,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     last_write_ts=self._last_sp_write_ts,
                     now=now,
                     echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
-                    # V4 (B4): symmetric with the write deadband. The write path
-                    # reverts anything >= WRITE_DEADBAND_C from our command, so the
-                    # adopt path must be able to *detect* the same delta -- otherwise
-                    # a change on a coarse-step device is forever reverted but never
-                    # adopted. Own re-quantise is handled by V2/pre_write, not by
-                    # inflating the deadband to the step.
-                    deadband=WRITE_DEADBAND_C,
+                    # At least one device step (the detector's documented contract).
+                    # The step also serves the *echo classification*: a device that
+                    # settles/re-quantises our write within one step (e.g. 21.5 -> 21.8
+                    # on a 0.5 K grid) must read as our echo, not a third value. RC
+                    # review F1: lowering this to the bare WRITE_DEADBAND_C (0.2, the
+                    # V4 "symmetry" idea) let such a settle -- reported later under a
+                    # *fresh* context, so V2 can't catch it -- be adopted as a phantom
+                    # "manual" hold on poll/sluggish devices (the old card-X bug class).
+                    # A real IR change is >= one step, so B1 stays fully fixed.
+                    deadband=max(WRITE_DEADBAND_C, step),
                     # P1-4a fix: only a value the device *moved* to is a user
                     # change; a stable settle/clamp of our own write is not.
                     prev_device_sp=self._prev_device_sp,
@@ -2739,6 +2742,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # card-X are undone within a tick) and a store-save fires per tick.
                 # Out-of-band adoptions self-correct: the clamped write that follows
                 # re-stamps _last_written_sp below.
+                # RC review F2: after an adoption the only other legit echo value still
+                # in flight is our *previous* command, so make it the pre-write
+                # reference. Otherwise a late echo of that command (fresh context,
+                # sluggish device) differs from both the adopted value and a stale
+                # pre-write -> the three-value rule would re-adopt it and replace the
+                # user's hold with a phantom hold of our own old setpoint.
+                self._pre_write_sp = self._last_written_sp
                 self._last_written_sp = snap_to_step(_adopted_sp, step)
                 self._last_sp_write_ts = now
                 self._dirty = True  # persist the adopted hold across restarts
