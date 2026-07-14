@@ -214,42 +214,54 @@ def detect_external_setpoint(
     echo_window_s: float,
     deadband: float,
     prev_device_sp: float | None = None,
+    pre_write_sp: float | None = None,
 ) -> float | None:
     """The device-side setpoint Poise should adopt as a manual hold, else ``None``.
 
-    A reported setpoint is a genuine external change only when it differs from what
-    Poise last commanded — an *echo* of our own write matches ``last_written_sp``
-    and must be ignored. Three guards keep lag, cold-start and a persistent device
-    offset from raising a false positive:
+    This is the value/time *fallback* — the coordinator first uses HA ``Context`` to
+    identify a state change it caused itself (a write echo / device re-quantise /
+    clamp) and never calls this for those; it calls this only when the change came
+    from an unknown or foreign actor (a user, or an async device echo a poll-based
+    integration reports under a fresh context). A reported setpoint is a genuine
+    external change only when it differs from what Poise last commanded — an *echo*
+    of our own write matches ``last_written_sp``. The guards:
 
-    * **No baseline** (``last_written_sp`` or ``last_write_ts`` is ``None``): Poise
-      has not established control yet, so it cannot tell an echo from a change —
-      return ``None`` and let the normal write path settle the device first.
-    * **Echo window**: within ``echo_window_s`` of our own write the device may
-      still report its *pre-write* value (Zigbee/poll lag); suppress adoption so
-      that lag is never read as a user change.
-    * **Stable offset** (``prev_device_sp``): a genuine user action *moves* the
-      setpoint this tick. A device that re-quantised, clamped (own min/max) or
-      otherwise settled our write at a fixed offset > ``deadband`` reports that
-      value unchanged tick-over-tick; without this guard it is re-adopted as a hold
-      the moment the echo window lapses — seen live: ending a hold via the card's X
-      springs straight back to "manual" (the schedule value the device settled at
-      gets re-read as a user change). Require an actual move since the previous
-      reading; a settled offset never fires. ``None`` (first observation) skips this
-      guard, which is safe because the *no baseline* guard already gates cold start.
+    * **No baseline** (``last_written_sp`` / ``last_write_ts`` ``None``): Poise has
+      not established control yet — return ``None`` and let the write path settle
+      the device first.
+    * **Echo of our command** (``|device_sp − last_written_sp| < deadband``): our
+      own value, possibly re-quantised within one step — never a user change, in or
+      out of the window.
+    * **Echo window + three-value rule** (``pre_write_sp``): within ``echo_window_s``
+      of our write the device may still report a stale value. A legit echo/lag can
+      only be the commanded value (above) or the *pre-write* value (poll lag); a
+      value differing from BOTH by ≥ ``deadband`` is provably a fresh user change and
+      is adopted even inside the window. This fixes the live bug where a change made
+      within 120 s of our write was swallowed and reverted minutes later (analysis
+      2026-07-14, B1). Without ``pre_write_sp`` we cannot prove it → stay
+      conservative and suppress inside the window.
+    * **Stable offset** (``prev_device_sp``, outside the window): a value that merely
+      sits at a fixed offset (a clamp/re-quantise the context check did not catch, on
+      a poll-based integration) is unchanged tick-over-tick; require an actual move
+      so a settled offset is never re-adopted (this was the card-X "springs back to
+      manual" regression guard).
 
     ``last_written_sp`` must be the value Poise actually commanded **after snapping
-    to the device step** (what the device settles to), and ``deadband`` at least
-    one device step, so a device echoing our command back — possibly re-quantised —
-    is never mistaken for a user change. ``now``/``last_write_ts`` share one
-    monotonic clock. The returned value is the raw reported setpoint (the caller
-    snaps and clamps it to the norm envelope before holding it).
+    to the device step**, and ``deadband`` at least one device step. ``now`` /
+    ``last_write_ts`` share one monotonic clock; ``pre_write_sp`` is the device's
+    reported setpoint captured immediately before that last write. The returned value
+    is the raw reported setpoint (the caller snaps and clamps it to the norm
+    envelope before holding it).
     """
     if device_sp is None or last_written_sp is None or last_write_ts is None:
         return None
-    if (now - last_write_ts) < echo_window_s:
-        return None
     if round(abs(device_sp - last_written_sp), 3) < deadband:
+        return None
+    if (now - last_write_ts) < echo_window_s:
+        if pre_write_sp is not None and (
+            round(abs(device_sp - pre_write_sp), 3) >= deadband
+        ):
+            return device_sp
         return None
     if prev_device_sp is not None and (
         round(abs(device_sp - prev_device_sp), 3) < deadband
