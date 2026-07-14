@@ -187,6 +187,24 @@ Am Ende von `card/src/poise-card.ts` wurde — offenbar beim Einfügen der `.opa
 1. Registrierungsblock am Ende von `poise-card.ts` wiederherstellen und das Bundle neu bauen.
 2. Regressions-Guard: Build-Check in `build.mjs` (nach dem esbuild-Lauf prüfen, dass das Bundle `customElements.define("poise-card"` enthält und sonst mit Fehler abbrechen) — plus Card-Job (`typecheck` + `test` + Build-Check) in der CI.
 
+## Nachtrag 2 (2026-07-14): Verifikation des Hotfix v0.170.2-alpha
+
+Geprüft: Tag `v0.170.2-alpha` (Commit `9a77ff1`) per Diff gegen v0.170.1-alpha, lokalem Rebuild und CI-Status.
+
+### Regression behoben — verifiziert
+
+- Der Registrierungsblock am Ende von `card/src/poise-card.ts` ist vollständig wiederhergestellt (`customCards.push`, `customElements.define("poise-card", …)`, Versions-Logging). Das ausgelieferte Bundle definiert wieder alle vier Elemente inkl. `poise-card` und trägt die Card wieder im Picker ein.
+- Ein Rebuild aus dem Tag-Stand erzeugt ein **byte-identisches** Bundle — Quelle und Artefakt sind in sync.
+- Der neue **Build-Guard** in `build.mjs` (Empfehlung 1 des Hotfix-Plans) wurde positiv („registration guard OK") und negativ verifiziert: Entfernt man den Registrierungsblock testweise, bricht der Build mit klarer Fehlermeldung ab — exakt der ursprüngliche Unfall wird jetzt abgefangen.
+- Versionen konsistent auf 0.170.2 (`const.py`, `manifest.json`, `card/package.json`, README, `pyproject.toml`); Card-Tests 52/52 grün, `tsc --noEmit` sauber, CI am Tag-Commit grün. Der Python-Anteil des Hotfix ist ausschließlich der Versions-Bump — die in Nachtrag 1 verifizierte V1/V2-Umsetzung ist unverändert.
+
+### Offene Punkte mit Dringlichkeitsbewertung
+
+1. **CI-Card-Job fehlt weiterhin** (zweite Hälfte von Hotfix-Empfehlung 2) — **Dringlichkeit: mittel-hoch.** Der Build-Guard greift nur, wenn `npm run build` tatsächlich läuft. Die CI prüft die Card weiterhin gar nicht: Weder Typecheck/Tests noch — wichtiger — ob das eingecheckte Bundle zum Quellstand passt. Das spiegelverkehrte Unglück (Quelle gefixt, aber **veraltetes** Bundle ausgeliefert) würde erneut unbemerkt durchgehen. Aufwand ist klein: ein Workflow-Job mit `npm ci && npm run typecheck && npm test && npm run build` plus `git diff --exit-code custom_components/poise/frontend/poise-card.js` (Artefakt-Frische-Check). Dies ist die einzige verbliebene Prozesslücke aus der Fehlerklasse, die v0.170.1 komplett unbrauchbar gemacht hat.
+2. **V3b — operative Temperatur als eigene Sensor-Entität** — **Dringlichkeit: niedrig-mittel.** Die akute Verwirrung ist durch V3a (Kennzeichnung + Luft-Hinweis auf der Card) entschärft; es wird nirgends mehr Widersprüchliches unbeschriftet angezeigt. Der Sensor bleibt sinnvoll für More-Info, Langzeit-Statistik und Automationen, ist aber Komfort, kein Defekt.
+3. **V5 — „Grund"-Diagnose-Sensor** (idle wegen Fenster/Guard/Lockout, manuell bis …) — **Dringlichkeit: niedrig.** Die Card erklärt die Zustände bereits per Chips, und `hvac_action` ist jetzt wahrheitsgemäß; der Mehrwert betrifft nur Nutzer nativer HA-Karten.
+4. **Beobachtung (außerhalb der Review-Vorschläge):** Die EKF-Drive-Fallbacks nutzen weiterhin die rohen Intent-Flags `heating`/`cooling`, die bei aktivem Override False bleiben (`coordinator.py`, Berechnung vor der Override-Richtungsauflösung). Relevanz nur für Geräte, die **keine** eigene `hvac_action` melden: Dort sieht das Lernmodell Override-Heiz-/Kühlphasen nicht als Anregung. **Dringlichkeit: niedrig** — kein Anzeige-Thema, aber bei Gelegenheit lohnend, die Fallbacks auf `final_mode` umzustellen.
+
 ## Quellen
 
 - [Home Assistant Developer Docs — Climate entity (`hvac_action` = current action)](https://developers.home-assistant.io/docs/core/entity/climate/)
