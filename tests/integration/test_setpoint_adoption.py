@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -57,7 +57,13 @@ def _base(**extra: Any) -> dict[str, Any]:
     }
 
 
-def _set_trv(hass: HomeAssistant, *, setpoint: float, room: float = 20.0) -> None:
+def _set_trv(
+    hass: HomeAssistant,
+    *,
+    setpoint: float,
+    room: float = 20.0,
+    context: Any = None,
+) -> None:
     hass.states.async_set(
         "sensor.room_temp", str(room), {"device_class": "temperature"}
     )
@@ -72,6 +78,9 @@ def _set_trv(hass: HomeAssistant, *, setpoint: float, room: float = 20.0) -> Non
             "min_temp": 5,
             "max_temp": 30,
         },
+        # V2: tag the actuator state with a Context so a test can simulate a change
+        # Poise itself caused (its own write's echo / device clamp) vs a user change.
+        context=context,
     )
 
 
@@ -115,9 +124,64 @@ async def test_device_side_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
     assert trv_writes == []
 
 
-async def test_change_within_echo_window_is_not_adopted(hass: HomeAssistant) -> None:
-    """A different reading right after Poise's own write is the device echoing/lag,
-    not a user change -> no hold."""
+async def test_echo_or_lag_within_window_is_not_adopted(hass: HomeAssistant) -> None:
+    """V1: inside the echo window a reading that equals the *pre-write* value is
+    poll lag (the device has not applied our write yet), not a user change -> no
+    hold. Poise commanded 20.0 but the device still reports the 22.0 it held before
+    that write -- provably not a fresh action, so it is suppressed."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_trv(hass, setpoint=22.0)
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    coord._last_written_sp = 20.0  # Poise commanded 20.0 ...
+    coord._pre_write_sp = 22.0  # ... but the device was at 22.0 just before
+    coord._last_sp_write_ts = 1000.0
+    clock.t = 1000.0 + 30.0  # still inside the echo window
+    _set_trv(hass, setpoint=22.0)  # device still reports its pre-write value (lag)
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._override is None
+
+
+async def test_in_window_third_value_is_adopted(hass: HomeAssistant) -> None:
+    """V1 (analysis 2026-07-14, B1): inside the echo window a value that differs
+    from BOTH our command and the pre-write value can only be a fresh user change --
+    a legit echo/lag can report only those two. It is adopted immediately instead of
+    being swallowed and reverted minutes later (the reported live bug)."""
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_trv(hass, setpoint=22.0)
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+
+    clock = _FakeClock(1000.0)
+    coord._clock = clock
+    coord._last_written_sp = 20.0  # commanded 20.0
+    coord._pre_write_sp = 22.0  # device was at 22.0 before that write
+    coord._last_sp_write_ts = 1000.0
+    clock.t = 1000.0 + 30.0  # INSIDE the echo window
+    # the user turns the wheel to 23.0 -- neither the command nor the pre-write value
+    _set_trv(hass, setpoint=23.0)
+    setpoints = async_mock_service(hass, "climate", "set_temperature")
+
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord._override == 23.0  # provable user change -> adopted in-window
+    # and this tick did not overwrite it back to the schedule
+    trv_writes = [c for c in setpoints if c.data.get("entity_id") == "climate.trv"]
+    assert trv_writes == []
+
+
+async def test_own_context_change_is_not_adopted(hass: HomeAssistant) -> None:
+    """V2 (analysis 2026-07-14): a state change carrying a Context Poise itself
+    created is our own write's echo -- including a device re-quantise / min-max
+    clamp a push integration reports under that context -- and must never be
+    adopted, even when the value differs from what we commanded. This is the signal
+    the value/time heuristic cannot see, and is why V2 ships together with V1."""
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     _set_trv(hass, setpoint=20.0)
@@ -127,13 +191,18 @@ async def test_change_within_echo_window_is_not_adopted(hass: HomeAssistant) -> 
     clock = _FakeClock(1000.0)
     coord._clock = clock
     coord._last_written_sp = 20.0
+    coord._pre_write_sp = 20.0
     coord._last_sp_write_ts = 1000.0
-    clock.t = 1000.0 + 30.0  # still inside the echo window
-    _set_trv(hass, setpoint=23.0)
+    clock.t = 1000.0 + 30.0  # inside the echo window
+    # the device settled our write at a clamped third value 23.0, reported UNDER a
+    # context Poise owns -> recognised as our own echo, not a user change
+    own = Context()
+    coord._own_write_ctx_ids.append(own.id)
+    _set_trv(hass, setpoint=23.0, context=own)
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override is None
+    assert coord._override is None  # our own clamp -> re-baselined, never adopted
 
 
 async def test_adopted_hold_is_stable_across_ticks(hass: HomeAssistant) -> None:
