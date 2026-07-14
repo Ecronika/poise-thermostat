@@ -35,8 +35,8 @@ class _FakeServices:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
 
-    async def async_call(self, domain, service, data, blocking):  # noqa: ANN001
-        self.calls.append((domain, service, data, blocking))
+    async def async_call(self, domain, service, data, blocking, context=None):  # noqa: ANN001
+        self.calls.append((domain, service, data, blocking, context))
 
 
 class _FakeHass:
@@ -53,8 +53,18 @@ def test_write_issues_exactly_one_nonblocking_service_call() -> None:
             "set_temperature",
             {"entity_id": "climate.trv", "temperature": 20.0},
             False,
+            None,  # no context passed -> forwarded as None
         )
     ]
+
+
+def test_write_threads_context_through() -> None:
+    # V2 (analysis 2026-07-14): a caller-supplied Context must reach the service
+    # call so the coordinator can recognise the resulting state change as its own.
+    hass = _FakeHass()
+    ctx = object()  # opaque sentinel; write() forwards it without inspecting it
+    asyncio.run(write(hass, _cmd(value=20.0), context=ctx))
+    assert hass.services.calls[0][4] is ctx
 
 
 def test_service_call_for_tpi_valve() -> None:
