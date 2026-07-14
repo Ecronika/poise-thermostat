@@ -897,7 +897,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # measures real elapsed time and a hold cannot outlive a restart.
                 osw = data.get("override_set_wall")
                 self._override_set_wall = (
-                    float(osw) if _hold_active and isinstance(osw, (int, float)) else None
+                    float(osw)
+                    if _hold_active and isinstance(osw, (int, float))
+                    else None
                 )
                 # ADR-0059: restore the manual-hold + timed-Boost lifecycle on a
                 # wall-clock basis, each defensively, so a hold/Boost survives a
@@ -915,7 +917,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # a user's option change on every restart. Deliberately not restored.
                 oea = data.get("override_expires_at")
                 self._override_expires_at = (
-                    float(oea) if _hold_active and isinstance(oea, (int, float)) else None
+                    float(oea)
+                    if _hold_active and isinstance(oea, (int, float))
+                    else None
                 )
                 # ADR-0059 §1: restore the reason-accuracy flag (default False so
                 # a pre-upgrade hold degrades to "expired_timer", never crashes).
