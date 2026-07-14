@@ -118,3 +118,16 @@ def test_first_observation_without_prev_still_gated_by_baseline() -> None:
     # no-baseline / echo guards still apply, so cold start never false-adopts.
     assert _d(device_sp=23.0, prev_device_sp=None) == 23.0  # baseline present here
     assert _d(device_sp=23.0, prev_device_sp=None, last_written_sp=None) is None
+
+
+def test_in_window_sub_step_requantise_is_echo_not_third_value() -> None:
+    # RC review F1: a device that settles / re-quantises our command within one step
+    # (21.5 -> 21.8 on a 0.5 K grid) must read as OUR echo, not a fresh user change,
+    # even inside the window and even with a pre-write reference present. The
+    # step-sized deadband (the caller passes max(WRITE_DEADBAND_C, step), not a bare
+    # 0.2) is what keeps this an echo; lowering it re-opened phantom "manual" holds
+    # on poll/sluggish devices whose echoes arrive under a fresh context.
+    assert (
+        _d(device_sp=21.8, now=TS + 50.0, last_written_sp=21.5, pre_write_sp=20.0)
+        is None
+    )
