@@ -295,7 +295,7 @@ def detect_external_mode(
     supported_modes: tuple[str, ...] | frozenset[str] = (),
     prev_mode: str | None = None,
 ) -> str | None:
-    """The device-side hvac_mode Poise should adopt as a manual mode-hold, else ``None``.
+    """The device hvac_mode Poise should adopt as a manual mode-hold, else ``None``.
 
     Like ``detect_external_setpoint`` this is the value/time *fallback* — the
     coordinator first uses HA ``Context`` to drop a mode change it caused itself (its
@@ -305,9 +305,9 @@ def detect_external_mode(
     * **No usable reading** (``None`` / ``unknown`` / ``unavailable``): return ``None``.
     * **Already where Poise wants it** (``device_mode == desired_mode``): nothing
       external to adopt — the normal case.
-    * **Not adoptable**: a mode the device does not actually list in ``supported_modes``,
+    * **Not adoptable**: a mode the device does not list in ``supported_modes``,
       or ``heat_cool`` (dual-setpoint is out of scope for v1, B7): return ``None``.
-    * **No baseline** (``last_commanded_mode`` / ``last_cmd_ts`` ``None``): Poise has not
+    * **No baseline** (``last_commanded_mode``/``last_cmd_ts`` ``None``): Poise has not
       commanded a mode yet — cannot tell an echo from a change.
     * **Echo of our command** (``device_mode == last_commanded_mode``): our own nudge
       settling (even if ``desired_mode`` has since moved on — Poise will re-nudge),
@@ -316,7 +316,7 @@ def detect_external_mode(
       report may still be a lagging echo of an even earlier command; stay conservative
       and suppress (the user change is adopted on the first tick past the window — the
       in-window immediate path is deliberately out of scope, plan §7).
-    * **Stable mode** (``prev_mode``): a mode unchanged since the previous reading is not
+    * **Stable mode** (``prev_mode``): a mode unchanged since the last reading is not
       a fresh user action; require an actual move (the mode-equivalent of the setpoint
       stable-offset guard).
 
