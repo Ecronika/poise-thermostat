@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.172.0"
+VERSION: Final = "0.173.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -207,29 +207,4 @@ DEFAULT_BOILER_MIN_OFF_S: Final = 300.0
 # F9/review 2026-07-10: min-on/min-off are a physical anti-short-cycle dwell —
 # 0 has no valid "off" meaning (unlike keepalive=0 or activation_delay=0). The
 # read path clamps both up to this floor so a stored/typed 0 cannot switch the
-# boiler every tick. 120 s = 2 ticks, the smallest dwell that actually binds
-# (tick = 60 s). Applied uniformly (incl. shadow-only); clamp direction is
-# always the safe one.
-BOILER_MIN_DWELL_FLOOR_S: Final = 120.0
-
-# Load shedding (S3) + compressor groups (S4) — both ADR-0013, shadow stage
-CONF_MAX_POWER_SENSOR: Final = "max_power_sensor"
-CONF_CURRENT_POWER_SENSOR: Final = "current_power_sensor"
-CONF_COMPRESSOR_GROUP: Final = "compressor_group"
-CONF_DECLARED_POWER: Final = "declared_power"
-
-# Flow-temperature allocator (S5, ADR-0013) — highest request wins, capped, hysteresis
-CONF_FLOW_TEMP: Final = "design_flow_temp"
-CONF_MAX_FLOW_TEMP: Final = "max_flow_temp"
-CONF_FLOW_HYSTERESIS: Final = "flow_hysteresis"
-DEFAULT_MAX_FLOW_TEMP_C: Final = 60.0
-DEFAULT_FLOW_HYSTERESIS_C: Final = 2.5
-
-# Energy-aware source policy (S6, ADR-0013) — external layer steers, Poise routes
-CONF_SOURCE_POLICY: Final = "source_policy"
-CONF_DEFAULT_SOURCE: Final = "default_heat_source"
-DEFAULT_HEAT_SOURCE: Final = "radiator"
-
-# Bundled Lovelace card, served + auto-registered by the integration (ADR-0040)
-CARD_URL_BASE: Final = "/poise"
-CARD_MODULES: Final = ({"name": "Poise Card", "filename": "poise-card.js"},)
+# boiler every tick. 120 s = 2 ticks, the smallest

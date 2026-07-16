@@ -176,9 +176,11 @@ from .control.override import (
     detect_external_setpoint,
     hold_ends_at_preheat,
     hold_expired,
+    mode_adopt_reason,
     mode_comfort_base,
     resolve_boost_expiry,
     resolve_hold_expiry,
+    setpoint_adopt_reason,
 )
 from .control.pi import PiCompensator
 from .control.pi_shadow import evaluate_pi_shadow
@@ -393,6 +395,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._override_expiry_is_switchpoint: bool = False
         self._override_policy: str = DEFAULT_OVERRIDE_POLICY
         self._override_stats: list[dict[str, Any]] = []  # §5 L1 (observe-only)
+        # K3 (Inc 3): origin of the active hold (ui_setpoint / device_adopt_* / …),
+        # persisted; + the last suppression reason logged, to debounce the debug log.
+        self._override_reason: str | None = None
+        self._last_adopt_log: str = ""
         self._boost_expires_at: float | None = None
         self._boost_prev_preset: OverrideMode | None = None  # VT#1961 restore
         self._prev_home: bool | None = None  # §1 house-gate flip tracking
@@ -609,12 +615,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 and set_at + mins * 60.0 <= set_at + self._override_max_h * 3600.0
             )
             self._record_override_stat(self._override)  # §5 L1 (observe-only)
+            # K3: record the hold's origin. A UI setpoint change defaults to
+            # "ui_setpoint"; device adoption passes reason="device_adopt_setpoint".
+            self._override_reason = reason or "ui_setpoint"
         else:
             # Clearing the hold: drop the whole lifecycle + announce the reason.
             self._override_set_wall = None
             self._override_expires_at = None
             self._override_requested = None
             self._override_expiry_is_switchpoint = False
+            self._override_reason = None  # K3: no hold -> no origin
             # Defekt-2: fire only when a hold was actually active, so a
             # mode_change or a resume on a hold-less zone raises no false event.
             if value is None and was_active:  # explicit clear of an active hold
@@ -631,6 +641,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         Cleared by ``_end_hold`` alongside the setpoint hold; never a safety layer.
         """
         self._mode_override = mode
+        if mode is not None:
+            self._override_reason = "device_adopt_mode"  # K3: origin of this hold
         if mode is not None and self._override_set_wall is None:
             set_at = dt_util.utcnow().timestamp()
             self._override_set_wall = set_at
@@ -750,6 +762,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._override_set_wall = None
         self._override_expires_at = None
         self._override_requested = None
+        self._override_reason = None  # K3: origin cleared with the hold
         self._override_expiry_is_switchpoint = False
         self._dirty = True
         self._fire_override_ended(reason)
@@ -892,6 +905,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # mode hold was persisted (an ``off`` hold carries no setpoint).
                 _hold_active = (
                     self._override is not None or self._mode_override is not None
+                )
+                # K3 (Inc 3): restore the hold's origin so "device"/"app" provenance
+                # survives a restart (only while a hold actually lives).
+                orr = data.get("override_reason")
+                self._override_reason = (
+                    orr if _hold_active and isinstance(orr, str) else None
                 )
                 # C5: restore the *wall-clock* set-time so the 2 h auto-revert
                 # measures real elapsed time and a hold cannot outlive a restart.
@@ -1621,6 +1640,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 else None
             ),
             "override_stats": self._override_stats,
+            "override_reason": self._override_reason,  # K3: persisted hold origin
             "climate_mode": self._climate_mode,
             "has_actuated": self._has_actuated,  # AR-11: teardown-park gate
         }
@@ -2679,6 +2699,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._end_hold("user_resume")
             _off_held = False
             _hold_resumed = True
+        # K3 (Inc 3): why this tick did/did not adopt a device change, surfaced as
+        # diagnostics (stays "" on the disabled / off-held path that skips below).
+        _mode_adopt_reason = ""
+        _sp_adopt_reason = ""
         if self._enabled and not _off_held:
             desired_hvac = resolve_desired_mode(
                 final_mode=final_mode,
@@ -2713,6 +2737,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
                 else None
             )
+            # K3: classify why the mode change was or was not adopted -- Layer-1 glue
+            # gates first, then the pure Layer-2 detector reason -- so a suppressed
+            # user mode change is explainable in diagnostics.
+            if not self._adopt_external_mode:
+                _mode_adopt_reason = "opt_out"
+            elif window_open:
+                _mode_adopt_reason = "safety_window"
+            elif frozen:
+                _mode_adopt_reason = "safety_frozen"
+            elif _own_change:
+                _mode_adopt_reason = "own_echo"
+            elif _hold_resumed:
+                _mode_adopt_reason = "hold_resumed"
+            else:
+                _mode_adopt_reason = mode_adopt_reason(
+                    device_mode=_cur_mode,
+                    desired_mode=desired_hvac,
+                    last_commanded_mode=self._last_commanded_hvac,
+                    last_cmd_ts=self._last_hvac_cmd_ts,
+                    now=now,
+                    echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
+                    supported_modes=tuple(act_modes),
+                    prev_mode=self._prev_device_mode,
+                )
             # M2: freeze the mode move-guard reference while the echo window is open,
             # so an in-window observation of the user's mode never poisons the guard
             # (the mode analogue of the setpoint prev-freeze; the B1 poisoning class).
@@ -2880,13 +2928,64 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 and not _own_change
                 else None
             )
+            # K3: classify why the reported setpoint was or was not adopted, using the
+            # SAME prev_device_sp the detector saw (captured before it is updated just
+            # below); Layer-1 glue gates first, then the pure Layer-2 detector reason.
+            if not self._adopt_external_setpoint:
+                _sp_adopt_reason = "opt_out"
+            elif sched_active:
+                _sp_adopt_reason = "schedule_active"
+            elif _own_change:
+                _sp_adopt_reason = "own_echo"
+            else:
+                _sp_adopt_reason = setpoint_adopt_reason(
+                    device_sp=actual_sp,
+                    last_written_sp=self._last_written_sp,
+                    last_write_ts=self._last_sp_write_ts,
+                    now=now,
+                    echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S,
+                    deadband=max(WRITE_DEADBAND_C, step),
+                    prev_device_sp=self._prev_device_sp,
+                    pre_write_sp=self._pre_write_sp,
+                )
+            # K3: log a suppressed device change once (debounced on the reason) so a
+            # user whose remote change "did nothing" can see why in the debug log.
+            _sup = next(
+                (
+                    r
+                    for r in (_mode_adopt_reason, _sp_adopt_reason)
+                    if r
+                    in (
+                        "echo_window",
+                        "own_echo",
+                        "opt_out",
+                        "safety_window",
+                        "safety_frozen",
+                        "hold_resumed",
+                        "stable_prev",
+                        "stable_offset",
+                        "no_baseline",
+                        "unsupported",
+                        "schedule_active",
+                    )
+                ),
+                "",
+            )
+            if _sup and _sup != self._last_adopt_log:
+                _LOGGER.debug(
+                    "Poise %s: device change not adopted (mode=%s setpoint=%s)",
+                    self._actuator,
+                    _mode_adopt_reason or "-",
+                    _sp_adopt_reason or "-",
+                )
+            self._last_adopt_log = _sup
             # P1-4a fix: remember this tick's device reading so next tick can tell a
             # fresh move (user) from a value the device is merely holding (echo of
             # our write, re-quantised/clamped). Updated every tick regardless of the
             # branch below, so a settled offset never re-triggers adoption.
             self._prev_device_sp = actual_sp
             if _adopted_sp is not None:
-                self.set_override(_adopted_sp, reason="device_adopt")
+                self.set_override(_adopted_sp, reason="device_adopt_setpoint")
                 # B1 (review v0.168.0): the device now reports the adopted value,
                 # so make it the echo baseline. Without this an in-band adoption
                 # (the common case, where no write follows because target==device)
@@ -3081,6 +3180,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     _LOGGER.exception(
                         "Poise: frost rescue write failed for %s", self._actuator
                     )
+                # K3 (Inc 3): a frost/mould rescue that fires while an ``off`` hold is
+                # active supersedes the user's off intent -- end the hold here with an
+                # accurate reason ("frost_rescue") instead of leaving the M3 device
+                # escape to end it next tick under the generic "user_resume".
+                if _off_held:
+                    self._end_hold("frost_rescue")
 
         await self._maybe_save()
 
@@ -3499,6 +3604,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._override is not None or self._mode_override is not None
             ),
             "mode_override": self._mode_override,
+            # K3 (Inc 3): hold origin (ui_setpoint / device_adopt_*) + why this tick
+            # did/did not adopt a device change (diagnostics; "" when nothing seen).
+            "override_reason": self._override_reason,
+            "mode_adopt_reason": _mode_adopt_reason,
+            "sp_adopt_reason": _sp_adopt_reason,
             # ADR-0059 §4: the manual-hold lifecycle for the Card ("gilt bis …").
             "override_expires_at": _iso_utc(self._override_expires_at),
             "override_policy": self._override_policy,
