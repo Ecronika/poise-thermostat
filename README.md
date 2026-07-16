@@ -71,23 +71,6 @@ Sicherheits- und Kontextlagen (offenes Fenster, Frost- und Schimmelschutz) sind 
 
 > **Migration:** Bestehende Installationen behalten das heutige Verhalten (`timer` / 2 h). `schedule` ist nur der Default für **neu eingerichtete** Zonen.
 
-### Geräteseitige Eingriffe (Adoption)
-
-Änderst du den Sollwert **oder** den Modus direkt am Gerät (IR-Fernbedienung einer Split-AC, Hersteller-App), übernimmt Poise die Änderung als denselben temporären Hold, statt sie zurückzunudgen — inklusive **„aus"** (die Zone bleibt aus, Frost- und Schimmelschutz laufen weiter). Standardmäßig an (*Optionen → geräteseitige Sollwert-/Modusänderungen übernehmen*).
-
-Damit eine echte Änderung sicher von einem bloßen Geräte-Echo unterschieden wird, gelten **Vorbedingungen** — übernommen wird nur, wenn die Änderung
-
-- **> 120 s nach Poises letztem eigenen Befehl** liegt (im Echo-Fenster davor wird konservativ unterdrückt);
-- ein **echter Wert-/Moduswechsel** ist (kein Re-Quantisierungs-Settle und kein von Poise selbst gesetzter HA-`Context` — der eigene Nudge-Echo wird nie adoptiert);
-- einen vom Gerät **gelisteten** Modus betrifft (`heat_cool` ist ausgeschlossen);
-- **kein Geräte-Zeitplan** gerade die Regelung übernommen hat.
-
-Fenster/Frost/Schimmel schlagen einen adoptierten Modus-Hold weiterhin (er ist Komfort, keine Safety).
-
-**Transparenz:** ein aktiver Hold weist seine **Herkunft** aus — `override_reason` (`ui_setpoint` = App, `device_adopt_setpoint` / `device_adopt_mode` = Gerät, `frost_rescue` = Sicherheitsübersteuerung); die Card zeigt „Gerät" bzw. „App" an der Hold-Pille. Warum eine gesehene Geräteänderung **nicht** übernommen wurde, steht als Diagnose (`mode_adopt_reason` / `sp_adopt_reason`, z. B. `echo_window`, `own_echo`, `no_baseline`, `schedule_active`) im Diagnose-Download und einmalig im Debug-Log.
-
-**Bekannte Grenzen (Stand 0.173.0):** wiederholte Eingriffe **≤ 120 s** nach dem letzten echten Kommandowechsel verlieren bewusst (sauber begrenzt, nicht endlos); die Modus-Baseline ist laufzeit-only, sodass der **erste** Griff direkt nach einem HA-Neustart noch revertiert werden kann; `fan_mode`/`swing_mode` werden nicht adoptiert.
-
 ## Scope & Non-Goals
 
 Poise controls heating/cooling **setpoints** and protects against **surface condensation / mould** (building physics). To stay honest and publishable, it explicitly does **not**:
@@ -202,4 +185,14 @@ sections:
 
 Everything else Poise exposes for transparency lives as **attributes on the `climate` entity — not as standalone sensors** — so read them from `climate.<room>`'s state attributes rather than looking for a `sensor.<room>_…`: the comfort index (`pmv` / `ppd`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`, `fan_velocity_ms`), the actuator↔room reference-frame offset (`ref_offset*`, `cool_sp_compensated`), the transparency flags (`override_clamped`, `mould_floor`, `dewpoint`), and the per-device `tpi_*` / `pi_*` shadow values. (For example there is no `sensor.<room>_pmv`; read the `pmv` attribute from the climate entity instead.)
 
-**System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow ta
+**System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow target and load-shedding attributes).
+
+---
+
+### Repository topics (set on GitHub)
+
+`home-assistant` · `homeassistant` · `hacs` · `custom-component` · `thermostat` · `climate` · `hvac` · `heating` · `cooling` · `trv` · `en16798` · `operative-temperature` · `comfort` · `self-learning`
+
+### One-line description (GitHub *About* / HACS)
+
+> Self-learning setpoint thermostat for TRV & climate entities — EN 16798 adaptive comfort, operative temperature/MRT, optimal start/stop, mould protection. Fully local. Successor to Smart Setpoint.
