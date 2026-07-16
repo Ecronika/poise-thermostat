@@ -29,7 +29,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Cooling decision & modes** — capability-aware dual setpoints; `COOL` is surfaced as an HVAC mode **only when the actuator supports cooling** (heat-only TRVs stay HEAT/OFF).
 - **Humidity (dry) & hot-day cooling** — capability-gated and live: a `dry`-capable AC lowers humidity through the dead-band (cool-first, dew-point-guarded, 60 / 55 % hysteresis), and on hot days the cooling edge is raised toward the EN / ASR ceiling (rate-limited ≤ 0.5 K/tick); heat-only TRVs are unaffected (ADR-0050/0051).
 - **Open-window reaction (sensor *or* sensorless)** — a configured window sensor or the **slope detector** (open threshold adapted to the learned time constant τ) drops the room to the frost/mould floor through the solver and pauses learning; a per-zone **bypass switch** overrides it. The sensor wins when present.
-- **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks, and a value pushed outside the comfort band is clamped to it and flagged (`override_clamped`) rather than limited silently. A setpoint changed **on the device itself** (TRV wheel / vendor app) is adopted as such a hold — with the zone's return rule — instead of being overwritten on the next tick (default on, opt-out per zone; ADR-0059).
+- **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks, and a value pushed outside the comfort band is clamped to it and flagged (`override_clamped`) rather than limited silently. A setpoint or HVAC mode changed **on the device itself** (TRV wheel / IR remote / vendor app) is adopted as such a hold — with the zone's return rule — *once Poise can tell it apart from an echo of its own write*; the preconditions and the modality limits are spelled out under [Geräteseitige Eingriffe (Adoption)](#geräteseitige-eingriffe-adoption) (default on, opt-out per zone; ADR-0059).
 - **Bundled Lovelace cards** — Poise ships its own cards inside the integration and **auto-registers** them (no separate HACS plugin, no manual resource URL). `poise-card` puts the **EN 16798 comfort band** front and centre — operative temperature & setpoint as markers in the live band, a 24 h history graph, clickable status chips, learning confidence and a **shadow pill that shows what the engine *would* do** (TPI %/PI/MPC). `poise-system-card` surfaces the multi-zone hub (boiler demand, heating zones, flow target, load shedding). Self-contained Lit/TS, only `lit` bundled (ADR-0040).
 - **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts (and flushed on Home Assistant shutdown, not only periodically). While enabled, Poise also keeps a heat-capable actuator in its `heat` mode so it follows Poise's setpoint instead of running its own `auto`/schedule.
 
@@ -70,6 +70,30 @@ Sicherheits- und Kontextlagen (offenes Fenster, Frost- und Schimmelschutz) sind 
 **Wie beenden:** einen HVAC-Modus wählen, das **X** auf der Card antippen, den Service `poise.resume_schedule` aufrufen (Zone oder alle Zonen), oder den Ablauf abwarten.
 
 > **Migration:** Bestehende Installationen behalten das heutige Verhalten (`timer` / 2 h). `schedule` ist nur der Default für **neu eingerichtete** Zonen.
+
+### Geräteseitige Eingriffe (Adoption)
+
+Wird **am Gerät selbst** verstellt (TRV-Rad, IR-Fernbedienung, Hersteller-App), übernimmt Poise das als denselben Hold wie einen Eingriff in der Poise-UI — mit der Rückkehrregel der Zone, statt beim nächsten Tick zurückzuschreiben. Standardmäßig an, je Zone abschaltbar (*Optionen → „Manuelle Eingriffe"*).
+
+**Die Übernahme ist bedingt, nicht bedingungslos.** Poise sieht an der `climate`-Entität nur einen neuen Wert — nicht, *wer* ihn gesetzt hat. Übernommen wird deshalb nur, was sich sicher vom Echo des eigenen Schreibvorgangs unterscheiden lässt. Im Zweifel gilt: **nicht übernehmen** — ein verworfener Eingriff kostet eine Wiederholung, eine falsche Übernahme friert die Regelung auf einem Phantom-Sollwert ein.
+
+| Wird **nicht** übernommen, wenn … | Grund (Diagnose) |
+| --- | --- |
+| die Zone die Übernahme abgeschaltet hat | `opt_out` |
+| Poise den Wert selbst geschrieben hat (erkannt am HA-`Context`) | `own_echo` |
+| Poise seit dem Start noch nie selbst geschrieben hat — es fehlt der Vergleichswert (**Laufzeit-Zustand, überlebt keinen Neustart**) | `no_baseline` |
+| die Änderung **binnen 120 s** auf einen eigenen Schreibvorgang folgt und nicht nachweislich auch vom Wert *davor* abweicht | `echo_window` |
+| die Abweichung unter der Geräteschrittweite liegt | `command_echo` |
+| das Gerät dauerhaft denselben Versatz zum geschriebenen Wert meldet (Rundung / interne Kompensation) | `stable_offset` |
+| beim **Sollwert**: die geräteeigene Zeitschaltuhr läuft (konfigurierte Schedule-Entität `on`) — dann stellt das Programm, nicht der Mensch | `schedule_active` |
+| beim **Modus**: Fenster offen oder Sensorik eingefroren — Sicherheit schlägt Eingriff | `safety_window`, `safety_frozen` |
+| beim **Modus**: das Gerät kann den Modus nicht oder er ist `heat_cool` | `unsupported` |
+
+Ein übernommener Sollwert ist ein normaler Hold und steht damit **unter** der Prioritätenkette oben: Fenster, Frost und Schimmelschutz klemmen ihn weiterhin, und ein Wert außerhalb des Komfortbands wird auf die Bandkante geklemmt und als `override_clamped` ausgewiesen.
+
+**Modalitätsgrenze:** übernommen werden **Sollwert und HVAC-Modus**. *Nicht* übernommen werden Lüfterstufe, Swing, geräteseitige Presets und `heat_cool`-Doppelsollwerte — diese Verstellungen lässt Poise unangetastet stehen, sie erzeugen aber auch keinen Hold.
+
+**Nachvollziehbarkeit:** die Herkunft eines Holds steht als `override_reason` an der `climate`-Entität (`ui_setpoint`, `device_adopt_setpoint`, `device_adopt_mode`, `frost_rescue`); die Card zeigt sie als „Gerät" / „App" an der Hold-Pille. Der Grund **je Tick** — auch der einer *unterdrückten* Übernahme aus der Tabelle oben — liegt in den Diagnosedaten (`sp_adopt_reason`, `mode_adopt_reason`) und im Debug-Log; für den Recorder sind diese Tick-Werte bewusst keine Entity-Attribute.
 
 ## Scope & Non-Goals
 
