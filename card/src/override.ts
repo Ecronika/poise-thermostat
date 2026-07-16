@@ -43,6 +43,17 @@ export interface HoldView {
   minutes: number | null; // remaining minutes; null when permanent/unknown
   permanent: boolean;
   direction: string | null; // localized "kühlt"/"heizt"/"entfeuchtet"; null when idle
+  origin: string | null; // K3: localized "Gerät"/"App" provenance; null when unknown
+}
+
+// K3 (Inc 3): where the hold came from — the device (IR remote / vendor app, whose
+// change Poise adopted) vs the Poise UI ("app"). A reason starting "device_adopt"
+// is the device; "ui" is the app; frost_rescue / unknown → null (no origin shown).
+export function holdOrigin(lang: string | undefined, reason: unknown): string | null {
+  const r = typeof reason === "string" ? reason : "";
+  if (r.startsWith("device_adopt")) return t(lang, "origin_device");
+  if (r.startsWith("ui")) return t(lang, "origin_app");
+  return null;
 }
 
 // Map the entity's hvac_action to a localized direction word for the Hold pill
@@ -66,15 +77,18 @@ export function holdView(
   expiresAt: unknown,
   now: number = Date.now(),
   action: unknown = null,
+  reason: unknown = null,
 ): HoldView {
   const manual = t(lang, "manual");
   const direction = holdDirection(lang, action);
+  const origin = holdOrigin(lang, reason);
   if (policy === "permanent") {
     return {
       label: `${manual} (${t(lang, "permanent")})`,
       minutes: null,
       permanent: true,
       direction,
+      origin,
     };
   }
   const label = setpoint != null ? `${manual} ${setpoint.toFixed(1)}°` : manual;
@@ -83,6 +97,7 @@ export function holdView(
     minutes: minutesUntil(expiresAt, now),
     permanent: false,
     direction,
+    origin,
   };
 }
 

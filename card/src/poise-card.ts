@@ -483,11 +483,13 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       a["override_expires_at"],
       Date.now(),
       a["hvac_action"],
+      a["override_reason"],
     );
     return html`<div class="hold">
       <div class="chip hold-chip">
         <ha-icon icon="mdi:hand-back-right"></ha-icon><span>${v.label}</span>
         ${v.direction != null ? html`<em>· ${v.direction}</em>` : nothing}
+        ${v.origin != null ? html`<em>· ${v.origin}</em>` : nothing}
         ${v.minutes != null
           ? html`<em>· ${v.minutes} ${t(lang, "min_left")}</em>`
           : nothing}
