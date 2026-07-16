@@ -205,6 +205,42 @@ def resolve_boost_expiry(*, set_at: float, boost_duration_min: float) -> float:
 # ---------------------------------------------------------------------------
 
 
+def setpoint_adopt_reason(
+    *,
+    device_sp: float | None,
+    last_written_sp: float | None,
+    last_write_ts: float | None,
+    now: float,
+    echo_window_s: float,
+    deadband: float,
+    prev_device_sp: float | None = None,
+    pre_write_sp: float | None = None,
+) -> str:
+    """Why the setpoint-adoption fallback did or did not adopt ``device_sp`` (K3).
+
+    Single source of truth for the setpoint decision -- ``detect_external_setpoint``
+    adopts iff this returns ``"adopt"``, so the coordinator can surface *why* a
+    reported setpoint was suppressed as a diagnostic. Codes in guard order:
+    ``no_baseline`` · ``command_echo`` · ``echo_window`` · ``stable_offset`` ·
+    ``adopt``.
+    """
+    if device_sp is None or last_written_sp is None or last_write_ts is None:
+        return "no_baseline"
+    if round(abs(device_sp - last_written_sp), 3) < deadband:
+        return "command_echo"
+    if (now - last_write_ts) < echo_window_s:
+        if pre_write_sp is not None and (
+            round(abs(device_sp - pre_write_sp), 3) >= deadband
+        ):
+            return "adopt"
+        return "echo_window"
+    if prev_device_sp is not None and (
+        round(abs(device_sp - prev_device_sp), 3) < deadband
+    ):
+        return "stable_offset"
+    return "adopt"
+
+
 def detect_external_setpoint(
     *,
     device_sp: float | None,
@@ -253,21 +289,21 @@ def detect_external_setpoint(
     is the raw reported setpoint (the caller snaps and clamps it to the norm
     envelope before holding it).
     """
-    if device_sp is None or last_written_sp is None or last_write_ts is None:
-        return None
-    if round(abs(device_sp - last_written_sp), 3) < deadband:
-        return None
-    if (now - last_write_ts) < echo_window_s:
-        if pre_write_sp is not None and (
-            round(abs(device_sp - pre_write_sp), 3) >= deadband
-        ):
-            return device_sp
-        return None
-    if prev_device_sp is not None and (
-        round(abs(device_sp - prev_device_sp), 3) < deadband
-    ):
-        return None
-    return device_sp
+    return (
+        device_sp
+        if setpoint_adopt_reason(
+            device_sp=device_sp,
+            last_written_sp=last_written_sp,
+            last_write_ts=last_write_ts,
+            now=now,
+            echo_window_s=echo_window_s,
+            deadband=deadband,
+            prev_device_sp=prev_device_sp,
+            pre_write_sp=pre_write_sp,
+        )
+        == "adopt"
+        else None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +318,43 @@ def detect_external_setpoint(
 # gates it behind the ``adopt_external_mode`` option and the Context check (a mode
 # change carrying Poise's own write context is our nudge echo, never adopted).
 # ---------------------------------------------------------------------------
+
+
+def mode_adopt_reason(
+    *,
+    device_mode: str | None,
+    desired_mode: str,
+    last_commanded_mode: str | None,
+    last_cmd_ts: float | None,
+    now: float,
+    echo_window_s: float,
+    supported_modes: tuple[str, ...] | frozenset[str] = (),
+    prev_mode: str | None = None,
+) -> str:
+    """Why the mode-adoption fallback did or did not adopt ``device_mode`` (K3).
+
+    Single source of truth for the mode decision -- ``detect_external_mode`` adopts
+    iff this returns ``"adopt"``. The coordinator surfaces the code as a diagnostic
+    so a suppressed user change is explainable instead of silently reverted. Codes
+    in guard order: ``no_signal`` · ``device_aligned`` · ``unsupported`` ·
+    ``own_command_echo`` · ``no_baseline`` · ``echo_window`` · ``stable_prev`` ·
+    ``adopt``.
+    """
+    if device_mode is None or device_mode in ("unknown", "unavailable"):
+        return "no_signal"
+    if device_mode == desired_mode:
+        return "device_aligned"
+    if device_mode not in supported_modes or device_mode == "heat_cool":
+        return "unsupported"
+    if device_mode == last_commanded_mode:
+        return "own_command_echo"
+    if last_commanded_mode is None or last_cmd_ts is None:
+        return "no_baseline"
+    if (now - last_cmd_ts) < echo_window_s:
+        return "echo_window"
+    if prev_mode is not None and device_mode == prev_mode:
+        return "stable_prev"
+    return "adopt"
 
 
 def detect_external_mode(
@@ -324,18 +397,18 @@ def detect_external_mode(
     device mode; the caller applies it as a hold within the norm/​safety precedence
     (window-open and frost still beat a mode-hold — a hold is comfort, not safety).
     """
-    if device_mode is None or device_mode in ("unknown", "unavailable"):
-        return None
-    if device_mode == desired_mode:
-        return None
-    if device_mode not in supported_modes or device_mode == "heat_cool":
-        return None
-    if device_mode == last_commanded_mode:
-        return None
-    if last_commanded_mode is None or last_cmd_ts is None:
-        return None
-    if (now - last_cmd_ts) < echo_window_s:
-        return None
-    if prev_mode is not None and device_mode == prev_mode:
-        return None
-    return device_mode
+    return (
+        device_mode
+        if mode_adopt_reason(
+            device_mode=device_mode,
+            desired_mode=desired_mode,
+            last_commanded_mode=last_commanded_mode,
+            last_cmd_ts=last_cmd_ts,
+            now=now,
+            echo_window_s=echo_window_s,
+            supported_modes=supported_modes,
+            prev_mode=prev_mode,
+        )
+        == "adopt"
+        else None
+    )
