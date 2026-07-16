@@ -5,7 +5,10 @@ genuine user change or an echo of Poise's own write."""
 
 from __future__ import annotations
 
-from custom_components.poise.control.override import detect_external_setpoint
+from custom_components.poise.control.override import (
+    detect_external_setpoint,
+    setpoint_adopt_reason,
+)
 
 EW = 120.0  # echo window (s)
 DB = 0.5  # deadband = one device step
@@ -130,4 +133,36 @@ def test_in_window_sub_step_requantise_is_echo_not_third_value() -> None:
     assert (
         _d(device_sp=21.8, now=TS + 50.0, last_written_sp=21.5, pre_write_sp=20.0)
         is None
+    )
+
+
+def test_setpoint_adopt_reason_codes() -> None:
+    # K3: detect_external_setpoint adopts iff setpoint_adopt_reason == "adopt"; the
+    # reason is surfaced as a diagnostic so a suppressed setpoint is explainable.
+    base: dict[str, float | None] = {
+        "last_written_sp": WROTE,
+        "last_write_ts": TS,
+        "now": TS + 500.0,
+        "echo_window_s": EW,
+        "deadband": DB,
+    }
+    assert setpoint_adopt_reason(device_sp=None, **base) == "no_baseline"
+    assert setpoint_adopt_reason(device_sp=WROTE + 0.1, **base) == "command_echo"
+    assert (
+        setpoint_adopt_reason(device_sp=24.0, **{**base, "now": TS + 50.0})
+        == "echo_window"
+    )
+    assert (
+        setpoint_adopt_reason(
+            device_sp=24.0, **{**base, "now": TS + 50.0}, pre_write_sp=WROTE
+        )
+        == "adopt"  # three-value proof inside the window
+    )
+    assert (
+        setpoint_adopt_reason(device_sp=24.0, **base, prev_device_sp=24.0)
+        == "stable_offset"
+    )
+    assert (
+        setpoint_adopt_reason(device_sp=24.0, **base, prev_device_sp=WROTE)
+        == "adopt"  # moved off the settled offset
     )

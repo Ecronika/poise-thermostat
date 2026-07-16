@@ -5,7 +5,10 @@ or an echo of Poise's own nudge. Categorical (no deadband)."""
 
 from __future__ import annotations
 
-from custom_components.poise.control.override import detect_external_mode
+from custom_components.poise.control.override import (
+    detect_external_mode,
+    mode_adopt_reason,
+)
 
 EW = 120.0  # echo window (s)
 TS = 1000.0  # monotonic stamp of the last mode command
@@ -98,3 +101,76 @@ def test_first_observation_without_prev_still_gated() -> None:
     # baseline / window guards still apply, so a cold start never false-adopts.
     assert _m(device_mode="cool", prev_mode=None) == "cool"  # past window, real change
     assert _m(device_mode="cool", prev_mode=None, last_commanded_mode=None) is None
+
+
+def test_mode_adopt_reason_codes() -> None:
+    # K3: detect_external_mode adopts iff mode_adopt_reason == "adopt"; the reason
+    # is surfaced as a diagnostic so a suppressed user change is explainable.
+    base: dict[str, object] = {
+        "desired_mode": "heat",
+        "last_commanded_mode": "heat",
+        "last_cmd_ts": TS,
+        "now": TS + 500.0,
+        "echo_window_s": EW,
+        "supported_modes": SUPPORTED,
+        "prev_mode": "heat",
+    }
+    assert mode_adopt_reason(device_mode=None, **base) == "no_signal"
+    assert mode_adopt_reason(device_mode="heat", **base) == "device_aligned"
+    assert mode_adopt_reason(device_mode="auto", **base) == "unsupported"
+    assert (
+        mode_adopt_reason(
+            device_mode="fan_only",
+            **{**base, "desired_mode": "cool", "last_commanded_mode": "fan_only"},
+        )
+        == "own_command_echo"
+    )
+    assert (
+        mode_adopt_reason(
+            device_mode="fan_only",
+            **{
+                **base,
+                "desired_mode": "cool",
+                "last_commanded_mode": None,
+                "last_cmd_ts": None,
+            },
+        )
+        == "no_baseline"
+    )
+    assert (
+        mode_adopt_reason(
+            device_mode="fan_only",
+            **{
+                **base,
+                "desired_mode": "cool",
+                "last_commanded_mode": "cool",
+                "last_cmd_ts": TS + 480.0,  # now - ts = 20 s, inside the window
+                "prev_mode": "cool",
+            },
+        )
+        == "echo_window"
+    )
+    assert (
+        mode_adopt_reason(
+            device_mode="fan_only",
+            **{
+                **base,
+                "desired_mode": "cool",
+                "last_commanded_mode": "cool",
+                "prev_mode": "fan_only",  # unchanged since last reading
+            },
+        )
+        == "stable_prev"
+    )
+    assert (
+        mode_adopt_reason(
+            device_mode="fan_only",
+            **{
+                **base,
+                "desired_mode": "cool",
+                "last_commanded_mode": "cool",
+                "prev_mode": "cool",  # moved -> genuine user change
+            },
+        )
+        == "adopt"
+    )
