@@ -6,6 +6,7 @@ import {
   clockLabel,
   heldSetpoint,
   holdDirection,
+  holdOrigin,
   holdView,
   minutesUntil,
   presetChip,
@@ -73,6 +74,35 @@ test("holdView: exposes the direction from hvac_action (V4)", () => {
   assert.equal(perm.direction, "heizt");
   // no action -> null direction (back-compatible default)
   assert.equal(holdView("de", 22, "schedule", null, NOW).direction, null);
+});
+
+test("holdOrigin: maps override_reason to a localized provenance (K3)", () => {
+  assert.equal(holdOrigin("de", "device_adopt_mode"), "Gerät");
+  assert.equal(holdOrigin("de", "device_adopt_setpoint"), "Gerät");
+  assert.equal(holdOrigin("de", "ui_setpoint"), "App");
+  assert.equal(holdOrigin("en", "device_adopt_setpoint"), "device");
+  assert.equal(holdOrigin("en", "ui_setpoint"), "app");
+  // frost_rescue / unknown / absent -> no origin shown
+  assert.equal(holdOrigin("de", "frost_rescue"), null);
+  assert.equal(holdOrigin("de", null), null);
+  assert.equal(holdOrigin("de", undefined), null);
+});
+
+test("holdView: carries the hold origin from override_reason (K3)", () => {
+  const dev = holdView(
+    "de",
+    22,
+    "schedule",
+    "2026-07-11T22:00:00Z",
+    NOW,
+    "cooling",
+    "device_adopt_mode",
+  );
+  assert.equal(dev.origin, "Gerät");
+  const app = holdView("en", 22, "permanent", null, NOW, null, "ui_setpoint");
+  assert.equal(app.origin, "app");
+  // back-compatible default: no reason -> null origin
+  assert.equal(holdView("de", 22, "schedule", null, NOW).origin, null);
 });
 
 test("airHint: shows air temperature only when it diverges from operative (V3a/D1)", () => {
