@@ -912,6 +912,44 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._override_reason = (
                     orr if _hold_active and isinstance(orr, str) else None
                 )
+                # B5 (review v0.173.0-alpha §4.3): restore the adoption baseline, so
+                # a device-side intervention made right after a restart is adopted
+                # instead of classifying as ``no_baseline`` and being reverted by the
+                # next write. Note this is NOT gated on an active hold: the baseline
+                # describes the actuator, not the hold.
+                #
+                # Restoring ``_prev_device_*`` next to the command is what makes this
+                # safe rather than a regression: on the first tick a device that
+                # reports a constant offset to our command, or that simply never
+                # moved while HA was down, then still classifies as
+                # ``stable_offset`` / ``stable_prev`` instead of being grabbed as a
+                # phantom hold (the F1/F2 class from the v0.171.0 RC review). Without
+                # the prev-values the ``stable_*`` guard is skipped (None) and every
+                # offset device would self-adopt on every restart.
+                _lws = data.get("last_written_sp")
+                self._last_written_sp = (
+                    float(_lws) if isinstance(_lws, (int, float)) else None
+                )
+                _pds = data.get("prev_device_sp")
+                self._prev_device_sp = (
+                    float(_pds) if isinstance(_pds, (int, float)) else None
+                )
+                _lch = data.get("last_commanded_hvac")
+                self._last_commanded_hvac = _lch if isinstance(_lch, str) else None
+                _pdm = data.get("prev_device_mode")
+                self._prev_device_mode = _pdm if isinstance(_pdm, str) else None
+                # The echo windows are monotonic and process-local, so a persisted
+                # stamp would be nonsense after a restart. Semantically no echo can
+                # be in flight across one, so the window must read as long expired --
+                # ``_stale`` guarantees ``(now - ts) >= echo_window`` on the first
+                # tick, which is also the honest input for the ADR-0052 §4 nudge
+                # throttle (no write happened recently). Only stamped where a
+                # baseline actually exists, so ``no_baseline`` still wins otherwise.
+                _stale = self._clock.monotonic() - SETPOINT_ADOPT_ECHO_WINDOW_S * 2.0
+                if self._last_written_sp is not None:
+                    self._last_sp_write_ts = _stale
+                if self._last_commanded_hvac is not None:
+                    self._last_hvac_cmd_ts = _stale
                 # C5: restore the *wall-clock* set-time so the 2 h auto-revert
                 # measures real elapsed time and a hold cannot outlive a restart.
                 osw = data.get("override_set_wall")
@@ -1641,6 +1679,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             ),
             "override_stats": self._override_stats,
             "override_reason": self._override_reason,  # K3: persisted hold origin
+            # B5 (review v0.173.0-alpha §4.3): the adoption baseline is otherwise
+            # runtime-only, so the first device-side intervention after a restart has
+            # nothing to compare against and is silently reverted. Persist BOTH what
+            # we last commanded and what the device last reported -- the reported
+            # value is what makes the restored baseline safe (see the restore side).
+            # Timestamps are deliberately left out: they are monotonic and
+            # process-local, hence meaningless across a restart.
+            "last_written_sp": self._last_written_sp,
+            "prev_device_sp": self._prev_device_sp,
+            "last_commanded_hvac": self._last_commanded_hvac,
+            "prev_device_mode": self._prev_device_mode,
             "climate_mode": self._climate_mode,
             "has_actuated": self._has_actuated,  # AR-11: teardown-park gate
         }
@@ -2670,6 +2719,45 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             min_off_s=_g_min_off,
             mode_hold_s=_g_mode_hold,
         )
+        # K2b (review v0.173.0-alpha §4.2): fold the actuator's observed run-state
+        # into the lifecycle HERE -- before the guard decision and the mode nudge
+        # below -- instead of ~500 lines further down. ``guard_block_reason`` used to
+        # judge against a lifecycle still holding last tick's state, so a device the
+        # user had just switched off was re-nudged in the very same tick without the
+        # min-off brake ever seeing the change: the un-braked immediate revert plus
+        # compressor restart on a NON-adopted intervention (T-4, open window or
+        # missing baseline). Deliberately placed ahead of the ``self._enabled`` split
+        # so disabled / off-held zones keep accruing their timers exactly as before
+        # (the call used to live in the shadow block, which runs for every zone).
+        # ``final_mode`` and ``act_state`` are already settled at this point, so the
+        # folded value is identical to the one the old late call produced -- only its
+        # visibility to the guard changes. P2: wall-clock basis, unchanged.
+        _now_wall = dt_util.utcnow().timestamp()
+        _act_avail = act_state is not None and act_state.state not in (
+            "unavailable",
+            "unknown",
+        )
+        _act_action = act_state.attributes.get("hvac_action") if act_state else None
+        # Fix the conditioning signal: an AC that reports no hvac_action (many
+        # ESPHome/IR bridges) would otherwise read as permanently off and never
+        # accrue a min-off lock. Fall back to Poise's intended mode (ADR-0024
+        # cool-drive parity).
+        try:
+            self._multi_lifecycle = _lifecycle.observe(
+                self._multi_lifecycle,
+                conditioning=_lifecycle.compressor_running(_act_action, final_mode),
+                mode=act_state.state if (act_state and _act_avail) else None,
+                now=_now_wall,
+                health=(
+                    DeviceHealth.OK.value
+                    if _act_avail
+                    else DeviceHealth.UNAVAILABLE.value
+                ),
+            )
+        except Exception:  # noqa: BLE001 - bookkeeping must never break the tick
+            # Keeps the previous lifecycle state, i.e. exactly the (stale) input the
+            # guard saw before this fix -- never worse than the old ordering.
+            _LOGGER.exception("Lifecycle observe failed; keeping previous state")
         # V2/K2: is the actuator's current state Poise's own write echo (our Context)?
         # Computed once, reused by the mode-adoption gate here and the setpoint gate
         # below (a change under our own context is never adopted, mode or setpoint).
@@ -3280,38 +3368,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _act_modes = (
                 (act_state.attributes.get("hvac_modes") or []) if act_state else []
             )
-            _act_avail = act_state is not None and act_state.state not in (
-                "unavailable",
-                "unknown",
-            )
-            # P2: fold the actuator's run-state into the per-device lifecycle on a
-            # wall-clock basis, then derive the resolver's min-off / health gate.
-            _now_wall = dt_util.utcnow().timestamp()
-            _act_action = act_state.attributes.get("hvac_action") if act_state else None
             # ADR-0046 §8 compressor protection (LIVE): the same decision the write
             # path above already applied (_guard_block) — surfaced here as a
-            # diagnostic. Evaluated against the pre-observe lifecycle (this tick's
-            # run-state is folded in just below). The display policy uses the
-            # effective timers so the remaining-time attributes match the live gate.
+            # diagnostic. K2b: the lifecycle is now folded BEFORE that decision (see
+            # the observe() call next to _guard_pol), so this diagnostic and the live
+            # gate are evaluated against the same, current run-state. The display
+            # policy uses the effective timers so the remaining-time attributes match
+            # the live gate. ``_act_avail`` / ``_act_action`` / ``_now_wall`` are
+            # likewise computed up there and reused here unchanged.
             _comp_pol = _guard_pol or _lifecycle.LifecyclePolicy(
                 min_off_s=_g_min_off, min_mode_hold_s=_g_mode_hold
             )
             _comp_block = _guard_block
-            # Fix the conditioning signal: an AC that reports no hvac_action (many
-            # ESPHome/IR bridges) would otherwise read as permanently off and never
-            # accrue a min-off lock. Fall back to Poise's intended mode (ADR-0024
-            # cool-drive parity).
-            self._multi_lifecycle = _lifecycle.observe(
-                self._multi_lifecycle,
-                conditioning=_lifecycle.compressor_running(_act_action, final_mode),
-                mode=act_state.state if (act_state and _act_avail) else None,
-                now=_now_wall,
-                health=(
-                    DeviceHealth.OK.value
-                    if _act_avail
-                    else DeviceHealth.UNAVAILABLE.value
-                ),
-            )
             _multi_policy = _lifecycle.LifecyclePolicy()
             _multi_runtime = _lifecycle.to_runtime(
                 self._multi_lifecycle, _now_wall, _multi_policy

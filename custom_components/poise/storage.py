@@ -30,7 +30,19 @@ class PoiseStore:
     survives a restart and still expires on real elapsed time (review C5):
     ``override_set_wall``/``override_requested``/``override_policy``/
     ``override_expires_at`` and ``boost_expires_at``/``boost_prev_preset``, plus
-    the observe-only ``override_stats`` (§5 L1).
+    the observe-only ``override_stats`` (§5 L1) and the hold's origin
+    (``override_reason``, K3).
+
+    B5 (v0.174.0): it also carries the *adoption baseline* --
+    ``last_written_sp``/``last_commanded_hvac`` (what Poise last commanded) and
+    ``prev_device_sp``/``prev_device_mode`` (what the device last reported back).
+    Both halves are needed: without the command there is no baseline and the
+    first device-side intervention after a restart is silently reverted; without
+    the reported values a device with a constant offset would self-adopt a
+    phantom hold on the first tick. The matching echo-window stamps are
+    deliberately *not* persisted -- they are monotonic and process-local, and no
+    echo can be in flight across a restart, so the restore stamps them as long
+    expired instead.
     """
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
