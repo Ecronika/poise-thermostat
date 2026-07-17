@@ -2719,45 +2719,27 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             min_off_s=_g_min_off,
             mode_hold_s=_g_mode_hold,
         )
-        # K2b (review v0.173.0-alpha §4.2): fold the actuator's observed run-state
-        # into the lifecycle HERE -- before the guard decision and the mode nudge
-        # below -- instead of ~500 lines further down. ``guard_block_reason`` used to
-        # judge against a lifecycle still holding last tick's state, so a device the
-        # user had just switched off was re-nudged in the very same tick without the
-        # min-off brake ever seeing the change: the un-braked immediate revert plus
-        # compressor restart on a NON-adopted intervention (T-4, open window or
-        # missing baseline). Deliberately placed ahead of the ``self._enabled`` split
-        # so disabled / off-held zones keep accruing their timers exactly as before
-        # (the call used to live in the shadow block, which runs for every zone).
-        # ``final_mode`` and ``act_state`` are already settled at this point, so the
-        # folded value is identical to the one the old late call produced -- only its
-        # visibility to the guard changes. P2: wall-clock basis, unchanged.
-        _now_wall = dt_util.utcnow().timestamp()
-        _act_avail = act_state is not None and act_state.state not in (
-            "unavailable",
-            "unknown",
-        )
-        _act_action = act_state.attributes.get("hvac_action") if act_state else None
-        # Fix the conditioning signal: an AC that reports no hvac_action (many
-        # ESPHome/IR bridges) would otherwise read as permanently off and never
-        # accrue a min-off lock. Fall back to Poise's intended mode (ADR-0024
-        # cool-drive parity).
-        try:
-            self._multi_lifecycle = _lifecycle.observe(
-                self._multi_lifecycle,
-                conditioning=_lifecycle.compressor_running(_act_action, final_mode),
-                mode=act_state.state if (act_state and _act_avail) else None,
-                now=_now_wall,
-                health=(
-                    DeviceHealth.OK.value
-                    if _act_avail
-                    else DeviceHealth.UNAVAILABLE.value
-                ),
-            )
-        except Exception:  # noqa: BLE001 - bookkeeping must never break the tick
-            # Keeps the previous lifecycle state, i.e. exactly the (stale) input the
-            # guard saw before this fix -- never worse than the old ordering.
-            _LOGGER.exception("Lifecycle observe failed; keeping previous state")
+        # K2b (review v0.173.0-alpha §4.2) — ATTEMPTED AND REVERTED in v0.174.0.
+        # Moving ``_lifecycle.observe()`` up here, ahead of ``guard_block_reason``
+        # below, looks like a pure reordering but is NOT safe, for two independent
+        # reasons the integration suite proved:
+        #   1. ``compressor_running(_act_action, final_mode)`` falls back to Poise's
+        #      OWN INTENT when the device reports no hvac_action. Folded in before
+        #      the guard, the intent to start ("we want cool") marks the device as
+        #      running, min-off evaporates and the guard can never brake a start --
+        #      it would judge against its own intent. Circular, and the exact
+        #      opposite of what the guard is for.
+        #   2. ``observe()`` stamps ``mode_changed_wall = now`` whenever the observed
+        #      mode differs from the stored one -- and on the first tick the stored
+        #      mode is None. The guard would then block that same tick's nudge
+        #      against a hold it had just armed itself: no dry/cool/heat entry on the
+        #      first tick after any restart (test_dry_nudge_when_humid_and_idle).
+        # The late call is therefore deliberate: it folds this tick's outcome for the
+        # NEXT tick's verdict. A correct K2b has to fold only the device-*reported*
+        # run-state (never the intent fallback) and must not arm the mode hold on a
+        # first observation -- a designed change to multi/lifecycle.py with its own
+        # pure tests, not a reordering. Tracked as follow-up; the un-braked revert on
+        # a non-adopted intervention (T-4) stays open until then.
         # V2/K2: is the actuator's current state Poise's own write echo (our Context)?
         # Computed once, reused by the mode-adoption gate here and the setpoint gate
         # below (a change under our own context is never adopted, mode or setpoint).
@@ -3368,18 +3350,40 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _act_modes = (
                 (act_state.attributes.get("hvac_modes") or []) if act_state else []
             )
+            _act_avail = act_state is not None and act_state.state not in (
+                "unavailable",
+                "unknown",
+            )
+            # P2: fold the actuator's run-state into the per-device lifecycle on a
+            # wall-clock basis, then derive the resolver's min-off / health gate.
+            _now_wall = dt_util.utcnow().timestamp()
+            _act_action = act_state.attributes.get("hvac_action") if act_state else None
             # ADR-0046 §8 compressor protection (LIVE): the same decision the write
             # path above already applied (_guard_block) — surfaced here as a
-            # diagnostic. K2b: the lifecycle is now folded BEFORE that decision (see
-            # the observe() call next to _guard_pol), so this diagnostic and the live
-            # gate are evaluated against the same, current run-state. The display
-            # policy uses the effective timers so the remaining-time attributes match
-            # the live gate. ``_act_avail`` / ``_act_action`` / ``_now_wall`` are
-            # likewise computed up there and reused here unchanged.
+            # diagnostic. Evaluated against the pre-observe lifecycle (this tick's
+            # run-state is folded in just below) — deliberately, see the K2b note at
+            # the guard: folding first would let the guard judge against its own
+            # intent and self-armed mode hold. The display policy uses the effective
+            # timers so the remaining-time attributes match the live gate.
             _comp_pol = _guard_pol or _lifecycle.LifecyclePolicy(
                 min_off_s=_g_min_off, min_mode_hold_s=_g_mode_hold
             )
             _comp_block = _guard_block
+            # Fix the conditioning signal: an AC that reports no hvac_action (many
+            # ESPHome/IR bridges) would otherwise read as permanently off and never
+            # accrue a min-off lock. Fall back to Poise's intended mode (ADR-0024
+            # cool-drive parity).
+            self._multi_lifecycle = _lifecycle.observe(
+                self._multi_lifecycle,
+                conditioning=_lifecycle.compressor_running(_act_action, final_mode),
+                mode=act_state.state if (act_state and _act_avail) else None,
+                now=_now_wall,
+                health=(
+                    DeviceHealth.OK.value
+                    if _act_avail
+                    else DeviceHealth.UNAVAILABLE.value
+                ),
+            )
             _multi_policy = _lifecycle.LifecyclePolicy()
             _multi_runtime = _lifecycle.to_runtime(
                 self._multi_lifecycle, _now_wall, _multi_policy
