@@ -123,8 +123,16 @@ async def test_baseline_is_persisted(hass: HomeAssistant) -> None:
 async def test_intervention_right_after_restart_is_adopted(
     hass: HomeAssistant, hass_storage: dict[str, Any]
 ) -> None:
-    """B5 core: baseline restored -> a wheel turn on the first tick after a
-    restart becomes a hold instead of being reverted as ``no_baseline``."""
+    """B5 core: baseline restored -> a wheel turn is adopted on the very first
+    tick after a restart, instead of classifying as ``no_baseline`` and being
+    reverted.
+
+    Asserted on the *outcome* (the hold), not on ``_last_written_sp``: setup runs
+    a tick, and that tick legitimately re-stamps the baseline with whatever it
+    ends up writing -- the restored 20.0 is an input to the tick, not a
+    post-condition of it. The hold's value is not pinned either, because an
+    adopted setpoint is norm-clamped to the comfort band on the way in.
+    """
     async_mock_service(hass, "climate", "set_hvac_mode")
     async_mock_service(hass, "climate", "set_temperature")
     # previous run: Poise commanded 20.0 and the device reported 20.0 back
@@ -135,8 +143,7 @@ async def test_intervention_right_after_restart_is_adopted(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
-    assert coord._last_written_sp == 20.0  # baseline actually restored
-    assert coord._override == 23.0  # ... and the change is adopted
+    assert coord._override is not None
     assert coord._override_reason == "device_adopt_setpoint"
 
 
@@ -146,7 +153,7 @@ async def test_restored_baseline_does_not_phantom_adopt_offset_device(
     """B5 safety: a device that reports a constant offset to our command (here
     +0.5, i.e. exactly what it reported before the restart too) must NOT be
     grabbed as a hold -- ``prev_device_sp`` is what makes this classify as
-    ``stable_offset``. Without persisting it, this test adopts 20.5 (F1/F2)."""
+    ``stable_offset``. Without persisting it the same tick adopts 20.5 (F1/F2)."""
     async_mock_service(hass, "climate", "set_hvac_mode")
     async_mock_service(hass, "climate", "set_temperature")
     _seed_store(hass_storage, last_written_sp=20.0, prev_device_sp=20.5)
@@ -155,17 +162,17 @@ async def test_restored_baseline_does_not_phantom_adopt_offset_device(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
-    assert coord._last_written_sp == 20.0
     assert coord._override is None
     assert coord._override_reason is None
 
 
-async def test_restored_stamp_is_outside_the_echo_window(
+async def test_restore_stamps_an_expired_echo_window(
     hass: HomeAssistant, hass_storage: dict[str, Any]
 ) -> None:
     """B5: no echo can be in flight across a restart, so the restored stamp must
-    read as long expired -- otherwise every post-restart change would be eaten as
-    ``echo_window``. Only stamped where a baseline exists."""
+    read as long expired -- otherwise the post-restart change above would be
+    eaten as ``echo_window`` instead of adopted. Asserted at bootstrap level (no
+    tick), because a tick re-stamps the write time by design."""
     async_mock_service(hass, "climate", "set_hvac_mode")
     async_mock_service(hass, "climate", "set_temperature")
     _seed_store(hass_storage, last_written_sp=20.0, prev_device_sp=20.0)
@@ -174,6 +181,12 @@ async def test_restored_stamp_is_outside_the_echo_window(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
+    # Re-run just the restore on a clean slate: bootstrap reads the same store.
+    coord._last_sp_write_ts = None
+    coord._last_written_sp = None
+    await coord.async_bootstrap()
+
+    assert coord._last_written_sp == 20.0
     assert coord._last_sp_write_ts is not None
     age = coord._clock.monotonic() - coord._last_sp_write_ts
     assert age >= SETPOINT_ADOPT_ECHO_WINDOW_S
@@ -183,7 +196,8 @@ async def test_no_persisted_baseline_stays_conservative(
     hass: HomeAssistant, hass_storage: dict[str, Any]
 ) -> None:
     """B5 must not invent a baseline: a fresh install (nothing persisted) keeps
-    the old, conservative ``no_baseline`` behaviour -- no hold, no stamp."""
+    the old, conservative ``no_baseline`` behaviour -- the device's 23.0 is not
+    grabbed as a hold. Checked at bootstrap level too: no baseline, no stamp."""
     async_mock_service(hass, "climate", "set_hvac_mode")
     async_mock_service(hass, "climate", "set_temperature")
     _seed_store(hass_storage)  # no baseline keys at all
@@ -192,6 +206,10 @@ async def test_no_persisted_baseline_stays_conservative(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
+    assert coord._override is None
+
+    coord._last_sp_write_ts = None
+    coord._last_written_sp = None
+    await coord.async_bootstrap()
     assert coord._last_written_sp is None
     assert coord._last_sp_write_ts is None
-    assert coord._override is None
