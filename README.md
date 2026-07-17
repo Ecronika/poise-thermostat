@@ -81,7 +81,7 @@ Wird **am Gerät selbst** verstellt (TRV-Rad, IR-Fernbedienung, Hersteller-App),
 | --- | --- |
 | die Zone die Übernahme abgeschaltet hat | `opt_out` |
 | Poise den Wert selbst geschrieben hat (erkannt am HA-`Context`) | `own_echo` |
-| Poise seit dem Start noch nie selbst geschrieben hat — es fehlt der Vergleichswert (**Laufzeit-Zustand, überlebt keinen Neustart**) | `no_baseline` |
+| Poise in dieser Zone noch nie selbst geschrieben hat — es fehlt der Vergleichswert (**seit v0.174.0 neustartfest**: er wird mitgespeichert, betrifft also nur Neuinstallationen bzw. die Zeit bis zum ersten eigenen Schreibvorgang) | `no_baseline` |
 | die Änderung **binnen 120 s** auf einen eigenen Schreibvorgang folgt und nicht nachweislich auch vom Wert *davor* abweicht | `echo_window` |
 | die Abweichung unter der Geräteschrittweite liegt | `command_echo` |
 | das Gerät dauerhaft denselben Versatz zum geschriebenen Wert meldet (Rundung / interne Kompensation) | `stable_offset` |
