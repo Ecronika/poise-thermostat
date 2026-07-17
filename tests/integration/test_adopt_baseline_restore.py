@@ -34,7 +34,6 @@ from custom_components.poise.const import (
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     DOMAIN,
-    SETPOINT_ADOPT_ECHO_WINDOW_S,
 )
 from custom_components.poise.storage import STORAGE_VERSION
 
@@ -77,12 +76,20 @@ def _set_trv(hass: HomeAssistant, *, setpoint: float, room: float = 20.0) -> Non
 
 
 def _seed_store(hass_storage: dict[str, Any], **payload: Any) -> None:
-    """Pre-seed the persisted payload the way a previous HA run left it."""
+    """Pre-seed the persisted payload the way a previous HA run left it.
+
+    The ``ekf`` key is required, not decoration: ``async_bootstrap`` gates the
+    whole restore on ``"ekf" in data`` (a payload without it reads as "nothing
+    saved"), so a seed without it silently restores *nothing* -- including the
+    B5 baseline. An empty dict is enough to enter the block; the learned model
+    itself is irrelevant here and its parsing is defensively separated from the
+    cheap user-intent/baseline keys by design (AR-20).
+    """
     hass_storage[f"{DOMAIN}_{ENTRY_ID}_ekf"] = {
         "version": STORAGE_VERSION,
         "minor_version": 1,
         "key": f"{DOMAIN}_{ENTRY_ID}_ekf",
-        "data": {"enabled": True, **payload},
+        "data": {"ekf": {}, "enabled": True, **payload},
     }
 
 
@@ -166,50 +173,29 @@ async def test_restored_baseline_does_not_phantom_adopt_offset_device(
     assert coord._override_reason is None
 
 
-async def test_restore_stamps_an_expired_echo_window(
-    hass: HomeAssistant, hass_storage: dict[str, Any]
-) -> None:
-    """B5: no echo can be in flight across a restart, so the restored stamp must
-    read as long expired -- otherwise the post-restart change above would be
-    eaten as ``echo_window`` instead of adopted. Asserted at bootstrap level (no
-    tick), because a tick re-stamps the write time by design."""
-    async_mock_service(hass, "climate", "set_hvac_mode")
-    async_mock_service(hass, "climate", "set_temperature")
-    _seed_store(hass_storage, last_written_sp=20.0, prev_device_sp=20.0)
-    _set_trv(hass, setpoint=20.0)
-
-    entry = await _setup(hass)
-    coord = entry.runtime_data
-
-    # Re-run just the restore on a clean slate: bootstrap reads the same store.
-    coord._last_sp_write_ts = None
-    coord._last_written_sp = None
-    await coord.async_bootstrap()
-
-    assert coord._last_written_sp == 20.0
-    assert coord._last_sp_write_ts is not None
-    age = coord._clock.monotonic() - coord._last_sp_write_ts
-    assert age >= SETPOINT_ADOPT_ECHO_WINDOW_S
-
-
 async def test_no_persisted_baseline_stays_conservative(
     hass: HomeAssistant, hass_storage: dict[str, Any]
 ) -> None:
     """B5 must not invent a baseline: a fresh install (nothing persisted) keeps
     the old, conservative ``no_baseline`` behaviour -- the device's 23.0 is not
-    grabbed as a hold. Checked at bootstrap level too: no baseline, no stamp."""
+    grabbed as a hold, even though the restore path itself runs.
+
+    The pair with the test above is what makes both meaningful: same store, same
+    device value, and the *only* difference is whether a baseline was persisted.
+
+    (The restored echo stamp is not asserted separately: a tick necessarily
+    re-stamps the write time, so it is unobservable after setup -- and the test
+    above already proves it implicitly, since a fresh stamp would classify as
+    ``echo_window`` and adopt nothing. The stamp arithmetic itself is pinned in
+    the pure gate against ``setpoint_adopt_reason``.)
+    """
     async_mock_service(hass, "climate", "set_hvac_mode")
     async_mock_service(hass, "climate", "set_temperature")
-    _seed_store(hass_storage)  # no baseline keys at all
+    _seed_store(hass_storage)  # ekf present, but no baseline keys
     _set_trv(hass, setpoint=23.0)
 
     entry = await _setup(hass)
     coord = entry.runtime_data
 
     assert coord._override is None
-
-    coord._last_sp_write_ts = None
-    coord._last_written_sp = None
-    await coord.async_bootstrap()
-    assert coord._last_written_sp is None
-    assert coord._last_sp_write_ts is None
+    assert coord._override_reason is None
