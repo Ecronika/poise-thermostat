@@ -142,3 +142,20 @@ Hardware-/Firmware-Gegner auf identischer Zielhardware:
 - **Adaptive Climate (msinhore)** als lebender Wettbewerber streichen (Repo 404); Konzept-Zitate (ASHRAE-55-Adaptivband, ADR-0051) bleiben gültig, Quelle ist das Blueprint-Repo.
 - **Sonoff TRVZB FW 1.4.4 „Adaptive Mode"** berührt ADR-0036 (TPI-Direktventil): vor dem Live-Flip prüfen, dass der Modus deaktiviert ist bzw. ein Repair-Hinweis existiert (Interferenz zweier Regler auf einem Ventil).
 - **Versatile Thermostat v10 Plugin-Mechanismus** ist strategisch beobachtenswert (Ökosystem-Öffnung; IHP zeigt, dass Dritt-Layer auf VTherm bauen).
+
+---
+
+## 5. Nachtrag 2026-07-17: Ergänzungen aus der Nutzerfeedback-Recherche
+
+Die nachgelagerte Meinungsbild-Recherche (GitHub/HA-Forum/Reddit/Simon42, siehe [`Meinungsbild_Wettbewerber_Nutzerfeedback_2026-07.md`](Meinungsbild_Wettbewerber_Nutzerfeedback_2026-07.md)) ergänzt die Liste um community-getriebene Lösungen, die in Abschnitt 2 fehlten — keine davon ändert das Tier-1-Benchmark-Set:
+
+| Ergänzung | Kategorie | Einordnung |
+|---|---|---|
+| **SmartHRT**, **Smart Dynamic Preheat** (05/2026), **Adaptive HVAC Preheat** | Blueprints/YAML, Optimal Start | Community-Welle 2026 „Vorlauf aus gemessener Aufheizrate" — unabhängige Bestätigung des Poise-Kernversprechens; leichte Vergleichspunkte für die Disziplin Optimal Start |
+| **ebusd** und **BSB-LAN** | Kessel-/Erzeuger-DIY-Ökosysteme (DACH) | Die realen Andock-Ziele für Poises Kesselbedarf-Aktion (ADR-0039); OpenTherm ist im DACH-Raum Nische |
+| **tado_ce** (hiall-fyi) und **tado-local** (array81) | Workaround-Integrationen | Beleg der Cloud-Flucht nach tado-Paywall/Quota; der praktikable lokale Messpfad für Feld-A/B gegen tado |
+| **Z2M-native Sensorkopplung ohne Regel-Integration** (Bosch `remote_temperature`-Automation, TRV Calibrator Blueprint) | Baseline-Klasse | Die „gut-genug"-Konkurrenz ohne HACS, gegen die Poise seinen Mehrwert erklären muss |
+| **Active Heating Manager** (Add-on) | Mehrzonen-Nische | Kesselsteuerung aus TRV-Demand |
+| **DIY-Heizkörperlüfter (ESPHome)** | Rand-Referenz | Populäres Effizienz-Add-on; relevant für Poises Fan-CE-Pfad (ADR-0054 Stufe 3) |
+
+Zusätzlich aus dem Nutzerfeedback bestätigt: die Empfehlung, den **Sonoff-TRVZB-Dreikampf** (Werks-Hysterese vs. FW-1.4.4-PID vs. Poise-TPI) ins Zentrum des Leistungsvergleichs zu stellen, deckt sich mit dem Community-Trend zu TRV-nativen Lösungen; und die BT-Bewertung ist zu präzisieren: das v1.8-Rewrite wurde begrüßt, die Migrationswelle (Juni–Juli 2026) war jedoch holprig — Versionsstand bei jedem Vergleich dokumentieren.
