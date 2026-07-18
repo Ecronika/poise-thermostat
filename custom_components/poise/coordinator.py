@@ -2549,6 +2549,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 prev_dry_active=self._dry_active,
                 category=self._category,
                 abs_humidity_gkg=_w,
+                occupied=_occupied,
             )
             self._dry_active = _hum.dry_active
             _hum_action = _hum.action
@@ -3811,6 +3812,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             heating=heating,
             tpi_duty=_tick_data.get("tpi_duty"),
             frozen=frozen,
+        )
+        # R11 trace v2: capture the REAL actuator mode + action so a replayed
+        # trace can explain a dehumidification episode. The v1 schema recorded
+        # only Poise's thermal ``mode`` (idle/cool/heat/off) and never the
+        # humidity/device axis, so dry episodes were invisible on disk.
+        _tick_data["device_hvac_mode"] = act_state.state if act_state else ""
+        _tick_data["hvac_action"] = (
+            (act_state.attributes.get("hvac_action") or "") if act_state else ""
         )
         await self._maybe_record_trace(
             _tick_data, room=room, t_out=t_out_eff, rh=rh, t_rm=t_rm_eff, now=now
