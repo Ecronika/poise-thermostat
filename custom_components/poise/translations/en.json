@@ -367,6 +367,10 @@
       "title": "Poise: thermostat's own schedule is active",
       "description": "The controlled thermostat `{entity}` has its built-in weekly schedule switched on. It will fight Poise's control. Turn the device schedule off; Poise then owns the setpoint."
     },
+    "adaptive_mode_active": {
+      "title": "Poise: thermostat's own adaptive mode is active",
+      "description": "The controlled thermostat `{entity}` runs its own adaptive / smart-temperature control. That second loop fights Poise's setpoint control. Turn the device's adaptive mode off; Poise then owns the setpoint."
+    },
     "device_alarm": {
       "title": "Poise: thermostat reports a fault",
       "description": "The thermostat `{entity}` reports a valve/installation fault (e.g. not mounted correctly, valve failure, wrong calibration, or a broken link to the external sensor). Heating may not work; check the device."

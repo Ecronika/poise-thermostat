@@ -198,6 +198,10 @@
       "title": "Poise: Eigener Zeitplan des Thermostats aktiv",
       "description": "Das gesteuerte Thermostat `{entity}` hat seinen internen Wochenplan eingeschaltet. Der kämpft gegen die Poise-Regelung. Schalte den Geräte-Zeitplan aus; Poise übernimmt dann den Sollwert."
     },
+    "adaptive_mode_active": {
+      "title": "Poise: Adaptiv-Modus des Thermostats aktiv",
+      "description": "Das gesteuerte Thermostat `{entity}` betreibt eine eigene adaptive / Smart-Temperature-Regelung. Dieser zweite Regelkreis arbeitet gegen die Poise-Sollwertführung. Schalte den Adaptiv-Modus des Geräts aus; Poise übernimmt dann den Sollwert."
+    },
     "device_alarm": {
       "title": "Poise: Thermostat meldet einen Fehler",
       "description": "Das Thermostat `{entity}` meldet einen Ventil-/Installationsfehler (z. B. falsch montiert, Ventildefekt, falsche Kalibrierung oder gestörte Verknüpfung zum externen Sensor). Heizen funktioniert evtl. nicht — Gerät prüfen."
