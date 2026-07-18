@@ -214,7 +214,7 @@
             },
             "data_description": {
               "override_policy": "When a manual setpoint returns to automatic.",
-              "adopt_external_setpoint": "Only adopted when it can be told apart from an echo of Poise's own write: a prior write is needed as a baseline (runtime state — not restored after a restart), and a change within 120 s of one counts as its echo. Suppressed while the device's own schedule runs. The resulting hold is still clamped by window/frost/mould and the comfort band.",
+              "adopt_external_setpoint": "Only adopted when it can be told apart from an echo of Poise's own write: a prior write is needed as a baseline (persisted, so it survives a restart — it is only missing until Poise has written once), and a change within 120 s of one counts as its echo. Suppressed while the device's own schedule runs. The resulting hold is still clamped by window/frost/mould and the comfort band.",
               "adopt_external_mode": "Same baseline and 120 s echo conditions as the setpoint. Not adopted while a window is open or sensors are frozen, or for modes the device does not support (incl. heat_cool). Fan speed, swing and device-side presets are never adopted."
             }
           }

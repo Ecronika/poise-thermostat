@@ -2993,9 +2993,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     # V1: inside the echo window, a value differing from BOTH our
                     # command and the pre-write reading is a provable user change.
                     pre_write_sp=self._pre_write_sp,
+                    # R4 (2026-07 competitor audit): a report at/below the frost
+                    # floor is a TRV's own frost drop, never a plausible user hold.
+                    frost_floor=FROST_FLOOR_C,
                 )
-                if (self._adopt_external_setpoint and not sched_active)
-                and not _own_change
+                if (
+                    self._adopt_external_setpoint
+                    and not sched_active
+                    and not _own_change
+                    # R4: gate on safety like the mode-adoption path -- an open
+                    # window or a frozen sensor must not let a device-side drop be
+                    # grabbed as a "manual" hold (the frost-drop phantom-hold class).
+                    and not window_open
+                    and not frozen
+                )
                 else None
             )
             # K3: classify why the reported setpoint was or was not adopted, using the
@@ -3007,6 +3018,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 _sp_adopt_reason = "schedule_active"
             elif _own_change:
                 _sp_adopt_reason = "own_echo"
+            elif window_open:
+                _sp_adopt_reason = "safety_window"
+            elif frozen:
+                _sp_adopt_reason = "safety_frozen"
             else:
                 _sp_adopt_reason = setpoint_adopt_reason(
                     device_sp=actual_sp,
@@ -3017,6 +3032,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     deadband=max(WRITE_DEADBAND_C, step),
                     prev_device_sp=self._prev_device_sp,
                     pre_write_sp=self._pre_write_sp,
+                    frost_floor=FROST_FLOOR_C,
                 )
             # K3: log a suppressed device change once (debounced on the reason) so a
             # user whose remote change "did nothing" can see why in the debug log.
