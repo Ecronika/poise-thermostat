@@ -76,6 +76,7 @@ def humidity_decide(
     prev_dry_active: bool = False,
     category: Category | None = None,
     abs_humidity_gkg: float | None = None,
+    occupied: bool = True,
     cfg: HumidityConfig = _DEFAULT,
 ) -> HumidityDecision:
     """Decide the RH-driven action against the (effective) comfort band.
@@ -85,6 +86,12 @@ def humidity_decide(
     dehumidification ceiling is the EN 16798-1 category limit (via ``category``,
     default Cat II 60 %); ``abs_humidity_gkg`` (from ``humidity_ratio``) adds the
     12 g/kg absolute backstop. Both share the latched ``dry_active`` hysteresis.
+
+    ``occupied`` gates the RELATIVE category ceiling only: it is an EN 16798-1
+    *comfort* criterion and so applies during occupancy. The absolute 12 g/kg
+    backstop (health / building protection: mould, condensation) is never gated
+    and stays active whether or not anyone is present. Default ``True`` preserves
+    the original behaviour for callers that do not pass occupancy.
     """
     if rh is None:  # no humidity sensor -> feature inactive (graceful)
         return HumidityDecision("idle", False, "no humidity sensor")
@@ -105,18 +112,29 @@ def humidity_decide(
     rh_exit = rh_high - cfg.hysteresis
     abs_exit = cfg.abs_high - cfg.abs_hysteresis
     w = abs_humidity_gkg
-    rh_over = rh >= rh_high
+    # The relative category ceiling is a COMFORT criterion -> occupancy-gated
+    # (both the trigger and its latch-hold). The absolute 12 g/kg backstop is a
+    # health / building-protection limit and is NEVER gated. So an empty room
+    # only dehumidifies for the absolute cap, and a relative-only latch releases
+    # once the room goes unoccupied.
+    rh_over = occupied and rh >= rh_high
     abs_over = w is not None and w >= cfg.abs_high
-    still_humid = rh >= rh_exit or (w is not None and w >= abs_exit)
-    humid_enough = rh_over or abs_over or (prev_dry_active and still_humid)
+    rh_hold = occupied and rh >= rh_exit
+    abs_hold = w is not None and w >= abs_exit
+    humid_enough = rh_over or abs_over or (prev_dry_active and (rh_hold or abs_hold))
     if in_deadband and humid_enough:
         if can_dry:
-            if abs_over and w is not None and not rh_over:
-                why = f"w {w:.1f} >= {cfg.abs_high:.0f} g/kg: dry"
+            rh_driven = rh_over or (prev_dry_active and rh_hold)
+            if not rh_driven and w is not None:
+                why = f"w {w:.1f} g/kg abs backstop: dry"
             else:
                 why = f"RH {rh:.0f} / ceiling {rh_high:.0f}: dry"
             return HumidityDecision("dry", True, why)
         if can_fan_only:  # fan re-evaporates condensate -> raises RH; never use it
             return HumidityDecision("idle", False, "no dry; fan_only raises RH")
         return HumidityDecision("idle", False, "device cannot dry")
+    if not occupied and rh >= rh_high:
+        return HumidityDecision(
+            "idle", False, f"RH {rh:.0f} >= {rh_high:.0f} but unoccupied: deferred"
+        )
     return HumidityDecision("idle", False, "RH within band")
