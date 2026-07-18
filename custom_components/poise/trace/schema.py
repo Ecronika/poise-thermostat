@@ -17,7 +17,18 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TRACE_VERSION: int = 1
+TRACE_VERSION: int = 2
+# Oldest on-disk trace version the replay loader still accepts (deprecation
+# window). Bump this — and retire the matching frozen golden — only when a
+# schema change makes older records genuinely un-replayable. Today a v1 record
+# replays fine (its missing v2 fields simply default), so v1 stays supported and
+# is pinned by a frozen legacy golden.
+MIN_SUPPORTED_TRACE_VERSION: int = 1
+
+
+def is_supported_version(v: int) -> bool:
+    """Whether a record's ``v`` is inside the replayable window (deprecation)."""
+    return MIN_SUPPORTED_TRACE_VERSION <= v <= TRACE_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +84,19 @@ class TraceRecord:
     rh: float | None = None
     t_rm: float | None = None
     ca_deviation_k: float | None = None
+    # --- v2: humidity / real-device axis ------------------------------------
+    # Added in TRACE_VERSION 2 so a replayed trace can explain a dehumidification
+    # episode (v1 recorded only Poise's thermal ``mode`` and never the humidity
+    # axis or the actuator's real mode). All defaulted, so a v1 record loads
+    # unchanged — that is the whole backward-compatibility mechanism.
+    humidity_action: str = ""  # Poise RH decision: idle|cool|dry|dry_guard
+    dry_active: bool = False  # dehumidification latch state
+    device_hvac_mode: str = ""  # the REAL actuator mode: cool|dry|fan_only|off|...
+    hvac_action: str = ""  # Poise zone resolved action: cooling|drying|idle|...
+    dewpoint: float | None = None
+    abs_humidity_gkg: float | None = None
+    rh_ceiling: float | None = None  # category RH ceiling in effect [%]
+    occupied: bool = False  # occupancy used by the humidity comfort gate
 
     def to_json_line(self) -> str:
         """One compact JSON line; floats rounded and ``None`` fields dropped."""
@@ -122,6 +146,15 @@ def build_record(
     def _b(key: str) -> bool:
         return bool(data.get(key, False))
 
+    def _maybe_f(key: str) -> float | None:
+        val = data.get(key)
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
     ca = data.get("ca_deviation_k")
     return TraceRecord(
         v=TRACE_VERSION,
@@ -155,4 +188,12 @@ def build_record(
         rh=rh,
         t_rm=t_rm,
         ca_deviation_k=(float(ca) if ca is not None else None),
+        humidity_action=str(data.get("humidity_action", "")),
+        dry_active=_b("dry_active"),
+        device_hvac_mode=str(data.get("device_hvac_mode", "")),
+        hvac_action=str(data.get("hvac_action", "")),
+        dewpoint=_maybe_f("dewpoint"),
+        abs_humidity_gkg=_maybe_f("abs_humidity_gkg"),
+        rh_ceiling=_maybe_f("rh_high_used"),
+        occupied=_b("occupied"),
     )
