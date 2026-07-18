@@ -5,10 +5,12 @@ from dataclasses import replace
 
 from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 from custom_components.poise.trace.schema import (
+    MIN_SUPPORTED_TRACE_VERSION,
     TRACE_VERSION,
     ModelSnapshot,
     TraceRecord,
     build_record,
+    is_supported_version,
 )
 from tests.harness.trace_replay import load_trace, replay_ekf
 
@@ -178,3 +180,125 @@ def test_missing_cooling_drive_would_break_replay_sufficiency() -> None:
     records = _make_trace()
     tampered = [replace(r, u_c=1.0) for r in records]
     assert replay_ekf(tampered).beta_c != replay_ekf(records).beta_c
+
+
+# --- v2: humidity / real-device axis + deprecation window -------------------
+
+
+def test_v2_record_round_trips_the_humidity_axis() -> None:
+    r = TraceRecord(
+        v=TRACE_VERSION,
+        ts=1700000000.0,
+        mono=120.0,
+        room=24.1,
+        t_out=17.0,
+        u_h=0.0,
+        u_c=0.0,
+        q_solar=0.3,
+        q_occ=0.0,
+        alpha=0.1,
+        beta_h=3.0,
+        beta_c=4.0,
+        beta_s=0.3,
+        beta_o=0.3,
+        t_std=0.5,
+        n_idle=10,
+        n_heating=0,
+        n_cooling=0,
+        identified=True,
+        humidity_action="dry",
+        dry_active=True,
+        device_hvac_mode="dry",
+        hvac_action="drying",
+        dewpoint=12.4,
+        abs_humidity_gkg=8.9,
+        rh_ceiling=50.0,
+        occupied=False,
+    )
+    back = TraceRecord.from_json_line(r.to_json_line())
+    assert back == r
+    assert back.humidity_action == "dry" and back.device_hvac_mode == "dry"
+    assert back.dry_active is True and back.occupied is False
+    assert back.dewpoint == 12.4 and back.rh_ceiling == 50.0
+
+
+def test_v1_record_loads_into_v2_with_defaulted_humidity_fields() -> None:
+    # A record written by the v1 recorder (no humidity axis) must still load:
+    # the new fields default, which IS the backward-compatibility mechanism.
+    v1_line = (
+        '{"v":1,"ts":0.0,"mono":0.0,"room":20.0,"t_out":5.0,"u_h":0.0,"u_c":0.0,'
+        '"q_solar":0.0,"q_occ":0.0,"alpha":0.15,"beta_h":3.0,"beta_c":4.0,'
+        '"beta_s":0.5,"beta_o":0.3,"t_std":1.0,"n_idle":0,"n_heating":0,'
+        '"n_cooling":0,"identified":false,"mode":"idle"}'
+    )
+    rec = TraceRecord.from_json_line(v1_line)
+    assert rec.v == 1 and rec.mode == "idle"
+    assert rec.humidity_action == "" and rec.dry_active is False
+    assert rec.device_hvac_mode == "" and rec.occupied is False
+    assert rec.dewpoint is None and rec.rh_ceiling is None
+    # and the deprecation-aware loader keeps it (v1 is still supported)
+    assert len(load_trace(v1_line)) == 1
+
+
+def test_build_record_populates_the_v2_humidity_fields() -> None:
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    data = {
+        "mode": "idle",
+        "humidity_action": "dry",
+        "dry_active": True,
+        "device_hvac_mode": "dry",
+        "hvac_action": "drying",
+        "dewpoint": 12.4,
+        "abs_humidity_gkg": 8.9,
+        "rh_high_used": 50.0,
+        "occupied": False,
+    }
+    r = build_record(
+        data,
+        model,
+        ts=1.0,
+        mono=60.0,
+        room=24.1,
+        t_out=17.0,
+        u_h=0.0,
+        u_c=0.0,
+        rh=48.0,
+    )
+    assert r.v == TRACE_VERSION
+    assert r.humidity_action == "dry" and r.dry_active is True
+    assert r.device_hvac_mode == "dry" and r.hvac_action == "drying"
+    assert r.dewpoint == 12.4 and r.abs_humidity_gkg == 8.9
+    assert r.rh_ceiling == 50.0 and r.occupied is False
+
+
+def test_load_trace_drops_unsupported_versions() -> None:
+    assert is_supported_version(MIN_SUPPORTED_TRACE_VERSION) is True
+    assert is_supported_version(TRACE_VERSION) is True
+    assert is_supported_version(TRACE_VERSION + 1) is False
+    assert is_supported_version(MIN_SUPPORTED_TRACE_VERSION - 1) is False
+    good = TraceRecord(
+        v=TRACE_VERSION,
+        ts=0.0,
+        mono=0.0,
+        room=20.0,
+        t_out=5.0,
+        u_h=0.0,
+        u_c=0.0,
+        q_solar=0.0,
+        q_occ=0.0,
+        alpha=0.1,
+        beta_h=3.0,
+        beta_c=4.0,
+        beta_s=0.5,
+        beta_o=0.3,
+        t_std=1.0,
+        n_idle=0,
+        n_heating=0,
+        n_cooling=0,
+        identified=False,
+    ).to_json_line()
+    future = good.replace(f'"v":{TRACE_VERSION}', '"v":99')
+    loaded = load_trace(good + "\n" + future)
+    assert len(loaded) == 1 and loaded[0].v == TRACE_VERSION
+    # opt out of the drop to inspect everything (e.g. for diagnostics)
+    assert len(load_trace(good + "\n" + future, drop_unsupported=False)) == 2

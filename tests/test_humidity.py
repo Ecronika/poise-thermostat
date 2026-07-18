@@ -153,3 +153,85 @@ def test_too_warm_precedes_absolute_cap() -> None:
         rh=55.0, too_warm=True, in_deadband=False, can_dry=True, abs_humidity_gkg=13.0
     )
     assert d.action == "cool"
+
+
+# --- Option 1: EN 16798-1 comfort-vs-health split (occupancy gate) ----------
+# The category RH ceiling is a COMFORT criterion -> occupancy-gated. The
+# absolute 12 g/kg cap is health/building protection -> never gated.
+
+
+def test_unoccupied_defers_relative_ceiling() -> None:
+    # RH over the Cat II ceiling but the room is empty: comfort criterion not
+    # enforced, and no absolute load -> no dehumidification.
+    d = humidity_decide(
+        rh=62.0, too_warm=False, in_deadband=True, can_dry=True, occupied=False
+    )
+    assert d.action == "idle"
+    assert d.dry_active is False
+    assert "unoccupied" in d.reason
+
+
+def test_unoccupied_cat_i_defers_the_observed_office_case() -> None:
+    # The live office case: Cat I, RH just over 50, empty room -> no dehumidify.
+    d = humidity_decide(
+        rh=52.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        category=Category.I,
+        occupied=False,
+    )
+    assert d.action == "idle"
+
+
+def test_unoccupied_releases_a_relative_only_latch() -> None:
+    # Was drying on the relative ceiling; the room empties -> the comfort latch
+    # releases (no absolute load to hold it).
+    d = humidity_decide(
+        rh=57.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        prev_dry_active=True,
+        occupied=False,
+    )
+    assert d.action == "idle"
+    assert d.dry_active is False
+
+
+def test_unoccupied_absolute_backstop_still_fires() -> None:
+    # Health/building protection: 12.5 g/kg dehumidifies even in an empty room.
+    d = humidity_decide(
+        rh=55.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        abs_humidity_gkg=12.5,
+        occupied=False,
+    )
+    assert d.action == "dry"
+    assert d.dry_active is True
+    assert "g/kg" in d.reason
+
+
+def test_unoccupied_absolute_latch_still_holds() -> None:
+    # A latched absolute-driven dry is not released by vacancy.
+    d = humidity_decide(
+        rh=50.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        prev_dry_active=True,
+        abs_humidity_gkg=11.5,
+        occupied=False,
+    )
+    assert d.action == "dry"
+
+
+def test_occupied_still_enforces_relative_ceiling() -> None:
+    # The default/occupied path is unchanged: relative ceiling enforced.
+    d = humidity_decide(
+        rh=62.0, too_warm=False, in_deadband=True, can_dry=True, occupied=True
+    )
+    assert d.action == "dry"
+    assert d.dry_active is True
