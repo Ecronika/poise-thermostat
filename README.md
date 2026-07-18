@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.174.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.175.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -86,7 +86,8 @@ Wird **am Gerät selbst** verstellt (TRV-Rad, IR-Fernbedienung, Hersteller-App),
 | die Abweichung unter der Geräteschrittweite liegt | `command_echo` |
 | das Gerät dauerhaft denselben Versatz zum geschriebenen Wert meldet (Rundung / interne Kompensation) | `stable_offset` |
 | beim **Sollwert**: die geräteeigene Zeitschaltuhr läuft (konfigurierte Schedule-Entität `on`) — dann stellt das Programm, nicht der Mensch | `schedule_active` |
-| beim **Modus**: Fenster offen oder Sensorik eingefroren — Sicherheit schlägt Eingriff | `safety_window`, `safety_frozen` |
+| beim **Sollwert**: der gemeldete Wert liegt auf/unter dem Frostschutz-Boden (7 °C) — kein plausibler Nutzerwunsch, sondern Geräte-Reset/Frostmodus | `implausible_frost` |
+| bei **Sollwert und Modus**: Fenster offen oder Sensorik eingefroren — Sicherheit schlägt Eingriff | `safety_window`, `safety_frozen` |
 | beim **Modus**: das Gerät kann den Modus nicht oder er ist `heat_cool` | `unsupported` |
 
 Ein übernommener Sollwert ist ein normaler Hold und steht damit **unter** der Prioritätenkette oben: Fenster, Frost und Schimmelschutz klemmen ihn weiterhin, und ein Wert außerhalb des Komfortbands wird auf die Bandkante geklemmt und als `override_clamped` ausgewiesen.
