@@ -73,6 +73,11 @@ def test_should_learn_gates_on_window_and_frozen() -> None:
     assert should_learn(window_open=True, frozen=False) is False
     assert should_learn(window_open=False, frozen=True) is False  # frozen -> no learn
     assert should_learn(window_open=True, frozen=True) is False
+    # R3: a confirmed heating failure (boiler off, valve open) also pauses learning
+    # so a flat curve under u_h~1 cannot drive beta_h to its bound. The default
+    # keeps every existing two-argument call site behaviour-identical.
+    assert should_learn(window_open=False, frozen=False, heating_failed=True) is False
+    assert should_learn(window_open=False, frozen=False, heating_failed=False) is True
 
 
 def test_frozen_safe_target_is_the_health_floor() -> None:

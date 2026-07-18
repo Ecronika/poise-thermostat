@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from custom_components.poise.devices.model_fixes import (
     is_low_battery,
+    looks_like_adaptive_mode_switch,
     looks_like_fault_alarm,
     looks_like_internal_schedule,
 )
@@ -19,6 +20,17 @@ def test_internal_schedule_classifier() -> None:
     assert looks_like_internal_schedule("switch.wohnzimmer_trv_schedule") is True
     assert looks_like_internal_schedule("switch.wohnzimmer_trv_child_lock") is False
     assert looks_like_internal_schedule("sensor.foo_schedule") is False  # not a switch
+
+
+def test_adaptive_mode_switch_classifier() -> None:
+    # R1: a device-internal adaptive/smart-temperature loop (doubled regulation)
+    # is recognised on both switch. and select. entities, keyed on name tokens.
+    assert looks_like_adaptive_mode_switch("switch.trv_smart_temperature_control")
+    assert looks_like_adaptive_mode_switch("switch.wohnzimmer_adaptive_mode")
+    assert looks_like_adaptive_mode_switch("select.trv_adaptive")
+    assert looks_like_adaptive_mode_switch("switch.trv_child_lock") is False
+    assert looks_like_adaptive_mode_switch("switch.trv_schedule") is False
+    assert looks_like_adaptive_mode_switch("sensor.trv_adaptive") is False  # domain
 
 
 def test_fault_alarm_classifier() -> None:
