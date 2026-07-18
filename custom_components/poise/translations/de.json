@@ -359,7 +359,7 @@
             },
             "data_description": {
               "override_policy": "Wann ein manueller Sollwert zur Automatik zurückkehrt.",
-              "adopt_external_setpoint": "Wird nur übernommen, wenn sie sich vom Echo des eigenen Schreibvorgangs unterscheiden lässt: ein vorheriger Schreibvorgang dient als Vergleichswert (Laufzeit-Zustand — nach einem Neustart nicht wiederhergestellt), und eine Änderung binnen 120 s danach gilt als dessen Echo. Unterdrückt, solange die geräteeigene Zeitschaltuhr läuft. Der entstehende Halt wird weiterhin von Fenster/Frost/Schimmel und vom Komfortband geklemmt.",
+              "adopt_external_setpoint": "Wird nur übernommen, wenn sie sich vom Echo des eigenen Schreibvorgangs unterscheiden lässt: ein vorheriger Schreibvorgang dient als Vergleichswert (wird mitgespeichert und übersteht damit einen Neustart — er fehlt nur, bis Poise einmal geschrieben hat), und eine Änderung binnen 120 s danach gilt als dessen Echo. Unterdrückt, solange die geräteeigene Zeitschaltuhr läuft. Der entstehende Halt wird weiterhin von Fenster/Frost/Schimmel und vom Komfortband geklemmt.",
               "adopt_external_mode": "Gleiche Vergleichswert- und 120-s-Echo-Bedingungen wie beim Sollwert. Keine Übernahme bei offenem Fenster, eingefrorener Sensorik oder für Modi, die das Gerät nicht beherrscht (inkl. heat_cool). Lüfterstufe, Swing und geräteseitige Presets werden nie übernommen."
             }
           }
