@@ -145,3 +145,38 @@ Die Mode-Adoption ist auf `not window_open and not frozen` gegated (`coordinator
 | P2 | FBH: Profil → `plan_preheat`/Setback-Dämpfung | mittel | R7 |
 | P2 | Kalibrier-Range aus Geräte-Number lesen (vor jedem Live-Flip des Pfads) | klein | R6 |
 | P3 | Golden-Trace-Korpus, Deprecation-Mechanik, Adopt-Reason-Attribut, Zonen-heat_demand, Lern-Reset-Service, i18n-Ausbau | laufend | R11–R14 |
+
+---
+
+## 6. Nachtrag: Prüfung v0.177.0-alpha (2026-07-18)
+
+**Prüfumfang:** Diff v0.174.0 → v0.177.0 (origin/main, +801/−26 Zeilen über 27 Dateien) gegen die Findings dieses Berichts; vollständiger Testlauf der Suite auf v0.177.0 (Python 3.13, `asyncio_mode=auto` wie CI): **1022 Tests, alle grün (Exit 0)**.
+
+### Korrekt umgesetzt (Finding → Beleg in v0.177.0)
+
+| Finding | Umsetzung | Bewertung |
+|---|---|---|
+| **R1** Adaptive-Mode-Guard | `looks_like_adaptive_mode_switch()` (`model_fixes.py`, switch./select. + „adaptive"/„smart_temperature"), Scan **vor** der elif-Kette (verhindert Verschlucken durch den Sensor-Select-Zweig), Repair-Issue `adaptive_mode_active` mit de/en-Übersetzung; Switch- („on") und Select-Zustände („adaptive"/„smart") werden erkannt. AUS-Assertion bewusst als TPI-Flip-Vorbedingung offen gelassen (im Code dokumentiert). Tests: `test_adaptive_mode_switch_classifier` (inkl. Negativfälle child_lock/schedule/Domain) | ✅ korrekt |
+| **R2** Diagnostics-Redaktion | `presence_home` + `occupancy_sensor` in `REDACT_KEYS`; Test `test_presence_and_occupancy_ids_are_redacted` prüft zusätzlich `"person.alice" not in repr(diag)` | ✅ korrekt, vollständig |
+| **R3** Kessel-aus → Lern-Gate | `should_learn(heating_failed=…)` neu; gespeist aus dem **Vortick-Latch** `_prev_heating_failed` (Verdict entsteht erst spät im Tick — sauber gelöst und begründet); Anker-Drop-Pfad greift mit. **Closed-Loop-Regressionstest** `test_learn_gate_heating_failure.py` pinnt exakt das VTherm-#1428-Szenario (u_h=1, Plant ohne Leistung → beta_h bleibt brauchbar) | ✅ korrekt; Restlatenz s. u. |
+| **R4** Setpoint-Adoption | Doppelt abgesichert: Glue-Gate `not window_open and not frozen` (wie Mode-Pfad) **und** purer `implausible_frost`-Filter (`device_sp ≤ FROST_FLOOR_C` nie adoptieren, nach dem Echo-Guard geprüft — echte Komfortänderungen unberührt); neue Reason-Codes `safety_window`/`safety_frozen`/`implausible_frost`. Tests pure + Glue (`test_trv_frost_drop_is_not_adopted`) | ✅ korrekt, vollständig |
+| **R5** Ventil-Physik-Vorbereitung | Harness-Plant um `valve_deadband` + `valve_curve` erweitert (Default byte-identisch linear); `test_tpi_converges_against_nonlinear_valve` (15 %-Totband, Exponent 1,6 → settelt ohne Hunting); **Gate-Regressionstest** `test_autodetected_valve_is_never_written` (nicht-vakuum: asserted zuerst, dass `_valve_entity` aufgelöst wurde) | ✅ Teil „Harness+Gate" erledigt; Read-back-Diagnose bleibt offen |
+| **R6** Kalibrier-Clamp | Bewusst nur die empfohlene Interim-Lösung: „Honesty note" im Modulkopf (`calibration.py`) — nicht verdrahtet, ±5-K-Clamps als Platzhalter deklariert, Geräte-Range-Auslesen als Verdrahtungs-Voraussetzung benannt | ✅ wie vorgeschlagen (Interim) |
+| **R7** FBH → Optimal Start | `DynamicsProfile.max_lead_h` (Radiator/AC 4 h, `very_slow` 12 h), durchgereicht bis `advise()`; Tests `test_r7_*` (3). Ehrlich dokumentiert, dass Auto-Detect FBH nicht erkennen kann (bleibt Nutzer-Flag) | ✅ Teilumsetzung wie designt; Setback-Dämpfung/Repair-Hinweis weiter offen |
+| **R8** savings_* | In `climate._ATTRS` aufgenommen — der README-Claim stimmt jetzt | ✅ korrekt |
+| **R9** Dry-Latch | `dry_active` in Save-Payload + Bootstrap-Restore + Glue-Test. `_window_open_since` bewusst **nicht** persistiert (Monotonic-Stamp; im Code begründet) — akzeptierte Abweichung, fail-safe Richtung kalt | ✅ korrekt (Teil bewusst ausgelassen) |
+| **R10e** `external_feed_due`-Unit-Test | `test_r10_external_feed_due` | ✅ |
+| Bonus | `cooling_intent()` als purer, getesteter Helper (Fenster-Gate des Kühl-Intents); **Doku-Ehrlichkeits-Fix** in `strings.json`: die Adoption-Beschreibung behauptete „Baseline not restored after restart" — korrigiert auf „persisted" (deckt sich mit dem Audit-Befund B5) | ✅ |
+
+### Weiterhin offen (unverändert gegenüber Abschnitt 3)
+
+- **R10a** Slope-Neutralisierung im Kühlbetrieb (`_was_cooling`-Glue) weiterhin ohne Test — der neue `cooling_intent`-Test deckt das benachbarte Intent-Gate ab, nicht die Fenster-Slope-Neutralisierung. **R10b** Sensor-Select-Re-Assert („external_2"), **R10c** Restart-mit-offenem-Fenster (Integration), **R10d** Hub-Glue-Restart: Tests fehlen weiter.
+- **R5-Rest:** `valve_opening_degree`-Read-back-Diagnose; **R6-Rest:** Geräte-Range-Auslesen beim Verdrahten; **R7-Rest:** Setback-Dämpfung/Hinweis bei `very_slow`.
+- **R11–R14** (P3) unverändert: Golden-Trace-Korpus, Deprecation-Mechanik, Adopt-Reason als Attribut (die neuen Reason-Codes existieren, landen aber weiter nur debounced im DEBUG-Log), Zonen-`heat_demand`-Publikation, Lern-Reset-Service, i18n-Ausbau.
+
+### Rest-Risiko-Hinweise zur R3-Umsetzung (klein, dokumentierenswert)
+
+1. **Detektor-Latenz:** Der `HeatingFailureDetector` latcht erst nach ~35 min Demand+Flat — die ersten ~35 min einer Kessel-aus-Episode lernen also weiterhin mit (begrenzte Kontamination; die EKF-Bounds/Recovery fangen das, der Harness-Test läuft konservativ mit gelatchtem Zustand).
+2. `_prev_heating_failed` ist nicht persistiert — nach einem Restart mitten in einer Ausfall-Episode beginnt die 35-min-Erkennung neu. Konsistent mit dem übrigen Latch-Verhalten, aber erwähnenswert.
+
+**Fazit v0.177.0:** Alle vier P1-Findings sind korrekt, getestet und mit sauberer Begründungs-Dokumentation umgesetzt; von den P2-Findings sind Harness-Kennlinie, TPI-Gate-Test, savings_*, Dry-Latch und `max_lead_h` erledigt, R6 wie empfohlen als Ehrlichkeitsnote interimistisch. Die Suite ist mit 1022 Tests grün. Der Fortschritt entspricht exakt der priorisierten Maßnahmenliste; Qualität der Umsetzung: hoch (pure Logik + Glue-Verdrahtung + Regressionstest je Finding, Kommentare referenzieren die Fehlerklassen).
