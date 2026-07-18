@@ -215,19 +215,29 @@ def setpoint_adopt_reason(
     deadband: float,
     prev_device_sp: float | None = None,
     pre_write_sp: float | None = None,
+    frost_floor: float | None = None,
 ) -> str:
     """Why the setpoint-adoption fallback did or did not adopt ``device_sp`` (K3).
 
     Single source of truth for the setpoint decision -- ``detect_external_setpoint``
     adopts iff this returns ``"adopt"``, so the coordinator can surface *why* a
     reported setpoint was suppressed as a diagnostic. Codes in guard order:
-    ``no_baseline`` · ``command_echo`` · ``echo_window`` · ``stable_offset`` ·
-    ``adopt``.
+    ``no_baseline`` · ``command_echo`` · ``implausible_frost`` · ``echo_window`` ·
+    ``stable_offset`` · ``adopt``.
     """
     if device_sp is None or last_written_sp is None or last_write_ts is None:
         return "no_baseline"
     if round(abs(device_sp - last_written_sp), 3) < deadband:
         return "command_echo"
+    # R4 (2026-07 competitor code audit): a device value at/below the frost floor
+    # is never a plausible *user* comfort setpoint -- it is a TRV's own frost drop
+    # (its internal open-window/away detection) that fired before Poise's slope or
+    # window sensor did. Adopting it would pin a phantom "manual" hold at 7 °C
+    # (the solver's band clamp keeps 7 °C off the wire, but the spurious hold would
+    # still stick until its policy expires). Checked after the echo guard so a real
+    # comfort change is unaffected; the caller passes ``FROST_FLOOR_C``.
+    if frost_floor is not None and round(device_sp - frost_floor, 3) <= 0.0:
+        return "implausible_frost"
     if (now - last_write_ts) < echo_window_s:
         if pre_write_sp is not None and (
             round(abs(device_sp - pre_write_sp), 3) >= deadband
@@ -251,6 +261,7 @@ def detect_external_setpoint(
     deadband: float,
     prev_device_sp: float | None = None,
     pre_write_sp: float | None = None,
+    frost_floor: float | None = None,
 ) -> float | None:
     """The device-side setpoint Poise should adopt as a manual hold, else ``None``.
 
@@ -300,6 +311,7 @@ def detect_external_setpoint(
             deadband=deadband,
             prev_device_sp=prev_device_sp,
             pre_write_sp=pre_write_sp,
+            frost_floor=frost_floor,
         )
         == "adopt"
         else None
