@@ -40,6 +40,20 @@ _FROST_MARGIN_C = 0.5
 _FROST_PLAUSIBLE_MIN_C = -20.0
 
 
+def zone_heat_demand(*, heating: bool, tpi_duty: float | None, frozen: bool) -> float:
+    """A zone's boiler heat-demand fraction in ``[0, 1]`` (R13).
+
+    Prefers the live TPI-duty shadow estimate when present, else a binary
+    fall-back from ``heating``; forced to ``0.0`` when the room sensor is frozen
+    (V9 — a dead sensor must never pin the shared boiler). Shared by the hub's
+    :func:`zone_request_from_data` and the per-zone coordinator so the value the
+    hub aggregates is exactly the value each zone publishes.
+    """
+    if frozen:
+        return 0.0
+    return tpi_duty if tpi_duty is not None else float(heating)
+
+
 def zone_request_from_data(
     zone_id: str,
     data: dict[str, Any],
@@ -74,7 +88,7 @@ def zone_request_from_data(
     heating = bool(data.get("heating")) and not frozen
     cause = str(data.get("binding_lower_cause") or "").lower()
     duty = _num(data.get("tpi_duty"))
-    heat_demand = 0.0 if frozen else (duty if duty is not None else float(heating))
+    heat_demand = zone_heat_demand(heating=heating, tpi_duty=duty, frozen=frozen)
     room = _num(data.get("current_temperature"))
     sp = _num(data.get("heat_sp"))
     gap = (sp - room) if room is not None and sp is not None else 0.0
