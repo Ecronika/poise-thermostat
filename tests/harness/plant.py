@@ -39,7 +39,7 @@ class RCPlant:
             return 0.0
         span = 1.0 - self.valve_deadband
         x = (d - self.valve_deadband) / span if span > 0.0 else 1.0
-        return x**self.valve_curve
+        return float(x**self.valve_curve)
 
     def step(self, t_air: float, power: float, t_out: float, dt: float) -> float:
         """Advance the room temperature by ``dt`` seconds under constant power."""
