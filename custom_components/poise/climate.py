@@ -101,6 +101,11 @@ _ATTRS = (
     "mpc_weight",
     "mpc_setpoint",
     "mpc_regime",
+    # ADR-0045 (R8): heating-degree-hour savings estimate -- makes the README's
+    # "published as savings_* climate attributes" claim true (diagnostic only).
+    "savings_kwh_month",
+    "savings_eur_month",
+    "savings_pct",
     # climate-band shadow diagnostics (observe-only; not a control input):
     # ADR-0051 cool raise, ADR-0050 humidity/dry, ADR-0023 free-running,
     # ADR-0053 fan circulation + roadmap M3 fan cooling-effect.

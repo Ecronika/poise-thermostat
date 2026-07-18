@@ -144,7 +144,7 @@ from .const import (
     WRITE_DEADBAND_C,
 )
 from .contracts import ActuatorCommand, ActuatorPath, Source
-from .control.cooling import override_mode
+from .control.cooling import cooling_intent, override_mode
 from .control.cover_shading import (
     predict_peak_operative,
     shading_target_position,
@@ -222,6 +222,7 @@ from .devices.model_fixes import (
     ext_temp_number_is_implausible,
     is_external_sensor_select,
     is_low_battery,
+    looks_like_adaptive_mode_switch,
     looks_like_external_temp_number,
     looks_like_fault_alarm,
     looks_like_internal_schedule,
@@ -369,6 +370,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._dirty = False  # override/enabled/mode changed -> persist next save
         self._store = PoiseStore(hass, entry.entry_id)
         self._failure = HeatingFailureDetector()
+        # R3: the heating-failure verdict is computed late in the tick, after the
+        # learn gate runs; latch the previous tick's value so the gate can pause
+        # EKF learning during a boiler-off/valve-open episode (VTherm #1428).
+        self._prev_heating_failed: bool = False
         self._last_mono: float | None = None
         self._last_u_h: float = 0.0
         self._last_u_c: float = 0.0
@@ -567,6 +572,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._guards_resolved = False
         self._sched_entity: str | None = None
         self._fault_entity: str | None = None
+        self._adaptive_mode_entity: str | None = None  # R1: device adaptive loop
         self._battery_entity: str | None = None
         self._ext_temp_auto: str | None = None
         self._sensor_select: str | None = None
@@ -1050,6 +1056,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                     self._tau_settle = TauSettle.from_dict(data["tau_settle"])
                 if isinstance(data.get("hdh_savings"), dict):
                     self._hdh = HdhSavings.from_dict(data["hdh_savings"])
+                if isinstance(data.get("dry_active"), bool):
+                    self._dry_active = data["dry_active"]  # R9: survive restart
             elif data is not None:
                 self._ekf = ThermalEKF.from_dict(data)  # legacy: bare EKF dict
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
@@ -1220,6 +1228,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 reg, ent.device_id, include_disabled_entities=False
             ):
                 eid = e.entity_id
+                # R1: a device-internal adaptive/smart-temperature loop is
+                # orthogonal to the roles below and can be a switch. OR a select.,
+                # so detect it independently of the elif chain (a select. would
+                # otherwise be consumed by the sensor-select branch first).
+                if (
+                    self._adaptive_mode_entity is None
+                    and looks_like_adaptive_mode_switch(eid)
+                ):
+                    self._adaptive_mode_entity = eid
                 if self._sched_entity is None and looks_like_internal_schedule(eid):
                     self._sched_entity = eid
                 elif self._fault_entity is None and looks_like_fault_alarm(eid):
@@ -1660,6 +1677,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._tau_settle.to_dict() if self._tau_settle is not None else None
             ),
             "hdh_savings": self._hdh.to_dict(),
+            # R9: the humidity dry-active latch is otherwise runtime-only, so a
+            # restart between 55-60 %RH drops the room out of dry mode until RH
+            # re-crosses 60 % (a behaviour jump, dual_smart #553). ``_window_open_
+            # since`` is deliberately NOT persisted here: it is a monotonic stamp
+            # (resets on restart) and would need a wall-clock rework to survive.
+            "dry_active": self._dry_active,
             "window_bypass": self._window_bypass,
             "preset": self._preset.value,
             "enabled": self._enabled,
@@ -1856,6 +1879,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 sched_active,
                 translation_key="device_schedule",
                 placeholders={"entity": self._sched_entity},
+            )
+        if self._adaptive_mode_entity:
+            st = self.hass.states.get(self._adaptive_mode_entity)
+            # R1: a switch reads "on"; a select reads the active option name.
+            # Treat any adaptive/smart-named option (or a plain "on") as the loop
+            # being active -- an off/manual state clears the issue.
+            active = st is not None and (
+                st.state == "on"
+                or "adaptive" in st.state.lower()
+                or "smart" in st.state.lower()
+            )
+            self._issue(
+                f"adaptive_mode_{self._entry_id}",
+                active,
+                translation_key="adaptive_mode_active",
+                placeholders={"entity": self._adaptive_mode_entity},
             )
         if self._fault_entity:
             st = self.hass.states.get(self._fault_entity)
@@ -2120,7 +2159,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _LOGGER.debug("Poise dynamics-profile refresh failed", exc_info=True)
         device_max = self._device_max()
 
-        if should_learn(window_open=window_open, frozen=frozen):
+        if should_learn(
+            window_open=window_open,
+            frozen=frozen,
+            heating_failed=self._prev_heating_failed,
+        ):
             # F3: only ever teach the EKF from a genuinely MEASURED room reading --
             # a DERIVED value (carried forward from ``last_good`` after a single
             # implausible raw sample) is a reasonable, frost-safe value to
@@ -2139,7 +2182,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         else:
             # V5: while learning is paused (open window / frozen sensor, which
             # now also covers a DEFAULT-source reading -- see the ``frozen =``
-            # assignment above) drop the time anchors, so the first step after
+            # assignment above -- and, R3, a latched heating failure) drop the
+            # time anchors, so the first step after
             # resumption re-anchors from that tick instead of integrating the
             # whole contaminated interval. A short Stoßlüften would otherwise
             # poison the EKF with a real-looking sub-hour dt (the 0<dt<1h guard
@@ -2255,6 +2299,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             coast_lower=lo,
             was_preheating=self._was_preheating,
             was_coasting=self._was_coasting,
+            max_lead_h=PROFILES[self._dynamics].max_lead_h,
         )
         base = plan.base
         preheating = plan.preheating
@@ -2602,7 +2647,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             else:
                 _LOGGER.debug("Poise climate-band shadow failed", exc_info=True)
         heating = self._enabled and not window_open and mode == "heat"
-        cooling = self._enabled and not window_open and mode == "cool"
+        cooling = cooling_intent(
+            enabled=self._enabled, window_open=window_open, mode=mode
+        )
         self._was_cooling = mode == "cool"  # gate the window slope next tick
         # A1: the EKF heating-drive uses the actuator's *real* running state when
         # reported (TRVZB running_state -> hvac_action), else our heat intent.
@@ -2636,6 +2683,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             or fault_active
         )
         await self._notify_failure(failed)
+        # R3: latch for the NEXT tick's learn gate (this tick's gate already ran).
+        self._prev_heating_failed = failed
 
         _mode_nudge_blocked = ""  # ADR-0046 §8: compressor-guard suppression reason
         # F1: default for the unconditional shadow block below (no live mode nudge
