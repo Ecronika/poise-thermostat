@@ -156,6 +156,7 @@ def plan_preheat(
     coast_lower: float | None = None,
     was_preheating: bool = False,
     was_coasting: bool = False,
+    max_lead_h: float = 4.0,
 ) -> PreheatPlan:
     """Decide the effective comfort base, applying night setback + optimal start.
 
@@ -198,6 +199,7 @@ def plan_preheat(
         target=target,
         t_out=t_out_lead,
         minutes_to_comfort=minutes_to_comfort,
+        max_lead_h=max_lead_h,
     )
     used_outdoor = round(t_out_lead, 1)
     # Latch (anti-chatter, ADR-0025): engage on start_now, then HOLD until the

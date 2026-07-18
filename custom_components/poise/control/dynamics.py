@@ -32,6 +32,11 @@ class DynamicsProfile:
     mpc_horizon_blocks: int
     regulation_period_s: float  # min seconds between setpoint nudges (fast path)
     self_regulating: bool  # has its own thermostat -> nudge, not a slow loop
+    # R7: optimal-start lead horizon [h]. A heavy floor must begin heating hours
+    # earlier than a radiator; the default keeps radiators/AC at today's 4 h, only
+    # user-flagged ``very_slow`` (underfloor/storage) extends it (auto-detect
+    # cannot tell an underfloor loop from a radiator, so it stays slow_hydronic).
+    max_lead_h: float = 4.0
     # Compressor-guard defaults for this class (ADR-0046 §8); a per-zone option
     # overrides. Only ever applied to a cool/dry-capable device (capability-gated),
     # so the slow-hydronic values are inert (a TRV never runs a compressor).
@@ -75,6 +80,7 @@ _VERY_SLOW = DynamicsProfile(
     mpc_horizon_blocks=18,  # 3 h
     regulation_period_s=0.0,
     self_regulating=False,
+    max_lead_h=12.0,  # R7: heavy floor/storage begins heating hours ahead
 )
 
 PROFILES: dict[DeviceDynamics, DynamicsProfile] = {

@@ -89,3 +89,15 @@ def override_mode(
         cool_min_outdoor=cool_min_outdoor,
         heat_max_outdoor=heat_max_outdoor,
     )
+
+
+def cooling_intent(*, enabled: bool, window_open: bool, mode: str) -> bool:
+    """True when Poise actively intends to cool this tick (R10).
+
+    Cooling is neutralised while a window is open -- don't chase a cool target
+    against the outside air -- and is only asserted when the zone is enabled and
+    the arbitrated ``mode`` is ``"cool"``. Pulled out of the coordinator tick so
+    the window gate is unit-tested; the heating counterpart mirrors it
+    (``enabled and not window_open and mode == "heat"``).
+    """
+    return enabled and not window_open and mode == "cool"
