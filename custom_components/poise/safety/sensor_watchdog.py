@@ -89,11 +89,18 @@ def frozen_safe_target(frost_floor: float, mold_min: float | None) -> float:
     return max(frost_floor, mold_min if mold_min is not None else frost_floor)
 
 
-def should_learn(*, window_open: bool, frozen: bool) -> bool:
-    """Learn only when the room signal is trustworthy.
+def should_learn(
+    *, window_open: bool, frozen: bool, heating_failed: bool = False
+) -> bool:
+    """Learn only when the room signal is trustworthy and heat actually works.
 
     An open window (air mixing) or a frozen sensor (stale value) must pause EKF
-    learning so the model is not poisoned (F1/ADR-0012). Extracted from the
-    coordinator tick so the gate itself is tested (review M13).
+    learning so the model is not poisoned (F1/ADR-0012). A confirmed heating
+    failure -- the actuator reports running but the room will not warm, e.g. a
+    boiler that is off while the TRV valve is open (VTherm #1428) -- must also
+    pause it: integrating a flat room curve under u_h~1 would drive ``beta_h``
+    toward its lower bound (R3). Extracted from the coordinator tick so the gate
+    itself is tested (review M13); ``heating_failed`` is fed from the PREVIOUS
+    tick's latch because the failure verdict is only known later in the tick.
     """
-    return not window_open and not frozen
+    return not window_open and not frozen and not heating_failed
