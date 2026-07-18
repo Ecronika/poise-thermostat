@@ -13,12 +13,29 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from custom_components.poise.estimation.thermal_ekf import ThermalEKF, ThermalModel
-from custom_components.poise.trace.schema import TraceRecord
+from custom_components.poise.trace.schema import (
+    TraceRecord,
+    is_supported_version,
+)
 
 
-def load_trace(text: str) -> list[TraceRecord]:
-    """Parse a JSONL trace (one ``TraceRecord`` per non-blank line)."""
-    return [TraceRecord.from_json_line(ln) for ln in text.splitlines() if ln.strip()]
+def load_trace(text: str, *, drop_unsupported: bool = True) -> list[TraceRecord]:
+    """Parse a JSONL trace (one ``TraceRecord`` per non-blank line).
+
+    Version-aware (deprecation): records whose ``v`` falls outside the supported
+    window (``MIN_SUPPORTED_TRACE_VERSION``..``TRACE_VERSION``) are skipped when
+    ``drop_unsupported`` (the default), so a future schema bump can retire an old
+    golden without the loader choking on its records.
+    """
+    out: list[TraceRecord] = []
+    for ln in text.splitlines():
+        if not ln.strip():
+            continue
+        rec = TraceRecord.from_json_line(ln)
+        if drop_unsupported and not is_supported_version(rec.v):
+            continue
+        out.append(rec)
+    return out
 
 
 def replay_ekf(records: Sequence[TraceRecord]) -> ThermalModel:
