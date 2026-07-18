@@ -143,6 +143,10 @@ _ATTRS = (
     "override_active",
     "mode_override",  # K2: the held device mode (off/dry/fan_only/…) or None
     "override_reason",  # K3: hold origin (ui_setpoint / device_adopt_* / frost…)
+    # R12 (P3): why THIS tick did / did not adopt a manual device change ("" when
+    # nothing seen; e.g. own_echo / safety_window / stable_offset / hold_resumed).
+    "mode_adopt_reason",
+    "sp_adopt_reason",
     "override_expires_at",
     "override_policy",
     "override_requested",
@@ -155,6 +159,9 @@ _ATTRS = (
     "tau_confidence",
     "tau_settled",
     "cool_sp_compensated",
+    # R13 (P3): this zone's boiler heat-demand fraction (0..1) -- the value the
+    # multi-zone hub aggregates for the shared boiler (diagnostic, observe-only).
+    "heat_demand",
 )
 
 

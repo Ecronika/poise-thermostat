@@ -156,6 +156,7 @@ from .control.dynamics import (
     regulation_throttled,
 )
 from .control.hdh_savings import HdhConfig, HdhSavings, report_price_eur_kwh
+from .control.hub_aggregate import zone_heat_demand
 from .control.lifecycle import resolve_safe_state
 from .control.mpc import MpcParams
 from .control.mpc_shadow import evaluate_shadow
@@ -3804,6 +3805,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 else None
             ),
         }
+        # R13: surface this zone's own boiler heat-demand (0..1) -- exactly the
+        # value the hub aggregates from our data, so per-zone visibility can't drift.
+        _tick_data["heat_demand"] = zone_heat_demand(
+            heating=heating,
+            tpi_duty=_tick_data.get("tpi_duty"),
+            frozen=frozen,
+        )
         await self._maybe_record_trace(
             _tick_data, room=room, t_out=t_out_eff, rh=rh, t_rm=t_rm_eff, now=now
         )
