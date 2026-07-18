@@ -2,13 +2,15 @@
 
 No model names: every guard keys off detected entities/attributes, so the same
 logic works for any thermostat that happens to expose these features (the Aqara
-E1 SRTS-A01 is merely one example). Three protective guards + one actuator
+E1 SRTS-A01 is merely one example). Four protective guards + one actuator
 extension:
 
   1. neutralise a device-internal weekly schedule that would fight the controller
-  2. surface a device valve/fault alarm (and feed it into heating-failure)
-  3. surface a low battery on the actuator/sensor device
-  4. feed the fused room temperature to a TRV external-temperature input, so a
+  2. detect a device-internal adaptive/smart-temperature loop (doubled
+     regulation) and surface it as a repair issue (R1)
+  3. surface a device valve/fault alarm (and feed it into heating-failure)
+  4. surface a low battery on the actuator/sensor device
+  5. feed the fused room temperature to a TRV external-temperature input, so a
      thermostat calibratable to an external sensor regulates against the true
      room temperature.
 
@@ -29,6 +31,23 @@ def is_low_battery(level: float | None, threshold: float = LOW_BATTERY_PCT) -> b
 def looks_like_internal_schedule(entity_id: str) -> bool:
     """A switch that toggles the device's own weekly schedule (fights control)."""
     return entity_id.startswith("switch.") and "schedule" in entity_id.lower()
+
+
+def looks_like_adaptive_mode_switch(entity_id: str) -> bool:
+    """A switch/select enabling the device's OWN adaptive/smart-temperature loop.
+
+    Some thermostats (e.g. the Sonoff TRVZB from FW 1.4.4, ``smart_temperature_
+    control``) run a second closed loop on the actuator itself. That loop fights
+    Poise's setpoint control -- the doubled-regulator interference the field
+    flags as the top TRV risk (R1 / ADR-0036). Keyed on entity domain + name
+    tokens, so it works for any device exposing such a toggle, not just the
+    TRVZB. Detection only: it raises a repair issue; asserting the mode OFF is a
+    later precondition of the TPI live-flip, not done here.
+    """
+    if not entity_id.startswith(("switch.", "select.")):
+        return False
+    name = entity_id.lower()
+    return "adaptive" in name or "smart_temperature" in name
 
 
 def looks_like_fault_alarm(entity_id: str) -> bool:
