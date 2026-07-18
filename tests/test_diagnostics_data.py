@@ -50,6 +50,26 @@ def test_all_sensor_keys_redacted() -> None:
     assert all(v == REDACTED for v in out.values())
 
 
+def test_presence_and_occupancy_ids_are_redacted() -> None:
+    # R2 (2026-07 competitor code audit): presence_home/occupancy_sensor carry
+    # person./device_tracker./occupancy ids and reach the dump via the options
+    # merge. They must never appear verbatim (RoomMind "person ids in the dump"
+    # class; ADR-0022 makes redaction mandatory).
+    diag = build_diagnostics(
+        {"name": "Living room", "temp_sensor": "sensor.lr"},
+        None,
+        entry_options={
+            "presence_home": ["person.alice", "device_tracker.bob_phone"],
+            "occupancy_sensor": ["binary_sensor.lr_motion"],
+        },
+    )
+    assert diag["config"]["presence_home"] == REDACTED
+    assert diag["config"]["occupancy_sensor"] == REDACTED
+    # and no person id survives anywhere in the serialised payload
+    assert "person.alice" not in repr(diag)
+    assert "device_tracker.bob_phone" not in repr(diag)
+
+
 def test_coordinator_data_redacts_entity_ids() -> None:
     # Privacy: the live attributes leak tpi_valve_entity (a real entity id) ->
     # it must be redacted while ordinary diagnostic values pass through.

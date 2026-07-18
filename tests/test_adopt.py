@@ -166,3 +166,30 @@ def test_setpoint_adopt_reason_codes() -> None:
         setpoint_adopt_reason(device_sp=24.0, **base, prev_device_sp=WROTE)
         == "adopt"  # moved off the settled offset
     )
+
+
+def test_setpoint_adopt_reason_frost_floor_is_implausible() -> None:
+    # R4: a TRV's own frost drop (<= frost floor) must never be adopted as a user
+    # hold, even out of the echo window where it would otherwise read as "adopt".
+    base: dict[str, float | None] = {
+        "last_written_sp": WROTE,
+        "last_write_ts": TS,
+        "now": TS + 500.0,  # well past the echo window
+        "echo_window_s": EW,
+        "deadband": DB,
+    }
+    # at/below the floor with the guard on -> suppressed
+    assert (
+        setpoint_adopt_reason(device_sp=7.0, **base, frost_floor=7.0)
+        == "implausible_frost"
+    )
+    assert (
+        setpoint_adopt_reason(device_sp=5.0, **base, frost_floor=7.0)
+        == "implausible_frost"
+    )
+    # a genuine comfort change above the floor still adopts with the guard on
+    assert setpoint_adopt_reason(device_sp=19.0, **base, frost_floor=7.0) == "adopt"
+    # guard off (frost_floor=None, default) -> unchanged behaviour: 7.0 would adopt
+    assert setpoint_adopt_reason(device_sp=7.0, **base) == "adopt"
+    # and detect_external_setpoint honours the guard (returns None, not the value)
+    assert detect_external_setpoint(device_sp=7.0, **base, frost_floor=7.0) is None
