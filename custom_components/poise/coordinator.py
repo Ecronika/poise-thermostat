@@ -32,7 +32,7 @@ from . import actuator as actuator_mod
 from .adaptive_cool import adaptive_cool_mode, resolve_adaptive_cool
 from .clock import MonotonicClock
 from .comfort.dual_setpoint import decide as comfort_decide
-from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER, Category
+from .comfort.en16798 import HEATING_LOWER, HEATING_UPPER
 from .comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
 from .comfort.fan_cooling import fan_cool_setpoint, fan_velocity
 from .comfort.free_running import free_running_widen
@@ -42,89 +42,21 @@ from .comfort.mold import mold_min_air_temperature_detail
 from .comfort.operative import operative_temperature
 from .comfort.pmv import pmv_ppd, seasonal_clo
 from .comfort.presence import (
-    PresenceConfig,
     PresenceLevel,
     any_present,
     resolve_presence,
     step_room_absence,
 )
-from .comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from .comfort.thermal_shock import (
-    DEFAULT_HARD_CAP_C,
-    DEFAULT_SHOCK_DELTA_K,
     adaptive_cool_setpoint,
     rate_limit,
 )
 from .comfort.virtual_mrt import virtual_mrt
 from .const import (
-    COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
-    CONF_ABSENCE_AFTER_MIN,
-    CONF_ACTUATOR,
-    CONF_ADAPTIVE_COOL,
-    CONF_ADOPT_EXTERNAL_MODE,
-    CONF_ADOPT_EXTERNAL_SETPOINT,
-    CONF_ANNUAL_KWH,
-    CONF_BOOST_DURATION_MIN,
-    CONF_CATEGORY,
     CONF_CLIMATE_MODE,
-    CONF_COMFORT_BASE,
-    CONF_COMFORT_END,
-    CONF_COMFORT_START,
-    CONF_COMFORT_WEIGHT,
-    CONF_COMPRESSOR_GUARD,
-    CONF_COMPRESSOR_MIN_OFF,
-    CONF_COMPRESSOR_MODE_HOLD,
-    CONF_COOL_HARD_CAP,
-    CONF_COOL_LOCKOUT_ENABLED,
-    CONF_COOL_MIN_OUTDOOR,
-    CONF_DYNAMICS,
     CONF_ENTRY_TYPE,
-    CONF_HEAT_LOCKOUT_ENABLED,
-    CONF_HEAT_MAX_OUTDOOR,
-    CONF_HUMIDITY_SENSOR,
-    CONF_IRRADIANCE,
-    CONF_MRT_SENSOR,
-    CONF_NAME,
-    CONF_OCCUPANCY_SENSOR,
-    CONF_OPERATIVE_INPUT,
-    CONF_OPTIMAL_START,
-    CONF_OUTDOOR_SENSOR,
-    CONF_OVERRIDE_END_ON_PRESENCE,
-    CONF_OVERRIDE_MAX_H,
-    CONF_OVERRIDE_POLICY,
-    CONF_OVERRIDE_TIMER_H,
-    CONF_PRESENCE_HOME,
-    CONF_PRICE_EUR_KWH,
-    CONF_SETBACK_DELTA,
-    CONF_SOURCE_POLICY,
-    CONF_TEMP_SENSOR,
-    CONF_THERMAL_SHOCK_DELTA,
-    CONF_TRACE_RECORDING,
-    CONF_TRM_SENSOR,
-    CONF_TRV_EXTERNAL_TEMP,
-    CONF_WEATHER,
-    CONF_WINDOW_SENSOR,
-    DEFAULT_ABSENCE_AFTER_MIN,
-    DEFAULT_ADAPTIVE_COOL,
-    DEFAULT_ADOPT_EXTERNAL_MODE,
-    DEFAULT_ADOPT_EXTERNAL_SETPOINT,
-    DEFAULT_ANNUAL_KWH,
-    DEFAULT_BOOST_DURATION_MIN,
-    DEFAULT_COMFORT_BASE,
-    DEFAULT_COMFORT_WEIGHT,
-    DEFAULT_COOL_LOCKOUT_ENABLED,
-    DEFAULT_COOL_MIN_OUTDOOR_C,
-    DEFAULT_DYNAMICS,
-    DEFAULT_HEAT_LOCKOUT_ENABLED,
-    DEFAULT_HEAT_MAX_OUTDOOR_C,
-    DEFAULT_OVERRIDE_END_ON_PRESENCE,
-    DEFAULT_OVERRIDE_MAX_H,
     DEFAULT_OVERRIDE_POLICY,
-    DEFAULT_OVERRIDE_TIMER_H,
-    DEFAULT_PRICE_EUR_KWH,
-    DEFAULT_PRICE_GAS_EUR_KWH,
-    DEFAULT_SETBACK_DELTA,
     DEFAULT_TRACE_MAX_BYTES,
     DEVICE_MAX_C,
     DOMAIN,
@@ -155,7 +87,7 @@ from .control.dynamics import (
     classify_dynamics,
     regulation_throttled,
 )
-from .control.hdh_savings import HdhConfig, HdhSavings, report_price_eur_kwh
+from .control.hdh_savings import HdhSavings
 from .control.hub_aggregate import zone_heat_demand
 from .control.lifecycle import resolve_safe_state
 from .control.mpc import MpcParams
@@ -237,12 +169,17 @@ from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.tau_settle import TauSettle, settle_confidence, update_settle
 from .estimation.thermal_ekf import ThermalEKF
 from .ingestion import RawSample, ingest_temperature, parse_finite
-from .migration import as_entity_list
 from .multi import lifecycle as _lifecycle
 from .multi.discovery import EntitySnapshot
 from .multi.model import DeviceHealth, Direction
 from .multi.resolvers import ThermalDemand
 from .multi.shadow import evaluate_thermal_shadow
+from .runtime.config import (
+    HoldTuning,
+    HotApplyConfig,
+    MissingStructuralFieldError,
+    ZoneConfig,
+)
 from .safety.heating_failure import (
     HeatingFailureDetector,
     actuator_running,
@@ -420,61 +357,39 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._multi_lifecycle = _lifecycle.DeviceLifecycle()
         self._preset: OverrideMode = OverrideMode.NONE
         self._override_cfg = OverrideConfig()
-        # options override data for hot-applyable tuning (A10); structural
-        # inputs (sensors/actuator) live only in data.
-        data = {**entry.data, **entry.options}
-        self._read_override_options(data)  # ADR-0059 §1/§2 hold/Boost tuning
-
-        def _require(key: str) -> str:
+        # Phase 2: ONE parser (runtime/config.py) feeds __init__ and
+        # async_apply_options — a single merged read, options over data, also
+        # for structural keys (analysis Befund 4); this adapter only assigns
+        # the parsed values onto today's attributes. HoldTuning parses first,
+        # mirroring today's read order (_read_override_options before the
+        # structural _require reads).
+        hold = HoldTuning.from_entry(entry)  # ADR-0059 §1/§2 hold/Boost tuning
+        try:
+            cfg = ZoneConfig.from_entry(entry)
+        except MissingStructuralFieldError as err:
             # AR-34: a corrupt entry missing a structural field must fail setup
-            # cleanly (ConfigEntryError -> SETUP_ERROR + repair flow), not raise an
-            # uncaught KeyError from ``data[key]``.
-            val = data.get(key)
-            if not isinstance(val, str) or not val:
-                raise ConfigEntryError(
-                    f"Poise entry '{entry.entry_id}' is missing the required "
-                    f"'{key}' setting; reconfigure the zone."
-                )
-            return val
-
-        self.zone_name: str = _require(CONF_NAME)
+            # cleanly (ConfigEntryError -> SETUP_ERROR + repair flow), not raise
+            # an uncaught KeyError; the pure parser signals it and only this
+            # adapter knows the entry id for today's exact message.
+            raise ConfigEntryError(
+                f"Poise entry '{entry.entry_id}' is missing the required "
+                f"'{err.key}' setting; reconfigure the zone."
+            ) from err
+        structure = cfg.structure
+        self.zone_name: str = structure.zone_name
         # opt-in field-trace recorder (ADR-0011 golden-file replay); default off.
-        self._trace_enabled: bool = bool(data.get(CONF_TRACE_RECORDING, False))
         self._trace_recorder: TraceRecorder | None = None
         self._trace_slug: str = entry.entry_id
         self._tick_budget = TickBudget()  # ADR-0020 per-tick compute-time budget
-        self._temp: str = _require(CONF_TEMP_SENSOR)
-        self._actuator: str = _require(CONF_ACTUATOR)
-        self._trm: str | None = data.get(CONF_TRM_SENSOR)
-        self._outdoor: str | None = data.get(CONF_OUTDOOR_SENSOR)
-        self._humidity: str | None = data.get(CONF_HUMIDITY_SENSOR)
-        self._mrt: str | None = data.get(CONF_MRT_SENSOR)
-        # ADR-0058 presence coupling (optional; empty -> today's behaviour). Both
-        # are multiple=True (ADR-0007): OR-reduced across the set, str-tolerant.
-        self._presence_home_entities: list[str] = as_entity_list(
-            data.get(CONF_PRESENCE_HOME)
-        )
-        self._occupancy_entities: list[str] = as_entity_list(
-            data.get(CONF_OCCUPANCY_SENSOR)
-        )
-        self._presence_cfg = PresenceConfig(
-            absence_after_min=float(
-                data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
-            ),
-            eco_delta=self._override_cfg.eco_offset,
-        )
+        self._temp: str = structure.temperature_sensor
+        self._actuator: str = structure.actuator
+        self._trm: str | None = structure.trm
+        self._outdoor: str | None = structure.outdoor
+        self._humidity: str | None = structure.humidity
+        self._mrt: str | None = structure.mrt
         self._room_absent_since: float | None = None  # transient; restart->present
         # window: multiple=True, structural (data) -> re-read only on reload.
-        self._windows: list[str] = as_entity_list(data.get(CONF_WINDOW_SENSOR))
-        # AR-34: an unknown/corrupt category string must not throw in __init__; fall
-        # back to the norm default rather than failing setup on a tuning value.
-        try:
-            self._category = Category(data.get(CONF_CATEGORY, "II"))
-        except ValueError:
-            self._category = Category("II")
-        self._comfort_base: float = float(
-            data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
-        )
+        self._windows: list[str] = list(structure.windows)
         # ADR-0044 outcome scoring + ADR-0045 efficiency report (diagnostic only)
         self._outcome_stats = OutcomeStats()
         self._regq = RegulationQuality()  # ADR-0055 M1 control-quality (shadow)
@@ -486,30 +401,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._outcome_session = OutcomeSession()
         self._hdh_last_mono: float | None = None  # F9: real dt for HDH/outcome obs
         self._hdh = HdhSavings()
-        self._hdh_cfg = HdhConfig(
-            annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
-            price_eur_kwh=report_price_eur_kwh(
-                data.get(CONF_PRICE_EUR_KWH),
-                data.get(CONF_SOURCE_POLICY),
-                gas=DEFAULT_PRICE_GAS_EUR_KWH,
-                electric=DEFAULT_PRICE_EUR_KWH,
-            ),
-        )
-        # ADR-0052: per-actuator dynamics profile (PI/MPC tuning by speed class).
-        self._dynamics_override: str = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
+        # ADR-0052: dynamics-profile derivation state — defaults until the
+        # first tick derives them from the live actuator (classify_dynamics +
+        # PROFILES in _run_once). Deliberately NOT parse-time values, and an
+        # options hot-apply never resets them (analysis Befund 6).
         self._dynamics = DeviceDynamics.SLOW_HYDRONIC
         self._mpc_params = MpcParams()
-        # ADR-0046 §8 (live): single-AC compressor guard — kill switch + timers
-        # (option over the dynamics-profile default). Also re-read in apply_options.
-        self._compressor_guard: str = str(
-            data.get(CONF_COMPRESSOR_GUARD, COMPRESSOR_GUARD_AUTO)
-        )
-        _cmo = data.get(CONF_COMPRESSOR_MIN_OFF)
-        self._comp_min_off_opt: float | None = float(_cmo) if _cmo is not None else None
-        _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
-        self._comp_mode_hold_opt: float | None = (
-            float(_cmh) if _cmh is not None else None
-        )
         # ADR-0050/0051: humidity dry-active hysteresis state (shadow).
         self._dry_active = False
         # AR-32: warn once (not every 60 s tick) when the climate-band/humidity
@@ -521,55 +418,30 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # target instead of flapping at the boundary. Not persisted (re-latches).
         self._was_preheating = False
         self._was_coasting = False
-        # ADR-0051: heat-day cooling raise (live, rate-limited, cooling-only).
-        self._thermal_shock_delta = float(
-            data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
-        )
-        self._cool_hard_cap = float(data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C))
-        self._adaptive_cool_cfg = data.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL)
         self._cool_sp_eff_prev: float | None = None
-        self._climate_mode: str = data.get(CONF_CLIMATE_MODE, "auto")
-        self._cool_min_outdoor: float = float(
-            data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
+        # AR-04: climate_mode is Store-owned user intent, deliberately OUTSIDE
+        # the shared parser — the options/data value only seeds the very first
+        # start; async_bootstrap restores the live selection from the store and
+        # async_apply_options never re-applies the stale options-form value.
+        self._climate_mode: str = {**entry.data, **entry.options}.get(
+            CONF_CLIMATE_MODE, "auto"
         )
-        self._heat_max_outdoor: float = float(
-            data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
-        )
-        # F4a: outdoor-lockout enable toggles. When off, None is passed into the
-        # pure decide so that lockout edge is dropped (None already = "off" there).
-        self._heat_lockout_enabled: bool = bool(
-            data.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
-        )
-        self._cool_lockout_enabled: bool = bool(
-            data.get(CONF_COOL_LOCKOUT_ENABLED, DEFAULT_COOL_LOCKOUT_ENABLED)
-        )
-        weight = float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT))
-        self._priority: float = weight / 100.0
-        delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
-        start = parse_hhmm(data.get(CONF_COMFORT_START))
-        end = parse_hhmm(data.get(CONF_COMFORT_END))
-        if start is not None and end is not None and delta > 0.0:
-            self._schedule = ComfortSchedule.from_windows(
-                [ComfortWindow(start, end)], delta
-            )
-        else:
-            self._schedule = ComfortSchedule.always_comfort()
-        self._optimal_start: bool = bool(data.get(CONF_OPTIMAL_START, True))
-        # optimal-stop coasts to the lower comfort edge before window end; for
-        # now coupled to optimal-start (predictive scheduling), splittable later.
-        self._optimal_stop: bool = self._optimal_start
-        self._weather: str | None = data.get(CONF_WEATHER)
-        self._irradiance: str | None = data.get(CONF_IRRADIANCE)
-        self._trv_ext_temp: str | None = data.get(CONF_TRV_EXTERNAL_TEMP)
-        # P1-4a: adopt a device-side setpoint change (TRV wheel) as a manual hold.
-        self._adopt_external_setpoint: bool = bool(
-            data.get(CONF_ADOPT_EXTERNAL_SETPOINT, DEFAULT_ADOPT_EXTERNAL_SETPOINT)
-        )
-        # K2: adopt a device-side hvac_mode change (IR remote) as a manual mode-hold.
-        self._adopt_external_mode: bool = bool(
-            data.get(CONF_ADOPT_EXTERNAL_MODE, DEFAULT_ADOPT_EXTERNAL_MODE)
-        )
-        self._operative_input: bool = bool(data.get(CONF_OPERATIVE_INPUT, False))
+        self._weather: str | None = structure.weather
+        self._irradiance: str | None = structure.irradiance
+        self._trv_ext_temp: str | None = structure.trv_ext_temp
+        # P1-4a / K2: adopt device-side setpoint/mode changes as manual holds.
+        # Parsed as tuning but applied ONLY here: async_apply_options has never
+        # re-read them (pre-existing path drift, phase-2 analysis Befunde 1+2),
+        # so they stay deliberately absent from _apply_hot_tuning.
+        self._adopt_external_setpoint: bool = cfg.tuning.adopt_external_setpoint
+        self._adopt_external_mode: bool = cfg.tuning.adopt_external_mode
+        # Every hot-applyable field flows through the ONE shared apply method,
+        # so the init and options paths can never drift again (F11/F4a). The
+        # already parsed pieces are bundled without a re-parse: __init__ keeps
+        # its require-before-tuning throw order (baseline Z. 426-572), while
+        # async_apply_options parses HotApplyConfig directly (no structural
+        # reads, baseline Z. 1101-1178).
+        self._apply_hot_tuning(HotApplyConfig.from_zone_config(cfg, hold))
         self._guards_resolved = False
         self._sched_entity: str | None = None
         self._fault_entity: str | None = None
@@ -669,23 +541,61 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
         self._dirty = True
 
-    def _read_override_options(self, data: dict[str, Any]) -> None:
-        """Read the ADR-0059 hold/Boost tuning (hot-applyable; options>data)."""
-        self._override_policy = str(
-            data.get(CONF_OVERRIDE_POLICY, DEFAULT_OVERRIDE_POLICY)
-        )
-        self._override_timer_h = float(
-            data.get(CONF_OVERRIDE_TIMER_H, DEFAULT_OVERRIDE_TIMER_H)
-        )
-        self._override_max_h = float(
-            data.get(CONF_OVERRIDE_MAX_H, DEFAULT_OVERRIDE_MAX_H)
-        )
-        self._override_end_on_presence = bool(
-            data.get(CONF_OVERRIDE_END_ON_PRESENCE, DEFAULT_OVERRIDE_END_ON_PRESENCE)
-        )
-        self._boost_duration_min = float(
-            data.get(CONF_BOOST_DURATION_MIN, DEFAULT_BOOST_DURATION_MIN)
-        )
+    def _apply_hot_tuning(self, hot: HotApplyConfig) -> None:
+        """Fill the hot-applyable tuning attributes from a parsed config.
+
+        The ONE write path shared by ``__init__`` and ``async_apply_options``
+        (phase 2) — exactly the fields both paths re-read today. Deliberately
+        NOT here: the structural wiring and the adopt-external toggles (init-
+        only today, analysis Befunde 1+2), ``climate_mode`` (store-owned,
+        AR-04) and the per-tick derived ``_dynamics``/``_mpc_params``/PI
+        profile (re-derived every tick in ``_run_once``; an options submit
+        must never reset them). ``HotApplyConfig`` carries no structural
+        fields at all, so this method cannot even reach for one.
+        """
+        tuning = hot.tuning
+        hold = hot.hold
+        # ADR-0059 §1/§2 hold/Boost tuning (hot-applyable; options>data).
+        self._override_policy = tuning.override_policy
+        self._override_timer_h = hold.override_timer_h
+        self._override_max_h = hold.override_max_h
+        self._override_end_on_presence = hold.override_end_on_presence
+        self._boost_duration_min = hold.boost_duration_min
+        self._comfort_base = tuning.comfort_base
+        self._hdh_cfg = tuning.hdh_cfg  # ADR-0045 savings-report inputs
+        # ADR-0052: the raw dynamics override; ``_dynamics`` itself is derived
+        # from it (plus the live capabilities) each tick.
+        self._dynamics_override = tuning.dynamics_override
+        # ADR-0046 §8 (live): single-AC compressor guard — kill switch + timers
+        # (option over the dynamics-profile default).
+        self._compressor_guard = tuning.compressor_guard
+        self._comp_min_off_opt = tuning.comp_min_off_opt
+        self._comp_mode_hold_opt = tuning.comp_mode_hold_opt
+        self._trace_enabled = tuning.trace_enabled
+        # ADR-0058 presence coupling — options-owned and hot-applied although
+        # modelled structurally (analysis Befund 8); the coordinator keeps
+        # today's list attributes (phase 2 moves only the filling).
+        self._presence_home_entities = list(hot.presence_home_entities)
+        self._occupancy_entities = list(hot.occupancy_entities)
+        self._presence_cfg = tuning.presence_cfg
+        # ADR-0051: heat-day cooling raise (live, rate-limited, cooling-only).
+        self._thermal_shock_delta = tuning.thermal_shock_delta
+        self._cool_hard_cap = tuning.cool_hard_cap
+        self._adaptive_cool_cfg = tuning.adaptive_cool_cfg
+        self._category = tuning.category  # AR-34/F11 fallback in the parser
+        self._cool_min_outdoor = tuning.cool_min_outdoor
+        self._heat_max_outdoor = tuning.heat_max_outdoor
+        # F4a: outdoor-lockout enable toggles. When off, None is passed into the
+        # pure decide so that lockout edge is dropped (None already = "off" there).
+        self._heat_lockout_enabled = tuning.heat_lockout_enabled
+        self._cool_lockout_enabled = tuning.cool_lockout_enabled
+        self._priority = tuning.priority
+        self._schedule = tuning.schedule
+        self._optimal_start = tuning.optimal_start
+        # optimal-stop coasts to the lower comfort edge before window end; for
+        # now coupled to optimal-start (predictive scheduling), splittable later.
+        self._optimal_stop = tuning.optimal_stop
+        self._operative_input = tuning.operative_input
 
     def set_climate_entity_id(self, entity_id: str) -> None:
         """Record the room's climate entity_id for the ended-event payload."""
@@ -976,7 +886,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
                 # F13: ``override_policy`` (like the rest of the ADR-0059 hold/Boost
                 # tuning) is a "hot-apply-fähig" config-entry OPTION, already correctly
-                # read from options/data by ``_read_override_options`` in ``__init__``
+                # read from options/data by the shared config parser in ``__init__``
                 # -- restoring it from the persisted store here would silently revert
                 # a user's option change on every restart. Deliberately not restored.
                 oea = data.get("override_expires_at")
@@ -1087,6 +997,21 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         Re-reads the volatile tuning fields (options over data) and updates the
         live state, so an options change does **not** discard the learned EKF
         transient that a full reload would. Structural inputs are not options.
+
+        Phase 2: the same parser + apply method as ``__init__``, so the two
+        paths can never drift (the former "mirror the init guard" comments).
+        ``HotApplyConfig`` reads NO structural key (the pre-refactor path
+        never did), so a merged mapping missing ``name``/``temp_sensor``/
+        ``actuator`` — a legacy entry holding the key only in ``options``,
+        dropped by an options submit — still hot-applies cleanly instead of
+        raising into the update listener. The parse is atomic — a corrupt
+        value now fails the whole hot-apply up front instead of tearing the
+        tuning mid-sequence (deliberate error-path change, see the Befund-3
+        note in ``ZoneConfig.from_mappings``). ``climate_mode`` stays
+        store-owned (AR-04): the climate entity sets it live via
+        ``set_climate_mode()`` and it is persisted in the payload —
+        re-applying the (stale) options form value here would clobber the
+        live selection on every submit.
         """
         # F14: the field mutations below race a concurrent tick (``_run_once``
         # reads many of these same attributes without any lock of its own) --
@@ -1098,84 +1023,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # which acquires this same lock -- held across that call, it would
         # deadlock immediately.
         async with self._lock:
-            data = {**entry.data, **entry.options}
-            self._read_override_options(data)  # ADR-0059 §1/§2 hot-apply
-            self._comfort_base = float(
-                data.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)
-            )
-            self._hdh_cfg = HdhConfig(
-                annual_kwh=float(data.get(CONF_ANNUAL_KWH, DEFAULT_ANNUAL_KWH)),
-                price_eur_kwh=report_price_eur_kwh(
-                    data.get(CONF_PRICE_EUR_KWH),
-                    data.get(CONF_SOURCE_POLICY),
-                    gas=DEFAULT_PRICE_GAS_EUR_KWH,
-                    electric=DEFAULT_PRICE_EUR_KWH,
-                ),
-            )
-            self._dynamics_override = data.get(CONF_DYNAMICS, DEFAULT_DYNAMICS)
-            self._compressor_guard = str(
-                data.get(CONF_COMPRESSOR_GUARD, COMPRESSOR_GUARD_AUTO)
-            )
-            _cmo = data.get(CONF_COMPRESSOR_MIN_OFF)
-            self._comp_min_off_opt = float(_cmo) if _cmo is not None else None
-            _cmh = data.get(CONF_COMPRESSOR_MODE_HOLD)
-            self._comp_mode_hold_opt = float(_cmh) if _cmh is not None else None
-            self._trace_enabled = bool(data.get(CONF_TRACE_RECORDING, False))
-            self._presence_home_entities = as_entity_list(data.get(CONF_PRESENCE_HOME))
-            self._occupancy_entities = as_entity_list(data.get(CONF_OCCUPANCY_SENSOR))
-            self._presence_cfg = PresenceConfig(
-                absence_after_min=float(
-                    data.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
-                ),
-                eco_delta=self._override_cfg.eco_offset,
-            )
-            self._thermal_shock_delta = float(
-                data.get(CONF_THERMAL_SHOCK_DELTA, DEFAULT_SHOCK_DELTA_K)
-            )
-            self._cool_hard_cap = float(
-                data.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C)
-            )
-            self._adaptive_cool_cfg = data.get(
-                CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL
-            )
-            # F11: mirror the init guard (AR-34) so a corrupt category string cannot
-            # throw in the hot-apply either; fall back to the norm default.
-            try:
-                self._category = Category(data.get(CONF_CATEGORY, "II"))
-            except ValueError:
-                self._category = Category("II")
-            # AR-04: climate_mode is Store-owned — the climate entity sets it live
-            # via set_climate_mode() and it is persisted in the payload. Do NOT
-            # re-apply the (stale) options form value here; that clobbered the
-            # live selection on every options submit (double ownership).
-            self._cool_min_outdoor = float(
-                data.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
-            )
-            self._heat_max_outdoor = float(
-                data.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
-            )
-            # F4a: keep the lockout toggles in lockstep with the init read.
-            self._heat_lockout_enabled = bool(
-                data.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
-            )
-            self._cool_lockout_enabled = bool(
-                data.get(CONF_COOL_LOCKOUT_ENABLED, DEFAULT_COOL_LOCKOUT_ENABLED)
-            )
-            self._priority = (
-                float(data.get(CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT)) / 100.0
-            )
-            delta = float(data.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
-            start = parse_hhmm(data.get(CONF_COMFORT_START))
-            end = parse_hhmm(data.get(CONF_COMFORT_END))
-            if start is not None and end is not None and delta > 0.0:
-                self._schedule = ComfortSchedule.from_windows(
-                    [ComfortWindow(start, end)], delta
-                )
-            else:
-                self._schedule = ComfortSchedule.always_comfort()
-            self._optimal_start = bool(data.get(CONF_OPTIMAL_START, True))
-            self._optimal_stop = self._optimal_start
-            self._operative_input = bool(data.get(CONF_OPERATIVE_INPUT, False))
+            self._apply_hot_tuning(HotApplyConfig.from_entry(entry))
         await self.async_request_refresh()
 
     def attach_listeners(self, entry: ConfigEntry) -> None:
@@ -1796,6 +1644,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         A change to ``entry.data`` means a reconfigure is reloading the entry, so
         the in-place options hot-apply must NOT run on this soon-to-be-discarded
         coordinator (the reload rebuilds it with the new data anyway).
+
+        Phase 2 deliberately KEEPS the data-dict comparison: a field-wise
+        ``ZoneStructure`` comparison is NOT equivalent — room ``entry.data``
+        carries non-structure keys (the installation keys; on fresh entries
+        also ``comfort_base``/``category``) whose changes must keep reading as
+        structural, while the options-owned presence lists must stay out of
+        this predicate (see ``runtime.config.structures_equal``).
         """
         return dict(entry.data) == self._data_snapshot
 
