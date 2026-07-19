@@ -95,14 +95,15 @@ def classify_dynamics(
     domain: str,
     can_cool: bool,
     can_fan: bool,
-    override: str | None = None,
+    override: str | DeviceDynamics | None = None,
 ) -> DeviceDynamics:
     """Pick the dynamics class.
 
-    An explicit override (a ``DeviceDynamics`` value) wins; ``"auto"`` or any
-    unknown value falls through to auto-detection: a climate device that can
-    cool or move air is a fast air system, anything else (heat-only TRV / switch
-    / valve) keeps the slow hydronic tuning.
+    An explicit override (a ``DeviceDynamics`` value, raw string or parsed
+    member) wins; ``"auto"``/``None`` or any unknown value falls through to
+    auto-detection: a climate device that can cool or move air is a fast air
+    system, anything else (heat-only TRV / switch / valve) keeps the slow
+    hydronic tuning.
     """
     if override:
         try:
