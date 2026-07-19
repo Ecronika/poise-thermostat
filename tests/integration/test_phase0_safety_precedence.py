@@ -229,9 +229,7 @@ async def test_safety_precedence_table(hass: HomeAssistant, case: Case) -> None:
     if case.override is not None:
         coord.set_override(case.override, reason="ui_setpoint")
     if case.window:
-        hass.states.async_set(
-            "binary_sensor.window", "on", {"device_class": "window"}
-        )
+        hass.states.async_set("binary_sensor.window", "on", {"device_class": "window"})
 
     frozen_ctx = (
         patch("custom_components.poise.coordinator.is_frozen", return_value=True)

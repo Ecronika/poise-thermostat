@@ -82,9 +82,7 @@ def _base(**extra: Any) -> dict[str, Any]:
 
 
 def _room_and_actuator(hass: HomeAssistant) -> None:
-    hass.states.async_set(
-        "sensor.room_temp", "18.5", {"device_class": "temperature"}
-    )
+    hass.states.async_set("sensor.room_temp", "18.5", {"device_class": "temperature"})
     hass.states.async_set(
         "climate.trv",
         "heat",

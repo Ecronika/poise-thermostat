@@ -300,9 +300,7 @@ async def test_preheat_hold_end_event_fires_before_actuator_writes(
     real_plan = coordinator_mod.plan_preheat
 
     def _forced_preheat(**kwargs: Any) -> Any:
-        return dataclasses.replace(
-            real_plan(**kwargs), preheating=True, coasting=False
-        )
+        return dataclasses.replace(real_plan(**kwargs), preheating=True, coasting=False)
 
     with patch.object(coordinator_mod, "plan_preheat", _forced_preheat):
         await coord.async_refresh()

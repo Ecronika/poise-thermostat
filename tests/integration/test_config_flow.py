@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, section
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import (
@@ -14,8 +14,11 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
+from custom_components.poise.config_flow import _OPTIONS_SECTIONS, _options_schema
 from custom_components.poise.const import (
     CONF_ACTUATOR,
+    CONF_ADOPT_EXTERNAL_MODE,
+    CONF_ADOPT_EXTERNAL_SETPOINT,
     CONF_BOILER_OFF_ACTION,
     CONF_BOILER_ON_ACTION,
     CONF_CATEGORY,
@@ -485,3 +488,52 @@ async def test_reconfigure_new_actuator_parks_old(hass: HomeAssistant) -> None:
     old_temp = [c for c in set_temp if c.data["entity_id"] == "climate.trv"]
     assert old_mode and old_mode[-1].data["hvac_mode"] == "heat"
     assert old_temp and old_temp[-1].data["temperature"] == 18.0
+
+
+async def test_options_prefills_stored_adopt_external_mode(
+    hass: HomeAssistant,
+) -> None:
+    """Regression: a stored adopt_external_mode=False must pre-fill the form.
+
+    The field was rendered in the manual_override section but missing from
+    _OPTIONS_SECTIONS, so nest_by_section dropped the stored value: every open
+    showed the schema default True and every unedited submit wrote True back.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={
+            CONF_ADOPT_EXTERNAL_SETPOINT: False,
+            CONF_ADOPT_EXTERNAL_MODE: False,
+        },
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    marker = next(
+        k for k in result["data_schema"].schema if k.schema == "manual_override"
+    )
+    suggested = marker.description["suggested_value"]
+    # control: the sibling flag has always round-tripped
+    assert suggested.get(CONF_ADOPT_EXTERNAL_SETPOINT) is False
+    assert suggested.get(CONF_ADOPT_EXTERNAL_MODE) is False
+
+
+async def test_options_sections_match_rendered_schema(hass: HomeAssistant) -> None:
+    """_OPTIONS_SECTIONS must list exactly the fields the options schema renders.
+
+    nest_by_section can only pre-fill listed fields, so a rendered-but-unlisted
+    field silently resets to its schema default on every options round-trip.
+    """
+    rendered = {
+        key.schema: {marker.schema for marker in val.schema.schema}
+        for key, val in _options_schema(hass).schema.items()
+        if isinstance(val, section)
+    }
+    declared = {name: set(fields) for name, fields in _OPTIONS_SECTIONS.items()}
+    assert rendered == declared
