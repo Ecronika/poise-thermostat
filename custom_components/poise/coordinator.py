@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Context, HomeAssistant, State
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import (
     ConfigEntryError,
     ConfigEntryNotReady,
@@ -150,16 +150,10 @@ from .control.window_auto import (
     quantized_slope,
     step_window_auto,
 )
-from .devices.capability import classify_number_entity, climate_capability
+from .devices.capability import climate_capability
 from .devices.model_fixes import (
     ext_temp_number_is_implausible,
-    is_external_sensor_select,
     is_low_battery,
-    looks_like_adaptive_mode_switch,
-    looks_like_external_temp_number,
-    looks_like_fault_alarm,
-    looks_like_internal_schedule,
-    looks_like_valve_steps,
 )
 from .estimation.heatup_rate import HeatupAccumulator, sample_heatup_rate
 from .estimation.psychrometrics import dewpoint as psychro_dewpoint
@@ -168,7 +162,8 @@ from .estimation.running_mean import RunningMeanTracker
 from .estimation.seasonless_rate import SeasonlessRate
 from .estimation.tau_settle import TauSettle, settle_confidence, update_settle
 from .estimation.thermal_ekf import ThermalEKF
-from .ingestion import RawSample, ingest_temperature, parse_finite
+from .ha.input_reader import InputReader, parse_attr_number
+from .ingestion import RawSample, ingest_temperature
 from .multi import lifecycle as _lifecycle
 from .multi.discovery import EntitySnapshot
 from .multi.model import DeviceHealth, Direction
@@ -182,6 +177,7 @@ from .runtime.config import (
     MissingStructuralFieldError,
     ZoneConfig,
 )
+from .runtime.tick_inputs import TickInputs
 from .safety.heating_failure import (
     HeatingFailureDetector,
     actuator_running,
@@ -189,7 +185,6 @@ from .safety.heating_failure import (
 from .safety.sensor_watchdog import (
     frozen_safe_target,
     is_frozen,
-    sensor_age_seconds,
     sensor_at_heat_source,
     should_learn,
     unavailable_safe_engaged,
@@ -211,25 +206,28 @@ _WEATHER_CALL_TIMEOUT_S = 10.0
 # any other value map to None (no thermal demand).
 _THERMAL_DIR: dict[str, Direction] = {"heat": Direction.HEAT, "cool": Direction.COOL}
 
-_INVALID = {"unknown", "unavailable", ""}
-
-
-def _num(state: State | None) -> float | None:
-    if state is None or state.state in _INVALID:
-        return None
-    return parse_finite(state.state)  # rejects NaN/Inf at the boundary (C1)
-
-
-def _num_attr(state: State | None, key: str) -> float | None:
-    """Read a numeric attribute (e.g. a climate setpoint) or None."""
-    if state is None or state.state == "unavailable":
-        return None
-    return parse_finite(state.attributes.get(key))
-
 
 def _iso_utc(ts: float | None) -> str | None:
     """UTC ISO-8601 string for a wall-clock epoch, or None (ADR-0059 §4 attrs)."""
     return datetime.fromtimestamp(ts, tz=UTC).isoformat() if ts is not None else None
+
+
+class _ReaderClock:
+    """Live view of the coordinator's injectable clock (phase 4).
+
+    The ``InputReader`` is constructed once in ``__init__``, but integration
+    tests swap ``coord._clock`` for a fake AFTER setup — so the reader gets
+    this forwarder instead of a snapshot of the reference, and the snapshot
+    instants follow the live clock exactly like every direct clock read today.
+    """
+
+    __slots__ = ("_coordinator",)
+
+    def __init__(self, coordinator: PoiseCoordinator) -> None:
+        self._coordinator = coordinator
+
+    def monotonic(self) -> float:
+        return self._coordinator._clock.monotonic()
 
 
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
@@ -437,6 +435,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # so they stay deliberately absent from _apply_hot_tuning.
         self._adopt_external_setpoint: bool = cfg.tuning.adopt_external_setpoint
         self._adopt_external_mode: bool = cfg.tuning.adopt_external_mode
+        # Phase 4: the single READING HA adapter (plan section 2). Owns every
+        # ``states.get`` primitive plus the device-guard discovery state
+        # (formerly ``_guards_resolved``/``_sched_entity``/… on this class;
+        # ``_sensor_select``/``_valve_entity`` are proxied below for the
+        # test pins). Constructed BEFORE the hot-tuning apply so the apply
+        # can sync the options-owned presence lists into the reader
+        # unconditionally, and handed a live clock forwarder so a
+        # test-swapped ``_clock`` governs the snapshot instants too.
+        self._input_reader = InputReader(hass, structure, _ReaderClock(self))
         # Every hot-applyable field flows through the ONE shared apply method,
         # so the init and options paths can never drift again (F11/F4a). The
         # already parsed pieces are bundled without a re-parse: __init__ keeps
@@ -444,16 +451,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # async_apply_options parses HotApplyConfig directly (no structural
         # reads, baseline Z. 1101-1178).
         self._apply_hot_tuning(HotApplyConfig.from_zone_config(cfg, hold))
-        self._guards_resolved = False
-        self._sched_entity: str | None = None
-        self._fault_entity: str | None = None
-        self._adaptive_mode_entity: str | None = None  # R1: device adaptive loop
-        self._battery_entity: str | None = None
-        self._ext_temp_auto: str | None = None
-        self._sensor_select: str | None = None
-        self._valve_entity: str | None = None
-        self._valve_closing_steps: str | None = None
-        self._valve_idle_steps: str | None = None
         self._forecast: list[tuple[float, float]] = []
         self._forecast_at: float | None = None
         self._forecast_fail_at: float | None = None  # F10: backoff after a failure
@@ -579,6 +576,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # today's list attributes (phase 2 moves only the filling).
         self._presence_home_entities = list(hot.presence_home_entities)
         self._occupancy_entities = list(hot.occupancy_entities)
+        # Phase 4: the presence lists are the ONE options-owned, hot-applied
+        # piece of the otherwise reload-only structure — the reader's
+        # structure snapshot must follow, or read_presence() would keep
+        # reading the setup-time lists after an options submit.
+        self._input_reader.set_presence_entities(
+            hot.presence_home_entities, hot.occupancy_entities
+        )
         self._presence_cfg = tuning.presence_cfg
         # ADR-0051: heat-day cooling raise (live, rate-limited, cooling-only).
         self._thermal_shock_delta = tuning.thermal_shock_delta
@@ -614,7 +618,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         warm at comfort time) is resolved in the tick -- where the model/forecast
         preheat decision lives -- by ``hold_ends_at_preheat`` in ``_run_once``.
         """
-        sched = self._schedule.state_at(self._local_minute())
+        _lnow = dt_util.now()
+        sched = self._schedule.state_at(int(_lnow.hour * 60 + _lnow.minute))
         cands = [
             float(m)
             for m in (sched.minutes_to_setback, sched.minutes_to_comfort)
@@ -641,9 +646,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._preset, self._comfort_base, self._override_cfg
             )
             delta = clamped - base
+            _lnow = dt_util.now()
             phase = (
                 "comfort"
-                if self._schedule.state_at(self._local_minute()).is_comfort
+                if self._schedule.state_at(
+                    int(_lnow.hour * 60 + _lnow.minute)
+                ).is_comfort
                 else "setback"
             )
             self._override_stats.append(
@@ -759,10 +767,34 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     def window_bypass(self) -> bool:
         return self._window_bypass
 
+    # ------------------------------------------------------------------
+    # Phase 4: the device-guard discovery state lives in the InputReader.
+    # These two are proxied on the coordinator because integration tests pin
+    # them directly (test_phase0_effect_sequences pins ``_sensor_select``,
+    # test_phase0_fault_shadow_domain pins ``_valve_entity``); a pin survives
+    # re-resolution because the discovery is idempotent.
+    # ------------------------------------------------------------------
+
+    @property
+    def _sensor_select(self) -> str | None:
+        return self._input_reader.sensor_select
+
+    @_sensor_select.setter
+    def _sensor_select(self, value: str | None) -> None:
+        self._input_reader.sensor_select = value
+
+    @property
+    def _valve_entity(self) -> str | None:
+        return self._input_reader.valve_entity
+
+    @_valve_entity.setter
+    def _valve_entity(self, value: str | None) -> None:
+        self._input_reader.valve_entity = value
+
     @property
     def capability(self) -> tuple[bool, bool]:
         """(can_heat, can_cool) of the actuator (review P2 cooling modes)."""
-        return self._capability()
+        return self._input_reader.capability()
 
     @property
     def via_device_id(self) -> tuple[str, str] | None:
@@ -1037,64 +1069,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             async_track_state_change_event(self.hass, watched, _on_change)
         )
 
-    def _resolve_device_guards(self) -> None:
-        """Find schedule/fault/battery entities on the actuator's device (once)."""
-        if self._guards_resolved:
-            return
-        self._guards_resolved = True
-        try:
-            from homeassistant.helpers import entity_registry as er
-
-            reg = er.async_get(self.hass)
-            ent = reg.async_get(self._actuator)
-            if ent is None or ent.device_id is None:
-                return
-            for e in er.async_entries_for_device(
-                reg, ent.device_id, include_disabled_entities=False
-            ):
-                eid = e.entity_id
-                # R1: a device-internal adaptive/smart-temperature loop is
-                # orthogonal to the roles below and can be a switch. OR a select.,
-                # so detect it independently of the elif chain (a select. would
-                # otherwise be consumed by the sensor-select branch first).
-                if (
-                    self._adaptive_mode_entity is None
-                    and looks_like_adaptive_mode_switch(eid)
-                ):
-                    self._adaptive_mode_entity = eid
-                if self._sched_entity is None and looks_like_internal_schedule(eid):
-                    self._sched_entity = eid
-                elif self._fault_entity is None and looks_like_fault_alarm(eid):
-                    self._fault_entity = eid
-                elif (
-                    self._battery_entity is None
-                    and eid.startswith("sensor.")
-                    and e.original_device_class == "battery"
-                ):
-                    self._battery_entity = eid
-                elif self._ext_temp_auto is None and looks_like_external_temp_number(
-                    eid, e.original_device_class
-                ):
-                    self._ext_temp_auto = eid
-                elif self._sensor_select is None and eid.startswith("select."):
-                    sel = self.hass.states.get(eid)
-                    if is_external_sensor_select(
-                        eid, sel.attributes.get("options") if sel else None
-                    ):
-                        self._sensor_select = eid
-                elif (
-                    self._valve_entity is None
-                    and eid.startswith("number.")
-                    and classify_number_entity(eid) == "valve"
-                ):
-                    self._valve_entity = eid
-                elif looks_like_valve_steps(eid) == "closing":
-                    self._valve_closing_steps = eid
-                elif looks_like_valve_steps(eid) == "idle":
-                    self._valve_idle_steps = eid
-        except Exception:  # noqa: BLE001 - guard resolution must never break setup
-            _LOGGER.debug("Poise: device-guard resolution failed", exc_info=True)
-
     def _issue(
         self,
         issue_id: str,
@@ -1137,19 +1111,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._issue(issue_id, False, translation_key="external_temp_implausible")
             return
         try:
-            from homeassistant.helpers import entity_registry as er
-
-            reg = er.async_get(self.hass)
-            ent = reg.async_get(entity_id)
-            device_class: str | None = None
-            unit: str | None = None
-            if ent is not None:
-                device_class = ent.device_class or ent.original_device_class
-                unit = ent.unit_of_measurement
-            st = self.hass.states.get(entity_id)
-            if st is not None:
-                device_class = device_class or st.attributes.get("device_class")
-                unit = unit or st.attributes.get("unit_of_measurement")
+            # Phase 4: the registry/state signature read lives in the reader;
+            # its errors propagate into THIS try — the "a registry miss must
+            # never block setup" boundary stays here, exactly as before.
+            device_class, unit = self._input_reader.configured_ext_temp_signature(
+                entity_id
+            )
             implausible = ext_temp_number_is_implausible(entity_id, device_class, unit)
         except Exception:  # noqa: BLE001 - a registry miss must not block setup
             _LOGGER.debug(
@@ -1179,87 +1146,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             translation_key="external_temp_implausible",
             placeholders={"entity": entity_id, "name": self.zone_name},
         )
-
-    def _read(self, entity_id: str | None) -> float | None:
-        if not entity_id:
-            return None
-        return _num(self.hass.states.get(entity_id))
-
-    def _sensor_age(self, entity_id: str) -> float | None:
-        state = self.hass.states.get(entity_id)
-        if state is None:
-            return None
-        # last_changed (the value-change time, per the watchdog contract): a
-        # dead/stuck sensor that keeps re-publishing the SAME value still bumps
-        # last_updated, so only last_changed detects "available but frozen".
-        # "Sensor lost / unavailable" is handled separately by the ingestion
-        # degradation ladder. Threshold is long (hours) so a legitimately stable
-        # room never false-positives (best-of: VTherm/BT, review F1).
-        return sensor_age_seconds(dt_util.utcnow(), state.last_changed)
-
-    def _local_minute(self) -> int:
-        now = dt_util.now()
-        return int(now.hour * 60 + now.minute)
-
-    def _window_open(self) -> tuple[bool, bool]:
-        """OR across the picker: any configured contact reporting "on" = open.
-
-        Returns ``(sensor_open, sensor_unavailable)``. F4a / ADR-0041 §5: a
-        contact that drops off (``unavailable``/``unknown``) previously read
-        as indistinguishable from "closed" here (neither is ``== "on"``), so a
-        window sensor that had merely lost battery/network silently held the
-        zone in full heating with no signal and no warning. The failsafe is
-        "heizen wie ohne Sensor" -- flag it (repair issue, at the call site)
-        and let the caller fall back to slope/auto-detection instead of
-        trusting stale/missing "closed" data. A confirmed "on" from any OTHER
-        still-working contact is trusted regardless (real positive evidence
-        beats a sibling sensor's dropout), so this never early-returns.
-        """
-        open_found = False
-        unavailable = False
-        for entity_id in self._windows:
-            state = self.hass.states.get(entity_id)
-            if state is None or state.state in ("unavailable", "unknown"):
-                unavailable = True
-                continue
-            if state.state == "on":
-                open_found = True
-        return open_found, unavailable
-
-    def _capability(self) -> tuple[bool, bool]:
-        act = self.hass.states.get(self._actuator)
-        modes = act.attributes.get("hvac_modes") if act else None
-        if modes:
-            return climate_capability([str(m) for m in modes])
-        return True, False  # default: assume a heat-only TRV
-
-    def _device_max(self) -> float:
-        act = self.hass.states.get(self._actuator)
-        if act is not None:
-            mx = act.attributes.get("max_temp")
-            if isinstance(mx, (int, float)):
-                return float(mx)
-        return DEVICE_MAX_C
-
-    def _device_min(self) -> float | None:
-        """The actuator's own ``min_temp`` (a physical write floor), if known.
-
-        Returns ``None`` when absent/non-numeric so resolve_write_target skips
-        the SAFETY floor clamp entirely (review P3-1).
-        """
-        act = self.hass.states.get(self._actuator)
-        if act is not None:
-            mn = act.attributes.get("min_temp")
-            if isinstance(mn, (int, float)):
-                return float(mn)
-        return None
-
-    def _sun_elevation(self) -> float | None:
-        sun = self.hass.states.get("sun.sun")
-        if sun is None:
-            return None
-        elev = sun.attributes.get("elevation")
-        return float(elev) if isinstance(elev, (int, float)) else None
 
     async def _forecast_outdoor(self, horizon_min: float, fallback: float) -> float:
         """Mean forecast outdoor temp over the preheat window (ADR-0025).
@@ -1305,9 +1191,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._forecast_fail_at = now
         return mean_forecast_outdoor(self._forecast, horizon_min, fallback)
 
-    def _learn(self, room: float, t_out: float) -> None:
-        """Passive EKF observer; paused on open window (ADR-0002/0024)."""
-        now = self._clock.monotonic()
+    def _learn(self, room: float, t_out: float, *, now: float) -> None:
+        """Passive EKF observer; paused on open window (ADR-0002/0024).
+
+        ``now`` is the tick's snapshot monotonic instant (phase 4: the
+        pre-await segment's ad-hoc clock reads unify onto the snapshot —
+        sub-ms divergence, unobservable, per the plan's clock directive).
+        """
         try:
             if self._last_mono is not None:
                 dt_h = (now - self._last_mono) / 3600.0
@@ -1330,6 +1220,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         room: float,
         t_out: float,
         *,
+        now: float,
         cooling: bool = False,
         sensor_unavailable: bool = False,
     ) -> None:
@@ -1355,7 +1246,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """
         if self._windows and not sensor_unavailable:
             return
-        now = self._clock.monotonic()
+        # ``now`` is the tick's snapshot monotonic instant (phase 4 clock
+        # unification — formerly an ad-hoc clock read here; sub-ms).
         cfg = self._window_auto_cfg
         if self._ekf.identified:
             self._wa_open_threshold = adaptive_open_threshold(
@@ -1384,7 +1276,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 )
         self._wa_prev_mono = now
 
-    def _observe_seasonless(self, room: float, t_out: float) -> None:
+    def _observe_seasonless(
+        self, room: float, t_out: float, *, now: float, day_ordinal: int
+    ) -> None:
         """Record a normalised heat-up rate while heating (shadow, ADR-0004/0026).
 
         The rate is sampled with an anchored accumulator (``heatup_rate``) instead
@@ -1393,16 +1287,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         the pooled rate — hence the beta_h cold-start seed — high. The accumulator
         divides a real accumulated rise by the full elapsed interval (flat ticks
         included), which is unbiased regardless of the sensor quantum.
+
+        ``now``/``day_ordinal`` are the tick's snapshot instants (phase 4
+        clock unification — formerly ad-hoc clock/calendar reads here).
         """
-        now = self._clock.monotonic()
         heating = self._last_target is not None and self._last_u_h > 0.5
         rate = sample_heatup_rate(
             self._heatup_acc, heating=heating, room=room, mono=now
         )
         if rate is not None and rate > 0.0 and self._last_target is not None:
-            self._seasonless.observe(
-                rate, self._last_target, t_out, dt_util.now().toordinal()
-            )
+            self._seasonless.observe(rate, self._last_target, t_out, day_ordinal)
         self._prev_room = room
         self._prev_room_mono = now
 
@@ -1670,69 +1564,72 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 data["tick_over_budget"] = self._tick_budget.over_budget
             return data
 
-    def _emit_health_issues(self) -> tuple[bool, bool, bool, bool]:
-        """Raise/clear device-health repair issues; return the status flags."""
+    def _emit_health_issues(self, inputs: TickInputs) -> tuple[bool, bool, bool, bool]:
+        """Raise/clear device-health repair issues; return the status flags.
+
+        Phase 4: the reads (incl. the guard discovery, which now runs inside
+        ``InputReader.snapshot()`` immediately before this call) live in the
+        snapshot; the emission order and its pre-first-await position are
+        unchanged.
+        """
         # F2: an actuator that dropped off the network (Zigbee/MQTT gone) keeps a
-        # registered State object with state=="unavailable" -- states.get(...) is
-        # None only for a never-registered/removed entity, which is the rarer
-        # case. Checking only the None case missed the common real-world failure
-        # (device offline), so no repair issue ever fired for it.
-        _act_health = self.hass.states.get(self._actuator)
+        # registered State object with state=="unavailable" -- the snapshot's
+        # ``state`` is None only for a never-registered/removed entity, which is
+        # the rarer case. Checking only the None case missed the common
+        # real-world failure (device offline), so no repair issue ever fired.
         self._issue(
             f"actuator_unavailable_{self._entry_id}",
-            _act_health is None or _act_health.state == "unavailable",
+            inputs.actuator.state is None or inputs.actuator.state == "unavailable",
             translation_key="actuator_unavailable",
             placeholders={"entity": self._actuator},
         )
-        frozen = is_frozen(self._sensor_age(self._temp), SENSOR_FREEZE_AFTER_S)
+        frozen = is_frozen(inputs.room.age_s, SENSOR_FREEZE_AFTER_S)
         self._issue(
             f"sensor_frozen_{self._entry_id}",
             frozen,
             translation_key="sensor_frozen",
             placeholders={"entity": self._temp},
         )
-        self._resolve_device_guards()
+        reader = self._input_reader
+        guards = inputs.device_guards
         sched_active = fault_active = False
-        if self._sched_entity:
-            st = self.hass.states.get(self._sched_entity)
-            sched_active = st is not None and st.state == "on"
+        if reader.sched_entity:
+            sched_active = guards.sched_active
             self._issue(
                 f"device_schedule_{self._entry_id}",
                 sched_active,
                 translation_key="device_schedule",
-                placeholders={"entity": self._sched_entity},
+                placeholders={"entity": reader.sched_entity},
             )
-        if self._adaptive_mode_entity:
-            st = self.hass.states.get(self._adaptive_mode_entity)
+        if reader.adaptive_mode_entity:
             # R1: a switch reads "on"; a select reads the active option name.
             # Treat any adaptive/smart-named option (or a plain "on") as the loop
             # being active -- an off/manual state clears the issue.
-            active = st is not None and (
-                st.state == "on"
-                or "adaptive" in st.state.lower()
-                or "smart" in st.state.lower()
+            active = guards.adaptive_mode is not None and (
+                guards.adaptive_mode == "on"
+                or "adaptive" in guards.adaptive_mode.lower()
+                or "smart" in guards.adaptive_mode.lower()
             )
             self._issue(
                 f"adaptive_mode_{self._entry_id}",
                 active,
                 translation_key="adaptive_mode_active",
-                placeholders={"entity": self._adaptive_mode_entity},
+                placeholders={"entity": reader.adaptive_mode_entity},
             )
-        if self._fault_entity:
-            st = self.hass.states.get(self._fault_entity)
-            fault_active = st is not None and st.state == "on"
+        if reader.fault_entity:
+            fault_active = guards.fault_active
             self._issue(
                 f"device_alarm_{self._entry_id}",
                 fault_active,
                 translation_key="device_alarm",
-                placeholders={"entity": self._fault_entity},
+                placeholders={"entity": reader.fault_entity},
             )
-        if self._battery_entity:
+        if reader.battery_entity:
             self._issue(
                 f"low_battery_{self._entry_id}",
-                is_low_battery(self._read(self._battery_entity), LOW_BATTERY_PCT),
+                is_low_battery(guards.battery, LOW_BATTERY_PCT),
                 translation_key="low_battery",
-                placeholders={"entity": self._battery_entity},
+                placeholders={"entity": reader.battery_entity},
             )
         heat_source_suspect = sensor_at_heat_source(
             self._ekf.tau_hours,
@@ -1758,7 +1655,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         AC does not thrash on an echo it cannot honour. Best-effort + idempotent;
         a failure must never break the tick (review #7).
         """
-        act = self.hass.states.get(self._actuator)
+        # Phase 4, positioned read: this sits AFTER the unavailable path's
+        # conditional dirty-flush save await — a device change during that
+        # save is observable today and must remain so.
+        act = self._input_reader.actuator_state()
         modes = (
             [str(m) for m in (act.attributes.get("hvac_modes") or [])] if act else []
         )
@@ -1770,8 +1670,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         plan = resolve_safe_state(
             hvac_modes=modes,
             device_state=act.state if act is not None else None,
-            device_setpoint=_num_attr(act, "temperature"),
-            device_min=_num_attr(act, "min_temp"),
+            device_setpoint=parse_attr_number(act, "temperature"),
+            device_min=parse_attr_number(act, "min_temp"),
             floor=FROST_FLOOR_C,
         )
         if plan is None:
@@ -1807,7 +1707,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             _LOGGER.exception("Poise %s: unavailable-safe write failed", self.zone_name)
 
     async def _run_once(self) -> dict[str, Any]:
-        air = self._read(self._temp)
+        # Phase 4, positioned first read (baseline line 1810): the availability
+        # gate must run BEFORE the pre-await snapshot — on an unavailable tick
+        # neither the guard discovery nor any other read of the segment runs
+        # today, and that error path stays read-for-read identical.
+        air = self._input_reader.read(self._temp)
         self._issue(
             f"sensor_unavailable_{self._entry_id}",
             air is None,
@@ -1867,10 +1771,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._temp,
             )
             self._unavailable_logged = False
+        # Phase 4: ONE snapshot bundles the contiguous pre-first-await read
+        # block (baseline lines 1810-2063). Within this await-free segment
+        # nothing can change between reads, so the re-read of the room here is
+        # provably the value the gate above saw, and the segment's ad-hoc
+        # clock reads unify onto the snapshot instants (sub-ms, unobservable).
+        # Every read AFTER the first await stays a positioned InputReader
+        # call at exactly its current place in the tick.
+        inputs = self._input_reader.snapshot()
         frozen, sched_active, fault_active, heat_source_suspect = (
-            self._emit_health_issues()
+            self._emit_health_issues(inputs)
         )
-        now = self._clock.monotonic()
+        now = inputs.now_mono
         # F3: feed the last known-good room value so an implausible raw sample
         # (Zigbee glitch, a misread °F number, ...) degrades to that recent real
         # reading ("derived") instead of skipping straight past it to the
@@ -1887,12 +1799,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # instead of regulating on -- and teaching the EKF -- a fabricated
         # constant (measured/estimated boundary, ADR-0012/0026).
         frozen = frozen or reading.source is Source.DEFAULT
-        t_out = self._read(self._outdoor)
+        t_out = inputs.outdoor.value
         # internal EN 16798-1 running mean, used when no external T_rm sensor.
         if t_out is not None:
-            self._trm_tracker.observe(t_out, dt_util.now().toordinal())
+            self._trm_tracker.observe(t_out, inputs.local_day_ordinal)
         t_rm, t_rm_source = select_t_rm(
-            self._read(self._trm), self._trm_tracker.current, t_out
+            inputs.trm.value, self._trm_tracker.current, t_out
         )
         t_out_eff = (
             t_out
@@ -1900,18 +1812,25 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             else (t_rm if t_rm is not None else _FALLBACK_OUTDOOR_C)
         )
         t_rm_eff = t_rm if t_rm is not None else t_out_eff
-        rh = self._read(self._humidity)
+        rh = inputs.humidity.value
         # solar disturbance q_solar (normalised, ADR-0010): internal clear-sky
         # estimate always runs; a measured irradiance sensor overrides the value
         # used (shadow-estimator principle, ADR-0026).
         q_solar, q_solar_source, q_solar_internal = select_q_solar(
-            self._sun_elevation(), self._read(self._irradiance)
+            inputs.sun_elevation, inputs.irradiance.value
         )
         # virtual MRT (shadow, ADR-0017/0026): exterior envelope pulls MRT toward
         # outdoor + a solar radiant bump; a measured globe/MRT sensor overrides.
         mrt_internal = virtual_mrt(room, t_out_eff, q_solar)
-        t_mrt, mrt_source = select_mrt(self._read(self._mrt), mrt_internal)
-        sensor_window_open, _window_sensor_unavailable = self._window_open()
+        t_mrt, mrt_source = select_mrt(inputs.mrt.value, mrt_internal)
+        # The ``_window_open`` OR-fold on the snapshot contacts (F4a/ADR-0041
+        # §5): ``is_on`` is None exactly when a contact dropped off — flag it
+        # so the caller falls back to slope/auto-detection instead of trusting
+        # stale "closed" data; a confirmed "on" from any OTHER still-working
+        # contact is trusted regardless (real positive evidence beats a
+        # sibling sensor's dropout).
+        sensor_window_open = any(bool(c.is_on) for c in inputs.windows)
+        _window_sensor_unavailable = any(not c.available for c in inputs.windows)
         self._issue(
             f"window_sensor_unavailable_{self._entry_id}",
             _window_sensor_unavailable,
@@ -1949,7 +1868,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             auto_open=self._window_auto.open,
             bypass=self._window_bypass,
         )
-        can_heat, can_cool = self._capability()
+        # ``_capability`` consumer rule on the snapshot's single actuator read:
+        # empty/missing hvac_modes -> assume a heat-only TRV.
+        can_heat, can_cool = (
+            climate_capability(list(inputs.actuator.hvac_modes))
+            if inputs.actuator.hvac_modes
+            else (True, False)
+        )
         # ADR-0008 tri-state: 'auto' follows cooling capability; a legacy bool is
         # honoured unchanged (True->on, False->off), so the upgrade is regression-free.
         adaptive_cool = resolve_adaptive_cool(
@@ -1958,12 +1883,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # ADR-0052: retune the PI/MPC to the actuator's dynamics class so a fast
         # split AC is not driven by a 2 h radiator integrator (which oscillates).
         try:
-            _act_dyn = self.hass.states.get(self._actuator)
-            _modes_dyn = (
-                [str(m) for m in (_act_dyn.attributes.get("hvac_modes") or [])]
-                if _act_dyn
-                else []
-            )
+            _modes_dyn = list(inputs.actuator.hvac_modes)
             self._dynamics = classify_dynamics(
                 domain=self._actuator.split(".", 1)[0],
                 can_cool=can_cool,
@@ -1979,7 +1899,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
         except Exception:  # noqa: BLE001 - tuning refresh must never break the tick
             _LOGGER.debug("Poise dynamics-profile refresh failed", exc_info=True)
-        device_max = self._device_max()
+        # ``_device_max`` consumer rule: absent/non-numeric -> DEVICE_MAX_C.
+        device_max = (
+            inputs.actuator.max_temp
+            if inputs.actuator.max_temp is not None
+            else DEVICE_MAX_C
+        )
 
         if should_learn(
             window_open=window_open,
@@ -1999,8 +1924,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # last-good value future ticks need to keep deriving from, regressing
             # a short flaky-sensor spell to the hard default one tick early.
             if reading.source is Source.MEASURED:
-                self._learn(room, t_out_eff)
-                self._observe_seasonless(room, t_out_eff)
+                self._learn(room, t_out_eff, now=now)
+                self._observe_seasonless(
+                    room, t_out_eff, now=now, day_ordinal=inputs.local_day_ordinal
+                )
         else:
             # V5: while learning is paused (open window / frozen sensor, which
             # now also covers a DEFAULT-source reading -- see the ``frozen =``
@@ -2017,6 +1944,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._observe_window_auto(
             room,
             t_out_eff,
+            now=now,
             cooling=self._was_cooling,
             sensor_unavailable=_window_sensor_unavailable,
         )
@@ -2044,7 +1972,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # schedule: night setback + optimal-start preheat (ADR-0025).
         # Resolve the forecast outdoor (I/O) here, then let the pure planner
         # decide the effective base — the decision is unit-tested without HA.
-        sched = self._schedule.state_at(self._local_minute())
+        sched = self._schedule.state_at(inputs.local_minute)
         # A model is needed for the predictive plan in BOTH phases: preheat during
         # setback (lead = minutes to comfort) and coast/optimal-stop during comfort
         # (lead = minutes to setback). H2: build it whenever the EKF is identified
@@ -2072,28 +2000,14 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # "away", whose depth is carried by the Eco band-widen below (not a base
         # shift), so we feed a NEUTRAL preset base into the plan to avoid a
         # cooling-edge double-dip, and an empty house is never preheated.
-        def _tristate(entity_id: str | None) -> bool | None:
-            if not entity_id:
-                return None
-            st = self.hass.states.get(entity_id)
-            if st is None or st.state in ("unknown", "unavailable"):
-                return None
-            s = st.state.lower()
-            if s in ("home", "on", "true"):
-                return True
-            if s in ("not_home", "off", "false", "away"):
-                return False
-            # F8: a person/device_tracker can report a named zone ("Work", "Gym",
-            # ...) as its state -- that is a resolved, confident "not home", not a
-            # sensor failure. Falling through to None here made ``any_present``'s
-            # fail-safe (unresolved -> present) misread a person confirmed to be
-            # away at a custom zone as "home", the opposite of a fail-safe. Any
-            # other domain's odd/custom state is left genuinely unresolved (None).
-            if entity_id.split(".", 1)[0] in ("person", "device_tracker"):
-                return False
-            return None
-
-        _home = any_present(_tristate(e) for e in self._presence_home_entities)
+        # Phase 4, positioned read AFTER the forecast await: a presence flip
+        # during the fetch is observable today and must remain so. The reader
+        # resolves the F8 tristates (a person/device_tracker reporting a named
+        # zone is a confident "not home"); home (baseline line 2096) and
+        # occupancy (line 2181) sit in the same await-free window, so the
+        # merged PresenceSnapshot read is equivalent.
+        _presence = self._input_reader.read_presence()
+        _home = any_present(_presence.home)
         # ADR-0059 §1/§2: expire the timed Boost + manual hold here, once the house
         # gate is known and before the preset/override feed the plan and solver. A
         # Boost restore must land before _is_away/_base_preset read the preset.
@@ -2154,10 +2068,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # (pavax-verified). The number is write-only, so a "unknown" state is fine;
         # only "unavailable" means the device is offline (ADR-0029).
         ext_num = self._trv_ext_temp or (
-            self._ext_temp_auto if self._operative_input else None
+            inputs.device_guards.ext_temp_number if self._operative_input else None
         )
-        ext_state = self.hass.states.get(ext_num) if ext_num else None
-        ext_ok = ext_state is not None and ext_state.state != "unavailable"
+        # Phase 4, positioned read (baseline lines 2159-2160): the feed
+        # target's availability is probed here, after the forecast await.
+        ext_ok = self._input_reader.ext_feed_target_ok(ext_num)
         operative_active = self._operative_input and ext_ok
         self._issue(
             f"operative_unsupported_{self._entry_id}",
@@ -2178,7 +2093,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # Eco delta capped at the cool hard cap; AWAY widens by the away offset up
         # to the device max. No base shift -- the widen carries the whole depth.
         _presence_now = dt_util.utcnow().timestamp()
-        _room_present = any_present(_tristate(e) for e in self._occupancy_entities)
+        _room_present = any_present(_presence.occupancy)
         self._room_absent_since = step_room_absence(
             self._room_absent_since, present=_room_present, now=_presence_now
         )
@@ -2247,7 +2162,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             cool_ceiling_override=_cool_ceiling,
         )
 
-        act_state = self.hass.states.get(self._actuator)
+        # Phase 4, positioned read: THE central actuator read stays exactly
+        # here, after the forecast await — a device change during the fetch is
+        # observable today; every later attribute access this tick reads this
+        # ONE State object, never a fresh read.
+        act_state = self._input_reader.actuator_state()
         # F2: a genuinely offline actuator (state=="unavailable") reports no
         # trustworthy setpoint, so should_write()'s "actual is None -> write"
         # rule fired on EVERY tick -- a write storm into a dead Zigbee/MQTT
@@ -2322,7 +2241,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             frost_floor=FROST_FLOOR_C,
             mold_min=mold_min_write,
             device_max=device_max,
-            device_min=self._device_min(),
+            # Phase 4: fresh read conserved 1:1 — same await-free window as
+            # the central actuator read above (baseline line 2325).
+            device_min=self._input_reader.device_min(),
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
@@ -2787,10 +2708,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # we re-assert when something external (e.g. an "off"/away automation)
             # changed it, while still skipping writes when it already matches
             # (review P1.2; live-test finding 2026-06-21).
-            actual_sp = _num_attr(act_state, "temperature")
+            actual_sp = parse_attr_number(act_state, "temperature")
             # snap our target to the device's setpoint step so a coarse TRV's
             # rounded echo doesn't trigger a write every tick (review R2)
-            step = _num_attr(act_state, "target_temperature_step") or 0.1
+            step = parse_attr_number(act_state, "target_temperature_step") or 0.1
             mode_changed = final_mode != self._last_written_mode
             # ADR-0052 §4: a self-regulating climate entity (its own thermostat)
             # is nudged at most once per its dynamics regulation period, so Poise
@@ -3015,22 +2936,29 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # ensure the TRV uses its external sensor (pavax-verified); on the
                 # tick we switch it, skip the write so the device can settle.
                 switched = False
-                if self._sensor_select:
-                    sel = self.hass.states.get(self._sensor_select)
-                    if sel is not None and sel.state not in ("external", "unavailable"):
-                        try:
-                            await self.hass.services.async_call(
-                                "select",
-                                "select_option",
-                                {
-                                    "entity_id": self._sensor_select,
-                                    "option": "external",
-                                },
-                                blocking=False,
-                            )
-                            switched = True
-                        except Exception:  # noqa: BLE001
-                            _LOGGER.exception("Poise: sensor-select switch failed")
+                # Phase 4, positioned read (baseline line 3019): the select's
+                # state is read FRESH in the write path, after the mode-nudge/
+                # setpoint awaits — a select change during those service calls
+                # is observable today and stays so. ``None`` covers both "no
+                # select discovered" and "no State object" (as before).
+                _sel_state = self._input_reader.ext_select_state()
+                if _sel_state is not None and _sel_state not in (
+                    "external",
+                    "unavailable",
+                ):
+                    try:
+                        await self.hass.services.async_call(
+                            "select",
+                            "select_option",
+                            {
+                                "entity_id": self._sensor_select,
+                                "option": "external",
+                            },
+                            blocking=False,
+                        )
+                        switched = True
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.exception("Poise: sensor-select switch failed")
                 if not switched:
                     fed = round(
                         operative_temperature(room, t_mrt)
@@ -3079,7 +3007,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             rescue = (
                 frost_rescue_target(
                     can_heat=can_heat,
-                    actual_sp=_num_attr(act_state, "temperature"),
+                    actual_sp=parse_attr_number(act_state, "temperature"),
                     device_state=act_state.state if act_state else None,
                     frost_floor=FROST_FLOOR_C,
                     mold_min=mold_min,
@@ -3322,8 +3250,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             )
         # valve health (A3): a near-zero closing-step count means the motorised
         # valve failed calibration / is jammed — advisory diagnostic + repair issue.
-        closing_steps = self._read(self._valve_closing_steps)
-        idle_steps = self._read(self._valve_idle_steps)
+        # Phase 4, positioned reads (baseline lines 3325-3326): the valve
+        # calibration counts are read FRESH after the save-checkpoint await.
+        closing_steps, idle_steps = self._input_reader.valve_steps()
         v_stuck = valve_stuck(closing_steps)
         valve_health = (
             "stuck" if v_stuck else ("ok" if closing_steps is not None else "unknown")
@@ -3332,7 +3261,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             f"valve_stuck_{self._entry_id}",
             v_stuck,
             translation_key="valve_stuck",
-            placeholders={"entity": self._valve_closing_steps or "—"},
+            placeholders={"entity": self._input_reader.valve_closing_steps or "—"},
         )
         # ADR-0044 outcome scoring + ADR-0045 efficiency report (diagnostic only;
         # never raises — a scoring slip must not break the control tick).
