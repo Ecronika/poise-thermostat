@@ -26,6 +26,7 @@ cannot be asserted from the recorded calls; only ``type``/``entity_id`` are.
 
 from __future__ import annotations
 
+import time
 from datetime import timedelta
 from typing import Any
 
@@ -56,6 +57,15 @@ from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 
 
 class _FakeClock:
+    """Seeded from ``time.monotonic()`` for continuity with the real-clock
+    setup tick: a fixed literal seed makes the next tick's EKF-learn dt depend
+    on the host's monotonic base (negative on long-running hosts, hundreds of
+    seconds on a fresh CI runner — which inflates the covariance and
+    de-identifies the EKF mid-tick; observed on CI in the sibling module
+    test_phase0_fault_shadow_domain). The predictive gate reads
+    ``self._ekf.identified`` AFTER the learn step, so this module needs the
+    same continuity."""
+
     def __init__(self, t: float) -> None:
         self.t = t
 
@@ -150,7 +160,7 @@ async def test_unidentified_ekf_makes_zero_forecast_calls(
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     calls = _register_forecast_counter(hass)
-    coord._clock = _FakeClock(10_000.0)
+    coord._clock = _FakeClock(time.monotonic())
     assert not coord._ekf.identified
 
     await coord.async_refresh()
@@ -173,7 +183,7 @@ async def test_optimal_start_off_makes_zero_forecast_calls(
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     calls = _register_forecast_counter(hass)
-    coord._clock = _FakeClock(10_000.0)
+    coord._clock = _FakeClock(time.monotonic())
     _make_identified(coord._ekf)
     assert coord._optimal_start is False
     assert coord._optimal_stop is False  # mirrors optimal_start (line 560)
@@ -205,7 +215,7 @@ async def test_predictive_zone_makes_exactly_one_call_then_serves_from_cache(
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     calls = _register_forecast_counter(hass)
-    clock = _FakeClock(10_000.0)
+    clock = _FakeClock(time.monotonic())
     coord._clock = clock
     _make_identified(coord._ekf)
     assert coord._forecast_at is None  # nothing fetched during setup's refresh

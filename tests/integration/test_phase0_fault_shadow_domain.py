@@ -26,6 +26,7 @@ tests then flip into their negative tests (degradation must STOP happening).
 
 from __future__ import annotations
 
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -126,7 +127,15 @@ async def _setup(hass: HomeAssistant) -> Any:
     # handlers, which would otherwise receive this test's tick writes.
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    coord._clock = _FakeClock(1000.0)
+    # Seed the fake clock CONTINUOUS with the real monotonic clock: the setup
+    # tick anchored the EKF learn anchor (_last_mono) with the real clock, so
+    # a fixed literal seed makes the next tick's learn dt depend on the host's
+    # monotonic base (uptime). On a long-running host that dt is negative
+    # (learn skipped, EKF stays identified); on a freshly booted CI runner it
+    # is hundreds of seconds, the covariance predict step inflates and the
+    # EKF DE-IDENTIFIES mid-tick. Continuity makes dt a deterministic ~60 s
+    # per _tick on every platform.
+    coord._clock = _FakeClock(time.monotonic())
     _make_identified(coord._ekf)
     return coord
 
