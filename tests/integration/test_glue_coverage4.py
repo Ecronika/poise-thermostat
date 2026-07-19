@@ -6,7 +6,9 @@
 - the coordinator's weather-forecast fetch used by optimal-start (ADR-0025) and
   its degrade-to-fallback path.
 - the small scalar read helpers (sensor age / capability / device-max / sun
-  elevation) that a fresh tick does not otherwise reach.
+  elevation) that a fresh tick does not otherwise reach — since phase 4 they
+  live in ``ha.input_reader.InputReader``; exercised here through the
+  coordinator's reader instance (and the public ``capability`` property).
 
 CI-only: needs a modern HA runtime (see conftest); the sandbox HA 2023.7 skips.
 """
@@ -228,14 +230,16 @@ async def test_coordinator_scalar_read_helpers(hass: HomeAssistant) -> None:
     entry = await _setup(hass, _base())
     coord = entry.runtime_data
 
+    # phase 4: the scalar read helpers live in the coordinator's InputReader
+    reader = coord._input_reader
     # a missing sensor has no change-age
-    assert coord._sensor_age("sensor.ghost") is None
+    assert reader.sensor_age("sensor.ghost") is None
     # an actuator that reports no hvac_modes/max_temp -> heat-only + default max
-    coord._actuator = "climate.ghost"
-    assert coord._capability() == (True, False)
-    assert isinstance(coord._device_max(), float)
+    hass.states.async_set("climate.trv", "heat", {})
+    assert coord.capability == (True, False)  # public property -> reader
+    assert isinstance(reader.device_max(), float)
     # sun elevation attribute (present -> float, absent -> None)
     hass.states.async_set("sun.sun", "above_horizon", {"elevation": 30.0})
-    assert coord._sun_elevation() == 30.0
+    assert reader.sun_elevation() == 30.0
     hass.states.async_set("sun.sun", "above_horizon", {})
-    assert coord._sun_elevation() is None
+    assert reader.sun_elevation() is None
