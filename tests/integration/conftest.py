@@ -19,6 +19,36 @@ Run them (CI, or locally on Python >= 3.12):
 
 from __future__ import annotations
 
+import sys
+
+if sys.platform == "win32":  # pragma: no cover - Windows dev machines only
+    # pytest-socket (enforced per-test by pytest-homeassistant-custom-component)
+    # blocks bare socket creation. On Linux asyncio builds its event-loop
+    # self-pipe from an AF_UNIX socketpair, which the guard exempts; Windows
+    # has no AF_UNIX socketpair, so CPython's fallback creates AF_INET
+    # sockets and every ``new_event_loop()`` dies with SocketBlockedError.
+    # Route only ``socket.socketpair`` through the unguarded socket class —
+    # test-visible socket blocking stays fully active.
+    import socket as _socket_mod
+
+    _orig_socketpair = _socket_mod.socketpair
+
+    def _unguarded_socketpair(*args: object, **kwargs: object) -> object:
+        try:
+            import pytest_socket
+
+            true_socket = pytest_socket._true_socket
+        except (ImportError, AttributeError):
+            return _orig_socketpair(*args, **kwargs)
+        guarded = _socket_mod.socket
+        _socket_mod.socket = true_socket
+        try:
+            return _orig_socketpair(*args, **kwargs)
+        finally:
+            _socket_mod.socket = guarded
+
+    _socket_mod.socketpair = _unguarded_socketpair  # type: ignore[assignment]
+
 try:  # HA must be new enough for the 2024.x+ APIs this integration uses
     from homeassistant.config_entries import ConfigFlowResult  # noqa: F401
 
