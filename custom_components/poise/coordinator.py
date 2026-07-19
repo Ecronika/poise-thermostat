@@ -174,6 +174,8 @@ from .multi.discovery import EntitySnapshot
 from .multi.model import DeviceHealth, Direction
 from .multi.resolvers import ThermalDemand
 from .multi.shadow import evaluate_thermal_shadow
+from .persistence import codec as _codec
+from .persistence.migrations import migrate_v0_bare_ekf
 from .runtime.config import (
     HoldTuning,
     HotApplyConfig,
@@ -802,175 +804,32 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             raise ConfigEntryNotReady(
                 f"Poise {self.zone_name}: could not load persisted state"
             ) from err
-        # Corruption recovery (narrowly scoped): restore the cheap user-intent keys
-        # FIRST and each defensively, so a later failure in the heavier learned-model
-        # from_dict parsing cannot lose enabled / preset / override / mode.
+        # Corruption recovery (narrowly scoped): the store FORMAT is owned by
+        # ``persistence.codec`` (phase 3). ``decode()`` reproduces the pinned
+        # restore gate (``isinstance(data, dict) and "ekf" in data``), the
+        # per-key defensive coercions, the hold gates and the sequential
+        # prefix parse of the model tail, so the cheap user-intent keys can
+        # never be lost to a failure in the heavier learned-model parsing
+        # (finding 10). The DOMAIN restore semantics (echo re-stamping, F7
+        # expiry recompute, section application order) stay here, in
+        # ``_apply_decoded_state``.
         try:
-            if isinstance(data, dict) and "ekf" in data:
-                self._enabled = bool(data.get("enabled", True))
-                try:
-                    self._preset = OverrideMode(data.get("preset", "none"))
-                except ValueError:
-                    self._preset = OverrideMode.NONE
-                ov = data.get("override")
-                self._override = float(ov) if isinstance(ov, (int, float)) else None
-                # K2: restore a manual mode-hold (shares the setpoint hold lifecycle
-                # restored below, so it expires on real elapsed wall-clock time).
-                mov = data.get("mode_override")
-                self._mode_override = mov if isinstance(mov, str) else None
-                # K2: the shared hold lifecycle is active if EITHER a setpoint or a
-                # mode hold was persisted (an ``off`` hold carries no setpoint).
-                _hold_active = (
-                    self._override is not None or self._mode_override is not None
-                )
-                # K3 (Inc 3): restore the hold's origin so "device"/"app" provenance
-                # survives a restart (only while a hold actually lives).
-                orr = data.get("override_reason")
-                self._override_reason = (
-                    orr if _hold_active and isinstance(orr, str) else None
-                )
-                # B5 (review v0.173.0-alpha §4.3): restore the adoption baseline, so
-                # a device-side intervention made right after a restart is adopted
-                # instead of classifying as ``no_baseline`` and being reverted by the
-                # next write. Note this is NOT gated on an active hold: the baseline
-                # describes the actuator, not the hold.
-                #
-                # Restoring ``_prev_device_*`` next to the command is what makes this
-                # safe rather than a regression: on the first tick a device that
-                # reports a constant offset to our command, or that simply never
-                # moved while HA was down, then still classifies as
-                # ``stable_offset`` / ``stable_prev`` instead of being grabbed as a
-                # phantom hold (the F1/F2 class from the v0.171.0 RC review). Without
-                # the prev-values the ``stable_*`` guard is skipped (None) and every
-                # offset device would self-adopt on every restart.
-                _lws = data.get("last_written_sp")
-                self._last_written_sp = (
-                    float(_lws) if isinstance(_lws, (int, float)) else None
-                )
-                _pds = data.get("prev_device_sp")
-                self._prev_device_sp = (
-                    float(_pds) if isinstance(_pds, (int, float)) else None
-                )
-                _lch = data.get("last_commanded_hvac")
-                self._last_commanded_hvac = _lch if isinstance(_lch, str) else None
-                _pdm = data.get("prev_device_mode")
-                self._prev_device_mode = _pdm if isinstance(_pdm, str) else None
-                # The echo windows are monotonic and process-local, so a persisted
-                # stamp would be nonsense after a restart. Semantically no echo can
-                # be in flight across one, so the window must read as long expired --
-                # ``_stale`` guarantees ``(now - ts) >= echo_window`` on the first
-                # tick, which is also the honest input for the ADR-0052 §4 nudge
-                # throttle (no write happened recently). Only stamped where a
-                # baseline actually exists, so ``no_baseline`` still wins otherwise.
-                _stale = self._clock.monotonic() - SETPOINT_ADOPT_ECHO_WINDOW_S * 2.0
-                if self._last_written_sp is not None:
-                    self._last_sp_write_ts = _stale
-                if self._last_commanded_hvac is not None:
-                    self._last_hvac_cmd_ts = _stale
-                # C5: restore the *wall-clock* set-time so the 2 h auto-revert
-                # measures real elapsed time and a hold cannot outlive a restart.
-                osw = data.get("override_set_wall")
-                self._override_set_wall = (
-                    float(osw)
-                    if _hold_active and isinstance(osw, (int, float))
-                    else None
-                )
-                # ADR-0059: restore the manual-hold + timed-Boost lifecycle on a
-                # wall-clock basis, each defensively, so a hold/Boost survives a
-                # restart and still expires on real elapsed time (review C5).
-                orq = data.get("override_requested")
-                self._override_requested = (
-                    float(orq)
-                    if self._override is not None and isinstance(orq, (int, float))
-                    else None
-                )
-                # F13: ``override_policy`` (like the rest of the ADR-0059 hold/Boost
-                # tuning) is a "hot-apply-fähig" config-entry OPTION, already correctly
-                # read from options/data by the shared config parser in ``__init__``
-                # -- restoring it from the persisted store here would silently revert
-                # a user's option change on every restart. Deliberately not restored.
-                oea = data.get("override_expires_at")
-                self._override_expires_at = (
-                    float(oea)
-                    if _hold_active and isinstance(oea, (int, float))
-                    else None
-                )
-                # ADR-0059 §1: restore the reason-accuracy flag (default False so
-                # a pre-upgrade hold degrades to "expired_timer", never crashes).
-                self._override_expiry_is_switchpoint = bool(
-                    data.get("override_expiry_is_switchpoint", False)
-                )
-                # F7: a hold persisted by a pre-ADR-0059 build (or one that otherwise
-                # lost its expiry) restores with ``_override_expires_at is None`` --
-                # not "permanent" but simply never computed. Recompute it now the same
-                # way a fresh override-set does, so the hold still expires on real
-                # elapsed time instead of silently running forever after a restart.
-                if (
-                    _hold_active
-                    and self._override_expires_at is None
-                    and self._override_set_wall is not None
-                ):
-                    self._override_expires_at = resolve_hold_expiry(
-                        policy=self._override_policy,
-                        set_at=self._override_set_wall,
-                        timer_h=self._override_timer_h,
-                        max_h=self._override_max_h,
-                        minutes_to_switchpoint=self._minutes_to_switchpoint(),
-                    )
-                try:
-                    bpp = data.get("boost_prev_preset")
-                    self._boost_prev_preset = (
-                        OverrideMode(bpp) if isinstance(bpp, str) else None
-                    )
-                except ValueError:
-                    self._boost_prev_preset = None
-                bea = data.get("boost_expires_at")
-                self._boost_expires_at = (
-                    float(bea) if isinstance(bea, (int, float)) else None
-                )
-                ostats = data.get("override_stats")
-                self._override_stats = (
-                    [r for r in ostats if isinstance(r, dict)][-50:]
-                    if isinstance(ostats, list)
-                    else []
-                )
-                self._window_bypass = bool(data.get("window_bypass", False))
-                cm = data.get("climate_mode")
-                if isinstance(cm, str):
-                    self._climate_mode = cm
-                # AR-11: restore the actuation latch so the teardown-park gate
-                # survives a restart.
-                self._has_actuated = bool(data.get("has_actuated", False))
-                # heavier learned-model parsing (a failure here must not lose the
-                # user intent already restored above)
-                self._ekf = ThermalEKF.from_dict(data["ekf"])
-                if isinstance(data.get("trm"), dict):
-                    self._trm_tracker = RunningMeanTracker.from_dict(data["trm"])
-                if isinstance(data.get("seasonless"), dict):
-                    self._seasonless = SeasonlessRate.from_dict(data["seasonless"])
-                if isinstance(data.get("window_auto"), dict):
-                    self._window_auto = WindowAutoState.from_dict(data["window_auto"])
-                if isinstance(data.get("multi_lifecycle"), dict):
-                    # ADR-0046 P2: restore the wall-clock lifecycle so a compressor
-                    # min-off keeps counting across a restart (conservative on a
-                    # skewed clock — a future stamp is clamped, never trusted long).
-                    self._multi_lifecycle = _lifecycle.from_dict(
-                        data["multi_lifecycle"], now=dt_util.utcnow().timestamp()
-                    )
-                if isinstance(data.get("outcome_stats"), dict):
-                    self._outcome_stats = OutcomeStats.from_dict(data["outcome_stats"])
-                if isinstance(data.get("regulation_quality"), dict):
-                    self._regq = RegulationQuality.from_dict(data["regulation_quality"])
-                if isinstance(data.get("ref_offset"), dict):
-                    self._ref_offset = OffsetEstimate.from_dict(data["ref_offset"])
-                if isinstance(data.get("tau_settle"), dict):
-                    self._tau_settle = TauSettle.from_dict(data["tau_settle"])
-                if isinstance(data.get("hdh_savings"), dict):
-                    self._hdh = HdhSavings.from_dict(data["hdh_savings"])
-                if isinstance(data.get("dry_active"), bool):
-                    self._dry_active = data["dry_active"]  # R9: survive restart
-            elif data is not None:
-                self._ekf = ThermalEKF.from_dict(data)  # legacy: bare EKF dict
+            decoded = _codec.decode(data, now_wall=dt_util.utcnow().timestamp())
+            if decoded.kind == "v1":
+                self._apply_decoded_state(decoded)
+                if decoded.model_error is not None:
+                    # A structural throw stopped the model parse mid-tail
+                    # (phase-0 Fall 2): every model parsed BEFORE the throwing
+                    # key was applied above, exactly like the pre-refactor
+                    # sequential restore. Re-raise the ORIGINAL exception into
+                    # the broad boundary below so the recovery log keeps its
+                    # old shape: ONE ``_LOGGER.exception`` record with the
+                    # caplog-pinned text, the exception class and traceback.
+                    raise decoded.model_error
+            elif decoded.kind == "legacy_bare_ekf":
+                # Legacy: bare EKF dict (persistence/migrations.py). "corrupt
+                # -> fresh" deliberately stays with the boundary below.
+                self._ekf = migrate_v0_bare_ekf(data)
         except Exception:  # noqa: BLE001 - corrupt state must not block setup
             _LOGGER.exception("Poise: failed to restore learned model; starting fresh")
         # cold-start prior (ADR-0004): seed beta_h from the seasonless estimate
@@ -990,6 +849,123 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # F2: vet the configured external-temp number once, now that _active_issues
         # has been re-adopted (F17) so a stale issue can be cleared on recovery.
         await self._validate_configured_ext_temp()
+
+    def _apply_decoded_state(self, decoded: _codec.DecodedPersistence) -> None:
+        """Apply a decoded v1 store onto the live attributes (phase 3).
+
+        The codec owns the FORMAT (gates and per-key coercions); this method
+        owns the DOMAIN restore semantics in today's order — user intent
+        first, the echo-window re-stamping next to the B5 baselines, the F7
+        expiry recompute against the CONFIG policy, the learned models last.
+        Fields the codec decoded as its "leave alone" sentinel (``None`` for
+        ``climate_mode``/``dry_active`` and the model fields) keep the fresh
+        ``__init__`` value in place.
+        """
+        user = decoded.user_state
+        hold = decoded.override_lifecycle
+        base = decoded.adoption_baselines
+        self._enabled = user.enabled
+        self._preset = user.preset
+        self._override = hold.override
+        # K2: a restored manual mode-hold shares the setpoint hold lifecycle,
+        # so it expires on real elapsed wall-clock time.
+        self._mode_override = hold.mode_override
+        # K3 (Inc 3): the hold's origin ("device"/"app" provenance) survives
+        # the restart only while a hold actually lives (gated in the codec).
+        self._override_reason = hold.override_reason
+        # B5 (review v0.173.0-alpha §4.3): the adoption baseline, so a
+        # device-side intervention made right after a restart is adopted
+        # instead of classifying as ``no_baseline`` and being reverted by the
+        # next write. NOT hold-gated: the baseline describes the actuator,
+        # not the hold. Restoring ``_prev_device_*`` next to the command is
+        # what keeps an offset device on ``stable_offset``/``stable_prev``
+        # instead of phantom-adopting on every restart (F1/F2, v0.171.0 RC).
+        self._last_written_sp = base.last_written_sp
+        self._prev_device_sp = base.prev_device_sp
+        self._last_commanded_hvac = base.last_commanded_hvac
+        self._prev_device_mode = base.prev_device_mode
+        # Echo-window re-stamping (domain hook, deliberately NOT codec): the
+        # echo windows are monotonic and process-local, so a persisted stamp
+        # would be nonsense after a restart. Semantically no echo can be in
+        # flight across one, so the window must read as long expired --
+        # ``_stale`` guarantees ``(now - ts) >= echo_window`` on the first
+        # tick, which is also the honest input for the ADR-0052 §4 nudge
+        # throttle (no write happened recently). Only stamped where a
+        # baseline actually exists, so ``no_baseline`` still wins otherwise.
+        _stale = self._clock.monotonic() - SETPOINT_ADOPT_ECHO_WINDOW_S * 2.0
+        if self._last_written_sp is not None:
+            self._last_sp_write_ts = _stale
+        if self._last_commanded_hvac is not None:
+            self._last_hvac_cmd_ts = _stale
+        # C5/ADR-0059: the wall-clock hold + Boost lifecycle (hold-gated in
+        # the codec; ``override_requested`` carries the stricter setpoint-
+        # hold-only gate there).
+        self._override_set_wall = hold.override_set_wall
+        self._override_requested = hold.override_requested
+        # F13: ``hold.override_policy`` (the stored copy) is decoded for
+        # observability only and deliberately NOT applied -- it is a
+        # config-entry OPTION already read by the shared parser; applying it
+        # would silently revert a user's option change on every restart
+        # (``codec.CONFIG_OWNED_KEYS``).
+        self._override_expires_at = hold.override_expires_at
+        self._override_expiry_is_switchpoint = hold.override_expiry_is_switchpoint
+        # F7 (domain hook): a hold persisted by a pre-ADR-0059 build (or one
+        # that otherwise lost its expiry) restores with ``None`` -- not
+        # "permanent" but simply never computed. Recompute it now the same way
+        # a fresh override-set does (CONFIG policy + live schedule, never the
+        # store), so the hold still expires on real elapsed time.
+        if (
+            hold.hold_active
+            and self._override_expires_at is None
+            and self._override_set_wall is not None
+        ):
+            self._override_expires_at = resolve_hold_expiry(
+                policy=self._override_policy,
+                set_at=self._override_set_wall,
+                timer_h=self._override_timer_h,
+                max_h=self._override_max_h,
+                minutes_to_switchpoint=self._minutes_to_switchpoint(),
+            )
+        self._boost_prev_preset = hold.boost_prev_preset
+        self._boost_expires_at = hold.boost_expires_at
+        self._override_stats = hold.override_stats
+        self._window_bypass = user.window_bypass
+        if user.climate_mode is not None:
+            self._climate_mode = user.climate_mode
+        # AR-11: the actuation latch keeps the teardown-park gate across the
+        # restart.
+        self._has_actuated = user.has_actuated
+        # Heavier learned models AFTER the user intent (finding 10). ``None``
+        # (key absent/non-dict, or undecoded because the sequential model
+        # parse stopped at an earlier key -- surfaced via
+        # ``decoded.model_error``) keeps the fresh model from ``__init__``.
+        learn = decoded.learning
+        if learn.ekf is not None:
+            self._ekf = learn.ekf
+        if learn.trm_tracker is not None:
+            self._trm_tracker = learn.trm_tracker
+        if learn.seasonless is not None:
+            self._seasonless = learn.seasonless
+        if learn.window_auto is not None:
+            self._window_auto = learn.window_auto
+        if learn.multi_lifecycle is not None:
+            # ADR-0046 P2: the wall-clock lifecycle keeps a compressor min-off
+            # counting across a restart (future stamps were clamped against
+            # the ``now_wall`` anchor injected into ``decode``).
+            self._multi_lifecycle = learn.multi_lifecycle
+        diag = decoded.diagnostics
+        if diag.outcome_stats is not None:
+            self._outcome_stats = diag.outcome_stats
+        if diag.regq is not None:
+            self._regq = diag.regq
+        if learn.ref_offset is not None:
+            self._ref_offset = learn.ref_offset
+        if learn.tau_settle is not None:
+            self._tau_settle = learn.tau_settle
+        if diag.hdh is not None:
+            self._hdh = diag.hdh
+        if diag.dry_active is not None:
+            self._dry_active = diag.dry_active  # R9: survive restart
 
     async def async_apply_options(self, entry: ConfigEntry) -> None:
         """Apply changed tuning options in place, without a reload (A10).
@@ -1511,60 +1487,50 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         return ctx
 
     def _save_payload(self) -> dict[str, Any]:
-        return {
-            "ekf": self._ekf.to_dict(),
-            "trm": self._trm_tracker.to_dict(),
-            "seasonless": self._seasonless.to_dict(),
-            "window_auto": self._window_auto.to_dict(),
-            "multi_lifecycle": _lifecycle.to_dict(self._multi_lifecycle),
-            "outcome_stats": self._outcome_stats.to_dict(),
-            "regulation_quality": self._regq.to_dict(),
-            "ref_offset": (
-                self._ref_offset.to_dict() if self._ref_offset is not None else None
-            ),
-            "tau_settle": (
-                self._tau_settle.to_dict() if self._tau_settle is not None else None
-            ),
-            "hdh_savings": self._hdh.to_dict(),
-            # R9: the humidity dry-active latch is otherwise runtime-only, so a
-            # restart between 55-60 %RH drops the room out of dry mode until RH
-            # re-crosses 60 % (a behaviour jump, dual_smart #553). ``_window_open_
-            # since`` is deliberately NOT persisted here: it is a monotonic stamp
-            # (resets on restart) and would need a wall-clock rework to survive.
-            "dry_active": self._dry_active,
-            "window_bypass": self._window_bypass,
-            "preset": self._preset.value,
-            "enabled": self._enabled,
-            "override": self._override,
-            "mode_override": self._mode_override,  # K2: manual mode-hold
-            "override_set_wall": self._override_set_wall,
-            # ADR-0059 manual-hold + timed-Boost lifecycle (wall-clock; review C5).
-            "override_requested": self._override_requested,
-            "override_policy": self._override_policy,
-            "override_expires_at": self._override_expires_at,
-            "override_expiry_is_switchpoint": self._override_expiry_is_switchpoint,
-            "boost_expires_at": self._boost_expires_at,
-            "boost_prev_preset": (
-                self._boost_prev_preset.value
-                if self._boost_prev_preset is not None
-                else None
-            ),
-            "override_stats": self._override_stats,
-            "override_reason": self._override_reason,  # K3: persisted hold origin
-            # B5 (review v0.173.0-alpha §4.3): the adoption baseline is otherwise
-            # runtime-only, so the first device-side intervention after a restart has
-            # nothing to compare against and is silently reverted. Persist BOTH what
-            # we last commanded and what the device last reported -- the reported
-            # value is what makes the restored baseline safe (see the restore side).
-            # Timestamps are deliberately left out: they are monotonic and
-            # process-local, hence meaningless across a restart.
-            "last_written_sp": self._last_written_sp,
-            "prev_device_sp": self._prev_device_sp,
-            "last_commanded_hvac": self._last_commanded_hvac,
-            "prev_device_mode": self._prev_device_mode,
-            "climate_mode": self._climate_mode,
-            "has_actuated": self._has_actuated,  # AR-11: teardown-park gate
-        }
+        """The v1 store payload — the FORMAT is owned by ``persistence.codec``.
+
+        This adapter only snapshots today's attribute values into the typed
+        ``PersistedZoneState``; key set/order, the per-key transforms and the
+        deliberate omissions (monotonic stamps like ``_window_open_since`` and
+        the echo timestamps — B5/R9 — and any ``_pi`` state, finding 3) are
+        documented and pinned in the codec. ``override_policy`` is the CONFIG
+        value: stored for diagnostics, never applied on restore (F13).
+        """
+        return _codec.encode(
+            _codec.PersistedZoneState(
+                ekf=self._ekf,
+                trm_tracker=self._trm_tracker,
+                seasonless=self._seasonless,
+                window_auto=self._window_auto,
+                multi_lifecycle=self._multi_lifecycle,
+                ref_offset=self._ref_offset,
+                tau_settle=self._tau_settle,
+                outcome_stats=self._outcome_stats,
+                regq=self._regq,
+                hdh=self._hdh,
+                dry_active=self._dry_active,
+                enabled=self._enabled,
+                preset=self._preset,
+                climate_mode=self._climate_mode,
+                window_bypass=self._window_bypass,
+                has_actuated=self._has_actuated,
+                override=self._override,
+                mode_override=self._mode_override,
+                override_set_wall=self._override_set_wall,
+                override_requested=self._override_requested,
+                override_policy=self._override_policy,
+                override_expires_at=self._override_expires_at,
+                override_expiry_is_switchpoint=self._override_expiry_is_switchpoint,
+                boost_expires_at=self._boost_expires_at,
+                boost_prev_preset=self._boost_prev_preset,
+                override_stats=self._override_stats,
+                override_reason=self._override_reason,
+                last_written_sp=self._last_written_sp,
+                prev_device_sp=self._prev_device_sp,
+                last_commanded_hvac=self._last_commanded_hvac,
+                prev_device_mode=self._prev_device_mode,
+            )
+        )
 
     async def _maybe_save(self) -> None:
         self._save_counter += 1

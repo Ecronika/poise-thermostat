@@ -158,6 +158,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_OVERRIDE_MAX_H,
         CONF_OVERRIDE_END_ON_PRESENCE,
         CONF_ADOPT_EXTERNAL_SETPOINT,
+        CONF_ADOPT_EXTERNAL_MODE,
         CONF_BOOST_DURATION_MIN,
         # CONF_OVERRIDE_SUGGESTIONS is latent (L2/v2, ADR-0059) and intentionally
         # not exposed in the UI yet; kept in const.py for the future override
