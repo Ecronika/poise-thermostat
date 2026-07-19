@@ -47,6 +47,7 @@ source = ["custom_components/poise"]
 # sandbox cannot run (its Python 3.10 caps HA at 2023.7, < our 2025.1 APIs).
 omit = [
     "custom_components/poise/__init__.py",
+    "custom_components/poise/ha/*",
     "custom_components/poise/config_flow.py",
     "custom_components/poise/coordinator.py",
     "custom_components/poise/climate.py",
