@@ -1,7 +1,7 @@
-"""Parsed zone configuration contracts + the single config parser (phases 1-2).
+"""Parsed zone configuration contracts + the single config parser.
 
 ``ZoneConfig`` is the typed shape of one zone entry, split along the
-reload-vs-hot-apply boundary the coordinator already enforces (F14):
+reload-vs-hot-apply boundary the coordinator enforces:
 
 * ``ZoneStructure`` — the entity wiring (structural ``entry.data``): which
   sensors and which actuator make up the zone. A structural change means the
@@ -11,28 +11,24 @@ reload-vs-hot-apply boundary the coordinator already enforces (F14):
   ``entry.data``): comfort, schedule, override and guard parameters that
   ``async_apply_options`` may swap on a live coordinator.
 * ``HoldTuning`` — the ADR-0059 §1/§2 hold/Boost timing that has no
-  ``ZoneTuning`` slot (analysis Befund 5); parsed by the same parser as a
-  sibling structure.
+  ``ZoneTuning`` slot; parsed by the same parser as a sibling structure.
 
 Deliberately absent: ``climate_mode``. It is store-owned user intent (the
 user flips it at runtime and it must survive restarts), not configuration —
-it belongs to ``UserControlState`` (plan section 3).
+it belongs to ``UserControlState``.
 
-Phase 2 adds the parser (plan section 6, phase 2): ``ZoneConfig.from_entry``
-/ ``from_mappings`` (plus ``HoldTuning.from_entry`` / ``from_mappings``)
-reproduce today's config reads — ``__init__`` Z. 440-572,
-``_read_override_options`` Z. 672-688 and ``async_apply_options``
-Z. 1101-1178 — exactly, verified field by field (phase-2 analysis Befund 7:
-zero value drift between the two paths for all 31 both-path fields).
+``ZoneConfig.from_entry`` / ``from_mappings`` (plus ``HoldTuning.from_entry``
+/ ``from_mappings``) are the single parser feeding both ``__init__`` and
+``async_apply_options``, with no value drift between the two paths.
 ``HotApplyConfig`` is the hot-apply-path view of that parse: it reads NO
-structural key (the baseline ``async_apply_options`` never did), so an
-options submit can never raise ``MissingStructuralFieldError``. The
-module stays pure: ``ConfigEntryLike`` is a structural stand-in for
+structural key (``async_apply_options`` never did), so an options submit can
+never raise ``MissingStructuralFieldError``. The module stays pure:
+``ConfigEntryLike`` is a structural stand-in for
 ``homeassistant.config_entries.ConfigEntry``, so ``from_entry(entry)`` is
 type-safe without any Home Assistant import. Option defaults keep living in
-``const.py`` (or the owning pure module) and are resolved only by the
-parser — never by dataclass defaults here, so there is exactly one place a
-default can drift.
+``const.py`` (or the owning pure module) and are resolved only by the parser —
+never by dataclass defaults here, so there is exactly one place a default can
+drift.
 """
 
 from __future__ import annotations
@@ -137,14 +133,13 @@ class ConfigEntryLike(Protocol):
 
 
 class MissingStructuralFieldError(Exception):
-    """A required structural field is missing, empty or not a string (AR-34).
+    """A required structural field is missing, empty or not a string.
 
     Pure stand-in for ``homeassistant.exceptions.ConfigEntryError`` (this
-    module cannot import HA): the phase-2 coordinator wiring catches it and
-    re-raises ``ConfigEntryError`` with today's exact message — prefixed with
-    the entry id only the coordinator knows — so a corrupt entry still fails
-    setup cleanly (SETUP_ERROR + repair flow), never as an uncaught
-    ``KeyError`` (mirrors ``_require``, coordinator.py Z. 428-438).
+    module cannot import HA): the coordinator wiring catches it and re-raises
+    ``ConfigEntryError`` with the exact message — prefixed with the entry id
+    only the coordinator knows — so a corrupt entry still fails setup cleanly
+    (SETUP_ERROR + repair flow), never as an uncaught ``KeyError``.
     """
 
     def __init__(self, key: str) -> None:
@@ -155,18 +150,16 @@ class MissingStructuralFieldError(Exception):
 def _merged(data: Mapping[str, Any], options: Mapping[str, Any]) -> dict[str, Any]:
     """Options-over-data merge, exactly ``{**entry.data, **entry.options}``.
 
-    Today's read semantics on BOTH paths (``__init__`` Z. 425 and
-    ``async_apply_options`` Z. 1101): options win — also for structural keys
-    (Befund 4), so a hand-edited/legacy entry with structural keys in
-    ``options`` keeps behaving options-over-data.
+    Read semantics on BOTH paths: options win — also for structural keys — so
+    a hand-edited/legacy entry with structural keys in ``options`` keeps
+    behaving options-over-data.
     """
     return {**data, **options}
 
 
 def _require(merged: Mapping[str, Any], key: str) -> str:
-    # AR-34: a corrupt entry missing a structural field must fail setup
-    # cleanly, not crash — identical predicate to __init__'s ``_require``
-    # (Z. 428-438): missing, non-str or empty all reject.
+    # A corrupt entry missing a structural field must fail setup cleanly, not
+    # crash — missing, non-str or empty all reject.
     val = merged.get(key)
     if not isinstance(val, str) or not val:
         raise MissingStructuralFieldError(key)
@@ -175,20 +168,19 @@ def _require(merged: Mapping[str, Any], key: str) -> str:
 
 def _float_or_none(raw: Any) -> float | None:
     # The compressor timers have no get-default: absent stays None, anything
-    # else coerces — identical on both paths today (Z. 507-512 / 1119-1122).
+    # else coerces — identical on both paths.
     return float(raw) if raw is not None else None
 
 
 def _parse_dynamics_override(raw: Any) -> DeviceDynamics | None:
-    """Map the raw ``actuator_dynamics`` option onto the phase-1 typing.
+    """Map the raw ``actuator_dynamics`` option onto the typed profile.
 
-    Mirrors ``classify_dynamics``'s override handling exactly (ADR-0052,
-    dynamics.py Z. 107-111): falsy (``""``/``None``) or unknown values —
-    including the stored default ``"auto"`` — fall through to
-    auto-detection, i.e. ``None`` here; a valid ``DeviceDynamics`` value pins
-    the profile. Lossless per analysis Befund 6. The per-tick derivation of
-    ``_dynamics``/``_mpc_params``/PI profile stays in the coordinator
-    (``_run_once`` Z. 2139-2160) — deliberately NOT done at parse time.
+    Mirrors ``classify_dynamics``'s override handling exactly (ADR-0052):
+    falsy (``""``/``None``) or unknown values — including the stored default
+    ``"auto"`` — fall through to auto-detection, i.e. ``None`` here; a valid
+    ``DeviceDynamics`` value pins the profile. The per-tick derivation of
+    ``_dynamics``/``_mpc_params``/PI profile stays in the coordinator —
+    deliberately NOT done at parse time.
     """
     if not raw:
         return None
@@ -202,24 +194,14 @@ def _parse_dynamics_override(raw: Any) -> DeviceDynamics | None:
 class ZoneStructure:
     """Entity wiring of one zone (the structural ``entry.data`` reads).
 
-    Field <-> today's coordinator attribute (``__init__``):
-    ``zone_name`` <- ``zone_name``, ``temperature_sensor`` <- ``_temp``,
-    ``actuator`` <- ``_actuator``, ``trm`` <- ``_trm``,
-    ``outdoor`` <- ``_outdoor``, ``humidity`` <- ``_humidity``,
-    ``mrt`` <- ``_mrt``,
-    ``presence_home_entities`` <- ``_presence_home_entities``,
-    ``occupancy_entities`` <- ``_occupancy_entities``,
-    ``windows`` <- ``_windows``, ``weather`` <- ``_weather``,
-    ``irradiance`` <- ``_irradiance``, ``trv_ext_temp`` <- ``_trv_ext_temp``.
-
     Entity-list fields are tuples (immutable, so the snapshot can never be
-    mutated behind the runtime's back) instead of today's lists; optional
-    single entities are ``None`` when not configured.
+    mutated behind the runtime's back) instead of lists; optional single
+    entities are ``None`` when not configured.
     """
 
     zone_name: str
-    temperature_sensor: str  # required: the room sensor (AR-34 setup gate)
-    actuator: str  # required: the single-writer target (AR-34 setup gate)
+    temperature_sensor: str  # required: the room sensor (setup gate)
+    actuator: str  # required: the single-writer target (setup gate)
     trm: str | None  # running-mean outdoor sensor (EN 16798-1 t_rm)
     outdoor: str | None
     humidity: str | None
@@ -235,11 +217,10 @@ class ZoneStructure:
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneStructure:
         """Parse the wiring from the MERGED mapping (options over data).
 
-        Deliberately *not* ``from_data``: today ``__init__`` reads even the
-        structural fields from ``{**entry.data, **entry.options}`` (Z. 425),
-        so the parser must too (Befund 4). The three ``_require`` reads keep
-        ``__init__``'s order (name, temp, actuator — Z. 440/446/447) so the
-        first missing key reported is the same one as today.
+        Deliberately *not* ``from_data``: ``__init__`` reads even the
+        structural fields from ``{**entry.data, **entry.options}``, so the
+        parser must too. The three ``_require`` reads keep the name/temp/
+        actuator order, so the first missing key reported stays the same.
         """
         return cls(
             zone_name=_require(merged, CONF_NAME),
@@ -265,20 +246,19 @@ class ZoneTuning:
     """Hot-applyable tuning of one zone — everything ``async_apply_options``
     may change without a reload.
 
-    Field names are today's coordinator attributes minus the leading
-    underscore (``__init__`` Z. 299-587); the two non-trivial typings:
+    Field names are the coordinator attributes minus the leading underscore;
+    the two non-trivial typings:
 
-    * ``dynamics_override`` — typed as ``DeviceDynamics | None`` instead of
-      today's raw option string: ``None`` means auto-classify from the
-      actuator's capabilities, exactly the ``classify_dynamics`` semantics
-      where ``"auto"`` / any unknown string falls through to detection
-      (ADR-0052).
+    * ``dynamics_override`` — typed as ``DeviceDynamics | None`` instead of a
+      raw option string: ``None`` means auto-classify from the actuator's
+      capabilities, exactly the ``classify_dynamics`` semantics where
+      ``"auto"`` / any unknown string falls through to detection (ADR-0052).
     * ``adaptive_cool_cfg`` — the stored value is the tri-state selector
       string (``"auto"`` / ``"on"`` / ``"off"``) but legacy entries hold a
       boolean; ``adaptive_cool_mode`` normalises at the use site (ADR-0008).
 
     No ``climate_mode`` field by design: it is store-owned user intent, not
-    configuration (plan section 3, ``UserControlState``).
+    configuration (``UserControlState``).
     """
 
     window_auto_cfg: WindowAutoConfig  # ADR-0041 slope-based window detection
@@ -297,46 +277,43 @@ class ZoneTuning:
     thermal_shock_delta: float  # ADR-0051 max cooling raise per step [K]
     cool_hard_cap: float  # ADR-0051 absolute cooling-setpoint cap [degC]
     adaptive_cool_cfg: str | bool  # tri-state selector; legacy bool (ADR-0008)
-    cool_min_outdoor: float  # F4a cooling lockout below this outdoor [degC]
-    heat_max_outdoor: float  # F4a heating lockout above this outdoor [degC]
+    cool_min_outdoor: float  # cooling lockout below this outdoor [degC]
+    heat_max_outdoor: float  # heating lockout above this outdoor [degC]
     heat_lockout_enabled: bool
     cool_lockout_enabled: bool
     priority: float  # comfort weight / 100 -> [0, 1]
     schedule: ComfortSchedule  # ADR-0025 comfort windows + setback depth
     optimal_start: bool
-    # Coasts to the lower comfort edge before window end; today deliberately
-    # coupled to optimal_start (predictive scheduling), splittable later.
+    # Coasts to the lower comfort edge before window end; deliberately coupled
+    # to optimal_start (predictive scheduling), splittable later.
     optimal_stop: bool
-    adopt_external_setpoint: bool  # P1-4a: TRV wheel -> manual hold
-    adopt_external_mode: bool  # K2: IR remote -> manual mode-hold
+    adopt_external_setpoint: bool  # TRV wheel -> manual hold
+    adopt_external_mode: bool  # IR remote -> manual mode-hold
     operative_input: bool  # ADR-0029 operative-temperature input mode
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneTuning:
         """Parse the tuning from the MERGED mapping (options over data).
 
-        Every default and coercion below is today's — identical on both
-        paths where both paths read the field (Befund 7). Notable exactness:
+        Every default and coercion below is identical on both paths where both
+        paths read the field. Notable exactness:
 
         * ``window_auto_cfg``/``override_cfg``/``mpc_params`` are default-
-          constructed constants, never config-read (``__init__`` Z. 321/422/
-          501; analysis "skipped" (d) + Befund 6) — the per-tick derivation
+          constructed constants, never config-read — the per-tick derivation
           of dynamics/PI/MPC stays in the coordinator.
-        * ``adopt_external_setpoint``/``adopt_external_mode`` ARE parsed
-          (they are tuning fields), but today only ``__init__`` reads them —
-          ``async_apply_options`` never re-reads them (pre-existing drift,
-          Befunde 1+2). The phase-2 wiring must keep NOT hot-applying them;
-          fixing that drift is a separate, deliberate change.
-        * ``climate_mode`` is NOT parsed: store-owned user intent (AR-04,
-          coordinator Z. 1147-1150; plan section 3 / phase 2 ->
-          ``UserControlState``).
+        * ``adopt_external_setpoint``/``adopt_external_mode`` ARE parsed (they
+          are tuning fields), but only ``__init__`` reads them —
+          ``async_apply_options`` never re-reads them (pre-existing drift).
+          The wiring must keep NOT hot-applying them; fixing that drift is a
+          separate, deliberate change.
+        * ``climate_mode`` is NOT parsed: store-owned user intent
+          (``UserControlState``).
         """
         # Constants by design (never config-read); the presence eco delta is
-        # wired to the constant eco offset exactly like __init__ Z. 460-465.
+        # wired to the constant eco offset.
         override_cfg = OverrideConfig()
-        # AR-34 (F11): an unknown/corrupt category string must not throw —
-        # fall back to the norm default (identical guard on both paths,
-        # Z. 471-474 / 1141-1146).
+        # An unknown/corrupt category string must not throw — fall back to the
+        # norm default (identical guard on both paths).
         try:
             category = Category(merged.get(CONF_CATEGORY, "II"))
         except ValueError:
@@ -344,8 +321,8 @@ class ZoneTuning:
         delta = float(merged.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
         start = parse_hhmm(merged.get(CONF_COMFORT_START))
         end = parse_hhmm(merged.get(CONF_COMFORT_END))
-        # Guard identical to Z. 551-556 / 1170-1175, including the error
-        # path: an empty/invalid HH:MM parses to None -> always_comfort.
+        # An empty/invalid HH:MM parses to None -> always_comfort (guard
+        # identical on both paths, including the error path).
         schedule = (
             ComfortSchedule.from_windows([ComfortWindow(start, end)], delta)
             if start is not None and end is not None and delta > 0.0
@@ -372,7 +349,7 @@ class ZoneTuning:
                 price_eur_kwh=report_price_eur_kwh(
                     merged.get(CONF_PRICE_EUR_KWH),
                     # Reads the data-owned installation key source_policy out
-                    # of the merged mapping, exactly like today (Z. 493).
+                    # of the merged mapping.
                     merged.get(CONF_SOURCE_POLICY),
                     gas=DEFAULT_PRICE_GAS_EUR_KWH,
                     electric=DEFAULT_PRICE_EUR_KWH,
@@ -392,7 +369,7 @@ class ZoneTuning:
             ),
             cool_hard_cap=float(merged.get(CONF_COOL_HARD_CAP, DEFAULT_HARD_CAP_C)),
             # Deliberately no coercion (both paths keep the raw str|bool;
-            # resolve_adaptive_cool normalises per tick, Z. 2134-2136).
+            # resolve_adaptive_cool normalises per tick).
             adaptive_cool_cfg=merged.get(CONF_ADAPTIVE_COOL, DEFAULT_ADAPTIVE_COOL),
             cool_min_outdoor=float(
                 merged.get(CONF_COOL_MIN_OUTDOOR, DEFAULT_COOL_MIN_OUTDOOR_C)
@@ -400,7 +377,7 @@ class ZoneTuning:
             heat_max_outdoor=float(
                 merged.get(CONF_HEAT_MAX_OUTDOOR, DEFAULT_HEAT_MAX_OUTDOOR_C)
             ),
-            # F4a: the lockout toggles stay in lockstep on both paths.
+            # The lockout toggles stay in lockstep on both paths.
             heat_lockout_enabled=bool(
                 merged.get(CONF_HEAT_LOCKOUT_ENABLED, DEFAULT_HEAT_LOCKOUT_ENABLED)
             ),
@@ -412,7 +389,7 @@ class ZoneTuning:
             ),
             schedule=schedule,
             optimal_start=optimal_start,
-            optimal_stop=optimal_start,  # coupled by design (Z. 557-560)
+            optimal_stop=optimal_start,  # coupled by design
             adopt_external_setpoint=bool(
                 merged.get(
                     CONF_ADOPT_EXTERNAL_SETPOINT, DEFAULT_ADOPT_EXTERNAL_SETPOINT
@@ -428,18 +405,14 @@ class ZoneTuning:
 @dataclass(frozen=True, slots=True)
 class HoldTuning:
     """ADR-0059 §1/§2 hold/Boost timing — ``_read_override_options`` minus
-    ``override_policy`` (which the plan pins into ``ZoneTuning``).
+    ``override_policy`` (which is pinned into ``ZoneTuning``).
 
-    P2 structural decision (analysis Befund 5): phase 1 gave these four
-    coordinator attributes (``_override_timer_h`` / ``_override_max_h`` /
-    ``_override_end_on_presence`` / ``_boost_duration_min``, filled by
-    ``_read_override_options`` Z. 677-688 on both paths) no ``ZoneTuning``
-    slot, and the 27-field ``ZoneTuning`` contract is pinned by the plan
-    section-3 table and ``test_phase1_config``. They live in this sibling
-    structure ("erweiterte Struktur"), parsed with the identical merged-dict
-    semantics: the phase-2 wiring calls ``ZoneConfig.from_entry`` AND
-    ``HoldTuning.from_entry`` in both ``__init__`` and
-    ``async_apply_options``.
+    These four attributes (``override_timer_h`` / ``override_max_h`` /
+    ``override_end_on_presence`` / ``boost_duration_min``) have no
+    ``ZoneTuning`` slot, because the ``ZoneTuning`` field contract is pinned
+    (``test_phase1_config``). They live in this sibling structure, parsed with
+    the identical merged-dict semantics: the wiring calls
+    ``ZoneConfig.from_entry`` AND ``HoldTuning.from_entry`` on both paths.
     """
 
     override_timer_h: float  # §1 timer-policy hold length [h]
@@ -449,7 +422,7 @@ class HoldTuning:
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> HoldTuning:
-        """Parse the hold timing (defaults/coercions = Z. 677-688 exactly)."""
+        """Parse the hold timing (defaults/coercions identical on both paths)."""
         return cls(
             override_timer_h=float(
                 merged.get(CONF_OVERRIDE_TIMER_H, DEFAULT_OVERRIDE_TIMER_H)
@@ -482,13 +455,13 @@ class HoldTuning:
 
 @dataclass(frozen=True, slots=True)
 class ZoneConfig:
-    """One fully parsed zone entry: wiring + tuning (plan section 2).
+    """One fully parsed zone entry: wiring + tuning.
 
     ``from_entry`` / ``from_mappings`` are the single parser feeding both
-    ``__init__`` and ``async_apply_options`` (plan phase 2). The ADR-0059
-    hold timing rides alongside in ``HoldTuning`` (Befund 5 — the phase-1
-    field contracts of this class and ``ZoneTuning`` are pinned, so it
-    cannot nest here); wiring code must parse both.
+    ``__init__`` and ``async_apply_options``. The ADR-0059 hold timing rides
+    alongside in ``HoldTuning`` (the field contracts of this class and
+    ``ZoneTuning`` are pinned, so it cannot nest here); wiring code must parse
+    both.
     """
 
     structure: ZoneStructure
@@ -500,30 +473,24 @@ class ZoneConfig:
     ) -> ZoneConfig:
         """Parse one zone entry from its two config mappings.
 
-        Reproduces today's semantics exactly: one merged mapping (options
-        over data, also for structural keys — Befund 4), then the field
-        reads of ``__init__`` Z. 440-572 / ``async_apply_options``
-        Z. 1101-1178 (verified drift-free, Befund 7). Corrupt numeric
-        values raise out of ``float(...)`` exactly like today — but
-        atomically, before anything is applied. NOTE (Befund 3): with
-        ``async_apply_options`` rewired onto this parser, a corrupt value
-        fails the WHOLE hot-apply instead of tearing the tuning
-        mid-sequence (the baseline applied fields before the throwing line
-        and kept the rest old, without a refresh). That error-path change
-        is a deliberate consequence of the atomic parser — accepted in the
-        plan's phase-2 status box and pinned by the wiring test
-        ``test_phase2_config_paths.py::
+        One merged mapping (options over data, also for structural keys), then
+        the field reads of both paths (verified drift-free). Corrupt numeric
+        values raise out of ``float(...)`` — but atomically, before anything is
+        applied. A corrupt value therefore fails the WHOLE hot-apply instead of
+        tearing the tuning mid-sequence (the baseline applied fields before the
+        throwing line and kept the rest old, without a refresh). That
+        error-path change is a deliberate consequence of the atomic parser,
+        pinned by ``test_phase2_config_paths.py::
         test_corrupt_option_fails_hot_apply_atomically``.
 
-        Accepted marginal deviation (equivalence review 2026-07-19):
-        WITHIN one parse the order of throwing coercions differs from the
-        baseline — ``setback_delta`` coerces first here (the schedule guard
-        consumes it) while the baseline coerced it after all other tuning
-        floats. Observable only when >= 2 values are corrupt at once, and
-        then only in WHICH value the (identically typed and handled)
-        ``ValueError`` names. Unfixable exactly anyway: the baseline
-        ``__init__`` and ``async_apply_options`` orders differ from each
-        other, and one shared parser cannot reproduce both.
+        Accepted marginal deviation: WITHIN one parse the order of throwing
+        coercions differs from the baseline — ``setback_delta`` coerces first
+        here (the schedule guard consumes it) while the baseline coerced it
+        after all other tuning floats. Observable only when >= 2 values are
+        corrupt at once, and then only in WHICH value the (identically typed
+        and handled) ``ValueError`` names. Unfixable exactly anyway: the
+        baseline ``__init__`` and ``async_apply_options`` orders differ from
+        each other, and one shared parser cannot reproduce both.
         """
         merged = _merged(data, options)
         return cls(
@@ -539,27 +506,24 @@ class ZoneConfig:
 
 @dataclass(frozen=True, slots=True)
 class HotApplyConfig:
-    """Exactly what ``async_apply_options`` hot-applies (phase-2 wiring view).
+    """Exactly what ``async_apply_options`` hot-applies.
 
-    Equivalence contract (baseline ``async_apply_options`` Z. 1101-1178):
-    the hot-apply path reads NO structural key — ``_require`` never ran
-    there — so a merged mapping missing ``name``/``temp_sensor``/
-    ``actuator`` must still hot-apply the tuning cleanly instead of raising
-    ``MissingStructuralFieldError`` (reachable: a legacy/hand-edited entry
-    holds a structural key only in ``entry.options`` — supported, Befund 4 —
+    Equivalence contract: the hot-apply path reads NO structural key —
+    ``_require`` never ran there — so a merged mapping missing ``name``/
+    ``temp_sensor``/``actuator`` must still hot-apply the tuning cleanly
+    instead of raising ``MissingStructuralFieldError`` (reachable: a
+    legacy/hand-edited entry holds a structural key only in ``entry.options``,
     and an options-flow submit replaces ``options`` and drops the key while
     ``entry.data`` stays unchanged, so ``structural_unchanged`` still routes
     into the hot-apply). Only the two options-owned entity lists
-    (presence/occupancy, Befund 8) are re-read, via the never-throwing
-    ``as_entity_list`` — exactly the baseline's Z. 1124-1125.
+    (presence/occupancy) are re-read, via the never-throwing ``as_entity_list``.
 
-    Parse order is hold-before-tuning, mirroring the baseline's
-    ``_read_override_options``-first read on BOTH paths (Z. 426 / Z. 1102):
-    with several corrupt values at once the hold floats throw first, like
-    today. ``__init__`` does not use this parse (it needs the structure and
-    must keep its require-before-tuning throw order); it bundles its already
-    parsed pieces via ``from_zone_config`` so both paths still feed the ONE
-    apply method with the identical shape.
+    Parse order is hold-before-tuning, mirroring the
+    ``_read_override_options``-first read on BOTH paths: with several corrupt
+    values at once the hold floats throw first. ``__init__`` does not use this
+    parse (it needs the structure and must keep its require-before-tuning throw
+    order); it bundles its already parsed pieces via ``from_zone_config`` so
+    both paths still feed the ONE apply method with the identical shape.
     """
 
     tuning: ZoneTuning
@@ -607,24 +571,23 @@ class HotApplyConfig:
 def structures_equal(a: ZoneStructure, b: ZoneStructure) -> bool:
     """True when two wirings describe the same physical zone (field-wise).
 
-    Phase-2 basis for ``PoiseCoordinator.structural_unchanged`` (F14): a
-    structural change means the entry is reloading, so the in-place options
-    hot-apply must not run on the soon-to-be-discarded coordinator. Trivial
-    today (dataclass equality), but a named function so the
-    reload-vs-hot-apply decision has exactly one greppable seam.
+    Basis for ``PoiseCoordinator.structural_unchanged``: a structural change
+    means the entry is reloading, so the in-place options hot-apply must not
+    run on the soon-to-be-discarded coordinator. Trivial (dataclass equality),
+    but a named function so the reload-vs-hot-apply decision has exactly one
+    greppable seam.
 
-    WARNING (phase-2 analysis, structural_keys_verdict): this field-wise
-    comparison is NOT a drop-in replacement for today's predicate
-    ``dict(entry.data) == self._data_snapshot`` (Z. 1793-1800). Room
-    ``entry.data`` carries keys outside these 13 fields (the installation
-    keys ``controls_boiler``/``compressor_group``/``declared_power``/
+    WARNING: this field-wise comparison is NOT a drop-in replacement for the
+    predicate ``dict(entry.data) == self._data_snapshot``. Room ``entry.data``
+    carries keys outside these 13 fields (the installation keys
+    ``controls_boiler``/``compressor_group``/``declared_power``/
     ``design_flow_temp``/``source_policy``; on fresh v2.2 entries also
     ``comfort_base`` + ``category`` until their first reconfigure), whose
     changes must KEEP reading as structural (hot-apply skipped on the
     coordinator the reload is about to discard). Conversely
     ``presence_home_entities``/``occupancy_entities`` are options-owned and
-    hot-applied today, so they must stay OUT of any reload predicate. The
-    coordinator therefore keeps the data-dict comparison until that gap is
-    deliberately resolved.
+    hot-applied, so they must stay OUT of any reload predicate. The coordinator
+    therefore keeps the data-dict comparison until that gap is deliberately
+    resolved.
     """
     return a == b

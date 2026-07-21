@@ -1,15 +1,11 @@
-"""Listener reaction registry (refactoring plan, phase 1 + finding 7).
+"""Listener reaction registry.
 
 Classifies every zone input entity by how the coordinator reacts to one of
 its state changes: ``IMMEDIATE`` entities are subscribed via
 ``async_track_state_change_event`` and any real change requests a coalesced
-refresh (A6); everything else is only picked up by the next scheduled tick.
-The ``InputRegistry`` turns the watched set into an explicit, testable
-contract instead of an inline tuple in ``attach_listeners`` (coordinator.py
-line 1193).
-
-Phase-1 scope: pure types and builder only — ``attach_listeners`` keeps its
-inline list until the adapter is rewired against this registry (plan phase 6).
+refresh; everything else is only picked up by the next scheduled tick. The
+``InputRegistry`` turns the watched set into an explicit, testable contract
+instead of an inline tuple in ``attach_listeners``.
 """
 
 from __future__ import annotations
@@ -23,7 +19,7 @@ from typing import TypeAlias
 class Reaction(Enum):
     """How the coordinator reacts to a state change of an input entity."""
 
-    # Watched: a real state change requests a coalesced refresh (A6).
+    # Watched: a real state change requests a coalesced refresh.
     IMMEDIATE = "immediate"
     # Unwatched: the change is only observed by the next scheduled tick.
     NEXT_TICK = "next_tick"
@@ -38,10 +34,9 @@ class InputSpec:
     role: str
 
 
-# The zone's complete input contract — the phase-1 deliverable the plan names
-# ``InputRegistry``. A plain ordered tuple on purpose: order IS contract (the
-# IMMEDIATE entries appear in listener registration order) and the registry
-# is immutable once built. Phase-6 wiring accepts this nominal type.
+# The zone's complete input contract. A plain ordered tuple on purpose: order
+# IS contract (the IMMEDIATE entries appear in listener registration order) and
+# the registry is immutable once built.
 # noqa UP040: the `type` statement is 3.12-only; the pure CI gate runs on 3.10.
 InputRegistry: TypeAlias = tuple[InputSpec, ...]  # noqa: UP040
 
@@ -63,11 +58,11 @@ def build_input_registry(
 ) -> InputRegistry:
     """Build the zone's input registry from its configured entity ids.
 
-    The ``IMMEDIATE`` set is EXACTLY today's watched list — ``(temp,
-    *windows, actuator)`` with falsy ids skipped, in that order (coordinator
-    line 1193) — so the future listener wiring can consume the registry
-    verbatim without changing which changes trigger a refresh. Every other
-    input, including presence and occupancy, is ``NEXT_TICK``.
+    The ``IMMEDIATE`` set is EXACTLY the watched list — ``(temp, *windows,
+    actuator)`` with falsy ids skipped, in that order — so the listener wiring
+    consumes the registry verbatim without changing which changes trigger a
+    refresh. Every other input, including presence and occupancy, is
+    ``NEXT_TICK``.
     """
     specs: list[InputSpec] = []
     if temp:
@@ -79,11 +74,10 @@ def build_input_registry(
     )
     if actuator:
         specs.append(InputSpec(actuator, Reaction.IMMEDIATE, "actuator"))
-    # Finding 7 — conserved listener gap: a presence flip can end a hold the
-    # moment the tick sees it (coordinator lines 787-804), yet presence and
-    # occupancy entities are NOT watched (line 1193), so the reaction waits
-    # for the next tick. This registry pins that behaviour; promoting them to
-    # IMMEDIATE is behaviour fix F-PRESENCE and happens in phase 10 only.
+    # Conserved listener gap: a presence flip can end a hold the moment the
+    # tick sees it, yet presence and occupancy entities are NOT watched, so the
+    # reaction waits for the next scheduled tick. Promoting them to IMMEDIATE
+    # would be a behaviour change, out of scope here.
     specs.extend(
         InputSpec(entity_id, Reaction.NEXT_TICK, "presence_home")
         for entity_id in presence_entities
