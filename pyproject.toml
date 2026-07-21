@@ -53,7 +53,9 @@ omit = [
     "custom_components/poise/climate.py",
     "custom_components/poise/storage.py",
     "custom_components/poise/sensor.py",
-    "custom_components/poise/diagnostics.py",
+    # diagnostics/ is PURE (shadows/collector + package __init__); only the
+    # relocated HA platform hook stays glue-measured (was diagnostics.py).
+    "custom_components/poise/diagnostics/entry.py",
     "custom_components/poise/hub_coordinator.py",
     "custom_components/poise/binary_sensor.py",
     "custom_components/poise/switch.py",
