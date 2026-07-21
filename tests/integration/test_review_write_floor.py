@@ -244,7 +244,9 @@ async def test_p2_8_heating_failure_is_a_repair_issue(hass: HomeAssistant) -> No
     reg = ir.async_get(hass)
     issue_id = f"heating_failure_{coord._entry_id}"
 
-    await coord._notify_failure(True)
+    # Phase 6a (S4): ``_notify_failure`` is a synchronous checkpoint emission
+    # now (the old await had a purely synchronous body — same behaviour).
+    coord._notify_failure(True)
     assert reg.async_get_issue(DOMAIN, issue_id) is not None
-    await coord._notify_failure(False)
+    coord._notify_failure(False)
     assert reg.async_get_issue(DOMAIN, issue_id) is None
