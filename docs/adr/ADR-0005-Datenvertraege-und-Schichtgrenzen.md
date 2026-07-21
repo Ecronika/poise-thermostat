@@ -31,3 +31,11 @@ Muster (DI, ABC, frozen dataclass) sind Allgemeingut; eigenständige Umsetzung, 
 
 ## Verknüpfungen
 Konkretisiert ADR-0002 (`RCModel` ist Teil von `ThermalState`). Fundament für ADR-0006 (Tick ruft die Schichten in Vertragsreihenfolge). Folge: Vertrags-Schemaversionierung (gehört zu ADR-0007).
+
+## Nachtrag (2026-07-21, Phase-9-Refactoring-Migration): `AdoptReason`-Serialisierungs-Stabilität — plain-`str` an der Schichtgrenze, Enum nur als Registry
+
+**Invariante (test-gepinnt).** Über die Schichtgrenze `coordinator.data["mode_adopt_reason"]`/`["sp_adopt_reason"]` und in den Store fließen **plain `str`**, keine Enum-Member. `control.external_override.AdoptReason` (ein expliziter `str`+`Enum`, StrEnum-äquivalent) ist bewusst ein **Vokabular-Registry** dieser Reason-Codes, **nicht** der Laufzeit-Werttyp: die verlagerten Stage-Bodies produzieren weiter verbatim plain `str`, und der Frozen-Datenvertrag (`TickOutcome`/`coordinator.data`) trägt `str`, nicht das Enum.
+
+**Warum kein Enum durch den Datenvertrag.** Enum-Member durch `coordinator.data`/Store zu fädeln würde auf `Enum.__format__`-Semantik reiten, die sich über Python 3.10→3.12/3.13 verschoben hat. Die **pure Suite läuft 3.10, die HA-Suite 3.13** — plain Strings sind die **eine** auf beiden beweisbar identische Repräsentation. Die Enum-Member serialisieren zeichen-exakt wie die historischen plain Strings (`__str__`/`__format__` auf `str` gepinnt; JSON dumpt den `str`-Inhalt), gesichert durch `tests/test_phase7_tracker.py`; die Whitelist im Registry hält die Vokabular-Menge ehrlich, ohne den Wertfluss zu ändern.
+
+Dies ist ein konkretes Beispiel der Grundregel dieses ADR (frozen, schmale, versions-stabile Werttypen an Schichtgrenzen — keine Repräsentation, deren Bytes von der Laufzeitumgebung abhängen). **Code-Ort:** `control/external_override.py::AdoptReason`.

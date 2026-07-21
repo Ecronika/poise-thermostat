@@ -33,3 +33,14 @@ Allgemeingültige Muster, eigenständig umgesetzt; generisch.
 
 ## Verknüpfungen
 Ruft die Schichten aus ADR-0005 in Vertragsreihenfolge. Liefert die Zeitbasis für ADR-0007 (Bootstrap/Timer) und ADR-0009 (Update-Intervalle/Gates).
+
+## Nachtrag (2026-07-21, Phase-9-Refactoring-Migration): I/O-Positionen unter dem Tick-Lock zählen in `tick_ms`
+
+Zwei I/O-Operationen liegen bewusst **innerhalb** des atomaren Tick-Locks, sodass ihre Wandzeit in die gemessene `tick_ms`/`TickBudget`-Dauer (ADR-0020) einfließt:
+
+- **Trace-Append = letztes Statement unter dem Lock.** `await self._trace_recorder.append(...)` bleibt die **letzte beobachtbare Anweisung** des Ticks unter dem Lock, ihre I/O-Dauer zählt in `tick_ms` (Befund 5). Der Record-**Bau** ist rein nach `diagnostics/trace.py` verlagert, der **Call-Site** (inkl. der schluckenden `except` + DEBUG-Log „Poise trace capture failed") bleibt im Coordinator — ein Build-Fehler wird weiter geschluckt, der Tick lebt.
+- **Forecast-`await` an fixer Position.** Der Forecast-Handshake (`await self._forecast_outdoor(...)`) läuft an **exakt heutiger Position** unter dem Lock, unter exakt heutiger Bedingung (`forecast_request` existiert genau dann, wenn das `predictive`-Gate hielt), mit tick-aktuellem Lead-Horizont und heutigem Fallback. Der `await` bleibt im Adapter, sodass die reine Prepare-Phase selbst kein I/O ausführt.
+
+**Entkopplung erst Phase 10.** Beide Positionen sind gefroren, bis F-TRACEIO (Queue + `flush_on_unload()`) bzw. F-FORECAST (Forecast aus dem Lock) sie bewusst verschieben — danach misst `tick_ms` bewusst nur noch den Kontrollpfad (dokumentierte Diagnose-Änderung).
+
+**⚠️ Nicht test-gepinnt (nur Testebene B).** Die reine Purity des Record-Baus ist von `tests/test_phase8_trace.py` abgedeckt; die **Timing-Position selbst** (Append als letztes Statement unter dem Lock, Dauer zählt in `tick_ms`) hat **keinen** dedizierten Unit-Test — sie ist nur durch den semantischen Trace-Vergleich der Testebene B abgesichert. Beim Kommentar-Cleanup darf dieses „Warum" daher **nicht** als redundant-zu-einem-Test gelöscht werden; die Invariante lebt allein in diesem ADR + Testebene B.
