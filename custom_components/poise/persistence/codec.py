@@ -1,59 +1,56 @@
-"""Storage-format codec for one Poise zone (refactoring plan, phase 3).
+"""Storage-format codec for one Poise zone.
 
-Single owner of the persisted store FORMAT: :func:`encode` produces exactly
-today's ``PoiseCoordinator._save_payload`` dict and :func:`decode` reproduces
-the restore-side parsing of ``async_bootstrap`` — including its deliberate
-gates and non-restores — as independently robust sections.  Pure: stdlib +
-poise pure modules only, no Home Assistant import.
+Single owner of the persisted store FORMAT: :func:`encode` produces the v1
+payload dict and :func:`decode` reproduces the restore-side parsing —
+including its deliberate gates and non-restores — as independently robust
+sections.  Pure: stdlib + poise pure modules only, no Home Assistant import.
 
 Format versions (no explicit version field — deliberate, the gate is pinned
 by ``test_store_without_ekf_key_is_legacy_branch``):
 
-* **v1** — a dict WITH an ``"ekf"`` key (today's ``_save_payload`` shape).
-  The restore gate is exactly ``isinstance(data, dict) and "ekf" in data``:
-  a dict store WITHOUT the ``ekf`` key does NOT restore the user-intent keys
-  either, even if they are present — it is classified ``legacy_bare_ekf``.
-* **v0** (``legacy_bare_ekf``) — any other non-``None`` payload, historically
-  a bare ``ThermalEKF.to_dict()``.  Parsing lives in
+* **v1** — a dict WITH an ``"ekf"`` key.  The restore gate is exactly
+  ``isinstance(data, dict) and "ekf" in data``: a dict store WITHOUT the
+  ``ekf`` key does NOT restore the user-intent keys either, even if they are
+  present — it is classified ``legacy_bare_ekf``.
+* **v0** (``legacy_bare_ekf``) — any other non-``None`` payload, a bare
+  ``ThermalEKF.to_dict()``.  Parsing lives in
   :func:`..persistence.migrations.migrate_v0_bare_ekf`; "corrupt -> fresh"
-  stays with the caller (today: the coordinator's broad restore boundary).
+  stays with the caller (the coordinator's broad restore boundary).
 
-Deliberate non-restores / never-in-schema (bound findings, phase 0):
+Deliberate non-restores / never-in-schema:
 
-* ``override_policy`` is stored but NEVER applied on restore (F13): it is a
-  config-owned hot-apply option — restoring it would silently revert a user's
-  options change on every restart.  :func:`decode` still surfaces the stored
-  value, marked via :data:`CONFIG_OWNED_KEYS`.
-* Monotonic timestamps are never in the schema: ``_last_sp_write_ts`` /
-  ``_last_hvac_cmd_ts`` (B5 — the restore side replaces them with the
-  echo-window "stale" stamping, a DOMAIN hook in the coordinator, not codec)
-  and ``_window_open_since`` (R9 comment in the save payload).
-* ``_pi`` / ``_pi.acc`` has no schema key (finding 3, F-PIACC phase 10).
+* ``override_policy`` is stored but NEVER applied on restore (ADR-0007): a
+  config-owned hot-apply option — restoring it would revert a user's options
+  change on every restart.  :func:`decode` still surfaces the stored value,
+  marked via :data:`CONFIG_OWNED_KEYS`.  Pinned by
+  ``test_override_policy_option_change_survives_restart``.
+* Monotonic timestamps are never in schema (B5, ADR-0059 §9 / ADR-0007): the
+  restore side stamps echo windows stale — a coordinator DOMAIN hook, not
+  codec.  Covers ``_last_sp_write_ts`` / ``_last_hvac_cmd_ts`` and
+  ``_window_open_since``.
+* ``_pi`` / ``_pi.acc`` has no schema key.
 * All presence/safety/latch/anchor attributes: their runtime groups declare
   ``PERSISTED_FIELDS = frozenset()``.
 
 Domain-restore hooks that deliberately do NOT live here (coordinator /
-future ``ZoneRuntime.restore()``): echo-window stale stamping, the F7
+``ZoneRuntime.restore()``): echo-window stale stamping, the
 ``resolve_hold_expiry`` recompute, EKF cold-start seeding, configured
-ext-temp vetting (F2) and issue re-adoption (F17).  The wall-clock anchor the
+ext-temp vetting and issue re-adoption.  The wall-clock anchor the
 ``multi_lifecycle`` restore needs is injected explicitly as ``now_wall``.
 
-Error semantics of :func:`decode` (phase-3 contract, behaviour-equivalent
-to the pre-refactor monolithic restore): the cheap sections (user state,
-override lifecycle, adoption baselines) use today's per-key defensive
-coercions and can never fail on JSON-typed input; the heavy model tail
-(learned models + diagnostic accumulators) is ONE sequential prefix parse
-in exactly the old restore order — ``ekf`` -> ``trm`` -> ``seasonless`` ->
-``window_auto`` -> ``multi_lifecycle`` -> ``outcome_stats`` ->
-``regulation_quality`` -> ``ref_offset`` -> ``tau_settle`` ->
-``hdh_savings`` -> ``dry_active``.  The FIRST structural throw stops the
-parse: every model parsed before the throwing key is kept, every later
-field stays undecoded (``None``), exactly like the old sequential
-assignments (finding 10), and can never cost the user-intent sections.
-The original exception is surfaced as ``DecodedPersistence.model_error``
-so the caller can re-raise it into its broad restore boundary — "corrupt
--> fresh" AND the single recovery log record stay with the caller, as
-today.
+Error semantics of :func:`decode`: the cheap sections (user state, override
+lifecycle, adoption baselines) use per-key defensive coercions and can never
+fail on JSON-typed input; the heavy model tail (learned models + diagnostic
+accumulators) is ONE sequential prefix parse in a fixed restore order —
+``ekf`` -> ``trm`` -> ``seasonless`` -> ``window_auto`` -> ``multi_lifecycle``
+-> ``outcome_stats`` -> ``regulation_quality`` -> ``ref_offset`` ->
+``tau_settle`` -> ``hdh_savings`` -> ``dry_active``.  The FIRST structural
+throw stops the parse: every model parsed before the throwing key is kept,
+every later field stays undecoded (``None``), and it can never cost the
+user-intent sections.  The original exception is surfaced as
+``DecodedPersistence.model_error`` so the caller can re-raise it into its
+broad restore boundary — "corrupt -> fresh" AND the single recovery log
+record stay with the caller.
 """
 
 from __future__ import annotations
@@ -74,7 +71,7 @@ from ..estimation.thermal_ekf import ThermalEKF
 from ..multi import lifecycle as _lifecycle
 from ..multi.lifecycle import DeviceLifecycle
 
-# The exact v1 payload key set, in today's ``_save_payload`` insertion order.
+# The v1 payload key set, in insertion order (the wire order of the dict).
 # 31 keys = the 30-field union of the ``PERSISTED_FIELDS`` constants in
 # ``runtime/state.py`` (three storage-key renames, see STORAGE_KEY_RENAMES)
 # plus the config-owned ``override_policy`` special case.
@@ -120,7 +117,7 @@ STORAGE_KEY_RENAMES: Final[dict[str, str]] = {
     "hdh": "hdh_savings",
 }
 
-# Payload keys that are stored but must NEVER be applied on restore (F13):
+# Payload keys that are stored but must NEVER be applied on restore:
 # ``override_policy`` is a config-entry option (``ZoneTuning``), already read
 # by the config parser — applying the stored copy would revert an options
 # change on every restart.  Pinned by
@@ -137,7 +134,7 @@ class PersistedZoneState:
     Field names follow the ``runtime/state.py`` groups (leading underscore of
     the coordinator attribute dropped); the three storage-key renames are in
     :data:`STORAGE_KEY_RENAMES`.  ``override_policy`` is the CONFIG value
-    (stored for diagnostics, never restored — F13).
+    (stored for diagnostics, never restored).
     """
 
     # learning (LearningRuntime + WindowRuntime + CompressorRuntime)
@@ -159,31 +156,31 @@ class PersistedZoneState:
     climate_mode: str
     window_bypass: bool
     has_actuated: bool
-    # override lifecycle (UserControlState, ADR-0059/K2/K3)
+    # override lifecycle (UserControlState, ADR-0059)
     override: float | None
     mode_override: str | None
     override_set_wall: float | None
     override_requested: float | None
-    override_policy: str  # config-owned; stored, never restored (F13)
+    override_policy: str  # config-owned; stored, never restored
     override_expires_at: float | None
     override_expiry_is_switchpoint: bool
     boost_expires_at: float | None
     boost_prev_preset: OverrideMode | None
     override_stats: list[dict[str, Any]]
     override_reason: str | None
-    # adoption baselines (ExternalOverrideRuntime, B5)
+    # adoption baselines (ExternalOverrideRuntime, ADR-0059 §9)
     last_written_sp: float | None
     prev_device_sp: float | None
     last_commanded_hvac: str | None
     prev_device_mode: str | None
 
     def to_dict(self) -> dict[str, Any]:
-        """Exactly today's ``_save_payload`` dict (key set, transforms, values).
+        """The v1 store dict (key set, transforms, values).
 
         Timestamp keys are wall-clock only; the monotonic stamps
         (``_last_sp_write_ts``/``_last_hvac_cmd_ts``, ``_window_open_since``)
-        are deliberately absent (B5/R9), as is any ``_pi`` state (finding 3).
-        ``override_stats`` is passed by reference, like today.
+        are deliberately absent, as is any ``_pi`` state.
+        ``override_stats`` is passed by reference.
         """
         return {
             "ekf": self.ekf.to_dict(),
@@ -205,7 +202,7 @@ class PersistedZoneState:
             "preset": self.preset.value,
             "enabled": self.enabled,
             "override": self.override,
-            "mode_override": self.mode_override,  # K2: manual mode-hold
+            "mode_override": self.mode_override,  # manual mode-hold
             "override_set_wall": self.override_set_wall,
             "override_requested": self.override_requested,
             "override_policy": self.override_policy,
@@ -218,13 +215,13 @@ class PersistedZoneState:
                 else None
             ),
             "override_stats": self.override_stats,
-            "override_reason": self.override_reason,  # K3: hold origin
+            "override_reason": self.override_reason,  # hold origin
             "last_written_sp": self.last_written_sp,
             "prev_device_sp": self.prev_device_sp,
             "last_commanded_hvac": self.last_commanded_hvac,
             "prev_device_mode": self.prev_device_mode,
             "climate_mode": self.climate_mode,
-            "has_actuated": self.has_actuated,  # AR-11: teardown-park gate
+            "has_actuated": self.has_actuated,  # teardown-park gate
         }
 
 
@@ -237,10 +234,10 @@ def encode(state: PersistedZoneState) -> dict[str, Any]:
 class UserStateSection:
     """Cheap user-intent keys, restored FIRST and each defensively.
 
-    ``has_actuated`` (ActuatorRuntime, AR-11) is decoded here because today's
-    restore handles it on the same robust pre-model path.  ``climate_mode``
-    is the one no-fallback key: a non-``str`` payload value decodes to
-    ``None`` = "leave the ``__init__``/config value in place" (never a reset).
+    ``has_actuated`` (ActuatorRuntime) is decoded here on the same robust
+    pre-model path.  ``climate_mode`` is the one no-fallback key: a non-``str``
+    payload value decodes to ``None`` = "leave the ``__init__``/config value
+    in place" (never a reset).
     """
 
     enabled: bool = True
@@ -252,7 +249,7 @@ class UserStateSection:
 
 @dataclass(frozen=True, slots=True)
 class OverrideLifecycleSection:
-    """The shared setpoint/mode hold lifecycle (ADR-0059, K2/K3, C5).
+    """The shared setpoint/mode hold lifecycle (ADR-0059).
 
     ``hold_active`` is the derived gate ``override is not None or
     mode_override is not None``; ``override_reason`` / ``override_set_wall`` /
@@ -260,7 +257,7 @@ class OverrideLifecycleSection:
     ``override_requested`` is stricter: gated on ``override is not None``
     (setpoint hold ONLY — a pure mode-hold does not restore it).
     ``override_policy`` is decoded for observability but CONFIG-OWNED
-    (:data:`CONFIG_OWNED_KEYS`): the caller must never apply it (F13).
+    (:data:`CONFIG_OWNED_KEYS`): the caller must never apply it.
     """
 
     override: float | None = None
@@ -279,7 +276,7 @@ class OverrideLifecycleSection:
 
 @dataclass(frozen=True, slots=True)
 class AdoptionBaselinesSection:
-    """B5 adoption baselines — deliberately NOT hold-gated.
+    """Adoption baselines (ADR-0059 §9) — deliberately NOT hold-gated.
 
     The baseline describes the actuator, not the hold.  The monotonic echo
     stamps are not part of the schema; re-stamping the echo windows as
@@ -298,8 +295,8 @@ class LearningSection:
     """The learned models (heavy ``from_dict`` parsing, prefix-parsed).
 
     ``None`` means "not decoded" — either the key was absent/non-dict (keep
-    the fresh default, like today's ``isinstance`` guards) or the sequential
-    model parse stopped at an earlier key (see
+    the fresh default) or the sequential model parse stopped at an earlier key
+    (see
     ``DecodedPersistence.model_error``).  ``ekf`` is special: on the v1 path
     the key is guaranteed by the gate and parsed WITHOUT an ``isinstance``
     guard — ``ThermalEKF.from_dict`` recovers garbage VALUES itself (fresh
@@ -318,16 +315,16 @@ class LearningSection:
 
 @dataclass(frozen=True, slots=True)
 class DiagnosticsSection:
-    """Diagnostic accumulators + the R9 dry-active latch (restore tail).
+    """Diagnostic accumulators + the dry-active latch (restore tail).
 
-    ``dry_active`` sits here (not in the user section) because today's
-    restore handles it as the LAST key, after the learned models — its
-    strict ``isinstance(..., bool)`` check maps to ``None`` = "leave the
-    ``__init__`` value in place".  The fields are parsed INTERLEAVED with
-    the learning section, at their old restore positions
-    (``outcome_stats``/``regulation_quality`` between ``multi_lifecycle``
-    and ``ref_offset``; ``hdh_savings``/``dry_active`` at the very end), so
-    a mid-tail throw retains exactly the old prefix.
+    ``dry_active`` sits here (not in the user section) because restore handles
+    it as the LAST key, after the learned models — its strict
+    ``isinstance(..., bool)`` check maps to ``None`` = "leave the ``__init__``
+    value in place".  The fields are parsed INTERLEAVED with the learning
+    section, at their restore positions (``outcome_stats``/
+    ``regulation_quality`` between ``multi_lifecycle`` and ``ref_offset``;
+    ``hdh_savings``/``dry_active`` at the very end), so a mid-tail throw
+    retains the same prefix as a fully sequential parse.
     """
 
     outcome_stats: OutcomeStats | None = None
@@ -340,10 +337,10 @@ class DiagnosticsSection:
 class DecodedPersistence:
     """Sectionwise decode result; ``kind`` tells the caller what to apply.
 
-    ``kind == "v1"``: apply the sections (user intent first, like today).
+    ``kind == "v1"``: apply the sections (user intent first).
     ``kind == "legacy_bare_ekf"``: the store predates the v1 format (any
     non-``None`` payload without an ``"ekf"`` key) — NO section is decoded,
-    even if user-intent keys happen to be present (bound phase-0 finding 2);
+    even if user-intent keys happen to be present;
     parse via ``migrations.migrate_v0_bare_ekf``.
     ``kind == "empty"``: no persisted state (``None`` store) — fresh defaults.
     """
@@ -360,8 +357,7 @@ class DecodedPersistence:
     diagnostics: DiagnosticsSection = field(default_factory=DiagnosticsSection)
     # The ORIGINAL exception that stopped the sequential model parse (None =
     # clean parse).  The caller re-raises it into its broad restore boundary,
-    # reproducing the pre-refactor single ``_LOGGER.exception`` record (exact
-    # text, exception class and traceback).
+    # which owns the single ``_LOGGER.exception`` recovery record.
     model_error: Exception | None = None
 
 
@@ -385,7 +381,7 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
     override = float(ov) if isinstance(ov, (int, float)) else None
     mov = data.get("mode_override")
     mode_override = mov if isinstance(mov, str) else None
-    # K2: the shared hold lifecycle is active if EITHER a setpoint or a mode
+    # The shared hold lifecycle is active if EITHER a setpoint or a mode
     # hold was persisted (an ``off`` hold carries no setpoint).
     hold_active = override is not None or mode_override is not None
     orr = data.get("override_reason")
@@ -409,7 +405,7 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
             float(osw) if hold_active and isinstance(osw, (int, float)) else None
         ),
         # NOT ``hold_active``: a pure mode-hold does not restore the pre-clamp
-        # setpoint ask (today's gate is ``self._override is not None``).
+        # setpoint ask (the gate is ``override is not None``).
         override_requested=(
             float(orq)
             if override is not None and isinstance(orq, (int, float))
@@ -448,20 +444,20 @@ def _decode_adoption_baselines(data: dict[Any, Any]) -> AdoptionBaselinesSection
 def _decode_models(
     data: dict[Any, Any], *, now_wall: float
 ) -> tuple[LearningSection, DiagnosticsSection, Exception | None]:
-    """Sequential prefix parse of the model tail, in exactly the old order.
+    """Sequential prefix parse of the model tail, in a fixed order.
 
-    Reproduces the pre-refactor restore semantics (finding 10): each model
-    is committed as soon as it parses; the FIRST structural throw stops the
-    parse — everything before the throwing key stays decoded, everything
-    after it stays ``None`` — and the original exception is returned for
-    the caller's broad boundary ("corrupt -> fresh" + the recovery log).
+    Each model is committed as soon as it parses; the FIRST structural throw
+    stops the parse — everything before the throwing key stays decoded,
+    everything after it stays ``None`` — and the original exception is
+    returned for the caller's broad boundary ("corrupt -> fresh" + the
+    recovery log).
     """
     learn: dict[str, Any] = {}
     diag: dict[str, Any] = {}
     try:
         # Direct subscript, no isinstance guard — the key is guaranteed by the
         # v1 gate and ``from_dict`` self-recovers garbage values; a list-shaped
-        # payload raises out of the parse (phase-0 finding 2).
+        # payload raises out of the parse.
         learn["ekf"] = ThermalEKF.from_dict(data["ekf"])
         trm = data.get("trm")
         if isinstance(trm, dict):
@@ -474,7 +470,7 @@ def _decode_models(
             learn["window_auto"] = WindowAutoState.from_dict(wa)
         ml = data.get("multi_lifecycle")
         if isinstance(ml, dict):
-            # ADR-0046 P2: the wall-clock clamp anchor is injected explicitly
+            # ADR-0046: the wall-clock clamp anchor is injected explicitly
             # (the coordinator passes ``dt_util.utcnow().timestamp()``).
             learn["multi_lifecycle"] = _lifecycle.from_dict(ml, now=now_wall)
         ost = data.get("outcome_stats")
@@ -494,7 +490,7 @@ def _decode_models(
             diag["hdh"] = HdhSavings.from_dict(hdh)
         da = data.get("dry_active")
         if isinstance(da, bool):
-            # R9: strict bool check — anything else leaves the latch alone.
+            # strict bool check — anything else leaves the latch alone.
             diag["dry_active"] = da
     except Exception as err:  # first structural throw stops the parse
         return LearningSection(**learn), DiagnosticsSection(**diag), err
@@ -505,8 +501,8 @@ def decode(raw: object, *, now_wall: float) -> DecodedPersistence:
     """Decode a raw store payload: robust cheap sections + prefix model tail.
 
     ``raw`` is whatever ``store.load()`` returned (JSON-typed values); store
-    I/O errors are the caller's concern (AR-20 ``ConfigEntryNotReady`` — a
-    transient load failure must never be mistaken for "no saved state").
+    I/O errors are the caller's concern (``ConfigEntryNotReady`` — a transient
+    load failure must never be mistaken for "no saved state").
     ``now_wall`` is the wall-clock anchor for the ``multi_lifecycle``
     future-timestamp clamp (ADR-0046 §8).  A structural throw in the model
     tail stops the sequential parse and is surfaced as ``model_error`` (see
@@ -516,7 +512,7 @@ def decode(raw: object, *, now_wall: float) -> DecodedPersistence:
         return DecodedPersistence(kind="empty")
     if not (isinstance(raw, dict) and "ekf" in raw):
         # The pinned legacy gate: also a *dict* without the ``ekf`` key — its
-        # user-intent keys are deliberately NOT decoded (phase-0 finding 2).
+        # user-intent keys are deliberately NOT decoded.
         return DecodedPersistence(kind="legacy_bare_ekf")
     learning, diagnostics, model_error = _decode_models(raw, now_wall=now_wall)
     return DecodedPersistence(
