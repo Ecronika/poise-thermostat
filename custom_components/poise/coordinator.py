@@ -220,7 +220,7 @@ def _utcnow_ts() -> float:
     lifecycle functions read ``dt_util.utcnow()`` only on the paths that
     consult the clock (never, e.g., on a hold clear).
     """
-    return dt_util.utcnow().timestamp()
+    return float(dt_util.utcnow().timestamp())
 
 
 def _local_minute_now() -> int:
