@@ -70,7 +70,7 @@ rules:
 
   # ---------------- Gold ----------------
   devices: done  # DeviceInfo per zone + hub; via_device hub<->zone link wired (climate/sensor/switch -> coordinator.via_device_id) (review M9)
-  diagnostics: done  # diagnostics.py (redacted)
+  diagnostics: done  # diagnostics/entry.py (redacted)
   reconfiguration-flow: done
   repair-issues: done
   entity-category: done  # diagnostic sensors + config switch
