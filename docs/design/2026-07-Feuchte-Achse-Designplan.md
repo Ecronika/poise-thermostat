@@ -142,13 +142,38 @@ Damit ist das Feature für den Bestand ohne jede Zusatzhardware nutzbar — ein 
 | „Das kostet ca. X kWh / Y €" | ✅ mit Vorbehalt | aus **gemessener** Abkühl-Steigung (ADR-0041-Slope-Detektor), gelernter Aufheizrate und dem Preis-Helfer aus `control/hdh_savings.report_price_eur_kwh`; als Schätzung ausgewiesen |
 | „Lüfte N Minuten, dann ist die Feuchte weg" | ❌ | erfordert die **Luftwechselrate** — Poise misst sie nicht und darf sie nicht behaupten |
 | Lüfter/KWL schalten | ❌ | ADR-0048 §1/§2 — Poise besitzt keine lufttechnische Anlage (VDI 6022) |
-| Push-Benachrichtigung selbst versenden | ❌ (Entwurfsentscheidung) | s. B.5 |
+| Den Rat selbst anzeigen (HA-Benachrichtigung) | ✅ | s. B.5 — der von ADR-0048 §2 ausdrücklich erlaubte Nudge |
+| Push / TTS / Alexa selbst versenden | ❌ (Entwurfsentscheidung) | s. B.5 — Empfänger- und Zeitmodell, das Poise nicht besitzen will |
 
-### B.5 Benachrichtigungen — bewusst **nicht** in Poise
+### B.5 Benachrichtigung — im richtigen Kanal, ohne Empfängermodell
 
-Der Entwurf sieht **keinen** Notify-Pfad vor. Der Rat wird als Attribut (und optional als recorder-exkludierbare Diagnose-Entität, ADR-0049 §7 hat das Muster bereits entworfen) veröffentlicht; Push, TTS, Alexa und Timing baut sich der Nutzer mit einer dreizeiligen Automation oder einem der vorhandenen Blueprints darauf.
+**Ausgangspunkt:** Poise redet bereits direkt mit dem Nutzer — es erzeugt Repair-Issues **und löscht sie wieder** (`coordinator.py`, `hub_coordinator.py`, `__init__.py`) und feuert bereits ein Bus-Event (`poise_override_ended`). „Poise besitzt keine Zustellstrecke" wäre also kein Argument. Die Frage ist der **Kanal**, nicht das Ob.
 
-Gründe: Poise besäße sonst eine Zustellstrecke inklusive Ruhezeiten, Wiederholungslogik und Empfängerverwaltung — ein eigenes Produkt. Das dokumentierte Nutzer-Sentiment („nur melden, wenn etwas nicht stimmt", Auto-Lüftung „ging nach hinten los", ADR-0048) verlangt den *Zustand*, nicht den Kanal. Und die Blueprints, die den Kanal können, fehlen genau an der Stelle, an der Poise stark ist: der Begründung.
+Der Entwurf sieht **drei** Ausgänge vor, die alle billig sind und keiner davon ein Empfänger- oder Zeitmodell mitbringt:
+
+| Ausgang | Zweck |
+| --- | --- |
+| **`persistent_notification`, selbstlöschend** (opt-in, je Zone abschaltbar) | der eingebaute, sichtbare Kanal — erscheint in der HA-Glocke, ohne dass der Nutzer etwas baut |
+| **Bus-Event** `poise_ventilation_advice` (Muster: `poise_override_ended`) | erstklassiger Trigger für eigene Automationen |
+| **Diagnose-Entität** (State-Token, s. §11.2) | Trigger-Ziel für Blueprints und den Entity-Picker |
+
+**Warum `persistent_notification` der richtige Kanal ist** — er räumt genau die Kostenliste leer, die gegen eine Push-Strecke spricht:
+
+| Kostenpunkt einer Push-Strecke | mit `persistent_notification` |
+| --- | --- |
+| Empfängermodell (Poise ist pro **Zone** modelliert, `notify`-Ziele sind pro **Person**) | entfällt — die Notification hängt an der Instanz |
+| Ruhezeiten („Fenster öffnen" um 3 Uhr) | entfällt — sie klingelt nicht, sie erscheint |
+| Wiederholungs-/Eskalationspolitik | entfällt — dieselbe `notification_id` wird **ersetzt**, nie dupliziert |
+| stille Ausfälle (`notify.mobile_app_*` ändert die ID nach Handy-Neuinstallation) | entfällt — kein Zielobjekt, das verschwinden kann |
+| Testbarkeit | die Entscheidung bleibt pur; nur die Emission sitzt am Rand |
+
+**Das Alleinstellungsmerkmal ist das Zurückziehen.** Die Schließ-Empfehlung ist keine zweite Benachrichtigung, sondern das **Ersetzen bzw. Löschen der ersten** unter derselben `notification_id` — dasselbe Muster, das Poise mit `async_create_issue` / `async_delete_issue` schon fährt. Die Blueprints im Feld können das nur über Helper-Booleans und Timer nachstellen (siehe die `input_boolean`-Krücke bei [adamcornforth](https://github.com/adamcornforth/ha-open-window-blueprint)).
+
+**Bewusst nicht gebaut:** `notify`-Ziel-Konfiguration, Ruhezeiten, Wiederholungs-/Eskalationslogik, Quittierung/Snooze. Wer Push, TTS oder Alexa will, hängt drei Zeilen an Event oder Entität — und benutzt dafür die Blueprints, die diesen Kanal bereits gut können. Poise liefert, was dort fehlt: die **Begründung**.
+
+**Ebenfalls bewusst nicht:** den Rat als **Repair-Issue** führen. Repairs sind für System-/Konfigurationsprobleme gedacht, die der Nutzer beheben soll; ein wiederkehrender Lüftungshinweis würde die Repair-Liste verwässern und den Nutzer trainieren, Repairs zu ignorieren.
+
+**Unterdrückung bleibt innen.** Anwesenheit (ADR-0058), Belegung, Fensterzustand und Anlass-Gültigkeit entscheiden **in `ventilation_advise`**, ob überhaupt ein Rat entsteht — nicht im Kanal. Damit muss keine nachgelagerte Automation Zustandslogik nachbauen, die Poise ohnehin hat.
 
 ### B.6 Fenster-Rückkopplung (ADR-0041)
 
@@ -178,6 +203,8 @@ Alle Werte sind Diagnose-Attribute im Sinne von ADR-0016 — langsam veränderli
 
 Card-seitig: die **Feuchte-Lampe** bekommt den g/m³-Wert in Titel/`aria-label`; der Lüftungs-Rat wird ein **Chip** (Muster `override_clamped`), keine Lampe — er trägt Text, keine Messgröße.
 
+Außerhalb der Card (B.5): eine **Diagnose-Entität** mit `vent_action` als State-Token — bewusst **ohne** die schnell wechselnden Felder (`vent_delta_gm3`, Kosten) als eigene Attribute, die bleiben an der Climate-Entität. Dazu das Bus-Event `poise_ventilation_advice` mit `{zone, action, reason, delta_gm3}` und die selbstlöschende `persistent_notification` unter einer stabilen, zonenbezogenen `notification_id`.
+
 ---
 
 ## 6. Schichten und Refactor-Berührung
@@ -190,7 +217,8 @@ Card-seitig: die **Feuchte-Lampe** bekommt den g/m³-Wert in Titel/`aria-label`;
 | `diagnostics/shadows.py` → `compose_climate_band` | +Parameter, +Dict-Schlüssel | **die einzige Naht** — bereits eine reine Funktion |
 | `coordinator.py` | ausschließlich **Argument-Konstruktion** innerhalb des bestehenden einen `try` | minimal, additiv, keine neue Stage, kein neuer Fehlerbereich |
 | `climate.py` | Attribut-Allowlist erweitern | nein |
-| `runtime/config.py`, `const.py` | 1 optionales Sensor-Feld, optionale Schwellen | nein |
+| Emissions-Rand (B.5): `persistent_notification`, Bus-Event, Diagnose-Entität | **der einzige seiteneffektbehaftete Teil** — reine Funktion rein, Zustellung raus, keine Logik | nein, aber am besten *nach* dem Umbau verdrahten |
+| `runtime/config.py`, `const.py` | 1 optionales Sensor-Feld, optionale Schwellen, Notification-Opt-in | nein |
 | `trace/schema.py` | optionale Felder | nein |
 | `card/src/monitoring.ts`, `poise-card.ts`, `card-config.ts` | Verdict-Erweiterung + Chip + Config | nein |
 
@@ -202,8 +230,8 @@ Card-seitig: die **Feuchte-Lampe** bekommt den g/m³-Wert in Titel/`aria-label`;
 
 Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formulierung an einer Stelle und braucht deshalb **einen eigenen ADR**:
 
-- ADR-0048 §2 verbietet CO₂-getriebene Lüftungs-**Steuerung** und erlaubt den Hinweis ausdrücklich („CO₂ hoch — Fenster öffnen"). Regel 4 der Tabelle in B.2 ist genau dieser erlaubte Nudge — die Grenze ist aber bisher nur allgemein gezogen und sollte für einen strukturierten, begründeten Rat präzisiert werden.
-- Es entsteht **kein** Kommando: keine `fan`-Entität, kein `humidifier`, kein Service-Call. Der `assignment_planner` baut weiterhin ausschließlich `Axis.THERMAL`. `Axis.VENTILATION` bleibt tot und darf es bleiben — der Rat ist ein *Attribut*, keine Achse.
+- ADR-0048 §2 verbietet CO₂-getriebene Lüftungs-**Steuerung** und erlaubt den Hinweis ausdrücklich („CO₂ hoch — Fenster öffnen"). Regel 4 der Tabelle in B.2 ist genau dieser erlaubte Nudge — die Grenze ist aber bisher nur allgemein gezogen und sollte für einen strukturierten, begründeten Rat präzisiert werden. Dass der Nudge **sichtbar** wird (B.5), ist Teil desselben Satzes: ein Hinweis, den niemand sieht, ist kein Hinweis.
+- Es entsteht **kein** Kommando: keine `fan`-Entität, kein `humidifier`, kein Service-Call an ein Gerät. Der `assignment_planner` baut weiterhin ausschließlich `Axis.THERMAL`. `Axis.VENTILATION` bleibt tot und darf es bleiben — der Rat ist ein *Zustand* (Attribut, Entität, Event) plus eine HA-interne Anzeige, keine Achse. Der einzige Service-Call geht an `persistent_notification`, also an die HA-Oberfläche, nicht an Hardware.
 - Die Nicht-Ziele bleiben unangetastet: keine aktive Befeuchtung (§3), keine RLT-Hygiene (§1), kein Lüftungs-Bemessungsanspruch (§2).
 
 ---
@@ -217,6 +245,8 @@ Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formuli
 | keine Außenfeuchte | Feature B still inaktiv; Feature A unberührt |
 | kein CO₂-Sensor | Regel 4 entfällt, Rest unverändert |
 | Ausnahme in der Komposition | fällt mit dem bestehenden `climate_diag`-Block zusammen — **wichtig:** anders als beim Dry-Nudge ist der Fallback hier folgenlos, weil nichts aktuiert wird |
+| Ausnahme beim Zustellen (B.5) | darf den Tick nie berühren: der Rat bleibt als Zustand gültig, nur die Anzeige fehlt. Eine hängengebliebene Notification wird beim nächsten Zustandswechsel unter derselben `notification_id` ersetzt oder gelöscht — sie kann nicht dauerhaft falsch stehenbleiben |
+| Integration wird entladen / Zone entfernt | offene Notifications derselben `notification_id` werden aufgeräumt, analog zum bestehenden `async_delete_issue`-Pfad |
 
 Die Anzeige zeigt im Zweifel **nichts** statt etwas Falschem — dieselbe Linie wie die stillen Fallbacks in `monitoring.ts`.
 
@@ -227,7 +257,8 @@ Die Anzeige zeigt im Zweifel **nichts** statt etwas Falschem — dieselbe Linie 
 - Alles Fachliche ist rein → Unit-Tests ohne HA, wie `test_humidity.py` / `test_psychrometrics.py`.
 - **Property:** das Trockenheits-Verdict ist monoton in `w` (mehr Feuchte darf nie schlechter bewerten).
 - **Invariante:** `mold_risk` und `too_dry` schließen sich aus (B.2).
-- **Guard-Test** im Geist von `tests/test_non_goals.py`: weder das Trockenheits- noch das Lüftungs-Verdict darf in `humidity_decide`, `dual_setpoint` oder den Constraint-Solver gelangen; `ventilation_advise` erzeugt nie ein Kommando.
+- **Guard-Test** im Geist von `tests/test_non_goals.py`: weder das Trockenheits- noch das Lüftungs-Verdict darf in `humidity_decide`, `dual_setpoint` oder den Constraint-Solver gelangen; `ventilation_advise` erzeugt nie ein Kommando an ein Gerät.
+- **Purheits-Grenze bei B.5:** `ventilation_advise` entscheidet, der Rand stellt zu. Der Rand enthält keine Fachlogik — kein Schwellenvergleich, keine Unterdrückung, keine Zeitlogik. Prüfbar als Test „gleicher Zustand → keine zweite Notification, Zustandswechsel → Ersetzen bzw. Löschen".
 - **Umrechnungs-Referenz:** g/m³ ↔ g/kg ↔ RH an bekannten Stützstellen (20 °C/40 % = 7,0 g/m³ = 5,9 g/kg).
 
 ---
@@ -244,15 +275,33 @@ Stufe 1 ist bewusst so geschnitten, dass sie **während** des Coordinator-Umbaus
 
 ---
 
-## 11. Offene Entscheidungen (nicht vorweggenommen)
+## 11. Entscheidungsstand
 
-1. **Eigene Rechnung oder Passthrough?** Poise rechnet die absolute Feuchte ohnehin. [Thermal Comfort](https://github.com/dolezsa/thermal_comfort) ist im Ökosystem so verbreitet, dass ein optionaler Sensor-Passthrough (Muster: CO₂-Sensor in ADR-0049) Doppelrechnung vermiede — kostet aber ein Config-Feld und eine Vertrauensfrage gegenüber fremden Werten.
-2. **Diagnose-Entität für den Rat?** Attribut genügt für die Card; eine recorder-exkludierbare Entität macht den Rat für fremde Automationen und Blueprints erst brauchbar. ADR-0049 §7 hat das Muster, aber es ist dort noch offen.
-3. **Δ-Schwelle fest oder temperaturabhängig?** 3 g/m³ ist Feld-Konvention. Physikalisch wäre eine Schwelle sinnvoll, die bei sehr kalter Außenluft steigt (Wärmeverlust pro abgeführtem Gramm wächst) — mehr Korrektheit gegen mehr Erklärungsbedarf.
-4. **Reserve auf das Schimmel-Limit** in Regel 1: wie früh vor `SURFACE_RH_LIMIT` bzw. `was_capped` soll der Rat anspringen? Zu früh = Daueralarm im Altbau, zu spät = nutzlos.
+### 11.1 Entschieden
+
+**Ausgabekanal des Lüftungs-Rats (war: „Diagnose-Entität oder nur Attribut?").**
+Entschieden für **alle drei Ausgänge**: selbstlöschende `persistent_notification` (opt-in) + Bus-Event + Diagnose-Entität mit State-Token — Begründung und Abgrenzung in B.5. Die ursprüngliche Fassung dieses Entwurfs sah **keine** eigene Benachrichtigung vor; das war auf die Push-/`notify`-Variante gemünzt und als Pauschalaussage falsch, weil Poise mit Repair-Issues und `poise_override_ended` bereits eigene Nutzerkommunikation betreibt. Verworfen bleibt ausschließlich die **Push-/TTS-Strecke** mit Empfänger-, Ruhezeit- und Wiederholungsmodell.
+
+### 11.2 Empfohlen, aber noch nicht entschieden
+
+**(a) Eigene Rechnung oder Passthrough von [Thermal Comfort](https://github.com/dolezsa/thermal_comfort)?**
+→ *Empfehlung: selbst rechnen, kein Config-Feld.* Ausschlaggebend ist der Bestand: der 12-g/kg-Backstop ist ein **Live-Control-Input** und darf nach ADR-0030 nie an einem fremden Sensor hängen. Ein Passthrough könnte deshalb nur die *Anzeige* bedienen — Ergebnis wären zwei Quellen für eine Größe. Der verbleibende Nachteil ist kosmetisch: andere Sättigungskoeffizienten ergeben ~1 % Abweichung zu einem parallel installierten Thermal-Comfort-Sensor. Dokumentieren statt lösen.
+
+**(b) Δ-Schwelle fest oder außentemperaturabhängig?**
+→ *Empfehlung: fest bei 3,0 g/m³.* **Korrektur gegenüber der ersten Fassung dieses Entwurfs:** dort stand die Vermutung, die Schwelle müsse bei kalter Außenluft steigen, weil der Wärmeverlust wächst. Nachgerechnet ist es umgekehrt — kalte Luft ist so trocken, dass Δw schneller wächst als ΔT:
+
+| Lage | Δw | ΔT | Wärme pro m³ | **pro entferntem Gramm** |
+| --- | --- | --- | --- | --- |
+| 20 °C/46 % innen, −5 °C/90 % außen | 4,9 g/m³ | 25 K | 8,3 Wh | **1,7 Wh/g** |
+| 20 °C/52 % innen, 10 °C/80 % außen | 1,5 g/m³ | 10 K | 3,3 Wh | **2,2 Wh/g** |
+
+(ρ·c_p ≈ 1,2 kJ/(m³·K), ohne Wärmerückgewinnung.) Winterlüften ist pro Gramm **billiger**. Eine winterliche Verschärfung würde Poise ausgerechnet dort schlechter machen, wofür es gedacht ist. Das eigentliche Winterproblem ist nicht der Preis, sondern das Überschießen in die Trockenheit — und das erledigt Regel 2. Saubere Trennung: **Δ** beantwortet *wirkt es?*, das **Veto** *wollen wir das?*, die **Kostenschätzung** *was kostet es?*. Eine enthalpiebasierte Bewertung (Weg der GSW-Suite) wäre ein eigenes Feature, keine Schwellenkorrektur.
+
+**(c) Auslöser für den Schimmel-Anlass (Regel 1).**
+→ *Empfehlung: konsequenzbasiert statt schwellenbasiert.* Auslösen, wenn der Schimmelboden den Komfort-Heizsollwert **tatsächlich nach oben klemmt** — also wenn gerade Heizenergie gegen Feuchte aufgewendet wird. Nutzt nur Größen, die im Solver ohnehin vorliegen, und drosselt sich selbst: im gedämmten Haus feuert es nie, im Altbau genau dann, wenn der Rat handlungsrelevant und wirtschaftlich motiviert ist. Die feste Reserve auf `SURFACE_RH_LIMIT` schrumpft damit auf eine technische Marge (~5 Prozentpunkte für Sensorrauschen und `f_Rsi`-Unsicherheit); `was_capped` bleibt die harte Eskalation auf `alert`. **Rest-Unsicherheit:** ob der Auslöser im Altbau selten genug feuert, ist die einzige der offenen Fragen, die sich nicht am Schreibtisch klären lässt — dafür braucht es Live-Daten.
 
 ---
 
 ## 12. Nicht Teil dieses Entwurfs
 
-Aktive Befeuchtung · KWL-/Abluft-/Fenster-Aktuierung · CO₂-**Regelung** · Lüftungsbemessung · VDI-6022-Hygiene · eine Benachrichtigungsstrecke. Für alles davon bleibt ADR-0048 die Antwort: Poise zeigt es an oder weist darauf hin — bewegen darf es nur, was seine eigenen Aktoren bewegen können.
+Aktive Befeuchtung · KWL-/Abluft-/Fenster-Aktuierung · CO₂-**Regelung** · Lüftungsbemessung · VDI-6022-Hygiene · eine Push-/`notify`-Zustellstrecke mit Empfänger-, Ruhezeit- und Wiederholungsmodell (der HA-interne Hinweiskanal dagegen **ist** Teil des Entwurfs, s. B.5). Für alles davon bleibt ADR-0048 die Antwort: Poise zeigt es an oder weist darauf hin — bewegen darf es nur, was seine eigenen Aktoren bewegen können.
