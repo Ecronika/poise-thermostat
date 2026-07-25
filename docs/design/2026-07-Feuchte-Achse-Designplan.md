@@ -92,7 +92,9 @@ Eine reine Funktion, Muster exakt wie `humidity_decide` (Dataclass rein, Datacla
 ventilation_advise(
     w_in, w_out,                  # absolute Feuchte innen/außen [g/m³]
     t_in, t_out,                  # für Wärmekosten + Plausibilität
-    surface_rh, mold_capped,      # aus mold.py — Bauphysik-Anlass
+    surface_rh_mean,              # GEMITTELTE Oberflächen-RH — der Anlass (§11.1c)
+    mold_floor_binding,           # klemmt der Schimmelboden gerade den Sollwert?
+    mold_capped,                  # aus mold.py — harte Eskalation
     co2,                          # optional, nur als Anlass
     window_open,                  # aus ADR-0041 (gelesen, nie geschrieben)
     occupied,                     # ADR-0058
@@ -107,12 +109,14 @@ ventilation_advise(
 
 | # | Bedingung | `action` | `reason` | Gate |
 | --- | --- | --- | --- | --- |
-| 1 | `mold_capped` **oder** `surface_rh ≥ Limit − Reserve` | `open` | `mold_risk` | **nie** gegatet (Gebäudeschutz) |
+| 1 | `surface_rh_mean ≥ Limit − Marge` | `open` | `mold_risk` | **nie** gegatet (Gebäudeschutz) |
 | 2 | `w_in ≤ abs_floor` **und** `w_out < w_in` | `discourage` | `too_dry` | nie gegatet |
 | 3 | `w_in − w_out ≥ Δ_ein` **und** `w_in` über dem Zielband | `open` | `moisture_out` | belegungs-gegatet (Komfort) |
 | 4 | `co2 ≥ Schwelle` (nur falls Sensor vorhanden) | `open` | `co2` | belegungs-gegatet |
 | 5 | `window_open` **und** Anlass entfallen (`w_in − w_out < Δ_aus`) **oder** Raum am Schimmel-/Frostboden | `close` | `target_reached` / `thermal_floor` | nie gegatet |
 | 6 | sonst | `idle` | `no_gain` | — |
+
+**Regel 1 löst am Mittelwert aus, nicht am Momentanwert** (Begründung §11.1c): ein Duschstoß bewegt das gleitende Mittel kaum, eine dauerhaft zu feuchte Wand schon. Die **Dringlichkeit** eskaliert getrennt davon: `level = warn`, wenn nur das Mittel die Grenze reißt; `level = alert`, wenn zusätzlich `mold_floor_binding` (der Schimmelboden kostet gerade Heizenergie) oder `mold_capped` (der Boden kann nicht mehr schützen) gilt.
 
 **Konsistenz-Notiz:** Regel 1 und Regel 2 können sich physikalisch nicht widersprechen — Schimmelrisiko setzt Feuchte voraus, die ein trockener Raum nicht hat. Das ist eine Invariante, die sich als Property-Test festschreiben lässt.
 
@@ -196,6 +200,8 @@ Alle Werte sind Diagnose-Attribute im Sinne von ADR-0016 — langsam veränderli
 | `abs_humidity_gkg` | float | **existiert bereits** | Regel-Einheit, unverändert |
 | `abs_humidity_gm3` | float | A.1 | Ökosystem-Einheit, Card-Bewertung |
 | `abs_humidity_out_gm3` | float \| null | B.3 | Außenluft-Vergleich |
+| `surface_rh` | float | `mold.py` (existiert bereits als Rechnung) | Momentanwert, Diagnose |
+| `surface_rh_mean` | float | §11.1c, persistiert | **der Anlass** von Regel 1 |
 | `vent_action` | `idle\|open\|close\|discourage` | B.1 | Rat |
 | `vent_reason` | Token | B.1 | Begründung (i18n) |
 | `vent_delta_gm3` | float \| null | B.1 | die Zahl hinter dem Rat |
@@ -214,6 +220,7 @@ Außerhalb der Card (B.5): eine **Diagnose-Entität** mit `vent_action` als Stat
 | `estimation/psychrometrics.py` | +1 reine Funktion | nein |
 | `comfort/humidity.py` | nur ein Kommentar an der 12-g/kg-Konstante | nein |
 | `comfort/ventilation.py` | **neu**, rein | nein |
+| `estimation/running_mean.py` | **wiederverwendet** — dieselbe exponentielle Mittelung wie für `T_rm`, angewandt auf die Oberflächen-RH; keine Änderung am Modul | nein, aber der Mittelwert braucht **Persistenz** (bestehender Pfad: `storage.py` / `persistence/codec.py`) |
 | `diagnostics/shadows.py` → `compose_climate_band` | +Parameter, +Dict-Schlüssel | **die einzige Naht** — bereits eine reine Funktion |
 | `coordinator.py` | ausschließlich **Argument-Konstruktion** innerhalb des bestehenden einen `try` | minimal, additiv, keine neue Stage, kein neuer Fehlerbereich |
 | `climate.py` | Attribut-Allowlist erweitern | nein |
@@ -260,6 +267,7 @@ Die Anzeige zeigt im Zweifel **nichts** statt etwas Falschem — dieselbe Linie 
 - **Guard-Test** im Geist von `tests/test_non_goals.py`: weder das Trockenheits- noch das Lüftungs-Verdict darf in `humidity_decide`, `dual_setpoint` oder den Constraint-Solver gelangen; `ventilation_advise` erzeugt nie ein Kommando an ein Gerät.
 - **Purheits-Grenze bei B.5:** `ventilation_advise` entscheidet, der Rand stellt zu. Der Rand enthält keine Fachlogik — kein Schwellenvergleich, keine Unterdrückung, keine Zeitlogik. Prüfbar als Test „gleicher Zustand → keine zweite Notification, Zustandswechsel → Ersetzen bzw. Löschen".
 - **Umrechnungs-Referenz:** g/m³ ↔ g/kg ↔ RH an bekannten Stützstellen (20 °C/40 % = 7,0 g/m³ = 5,9 g/kg).
+- **Alarmfestigkeit als Test:** ein einzelner Feuchtestoß (Duschen, Kochen) darf Regel 1 **nicht** auslösen; eine anhaltend zu feuchte Wand schon; nach dem Lüften fällt das Mittel von selbst unter die Grenze zurück und zieht den Rat zurück. Drei Zeitreihen-Tests gegen die reine Mittelungsfunktion, ohne HA.
 
 ---
 
@@ -268,7 +276,7 @@ Die Anzeige zeigt im Zweifel **nichts** statt etwas Falschem — dieselbe Linie 
 Jede Stufe ist für sich auslieferbar und wertvoll:
 
 1. **A** — absolute Feuchte veröffentlichen und die untere Ampel-Seite darauf umstellen. Null Regelrisiko, korrigiert einen echten Bewertungsfehler, braucht keinen neuen Sensor.
-2. **B ohne Kosten** — Lüftungs-Rat aus Δ absoluter Feuchte + Schimmelanlass + Trockenheits-Veto. Der eigentliche Differenzierer.
+2. **B ohne Kosten** — Lüftungs-Rat aus Δ absoluter Feuchte + Schimmelanlass + Trockenheits-Veto. Der eigentliche Differenzierer. Braucht als einzige Vorarbeit das **persistierte Oberflächen-RH-Mittel** (§11.1c) — sinnvollerweise schon in Stufe 1 mitgeschrieben, damit α an echten Daten kalibriert werden kann, bevor Regel 1 scharf geschaltet wird.
 3. **B mit Kosten und Fenster-Rückkopplung** — Wärmekosten-Schätzung und ereignisgetriebene Schließ-Empfehlung. Setzt voraus, dass die Slope-/Aufheizraten-Werte nach dem Refactoring stabil erreichbar sind.
 
 Stufe 1 ist bewusst so geschnitten, dass sie **während** des Coordinator-Umbaus machbar wäre: sie braucht genau einen zusätzlichen berechneten Wert an einer Stelle, an der bereits einer entsteht.
@@ -279,16 +287,16 @@ Stufe 1 ist bewusst so geschnitten, dass sie **während** des Coordinator-Umbaus
 
 ### 11.1 Entschieden
 
-**Ausgabekanal des Lüftungs-Rats (war: „Diagnose-Entität oder nur Attribut?").**
+Alle vier ursprünglich offenen Punkte sind entschieden.
+
+**(0) Ausgabekanal des Lüftungs-Rats (war: „Diagnose-Entität oder nur Attribut?").**
 Entschieden für **alle drei Ausgänge**: selbstlöschende `persistent_notification` (opt-in) + Bus-Event + Diagnose-Entität mit State-Token — Begründung und Abgrenzung in B.5. Die ursprüngliche Fassung dieses Entwurfs sah **keine** eigene Benachrichtigung vor; das war auf die Push-/`notify`-Variante gemünzt und als Pauschalaussage falsch, weil Poise mit Repair-Issues und `poise_override_ended` bereits eigene Nutzerkommunikation betreibt. Verworfen bleibt ausschließlich die **Push-/TTS-Strecke** mit Empfänger-, Ruhezeit- und Wiederholungsmodell.
 
-### 11.2 Empfohlen, aber noch nicht entschieden
+**(a) Absolute Feuchte: eigene Rechnung, kein Passthrough.**
+Kein Config-Feld für einen fremden [Thermal-Comfort](https://github.com/dolezsa/thermal_comfort)-Sensor. Ausschlaggebend ist der Bestand: der 12-g/kg-Backstop ist ein **Live-Control-Input** und darf nach ADR-0030 nie an einem fremden Sensor hängen. Ein Passthrough könnte deshalb nur die *Anzeige* bedienen — Ergebnis wären zwei Quellen für eine Größe. Der verbleibende Nachteil ist kosmetisch: andere Sättigungskoeffizienten ergeben ~1 % Abweichung zu einem parallel installierten Thermal-Comfort-Sensor. Wird dokumentiert, nicht gelöst.
 
-**(a) Eigene Rechnung oder Passthrough von [Thermal Comfort](https://github.com/dolezsa/thermal_comfort)?**
-→ *Empfehlung: selbst rechnen, kein Config-Feld.* Ausschlaggebend ist der Bestand: der 12-g/kg-Backstop ist ein **Live-Control-Input** und darf nach ADR-0030 nie an einem fremden Sensor hängen. Ein Passthrough könnte deshalb nur die *Anzeige* bedienen — Ergebnis wären zwei Quellen für eine Größe. Der verbleibende Nachteil ist kosmetisch: andere Sättigungskoeffizienten ergeben ~1 % Abweichung zu einem parallel installierten Thermal-Comfort-Sensor. Dokumentieren statt lösen.
-
-**(b) Δ-Schwelle fest oder außentemperaturabhängig?**
-→ *Empfehlung: fest bei 3,0 g/m³.* **Korrektur gegenüber der ersten Fassung dieses Entwurfs:** dort stand die Vermutung, die Schwelle müsse bei kalter Außenluft steigen, weil der Wärmeverlust wächst. Nachgerechnet ist es umgekehrt — kalte Luft ist so trocken, dass Δw schneller wächst als ΔT:
+**(b) Δ-Schwelle fest bei 3,0 g/m³.**
+**Korrektur gegenüber der ersten Fassung dieses Entwurfs:** dort stand die Vermutung, die Schwelle müsse bei kalter Außenluft steigen, weil der Wärmeverlust wächst. Nachgerechnet ist es umgekehrt — kalte Luft ist so trocken, dass Δw schneller wächst als ΔT:
 
 | Lage | Δw | ΔT | Wärme pro m³ | **pro entferntem Gramm** |
 | --- | --- | --- | --- | --- |
@@ -297,8 +305,23 @@ Entschieden für **alle drei Ausgänge**: selbstlöschende `persistent_notificat
 
 (ρ·c_p ≈ 1,2 kJ/(m³·K), ohne Wärmerückgewinnung.) Winterlüften ist pro Gramm **billiger**. Eine winterliche Verschärfung würde Poise ausgerechnet dort schlechter machen, wofür es gedacht ist. Das eigentliche Winterproblem ist nicht der Preis, sondern das Überschießen in die Trockenheit — und das erledigt Regel 2. Saubere Trennung: **Δ** beantwortet *wirkt es?*, das **Veto** *wollen wir das?*, die **Kostenschätzung** *was kostet es?*. Eine enthalpiebasierte Bewertung (Weg der GSW-Suite) wäre ein eigenes Feature, keine Schwellenkorrektur.
 
-**(c) Auslöser für den Schimmel-Anlass (Regel 1).**
-→ *Empfehlung: konsequenzbasiert statt schwellenbasiert.* Auslösen, wenn der Schimmelboden den Komfort-Heizsollwert **tatsächlich nach oben klemmt** — also wenn gerade Heizenergie gegen Feuchte aufgewendet wird. Nutzt nur Größen, die im Solver ohnehin vorliegen, und drosselt sich selbst: im gedämmten Haus feuert es nie, im Altbau genau dann, wenn der Rat handlungsrelevant und wirtschaftlich motiviert ist. Die feste Reserve auf `SURFACE_RH_LIMIT` schrumpft damit auf eine technische Marge (~5 Prozentpunkte für Sensorrauschen und `f_Rsi`-Unsicherheit); `was_capped` bleibt die harte Eskalation auf `alert`. **Rest-Unsicherheit:** ob der Auslöser im Altbau selten genug feuert, ist die einzige der offenen Fragen, die sich nicht am Schreibtisch klären lässt — dafür braucht es Live-Daten.
+**(c) Schimmel-Anlass: gemittelte Oberflächen-RH als Auslöser, Konsequenz als Eskalation.**
+
+Die Frage war ursprünglich als „wie viel Reserve vor der 80-%-Grenze?" gestellt. Der Wettbewerbsvergleich hat sie umformuliert: es geht nicht um die **Höhe** der Schwelle, sondern um den **Zeitraum**.
+
+*Wie es andere lösen.* Die Smart-Home-Welt delegiert: der [HA-Core Mold Indicator](https://www.home-assistant.io/integrations/mold_indicator/) liefert nur eine Prozentzahl ohne jeden Auslöser, [ha-optimal-humidity](https://github.com/TheRealWaldo/ha-optimal-humidity) einen Momentanwert-Boolean, [Homematic IP](https://homematic-ip.com/de/produkt/temperatur-und-luftfeuchtigkeitssensor-innen) lässt den Nutzer konfigurieren, *ob und wann* er die Warnung überhaupt bekommen will — Zeitfenster statt Modell. Die Bauphysik hat das Problem dagegen gelöst, indem sie die Momentanschwelle aufgegeben hat: das **VTT-/Viitanen-Modell** ([Hukka & Viitanen 1999](https://research.tuni.fi/buildingphysics/finnish-mould-growth-model/), erweitert Ojanen 2010) führt einen Schimmelindex 0–6, der über der Grenze wächst und **in Trockenperioden wieder abfällt**; die **Sedlbauer-Isoplethen/LIM** ([Fraunhofer IBP](https://publica.fraunhofer.de/bitstreams/011d55af-cc14-4319-b95a-a6ceab618caa/download)) verlangen eine Verweildauer oberhalb einer temperatur- und substratabhängigen Kurve. Der kommerzielle Kompromiss ist [Airthings' Schimmelindikator](https://help.airthings.com/en/articles/4419641-wave-what-is-the-mold-risk-indicator-wave-mini-only): Temperatur + Feuchte + Zeit über ein **rollierendes 48-h-Fenster**.
+
+*Der Befund im eigenen Haus.* **EN ISO 13788 — die Norm, auf die `mold.py` sich beruft — definiert die 80 % selbst auf Monatsmittelwerten** (`f_Rsi,min` je Monat, der kritische Monat entscheidet). Einen Momentanwert kennt die Norm nicht. Für den **Regelboden** ist Poises tickweise Auswertung dennoch richtig — Sicherheit darf nicht mitteln, konservativ klemmen kostet nur Wärme. Für einen **Hinweis** ist sie normfremd, und genau daraus entsteht die Alarmmüdigkeit.
+
+*Entscheidung.* Regel 1 löst am **exponentiell gewichteten gleitenden Mittel der Oberflächen-RH** aus. Der Baustein liegt bereits im Repo: `estimation/running_mean.py` macht genau diese Mittelung für `T_rm` nach EN 16798-1, inklusive Persistenz — er wird wiederverwendet, nicht geändert. Die feste Reserve schrumpft auf eine **technische Marge** (~5 Prozentpunkte für Sensorrauschen und `f_Rsi`-Unsicherheit), sie ist kein Steuerungshebel mehr. Die **Dringlichkeit** trägt den ökonomischen Teil des ursprünglichen Vorschlags: `warn` beim Reißen des Mittels, `alert`, wenn zusätzlich der Schimmelboden gerade Heizenergie kostet (`mold_floor_binding`) oder `was_capped` greift.
+
+*Verworfen: der volle VTT-Index.* Er ist material- und substratabhängig (Ojanen 2010 unterscheidet Fichte, Beton, Porenbeton, Mineralwolle, EPS …). Poise kennt die Wandoberfläche nicht und kann sie nicht erfragen, ohne eine Konfigurationsfrage zu stellen, die kaum jemand richtig beantwortet — ein Index mit falscher Materialklasse ist schlechter als ein ehrliches gleitendes Mittel.
+
+*Nebeneffekt, der zum Rest passt:* das Mittel liefert die **Entwarnung** gleich mit. Es fällt nach dem Lüften von selbst zurück, womit das Zurückziehen der Notification (B.5) ein Zustandswechsel wird statt eines Timers.
+
+### 11.2 Verbleibend offen
+
+**Die Zeitkonstante α des Oberflächen-RH-Mittels.** 48 h (Airthings-Linie) ist erklärbar und reagiert schnell; mehrere Tage liegt näher an den Keimungsdauern der Isoplethen-Modelle und ist alarmfester. Das ist die einzige verbliebene Zahl, die sich nicht am Schreibtisch entscheiden lässt — sie braucht Live-Daten, sobald die Oberflächen-RH mitgeschrieben wird. Bis dahin gilt als Arbeitswert die Airthings-Linie (~48 h), weil sie die konservativere Wahl in Richtung *zu früh* statt *zu spät* ist.
 
 ---
 
