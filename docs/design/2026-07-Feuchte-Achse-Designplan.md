@@ -84,6 +84,43 @@ Literaturlage: der Gradient ist belegt ([Shaman & Kohn 2009](https://www.pnas.or
 
 ## 4. Feature B — Lüftungs-Empfehlung
 
+### B.0 Bestandsbefund: Die Card zeigt heute die Wirkung, nicht die Ursache
+
+Der orange Strich auf dem Dial ist **kein Schimmel-Risiko-Indikator**, sondern eine **Temperatur** — eine Regelschranke:
+
+```
+mold.py: mold_min_air_temperature(t_out, rh, t_air_ref, f_rsi=0.7, limit=0.80)
+  → corridor.py    Bound(mold_min, "mold")        [untere Schranke]
+  → dual_setpoint  heat_sp = max(heat_sp, mold_min)
+  → coordinator    Attribut "mould_floor"
+  → poise-card.ts  oranger Radial-Strich + Zahl auf dem Dial (ADR-0057)
+```
+
+Erklärt wird er an vier Stellen, von denen keine erklärt, **warum** er sich bewegt:
+
+| Ort | Text | Leistung |
+| --- | --- | --- |
+| Dial-Tooltip (`localize.ts`) | „Schimmelgrenze 19,4°" | ein Label |
+| Config-Flow (`de.json`) | „Raumfeuchte (aktiviert Schimmelschutz)" | *dass* der Sensor etwas freischaltet |
+| Repair-Issue `mould_protection_inactive` | vier Sätze, die beste Erklärung im System | erscheint **nur bei Sensorausfall** |
+| README | „surface-humidity model (DIN 4108-2)" | für Entwickler, nicht für Bewohner |
+
+**Zwei Lücken im Bestand:**
+
+1. **Ursache und Wirkung sind nicht unterscheidbar.** Der Tick wandert nach oben, der Raum wird härter geheizt — die auslösende Größe (Oberflächenfeuchte) wird nirgends angezeigt.
+2. **`mold_capped` wird berechnet, aber nie veröffentlicht.** Der Wert entsteht in `tick_pipeline.py` über `mold_min_air_temperature_detail`, liegt im Return-Dict des Coordinators, steht aber **nicht** in der `_ATTRS`-Allowlist von `climate.py` und kommt in `card/src/` nicht vor. Genau die Lage „der Sollwert kann dich nicht mehr schützen" ist heute unsichtbar.
+
+**Daraus folgt die Rollenteilung des Entwurfs** — zwei Zahlen, zwei Dimensionen, zwei Aufgaben:
+
+| Größe | Einheit | Rolle | heute | nachher |
+| --- | --- | --- | --- | --- |
+| `mould_floor` | °C | die **Schranke** — *was* geregelt wird | Tick auf dem Dial | **unverändert** |
+| `surface_rh` | % | Momentanwert | nur intern | Attribut, Diagnose |
+| `surface_rh_mean` | % | der **Anlass** — *warum* die Schranke steigt | existiert nicht | Auslöser Regel 1 |
+| `mold_capped` | bool | Schutz reicht nicht mehr | unsichtbar | Eskalation auf `alert` |
+
+Der Gewinn ist damit nicht in erster Linie der neue Rat, sondern dass der **bestehende** Tick erstmals eine Begründung bekommt. Das ist genau die Linie von ADR-0057 §4: der Tick zeigt, *was* die Regelung tut — der neue Wert, *warum*.
+
 ### B.1 Neues pures Modul `comfort/ventilation.py`
 
 Eine reine Funktion, Muster exakt wie `humidity_decide` (Dataclass rein, Dataclass raus, Latch als Parameter):
@@ -119,6 +156,8 @@ ventilation_advise(
 **Regel 1 löst am Mittelwert aus, nicht am Momentanwert** (Begründung §11.1c): ein Duschstoß bewegt das gleitende Mittel kaum, eine dauerhaft zu feuchte Wand schon. Die **Dringlichkeit** eskaliert getrennt davon: `level = warn`, wenn nur das Mittel die Grenze reißt; `level = alert`, wenn zusätzlich `mold_floor_binding` (der Schimmelboden kostet gerade Heizenergie) oder `mold_capped` (der Boden kann nicht mehr schützen) gilt.
 
 **Konsistenz-Notiz:** Regel 1 und Regel 2 können sich physikalisch nicht widersprechen — Schimmelrisiko setzt Feuchte voraus, die ein trockener Raum nicht hat. Das ist eine Invariante, die sich als Property-Test festschreiben lässt.
+
+**Konsumvorschrift (Randbedingung aus ADR-0041):** Bei offenem Fenster wird der Schimmelboden für die ersten **30 Minuten** der Episode (`WINDOW_MOULD_SUPPRESS_S = 1800`) aus dem **Schreibpfad** unterdrückt, damit der Raum nicht gegen das Lüften auf 24 °C heizt — die **Diagnose behält den echten Wert** (`mould_floor`). `ventilation_advise` muss deshalb den **Diagnosewert** lesen, nie den geschriebenen: sonst verschwände der Schimmel-Anlass genau in dem Moment, in dem gelüftet wird, und Regel 5 („schließen") feuerte 30 Minuten lang falsch. Gehört als Kommentar an die Aufrufstelle und als Test in die Glue-Schicht.
 
 **Hysterese:** `Δ_ein = 3,0 g/m³` (die im Feld etablierte Schwelle, u. a. [adamcornforth](https://github.com/adamcornforth/ha-open-window-blueprint)), `Δ_aus = 1,5 g/m³`, gehalten über `prev_advice_active` — dasselbe asymmetrische Muster wie `humidity_decide`, aus demselben Grund (kein Chatter am Schwellenrand).
 
@@ -202,6 +241,7 @@ Alle Werte sind Diagnose-Attribute im Sinne von ADR-0016 — langsam veränderli
 | `abs_humidity_out_gm3` | float \| null | B.3 | Außenluft-Vergleich |
 | `surface_rh` | float | `mold.py` (existiert bereits als Rechnung) | Momentanwert, Diagnose |
 | `surface_rh_mean` | float | §11.1c, persistiert | **der Anlass** von Regel 1 |
+| `mold_capped` | bool | **existiert bereits, wird nur nicht veröffentlicht** (§B.0) | Eskalation auf `alert`; schließt nebenbei eine Bestandslücke |
 | `vent_action` | `idle\|open\|close\|discourage` | B.1 | Rat |
 | `vent_reason` | Token | B.1 | Begründung (i18n) |
 | `vent_delta_gm3` | float \| null | B.1 | die Zahl hinter dem Rat |
@@ -240,6 +280,30 @@ Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formuli
 - ADR-0048 §2 verbietet CO₂-getriebene Lüftungs-**Steuerung** und erlaubt den Hinweis ausdrücklich („CO₂ hoch — Fenster öffnen"). Regel 4 der Tabelle in B.2 ist genau dieser erlaubte Nudge — die Grenze ist aber bisher nur allgemein gezogen und sollte für einen strukturierten, begründeten Rat präzisiert werden. Dass der Nudge **sichtbar** wird (B.5), ist Teil desselben Satzes: ein Hinweis, den niemand sieht, ist kein Hinweis.
 - Es entsteht **kein** Kommando: keine `fan`-Entität, kein `humidifier`, kein Service-Call an ein Gerät. Der `assignment_planner` baut weiterhin ausschließlich `Axis.THERMAL`. `Axis.VENTILATION` bleibt tot und darf es bleiben — der Rat ist ein *Zustand* (Attribut, Entität, Event) plus eine HA-interne Anzeige, keine Achse. Der einzige Service-Call geht an `persistent_notification`, also an die HA-Oberfläche, nicht an Hardware.
 - Die Nicht-Ziele bleiben unangetastet: keine aktive Befeuchtung (§3), keine RLT-Hygiene (§1), kein Lüftungs-Bemessungsanspruch (§2).
+
+### 7.1 ADR-Auswirkungen im Überblick
+
+**Ungültig wird keine bestehende Entscheidung.** Geschuldet sind Nachträge:
+
+| ADR | betroffen | Art |
+| --- | --- | --- |
+| **0049** (Monitoring-Ampel) | ja, **inhaltlich** | §5 legt `[30, 40, 60, 65]` **% RH** fest; die untere Seite wird auf g/m³ umgestellt (A.2/A.3) → echter Nachtrag, kein Beiwerk |
+| **0048** (Nicht-Ziele) | ja, Präzisierung | §2 zieht die Grenze Nudge ↔ Lüftungssteuerung nur allgemein; ein strukturierter, sichtbarer Rat gehört ausformuliert (§7) |
+| **0057** (Card-Layout) | ja, Erweiterung | „Schimmel-Tick display-only" bleibt gültig; ein neuer Chip kommt in die `resolveChips`-Tokenliste |
+| **0016** (Entity-/Card-Vertrag) | ja, Erweiterung | neue Attribute + eine Diagnose-Entität — der reguläre Weg |
+| **0012** (Redaction) | ja, mechanisch | optionaler Außen-Feuchtesensor gehört in `REDACT_KEYS` |
+| **0050** (Dry-Pfad) | nein | Regelpfad unberührt; die 12-g/kg-Klarstellung (A.4) ist ein Kommentar |
+| **0041** (Fenster) | nein, aber Randbedingung | die 30-Minuten-Unterdrückung — Konsumvorschrift in B.2, keine Änderung |
+| **0030** (Anti-Garbage-In) | nein | stützt die „selbst rechnen"-Entscheidung (§11.1a) |
+| **0026 / 0033** (Shadow-first) | nein | trivial erfüllt — es wird nie aktuiert |
+
+### 7.2 Bestandsbefund: das Schimmelmodell hat keinen ADR
+
+Beim Abgleich der Verweise: `mold.py` nennt „charter G4, ADR-0010", `estimation/psychrometrics.py` „ADR-0010 mould/psychrometrics", ADR-0048 und ADR-0050 zitieren „ADR-0010 (Schimmel/Taupunkt)" — **ADR-0010 ist aber „Solar-Buchhaltung"**. Kein ADR im Verzeichnis behandelt `f_Rsi`, DIN 4108-2 oder EN ISO 13788 als *Entscheidung*; die einzigen Treffer (ADR-0011, ADR-0014, ADR-0048) sind Test- bzw. Abgrenzungskontexte. Das referenzierte „charter G4" liegt nicht im Repo.
+
+Damit ist die **härteste Sicherheitsschranke des Systems die einzige undokumentierte**, und vier Stellen zeigen auf die falsche Nummer. Das macht nichts ungültig und blockiert diesen Entwurf nicht — es sollte nur nicht mit ihm mitwachsen.
+
+**Vorschlag:** ein **eigener, rückwirkend dokumentierender ADR** für den Schimmelboden (Vorbild: ADR-0048 hat die Nicht-Ziele nachträglich festgeschrieben), nicht ein Kontext-Abschnitt in ADR-0062. Sonst stünde die Bestandsentscheidung in einem Dokument, das eine Erweiterung beschreibt — und der nächste Leser sucht sie wieder an der falschen Stelle. Die Korrektur der vier Verweise gehört in denselben Zug.
 
 ---
 
