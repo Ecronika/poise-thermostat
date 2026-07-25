@@ -1,6 +1,6 @@
-# Designplan: Erweiterung der Feuchte-Achse (Trockenheits-Bewertung + Lüftungs-Empfehlung)
+# Designplan: Erweiterung der Feuchte-Achse (Trockenheits-Bewertung · Lüftungs-Empfehlung · Feuchte-Obergrenze)
 
-**Datum:** 2026-07-25 · **Typ:** Entwurf (Design), **kein** Implementierungsplan, **keine** getroffene Entscheidung · **Grundlage:** [Recherche-Notiz vom 2026-07-25](../research/2026-07-Feuchte-Steuerung-und-Lueftungshinweise.md) · **Bezug:** ADR-0010, ADR-0016, ADR-0035, ADR-0041, ADR-0045, ADR-0048, ADR-0049, ADR-0050, ADR-0058
+**Datum:** 2026-07-25 · **Typ:** Entwurf (Design), **kein** Implementierungsplan; Entwurfsentscheidungen in §12 festgehalten, Umsetzung nicht begonnen · **Grundlage:** [Recherche-Notiz vom 2026-07-25](../research/2026-07-Feuchte-Steuerung-und-Lueftungshinweise.md) · **Bezug:** ADR-0010, ADR-0016, ADR-0035, ADR-0041, ADR-0045, ADR-0048, ADR-0049, ADR-0050, ADR-0058
 
 > **Randbedingung:** Der Coordinator wird gerade refaktoriert. Dieser Plan beschreibt deshalb **Verantwortlichkeiten, Datenverträge und Schichtgrenzen** — keine Aufrufreihenfolge, keine Stage-Zuschnitte, keine Tick-Verdrahtung. Alle fachliche Logik landet in **puren Modulen**; die einzige Naht zum Coordinator ist die Argument-Konstruktion einer bereits existierenden puren Komposition. Der Entwurf gilt damit unabhängig davon, wie der Tick am Ende geschnitten ist.
 
@@ -12,8 +12,9 @@
 | --- | --- | --- |
 | **A** | Trockenheit wird **physikalisch** bewertet (absolute Feuchte) statt über eine RH-Zahl, die mit der Raumtemperatur wegdriftet | Anzeige, kein Regeleingriff |
 | **B** | Poise sagt, **wann Lüften etwas bringt** — und wann es schadet — begründet aus Schimmelmodell, Feuchtedifferenz und Wärmekosten | Hinweis, kein Aktor |
+| **C** | Poise liefert die **schimmelsichere Feuchte-Obergrenze**, die einem fremden Befeuchter (`generic_hygrostat`) als Zielwert fehlt | Randbedingung, kein Regler |
 
-Beides bleibt strikt auf der Anzeige-/Hinweis-Seite des ADR-0048-Leitprinzips *Monitoring vs. Control*. Der Regelpfad (`humidity_decide` → `mode_arbitration` → Dry-Nudge) wird **nicht angefasst**.
+Alles drei bleibt strikt auf der Anzeige-/Hinweis-Seite des ADR-0048-Leitprinzips *Monitoring vs. Control*. Der Regelpfad (`humidity_decide` → `mode_arbitration` → Dry-Nudge) wird **nicht angefasst**.
 
 ## 2. Entwurfsprinzipien
 
@@ -129,7 +130,7 @@ Eine reine Funktion, Muster exakt wie `humidity_decide` (Dataclass rein, Datacla
 ventilation_advise(
     w_in, w_out,                  # absolute Feuchte innen/außen [g/m³]
     t_in, t_out,                  # für Wärmekosten + Plausibilität
-    surface_rh_mean,              # GEMITTELTE Oberflächen-RH — der Anlass (§11.1c)
+    surface_rh_mean,              # GEMITTELTE Oberflächen-RH — der Anlass (§12.1c)
     mold_floor_binding,           # klemmt der Schimmelboden gerade den Sollwert?
     mold_capped,                  # aus mold.py — harte Eskalation
     co2,                          # optional, nur als Anlass
@@ -153,7 +154,7 @@ ventilation_advise(
 | 5 | `window_open` **und** Anlass entfallen (`w_in − w_out < Δ_aus`) **oder** Raum am Schimmel-/Frostboden | `close` | `target_reached` / `thermal_floor` | nie gegatet |
 | 6 | sonst | `idle` | `no_gain` | — |
 
-**Regel 1 löst am Mittelwert aus, nicht am Momentanwert** (Begründung §11.1c): ein Duschstoß bewegt das gleitende Mittel kaum, eine dauerhaft zu feuchte Wand schon. Die **Dringlichkeit** eskaliert getrennt davon: `level = warn`, wenn nur das Mittel die Grenze reißt; `level = alert`, wenn zusätzlich `mold_floor_binding` (der Schimmelboden kostet gerade Heizenergie) oder `mold_capped` (der Boden kann nicht mehr schützen) gilt.
+**Regel 1 löst am Mittelwert aus, nicht am Momentanwert** (Begründung §12.1c): ein Duschstoß bewegt das gleitende Mittel kaum, eine dauerhaft zu feuchte Wand schon. Die **Dringlichkeit** eskaliert getrennt davon: `level = warn`, wenn nur das Mittel die Grenze reißt; `level = alert`, wenn zusätzlich `mold_floor_binding` (der Schimmelboden kostet gerade Heizenergie) oder `mold_capped` (der Boden kann nicht mehr schützen) gilt.
 
 **Konsistenz-Notiz:** Regel 1 und Regel 2 können sich physikalisch nicht widersprechen — Schimmelrisiko setzt Feuchte voraus, die ein trockener Raum nicht hat. Das ist eine Invariante, die sich als Property-Test festschreiben lässt.
 
@@ -198,7 +199,7 @@ Der Entwurf sieht **drei** Ausgänge vor, die alle billig sind und keiner davon 
 | --- | --- |
 | **`persistent_notification`, selbstlöschend** (opt-in, je Zone abschaltbar) | der eingebaute, sichtbare Kanal — erscheint in der HA-Glocke, ohne dass der Nutzer etwas baut |
 | **Bus-Event** `poise_ventilation_advice` (Muster: `poise_override_ended`) | erstklassiger Trigger für eigene Automationen |
-| **Diagnose-Entität** (State-Token, s. §11.2) | Trigger-Ziel für Blueprints und den Entity-Picker |
+| **Diagnose-Entität** (State-Token, s. §12.2) | Trigger-Ziel für Blueprints und den Entity-Picker |
 
 **Warum `persistent_notification` der richtige Kanal ist** — er räumt genau die Kostenliste leer, die gegen eine Push-Strecke spricht:
 
@@ -230,7 +231,52 @@ Damit ersetzt ein **Ereignis** den festen Timer, den alle Blueprints benutzen m�
 
 ---
 
-## 5. Datenvertrag (neue Felder)
+## 5. Feature C — Schimmelsichere Feuchte-Obergrenze für fremde Befeuchter
+
+### C.1 Die Größe, die sonst niemand kennt
+
+Ein `generic_hygrostat` mit Ziel „50 %" weiß nicht, ob 50 % bei −10 °C an der Außenwandecke kondensieren. **Poise weiß es** — es ist `mold.py`, nach *relativer Feuchte* statt nach *Temperatur* aufgelöst:
+
+```
+rh_max = 100 · limit · p_sat(t_si) / p_sat(t_air),   t_si = t_out + f_Rsi · (t_air − t_out)
+```
+
+Zwei Zeilen über die vorhandenen `saturation_pressure` / `surface_temperature`, dieselbe Gleichung wie `mold_min_air_temperature`, nur andersherum gelöst. Bei 20 °C Raumtemperatur und `f_Rsi` = 0,7 (Bestand nach DIN 4108-2):
+
+| Außentemperatur | max. sichere Raumfeuchte | entspricht |
+| --- | --- | --- |
+| +5 °C | 60 % | 10,4 g/m³ |
+| 0 °C | 55 % | 9,4 g/m³ |
+| −10 °C | 45 % | 7,7 g/m³ |
+| −20 °C | **37 %** | **6,3 g/m³** |
+
+Das ist genau die Zahl, die man einem Befeuchter als Ziel geben müsste. Veröffentlicht als `rh_max_safe` (%) plus `abs_max_safe` (g/m³), **monitor-only**.
+
+Nebenbei ist es die quantitative Antwort auf den Anlassartikel: dessen pauschale Obergrenze von 12 g/m³ wäre in dieser Tabelle bei jeder Außentemperatur unter etwa +10 °C eine Schimmelempfehlung.
+
+### C.2 Warum liefern statt regeln
+
+Der Bestand kann Be- und Entfeuchter **bereits unterscheiden** — `multi/discovery.py:154` liest die Device-Class und mappt `dehumidifier` → `Direction.DRY`, sonst `Direction.HUMIDIFY`. Anders als bei `fan` (§13) ist die Identifikation also gelöst; das Gatter liegt allein auf der Steuerseite (`model.py`: „inventory-only; never actuated", festgeschrieben in `tests/test_non_goals.py`).
+
+Dass dieses Gatter zu bleibt, ist trotzdem richtig — aber die Begründung in ADR-0048 §3 („ein AC/TRV kann Feuchte nur senken") trägt nur, solange kein echter Befeuchter in der Zone steht. Das belastbarere Argument ist **Eigentum und Arbitrierung**: Der Standardweg für einen Befeuchter in HA ist `generic_hygrostat` — in ADR-0050 selbst als Goldstandard gewürdigt (Bang-Bang, `min_cycle_duration`, Stale-Sensor-Not-Aus). Führe Poise dasselbe Gerät, kämpften zwei Regler um einen Aktor, und die heute bewusst als No-op gehaltene Feuchte-Achse (`humidity_resolver`) müsste eine zweite Arbitrierungsdomäne werden.
+
+Feature C dreht das um: Poise liefert die **Randbedingung**, die dem Hygrostat fehlt, und überlässt ihm die Regelung. Ergänzung statt Konkurrenz — dieselbe Haltung wie bei der Benachrichtigung (B.5): Poise liefert die Begründung, nicht den Kanal.
+
+### C.3 Befund: In manchen Gebäuden gibt es keine gute Antwort
+
+Die letzte Tabellenzeile enthält einen Konflikt: bei −20 °C liegt die schimmelsichere Obergrenze mit **6,3 g/m³ unter dem physiologischen Trockenheitsboden von 7 g/m³** aus A.3. In einem Altbau ist es an solchen Tagen physikalisch unmöglich, gleichzeitig schimmelsicher und behaglich zu sein.
+
+Bei `f_Rsi` = 0,9 (Neubau) liegt dieselbe Grenze bei 66 % — der Konflikt verschwindet vollständig. **Es ist also kein Regelungsproblem, sondern ein Bauteilproblem.** Der Entwurf sieht vor, das zu **benennen** (eigener `reason`-Token, z. B. `fabric_conflict`), statt still zwischen zwei Grenzen zu pendeln oder eine der beiden kommentarlos zu gewinnen. Das ist die ehrlichste verfügbare Aussage — und ein Hinweis, mit dem der Nutzer tatsächlich etwas anfangen kann, weil er auf die Dämmung zeigt und nicht auf einen Regler.
+
+### C.4 Grenzen
+
+- **Keine Aktuierung**, kein Schreibzugriff auf `humidifier`, keine Zielwert-Vorgabe an ein Gerät. `Direction.HUMIDIFY` bleibt inventory-only, `tests/test_non_goals.py` bleibt unverändert gültig.
+- Der Wert hängt an `f_Rsi`, das Poise **annimmt** (0,7 Bestand) statt zu messen. Er ist damit so gut wie das Schimmelmodell selbst — als Größenordnung belastbar, nicht als Gutachten. Gehört in die Anzeige-Erklärung.
+- Ohne Außentemperatur ist er nicht berechenbar → Feature still inaktiv, wie überall sonst.
+
+---
+
+## 6. Datenvertrag (neue Felder)
 
 Alle Werte sind Diagnose-Attribute im Sinne von ADR-0016 — langsam veränderlich, keine Recorder-Last-Treiber.
 
@@ -240,8 +286,11 @@ Alle Werte sind Diagnose-Attribute im Sinne von ADR-0016 — langsam veränderli
 | `abs_humidity_gm3` | float | A.1 | Ökosystem-Einheit, Card-Bewertung |
 | `abs_humidity_out_gm3` | float \| null | B.3 | Außenluft-Vergleich |
 | `surface_rh` | float | `mold.py` (existiert bereits als Rechnung) | Momentanwert, Diagnose |
-| `surface_rh_mean` | float | §11.1c, persistiert | **der Anlass** von Regel 1 |
+| `surface_rh_mean` | float | §12.1c, persistiert | **der Anlass** von Regel 1 |
 | `mold_capped` | bool | **existiert bereits, wird nur nicht veröffentlicht** (§B.0) | Eskalation auf `alert`; schließt nebenbei eine Bestandslücke |
+| `rh_max_safe` | float | C.1 | schimmelsichere RH-Obergrenze [%] — Zielwert für einen fremden Befeuchter |
+| `abs_max_safe` | float | C.1 | dieselbe Grenze in g/m³, vergleichbar mit `abs_humidity_gm3` |
+| `fabric_conflict` | bool | C.3 | Schimmelgrenze liegt unter dem Trockenheitsboden — Bauteil-, kein Regelproblem |
 | `vent_action` | `idle\|open\|close\|discourage` | B.1 | Rat |
 | `vent_reason` | Token | B.1 | Begründung (i18n) |
 | `vent_delta_gm3` | float \| null | B.1 | die Zahl hinter dem Rat |
@@ -253,12 +302,13 @@ Außerhalb der Card (B.5): eine **Diagnose-Entität** mit `vent_action` als Stat
 
 ---
 
-## 6. Schichten und Refactor-Berührung
+## 7. Schichten und Refactor-Berührung
 
 | Ort | Änderungsart | Berührt den Coordinator-Umbau? |
 | --- | --- | --- |
 | `estimation/psychrometrics.py` | +1 reine Funktion | nein |
 | `comfort/humidity.py` | nur ein Kommentar an der 12-g/kg-Konstante | nein |
+| `comfort/mold.py` | +1 reine Funktion (`max_safe_rh`, die Umkehrung der bestehenden Gleichung); die vorhandenen Funktionen unverändert | nein |
 | `comfort/ventilation.py` | **neu**, rein | nein |
 | `estimation/running_mean.py` | **wiederverwendet** — dieselbe exponentielle Mittelung wie für `T_rm`, angewandt auf die Oberflächen-RH; keine Änderung am Modul | nein, aber der Mittelwert braucht **Persistenz** (bestehender Pfad: `storage.py` / `persistence/codec.py`) |
 | `diagnostics/shadows.py` → `compose_climate_band` | +Parameter, +Dict-Schlüssel | **die einzige Naht** — bereits eine reine Funktion |
@@ -273,7 +323,7 @@ Außerhalb der Card (B.5): eine **Diagnose-Entität** mit `vent_action` als Stat
 
 ---
 
-## 7. Abgrenzung zu ADR-0048
+## 8. Abgrenzung zu ADR-0048
 
 Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formulierung an einer Stelle und braucht deshalb **einen eigenen ADR**:
 
@@ -281,23 +331,23 @@ Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formuli
 - Es entsteht **kein** Kommando: keine `fan`-Entität, kein `humidifier`, kein Service-Call an ein Gerät. Der `assignment_planner` baut weiterhin ausschließlich `Axis.THERMAL`. `Axis.VENTILATION` bleibt tot und darf es bleiben — der Rat ist ein *Zustand* (Attribut, Entität, Event) plus eine HA-interne Anzeige, keine Achse. Der einzige Service-Call geht an `persistent_notification`, also an die HA-Oberfläche, nicht an Hardware.
 - Die Nicht-Ziele bleiben unangetastet: keine aktive Befeuchtung (§3), keine RLT-Hygiene (§1), kein Lüftungs-Bemessungsanspruch (§2).
 
-### 7.1 ADR-Auswirkungen im Überblick
+### 8.1 ADR-Auswirkungen im Überblick
 
 **Ungültig wird keine bestehende Entscheidung.** Geschuldet sind Nachträge:
 
 | ADR | betroffen | Art |
 | --- | --- | --- |
 | **0049** (Monitoring-Ampel) | ja, **inhaltlich** | §5 legt `[30, 40, 60, 65]` **% RH** fest; die untere Seite wird auf g/m³ umgestellt (A.2/A.3) → echter Nachtrag, kein Beiwerk |
-| **0048** (Nicht-Ziele) | ja, Präzisierung | §2 zieht die Grenze Nudge ↔ Lüftungssteuerung nur allgemein; ein strukturierter, sichtbarer Rat gehört ausformuliert (§7) |
+| **0048** (Nicht-Ziele) | ja, Präzisierung | §2 zieht die Grenze Nudge ↔ Lüftungssteuerung nur allgemein; ein strukturierter, sichtbarer Rat gehört ausformuliert (§8) |
 | **0057** (Card-Layout) | ja, Erweiterung | „Schimmel-Tick display-only" bleibt gültig; ein neuer Chip kommt in die `resolveChips`-Tokenliste |
 | **0016** (Entity-/Card-Vertrag) | ja, Erweiterung | neue Attribute + eine Diagnose-Entität — der reguläre Weg |
 | **0012** (Redaction) | ja, mechanisch | optionaler Außen-Feuchtesensor gehört in `REDACT_KEYS` |
 | **0050** (Dry-Pfad) | nein | Regelpfad unberührt; die 12-g/kg-Klarstellung (A.4) ist ein Kommentar |
 | **0041** (Fenster) | nein, aber Randbedingung | die 30-Minuten-Unterdrückung — Konsumvorschrift in B.2, keine Änderung |
-| **0030** (Anti-Garbage-In) | nein | stützt die „selbst rechnen"-Entscheidung (§11.1a) |
+| **0030** (Anti-Garbage-In) | nein | stützt die „selbst rechnen"-Entscheidung (§12.1a) |
 | **0026 / 0033** (Shadow-first) | nein | trivial erfüllt — es wird nie aktuiert |
 
-### 7.2 Bestandsbefund: das Schimmelmodell hat keinen ADR
+### 8.2 Bestandsbefund: das Schimmelmodell hat keinen ADR
 
 Beim Abgleich der Verweise: `mold.py` nennt „charter G4, ADR-0010", `estimation/psychrometrics.py` „ADR-0010 mould/psychrometrics", ADR-0048 und ADR-0050 zitieren „ADR-0010 (Schimmel/Taupunkt)" — **ADR-0010 ist aber „Solar-Buchhaltung"**. Kein ADR im Verzeichnis behandelt `f_Rsi`, DIN 4108-2 oder EN ISO 13788 als *Entscheidung*; die einzigen Treffer (ADR-0011, ADR-0014, ADR-0048) sind Test- bzw. Abgrenzungskontexte. Das referenzierte „charter G4" liegt nicht im Repo.
 
@@ -307,7 +357,7 @@ Damit ist die **härteste Sicherheitsschranke des Systems die einzige undokument
 
 ---
 
-## 8. Fehlerverhalten und Degradation
+## 9. Fehlerverhalten und Degradation
 
 | Ausfall | Verhalten |
 | --- | --- |
@@ -323,7 +373,7 @@ Die Anzeige zeigt im Zweifel **nichts** statt etwas Falschem — dieselbe Linie 
 
 ---
 
-## 9. Testbarkeit (Entwurfsanforderung, nicht Testplan)
+## 10. Testbarkeit (Entwurfsanforderung, nicht Testplan)
 
 - Alles Fachliche ist rein → Unit-Tests ohne HA, wie `test_humidity.py` / `test_psychrometrics.py`.
 - **Property:** das Trockenheits-Verdict ist monoton in `w` (mehr Feuchte darf nie schlechter bewerten).
@@ -331,25 +381,27 @@ Die Anzeige zeigt im Zweifel **nichts** statt etwas Falschem — dieselbe Linie 
 - **Guard-Test** im Geist von `tests/test_non_goals.py`: weder das Trockenheits- noch das Lüftungs-Verdict darf in `humidity_decide`, `dual_setpoint` oder den Constraint-Solver gelangen; `ventilation_advise` erzeugt nie ein Kommando an ein Gerät.
 - **Purheits-Grenze bei B.5:** `ventilation_advise` entscheidet, der Rand stellt zu. Der Rand enthält keine Fachlogik — kein Schwellenvergleich, keine Unterdrückung, keine Zeitlogik. Prüfbar als Test „gleicher Zustand → keine zweite Notification, Zustandswechsel → Ersetzen bzw. Löschen".
 - **Umrechnungs-Referenz:** g/m³ ↔ g/kg ↔ RH an bekannten Stützstellen (20 °C/40 % = 7,0 g/m³ = 5,9 g/kg).
+- **Umkehr-Invariante (Feature C):** `max_safe_rh` und `mold_min_air_temperature` müssen einander aufheben — die für `rh_max` zurückgegebene Feuchte muss, in `mold_min_air_temperature` eingesetzt, genau die Ausgangs-Lufttemperatur ergeben. Ein Round-Trip-Test über beide Funktionen sichert die Umformung, ohne die bestehende Funktion anzufassen.
 - **Alarmfestigkeit als Test:** ein einzelner Feuchtestoß (Duschen, Kochen) darf Regel 1 **nicht** auslösen; eine anhaltend zu feuchte Wand schon; nach dem Lüften fällt das Mittel von selbst unter die Grenze zurück und zieht den Rat zurück. Drei Zeitreihen-Tests gegen die reine Mittelungsfunktion, ohne HA.
 
 ---
 
-## 10. Sinnvolle Reihenfolge (grob, jederzeit unterbrechbar)
+## 11. Sinnvolle Reihenfolge (grob, jederzeit unterbrechbar)
 
 Jede Stufe ist für sich auslieferbar und wertvoll:
 
 1. **A** — absolute Feuchte veröffentlichen und die untere Ampel-Seite darauf umstellen. Null Regelrisiko, korrigiert einen echten Bewertungsfehler, braucht keinen neuen Sensor.
-2. **B ohne Kosten** — Lüftungs-Rat aus Δ absoluter Feuchte + Schimmelanlass + Trockenheits-Veto. Der eigentliche Differenzierer. Braucht als einzige Vorarbeit das **persistierte Oberflächen-RH-Mittel** (§11.1c) — sinnvollerweise schon in Stufe 1 mitgeschrieben, damit α an echten Daten kalibriert werden kann, bevor Regel 1 scharf geschaltet wird.
-3. **B mit Kosten und Fenster-Rückkopplung** — Wärmekosten-Schätzung und ereignisgetriebene Schließ-Empfehlung. Setzt voraus, dass die Slope-/Aufheizraten-Werte nach dem Refactoring stabil erreichbar sind.
+2. **B ohne Kosten** — Lüftungs-Rat aus Δ absoluter Feuchte + Schimmelanlass + Trockenheits-Veto. Der eigentliche Differenzierer. Braucht als einzige Vorarbeit das **persistierte Oberflächen-RH-Mittel** (§12.1c) — sinnvollerweise schon in Stufe 1 mitgeschrieben, damit α an echten Daten kalibriert werden kann, bevor Regel 1 scharf geschaltet wird.
+3. **C** — schimmelsichere Feuchte-Obergrenze. Hängt an **keiner** der beiden anderen Stufen und ist die billigste von allen (eine reine Funktion, ein Attribut); sie kann jederzeit dazwischengeschoben werden. Sinnvoll direkt nach Stufe 1, weil sie dieselbe Anzeige-Ecke bedient und den `fabric_conflict`-Befund erst sichtbar macht.
+4. **B mit Kosten und Fenster-Rückkopplung** — Wärmekosten-Schätzung und ereignisgetriebene Schließ-Empfehlung. Setzt voraus, dass die Slope-/Aufheizraten-Werte nach dem Refactoring stabil erreichbar sind.
 
 Stufe 1 ist bewusst so geschnitten, dass sie **während** des Coordinator-Umbaus machbar wäre: sie braucht genau einen zusätzlichen berechneten Wert an einer Stelle, an der bereits einer entsteht.
 
 ---
 
-## 11. Entscheidungsstand
+## 12. Entscheidungsstand
 
-### 11.1 Entschieden
+### 12.1 Entschieden
 
 Alle vier ursprünglich offenen Punkte sind entschieden.
 
@@ -383,12 +435,32 @@ Die Frage war ursprünglich als „wie viel Reserve vor der 80-%-Grenze?" gestel
 
 *Nebeneffekt, der zum Rest passt:* das Mittel liefert die **Entwarnung** gleich mit. Es fällt nach dem Lüften von selbst zurück, womit das Zurückziehen der Notification (B.5) ein Zustandswechsel wird statt eines Timers.
 
-### 11.2 Verbleibend offen
+### 12.2 Verbleibend offen
 
 **Die Zeitkonstante α des Oberflächen-RH-Mittels.** 48 h (Airthings-Linie) ist erklärbar und reagiert schnell; mehrere Tage liegt näher an den Keimungsdauern der Isoplethen-Modelle und ist alarmfester. Das ist die einzige verbliebene Zahl, die sich nicht am Schreibtisch entscheiden lässt — sie braucht Live-Daten, sobald die Oberflächen-RH mitgeschrieben wird. Bis dahin gilt als Arbeitswert die Airthings-Linie (~48 h), weil sie die konservativere Wahl in Richtung *zu früh* statt *zu spät* ist.
 
 ---
 
-## 12. Nicht Teil dieses Entwurfs
+## 13. Nicht Teil dieses Entwurfs
 
-Aktive Befeuchtung · KWL-/Abluft-/Fenster-Aktuierung · CO₂-**Regelung** · Lüftungsbemessung · VDI-6022-Hygiene · eine Push-/`notify`-Zustellstrecke mit Empfänger-, Ruhezeit- und Wiederholungsmodell (der HA-interne Hinweiskanal dagegen **ist** Teil des Entwurfs, s. B.5). Für alles davon bleibt ADR-0048 die Antwort: Poise zeigt es an oder weist darauf hin — bewegen darf es nur, was seine eigenen Aktoren bewegen können.
+Aktive Befeuchtungs-**Regelung** · KWL-/Abluft-/Fenster-Aktuierung · CO₂-**Regelung** · Lüftungsbemessung · VDI-6022-Hygiene · eine Push-/`notify`-Zustellstrecke mit Empfänger-, Ruhezeit- und Wiederholungsmodell (der HA-interne Hinweiskanal dagegen **ist** Teil des Entwurfs, s. B.5). Für alles davon bleibt ADR-0048 die Antwort: Poise zeigt es an oder weist darauf hin — bewegen darf es nur, was seine eigenen Aktoren bewegen können.
+
+### 13.1 Lüftungs-Aktuierung: nicht „wollen wir nicht", sondern „können wir nicht"
+
+Für den Lüftungs-Aktor lässt sich das Nicht-Ziel schärfer begründen als bisher dokumentiert — es ist eine **Grenze des HA-Datenmodells**, keine Geschmacksfrage. Am Quellcode geprüft:
+
+| | `fan` | `humidifier` |
+| --- | --- | --- |
+| Device-Class | **keine — die Domain kennt das Konzept nicht** | `humidifier` / `dehumidifier` |
+| Sollwert | — | `target_humidity` |
+| Istwert | — | `current_humidity` |
+| Zustand | — | `action`: humidifying / drying / idle |
+| Sonst | `percentage`, `oscillating`, `preset_mode`, `current_direction` | `mode` / `available_modes` |
+
+`FanEntityFeature` kennt genau sechs Flags (`SET_SPEED`, `OSCILLATE`, `DIRECTION`, `PRESET_MODE`, `TURN_ON`, `TURN_OFF`) und keinerlei Angabe zur Luftführung. `current_direction` ist `"forward"` / `"reverse"` — die **Drehrichtung** eines Deckenventilators (Sommer-/Winterbetrieb), nicht Zu- oder Abluft. Ein Deckenventilator, ein Badlüfter, ein KWL-Zentralgerät und der Umluftlüfter einer Klimaanlage sind im Modell **dasselbe Objekt**; die Topologie steckt allein in Namen und Preset-Strings (Zehnder: ein `fan` fürs ganze Gerät, alles Weitere als `select`/`switch`; Helios/Vallox/Pluggit: gar kein `fan`, sondern Modbus-`number`).
+
+**Konsequenz:** Poise könnte einen Abluftventilator gar nicht von einem Umluftventilator unterscheiden. Es müsste den Nutzer fragen und dann eine unverifizierbare Antwort für einen Aktor verwenden, dessen Fehlbedienung genau die Physik verletzt, die Poise sonst sorgfältig einhält — ein Umluftlüfter über nasser Verdampferschlange **hebt** die Feuchte (ADR-0050 §6).
+
+**Der Kontrast im eigenen Haus:** Poises `air_movement`-Kredit (ADR-0053) funktioniert nur deshalb sauber, weil er den **geräteeigenen Lüfter des Klimaaktors** nutzt, abgeleitet aus dessen `fan_modes` / `hvac_action` — dort ist die Topologie durch den Kontext garantiert (der Lüfter einer Split-AC ist immer Umluft). Bei einer freistehenden `fan`-Entität gibt es diese Garantie nicht.
+
+**Beim Befeuchter liegt es umgekehrt** (C.2): dort *ist* die Unterscheidung im Modell vorhanden und in `discovery.py` bereits implementiert. Das Nicht-Ziel bleibt trotzdem — aber aus Arbitrierungs-, nicht aus Erkennungsgründen, und es schrumpft auf die *Regelung*: die Randbedingung liefert Poise mit Feature C.
