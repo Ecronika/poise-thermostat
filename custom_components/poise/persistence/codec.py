@@ -87,6 +87,8 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "tau_settle",
     "hdh_savings",
     "dry_active",
+    "vent_active",
+    "surface_rh_mean",
     "window_bypass",
     "preset",
     "enabled",
@@ -173,6 +175,9 @@ class PersistedZoneState:
     prev_device_sp: float | None
     last_commanded_hvac: str | None
     prev_device_mode: str | None
+    # ADR-0066 humidity axis (defaulted: additive to the v1 store shape)
+    vent_active: bool = False
+    surface_rh_mean: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The v1 store dict (key set, transforms, values).
@@ -198,6 +203,8 @@ class PersistedZoneState:
             ),
             "hdh_savings": self.hdh.to_dict(),
             "dry_active": self.dry_active,
+            "vent_active": self.vent_active,
+            "surface_rh_mean": self.surface_rh_mean,
             "window_bypass": self.window_bypass,
             "preset": self.preset.value,
             "enabled": self.enabled,
@@ -331,6 +338,8 @@ class DiagnosticsSection:
     regq: RegulationQuality | None = None
     hdh: HdhSavings | None = None
     dry_active: bool | None = None
+    vent_active: bool | None = None
+    surface_rh_mean: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -492,6 +501,12 @@ def _decode_models(
         if isinstance(da, bool):
             # strict bool check — anything else leaves the latch alone.
             diag["dry_active"] = da
+        va = data.get("vent_active")
+        if isinstance(va, bool):
+            diag["vent_active"] = va
+        srm = data.get("surface_rh_mean")
+        if isinstance(srm, int | float):
+            diag["surface_rh_mean"] = float(srm)
     except Exception as err:  # first structural throw stops the parse
         return LearningSection(**learn), DiagnosticsSection(**diag), err
     return LearningSection(**learn), DiagnosticsSection(**diag), None
