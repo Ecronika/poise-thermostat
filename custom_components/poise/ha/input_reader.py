@@ -284,6 +284,13 @@ class InputReader:
             return None
         return parse_state_number(self._hass.states.get(entity_id))
 
+    def attr_number(self, entity_id: str | None, key: str) -> float | None:
+        """Finite-parsed numeric ATTRIBUTE of an entity (ADR-0066: the
+        weather entity's ``humidity`` feeds the outdoor-humidity ladder)."""
+        if not entity_id:
+            return None
+        return parse_attr_number(self._hass.states.get(entity_id), key)
+
     def sensor_age(
         self, entity_id: str, *, now: datetime | None = None
     ) -> float | None:

@@ -1427,16 +1427,9 @@ class TickOrchestrator:
         hardware or config. A dedicated outdoor-RH sensor field (stage 1) is a
         later increment; without any source the advice degrades silently to
         ``no_data`` (design §9)."""
-        if not self._c._weather:
-            return None
-        try:
-            state = self._c.hass.states.get(self._c._weather)
-            if state is None:
-                return None
-            val = state.attributes.get("humidity")
-            return float(val) if val is not None else None
-        except (TypeError, ValueError):
-            return None
+        # Routed through the InputReader (phase-4 read boundary) — the only
+        # module allowed to touch hass.states.
+        return self._c._input_reader.attr_number(self._c._weather, "humidity")
 
     def _climate_humidity(
         self,
