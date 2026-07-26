@@ -178,11 +178,13 @@ async def _to_unavailable_safe_edge(
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
     clock = _FakeClock(1000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
     hass.states.async_set("sensor.room_temp", "unavailable", {})
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._unavailable_since == 1000.0  # Ausfall ab fake t0 gestempelt
+    assert (
+        coord.runtime.safety.unavailable_since == 1000.0
+    )  # Ausfall ab fake t0 gestempelt
     assert (coord.data or {}).get("available") is False
     return entry, clock
 
@@ -270,13 +272,13 @@ async def _setup_feed_zone(hass: HomeAssistant) -> MockConfigEntry:
     await hass.async_block_till_done()
     coord: Any = entry.runtime_data
     assert coord._trv_ext_temp == EXT  # von der F2-Validierung behalten
-    coord._sensor_select = SELECT
+    coord.input_reader.sensor_select = SELECT
     hass.states.async_set(SELECT, "internal", {"options": ["internal", "external"]})
     # Feed-Buchhaltung zuruecksetzen: ein Feed ist damit definitiv faellig,
     # ein ausbleibender Feed ist also eindeutig dem Select-Zweig zuzuordnen.
-    coord._clock = _FakeClock(1000.0)
-    coord._last_fed = None
-    coord._last_fed_ts = 0.0
+    coord.runtime.clock = _FakeClock(1000.0)
+    coord.runtime.actuator.last_fed = None
+    coord.runtime.actuator.last_fed_ts = 0.0
     return entry
 
 
@@ -309,7 +311,7 @@ async def test_ext_select_success_skips_feed_this_tick(
 
     # das Geraet folgt: Select meldet jetzt 'external' -> naechster Tick feedet
     hass.states.async_set(SELECT, "external", {"options": ["internal", "external"]})
-    coord._clock.t += 30.0
+    coord.runtime.clock.t += 30.0
     await coord.async_refresh()
     await hass.async_block_till_done()
     feeds = _feed_writes(set_value)

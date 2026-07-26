@@ -70,48 +70,48 @@ def _data(**kw: Any) -> dict[str, Any]:
 
 async def test_override_cool_silent_device_reads_cooling(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = True
+    coord.runtime.user.enabled = True
     coord.data = _data(final_mode="cool", actuator_hvac_action=None)
     assert ent.hvac_action == HVACAction.COOLING
 
 
 async def test_override_heat_silent_device_reads_heating(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = True
+    coord.runtime.user.enabled = True
     coord.data = _data(final_mode="heat", actuator_hvac_action=None)
     assert ent.hvac_action == HVACAction.HEATING
 
 
 async def test_device_cooling_wins_over_idle_intent(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = True
+    coord.runtime.user.enabled = True
     coord.data = _data(final_mode="idle", actuator_hvac_action="cooling")
     assert ent.hvac_action == HVACAction.COOLING
 
 
 async def test_guard_held_reads_idle(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = True
+    coord.runtime.user.enabled = True
     coord.data = _data(final_mode="cool", actuator_hvac_action="idle")
     assert ent.hvac_action == HVACAction.IDLE
 
 
 async def test_dry_in_deadband_reads_drying(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = True
+    coord.runtime.user.enabled = True
     coord.data = _data(final_mode="dry", actuator_hvac_action=None)
     assert ent.hvac_action == HVACAction.DRYING
 
 
 async def test_window_off_reads_idle(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = True
+    coord.runtime.user.enabled = True
     coord.data = _data(final_mode="off", actuator_hvac_action=None)
     assert ent.hvac_action == HVACAction.IDLE
 
 
 async def test_disabled_reads_off(hass: HomeAssistant) -> None:
     ent, coord = await _entity(hass)
-    coord._enabled = False
+    coord.runtime.user.enabled = False
     coord.data = _data(final_mode="cool", actuator_hvac_action="cooling")
     assert ent.hvac_action == HVACAction.OFF

@@ -108,7 +108,7 @@ async def test_unavailable_safe_state_heat_writes_floor(hass: HomeAssistant) -> 
     coord = entry.runtime_data
 
     # sensor drops out, and pretend the loss is older than the safe-after timeout
-    coord._unavailable_since = coord._clock.monotonic() - 2000.0
+    coord.runtime.safety.unavailable_since = coord.runtime.clock.monotonic() - 2000.0
     hass.states.async_set(
         "sensor.room_temp", "unavailable", {"device_class": "temperature"}
     )
@@ -117,8 +117,8 @@ async def test_unavailable_safe_state_heat_writes_floor(hass: HomeAssistant) -> 
 
     assert coord.data == {"available": False, "unavailable_safe": True}
     # the safe write computed the frost/mould floor (fail toward warmth), not comfort
-    assert coord._last_target is not None
-    assert coord._last_target <= 10.0
+    assert coord.runtime.actuator.last_target is not None
+    assert coord.runtime.actuator.last_target <= 10.0
 
 
 async def test_unavailable_safe_state_cool_only_turns_off(hass: HomeAssistant) -> None:
@@ -130,7 +130,7 @@ async def test_unavailable_safe_state_cool_only_turns_off(hass: HomeAssistant) -
     entry = await _setup(hass, _base())
     coord = entry.runtime_data
 
-    coord._unavailable_since = coord._clock.monotonic() - 2000.0
+    coord.runtime.safety.unavailable_since = coord.runtime.clock.monotonic() - 2000.0
     hass.states.async_set(
         "sensor.room_temp", "unavailable", {"device_class": "temperature"}
     )
@@ -150,7 +150,9 @@ async def test_unavailable_no_timeout_holds_state(hass: HomeAssistant) -> None:
     entry = await _setup(hass, _base())
     coord = entry.runtime_data
 
-    coord._unavailable_since = None  # fresh loss -> timer (re)starts at now
+    coord.runtime.safety.unavailable_since = (
+        None  # fresh loss -> timer (re)starts at now
+    )
     hass.states.async_set(
         "sensor.room_temp", "unavailable", {"device_class": "temperature"}
     )
@@ -158,7 +160,7 @@ async def test_unavailable_no_timeout_holds_state(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
     assert coord.data == {"available": False}
-    assert coord._unavailable_since is not None  # the clock was started
+    assert coord.runtime.safety.unavailable_since is not None  # the clock was started
 
 
 async def test_weather_forecast_consumed(hass: HomeAssistant) -> None:
@@ -187,7 +189,7 @@ async def test_weather_forecast_consumed(hass: HomeAssistant) -> None:
     entry = await _setup(hass, _base(**{CONF_WEATHER: "weather.home"}))
     coord = entry.runtime_data
 
-    coord._forecast_at = None  # force a fresh fetch on the next tick
+    coord.forecast_provider.forecast_at = None  # force a fresh fetch on the next tick
     await coord.async_refresh()
     await hass.async_block_till_done()
 
@@ -255,4 +257,4 @@ async def test_trace_recording_appends_a_replay_line(hass: HomeAssistant) -> Non
     # (the writer rounds floats to 4 dp, so compare at that precision).
     record = TraceRecord.from_json_line(lines[-1])
     assert record.room is not None
-    assert record.alpha == round(coord._ekf.x[1], 4)
+    assert record.alpha == round(coord.runtime.learning.ekf.x[1], 4)

@@ -117,9 +117,9 @@ async def test_feed_repushes_after_keepalive(hass: HomeAssistant) -> None:
     # take over the clock and reset the feed bookkeeping so the interval math
     # starts from our fake t0 rather than the real monotonic value setup used.
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_fed = None
-    coord._last_fed_ts = 0.0
+    coord.runtime.clock = clock
+    coord.runtime.actuator.last_fed = None
+    coord.runtime.actuator.last_fed_ts = 0.0
     # re-arm the recorder AFTER setup (the platform forward shadows a pre-setup mock)
     set_value = async_mock_service(hass, "number", "set_value")
 
@@ -152,9 +152,11 @@ async def test_feed_pushes_immediately_on_change(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(5000.0)
-    coord._clock = clock
-    coord._last_fed = 20.0
-    coord._last_fed_ts = 5000.0  # just fed -> keep-alive nowhere near due
+    coord.runtime.clock = clock
+    coord.runtime.actuator.last_fed = 20.0
+    coord.runtime.actuator.last_fed_ts = (
+        5000.0  # just fed -> keep-alive nowhere near due
+    )
     set_value = async_mock_service(hass, "number", "set_value")
 
     # room jumps; the feed must follow this tick even though no time has passed

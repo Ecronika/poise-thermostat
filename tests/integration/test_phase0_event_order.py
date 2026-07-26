@@ -165,9 +165,9 @@ def _neutral_echo_baseline(coord: Any, device_sp: float) -> None:
     ``_prev_device_sp == device_sp`` baseline keeps the adoption detector
     silent (stable-offset rule), so the test tick only exercises the ordering.
     """
-    coord._last_written_sp = None
-    coord._last_sp_write_ts = None
-    coord._prev_device_sp = device_sp
+    coord.runtime.external.last_written_sp = None
+    coord.runtime.external.last_sp_write_ts = None
+    coord.runtime.external.prev_device_sp = device_sp
 
 
 async def test_expired_timed_hold_event_fires_before_actuator_writes(
@@ -180,19 +180,21 @@ async def test_expired_timed_hold_event_fires_before_actuator_writes(
     _actuator(hass, state="heat", sp=25.0, modes=["heat", "off"], room=18.0)
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
     _neutral_echo_baseline(coord, 25.0)
 
     coord.set_override(25.0)  # active hold, expiry announced at set-time
-    assert coord._override == 25.0
+    assert coord.runtime.user.override == 25.0
     # wall-clock expiry in the past -> _expire_timed_states ends it on the tick
-    coord._override_expires_at = dt_util.utcnow().timestamp() - 60.0
+    coord.runtime.user.override_expires_at = dt_util.utcnow().timestamp() - 60.0
     order = _arm_recorder(hass)
 
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._override is None, "the expired hold must be gone after the tick"
+    assert coord.runtime.user.override is None, (
+        "the expired hold must be gone after the tick"
+    )
     ev, wr = _event_idx(order), _write_idx(order)
     assert ev, f"no poise_override_ended fired: {order}"
     # always-comfort room -> no switchpoint -> the timer-fallback reason
@@ -214,18 +216,20 @@ async def test_frost_rescue_hold_end_event_fires_after_rescue_writes(
     _actuator(hass, state="off", sp=5.0, modes=["heat", "off"], room=5.0)
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
 
     # active user 'off' mode-hold with its announced (future) expiry; the tick
     # then routes through the disabled/frost-rescue branch (line 3241 else).
     coord._set_mode_override("off")
-    assert coord._mode_override == "off"
+    assert coord.runtime.user.mode_override == "off"
     order = _arm_recorder(hass)
 
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._mode_override is None, "the rescue must have ended the off-hold"
+    assert coord.runtime.user.mode_override is None, (
+        "the rescue must have ended the off-hold"
+    )
     ev, wr = _event_idx(order), _write_idx(order)
     assert ev, f"no poise_override_ended fired: {order}"
     assert order[ev[0]][1] == "frost_rescue"
@@ -248,14 +252,14 @@ async def test_set_override_none_fires_immediately_outside_a_tick(
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
     coord.set_override(24.0)
-    assert coord._override == 24.0
+    assert coord.runtime.user.override == 24.0
     order = _arm_recorder(hass)
 
     coord.set_override(None)  # outside any tick; plain synchronous call
 
     # asserted BEFORE any await: the event is already on the record, alone
     assert order == [("event", "user_resume")]
-    assert coord._override is None
+    assert coord.runtime.user.override is None
     await hass.async_block_till_done()
     # ... and nothing trailing: no tick ran, no actuator writes were queued
     assert _write_idx(order) == []
@@ -285,16 +289,16 @@ async def test_preheat_hold_end_event_fires_before_actuator_writes(
         **{CONF_OPTIMAL_START: True, CONF_OVERRIDE_POLICY: OVERRIDE_POLICY_SCHEDULE},
     )
     coord: Any = entry.runtime_data
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
     _neutral_echo_baseline(coord, 18.0)
 
     coord.set_override(18.0)  # active hold below the preheat target
-    assert coord._override == 18.0
+    assert coord.runtime.user.override == 18.0
     assert coord._override_policy == "schedule"  # explicitly configured above
     # always-comfort -> set_override computed a timer-fallback expiry; gate the
     # ADR-0059 §3 path by declaring it a real switchpoint expiry (seeded).
-    coord._override_expiry_is_switchpoint = True
-    assert not coord._was_preheating
+    coord.runtime.user.override_expiry_is_switchpoint = True
+    assert not coord.runtime.latches.was_preheating
     order = _arm_recorder(hass)
 
     real_plan = coordinator_mod.plan_preheat
@@ -306,7 +310,7 @@ async def test_preheat_hold_end_event_fires_before_actuator_writes(
         await coord.async_refresh()
         await hass.async_block_till_done()
 
-    assert coord._override is None, "the hold must end at the preheat edge"
+    assert coord.runtime.user.override is None, "the hold must end at the preheat edge"
     ev, wr = _event_idx(order), _write_idx(order)
     assert ev, f"no poise_override_ended fired: {order}"
     assert order[ev[0]][1] == "schedule_point"

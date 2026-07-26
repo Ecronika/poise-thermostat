@@ -97,10 +97,10 @@ async def test_sensor_dropout_drops_learning_and_window_auto_anchors(
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._last_mono is not None
-    assert coord._prev_room_mono is not None
-    assert coord._wa_ref_mono is not None
-    assert coord._wa_prev_mono is not None
+    assert coord.runtime.learning.last_mono is not None
+    assert coord.runtime.learning.prev_room_mono is not None
+    assert coord.runtime.window.wa_ref_mono is not None
+    assert coord.runtime.window.wa_prev_mono is not None
 
     # the room sensor drops off the network entirely.
     hass.states.async_set("sensor.room_temp", "unavailable", {})
@@ -109,9 +109,9 @@ async def test_sensor_dropout_drops_learning_and_window_auto_anchors(
 
     assert coord.data is not None
     assert coord.data.get("available") is False
-    assert coord._last_mono is None
-    assert coord._prev_room is None
-    assert coord._prev_room_mono is None
-    assert coord._wa_ref_room is None
-    assert coord._wa_ref_mono is None
-    assert coord._wa_prev_mono is None
+    assert coord.runtime.learning.last_mono is None
+    assert coord.runtime.learning.prev_room is None
+    assert coord.runtime.learning.prev_room_mono is None
+    assert coord.runtime.window.wa_ref_room is None
+    assert coord.runtime.window.wa_ref_mono is None
+    assert coord.runtime.window.wa_prev_mono is None

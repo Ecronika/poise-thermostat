@@ -126,7 +126,7 @@ async def _setup(hass: HomeAssistant, **extra: Any) -> MockConfigEntry:
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     coord: Any = entry.runtime_data
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
     return entry
 
 

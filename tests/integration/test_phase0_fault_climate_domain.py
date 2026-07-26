@@ -1,28 +1,28 @@
-"""Phase 0 — Fault-Injection: Legacy-Klimaband-Domäne (Refactoring-Plan
-``docs/Konzepte/2026-07-18_Refactoring-Plan_coordinator.md``, Befund 11 /
-Punkt 11b "Legacy-Klimaband-Domäne", Zeilentabelle 2523–2555 / 2638–2650;
-Negativ-Test für F-HUMSHADOW aus Phase 10).
+"""Phase 10 — Fault-Injection: Klimaband, zwei getrennte Fehlergrenzen
+(Refactoring-Plan ``docs/Konzepte/2026-07-18_Refactoring-Plan_coordinator.md``,
+Befund 11b; ADR-0062 / F-HUMSHADOW).
 
-Friert das HEUTIGE Verhalten der EINEN breiten Fehlergrenze um den
-Klimaband-Block ein (``coordinator.py``, try 2529–2650):
+Bis Phase 10 lagen die LIVE Humidity-/Dry-Entscheidung und die reinen
+Klima-Shadows (Free-Running/Fan/PMV + ``climate_diag``-Assembly) unter EINER
+breiten Fehlergrenze: ein Fehler in ``humidity_decide`` nahm nicht nur den
+Dry-Nudge mit, sondern löschte auch sämtliche Diagnose-Keys des Bandes aus
+``coord.data``. Diese Datei war der Phase-0-Pin genau dafür.
 
-* Wirft ``humidity_decide`` (Aufruf Z. 2543), degradiert der LIVE
-  Dry-Mode-Nudge still: ``_hum_action`` bleibt auf dem Default "idle"
-  (Z. 2528), ``mode_arbitration`` (Z. 2745–2749) liefert nie "dry", der
-  Mode-Nudge-Write (Z. 2942–2964) sendet kein ``set_hvac_mode('dry')``.
-* AR-32 warn-once (Z. 2638–2650): der ERSTE Fehler erzeugt genau eine
-  WARNING ("climate-band/humidity block failed"); jeder weitere Tick mit
-  demselben Fehler nur noch DEBUG ("Poise climate-band shadow failed") —
-  Latch ``_hum_shadow_warned`` (Init Z. 518), wird nie zurückgesetzt.
-* Die gesamte ``climate_diag``-Assembly (Z. 2609–2637) degradiert GEMEINSAM:
-  bei einem Humidity-Fehler bleibt das Dict leer und KEINER seiner Keys
-  erreicht ``coord.data`` (Spread in ``_tick_data`` Z. 3685) — die
-  Humidity-Felder ebenso wie die nachgelagerten Free-Running-/Fan-/PMV-
-  Shadow-Felder (Befund 11b: beobachtbare gemeinsame Degradation).
+Sie ist jetzt der Negativ-Test von F-HUMSHADOW. Unverändert bleibt, was am
+Live-Pfad hängt:
+
+* Wirft ``humidity_decide``, degradiert der Dry-Mode-Nudge still —
+  ``hum_action`` fällt auf "idle", ``mode_arbitration`` liefert nie "dry",
+  es geht kein ``set_hvac_mode('dry')`` raus.
+* AR-32 warn-once: der ERSTE Fehler erzeugt genau eine WARNING
+  ("climate-band/humidity block failed"), jeder weitere nur noch DEBUG —
+  Latch ``hum_shadow_warned``, wird nie zurückgesetzt.
 * Der Tick selbst bleibt erfolgreich ("must never break the tick").
 
-Phase 10 (F-HUMSHADOW) entkoppelt Humidity von den reinen Klima-Shadows;
-bis dahin fixiert diese Datei das Vorher-Verhalten. Glue, CI-only.
+Neu ist die Entkopplung: die ``climate_diag``-Assembly läuft weiter, alle
+Shadow-Keys bleiben publiziert, und die drei Humidity-Keys verschwinden nicht
+mehr, sondern benennen den Ausfall (``humidity_reason == "humidity block
+failed"``, ``dry_active`` behält den Latch). Glue, CI-only.
 """
 
 from __future__ import annotations
@@ -60,10 +60,11 @@ _COORD_LOGGER = "custom_components.poise.coordinator"
 _WARN_TEXT = "climate-band/humidity block failed"
 _DEBUG_TEXT = "climate-band shadow failed"
 
-# Every key the climate_diag-Assembly (coordinator.py 2609–2637) produces.
-# On a humidity failure they must ALL be absent from coord.data together —
-# the Live-Humidity fields AND the shadow fields share the one boundary.
+# Every key the climate_diag assembly produces. Seit F-HUMSHADOW bleiben sie
+# ALLE publiziert, auch wenn die Live-Humidity-Entscheidung fehlschlägt — die
+# drei Humidity-Keys tragen dann den Ausfall-Marker statt zu verschwinden.
 _HUMIDITY_KEYS = ("humidity_action", "dry_active", "humidity_reason")
+_HUM_FAILED_REASON = "humidity block failed"
 _SHADOW_KEYS = (
     "cool_sp_eff",
     "cool_sp_active",
@@ -175,12 +176,14 @@ async def test_healthy_baseline_dry_nudge_and_diag_fields(
         assert key in data, f"healthy tick must publish climate_diag key {key!r}"
 
 
-async def test_humidity_decide_failure_degrades_domain_warn_once(
+async def test_humidity_decide_failure_keeps_the_shadows_warn_once(
     hass: HomeAssistant, caplog: Any
 ) -> None:
-    """Befund 11b: a raising ``humidity_decide`` (a) suppresses the dry nudge
-    silently, (b) warns exactly ONCE across ticks (AR-32), (c) drops the WHOLE
-    climate_diag key set from coord.data together, (d) never breaks the tick."""
+    """F-HUMSHADOW: a raising ``humidity_decide`` (a) still suppresses the dry
+    nudge silently, (b) still warns exactly ONCE across ticks (AR-32), (c) but
+    no longer takes the shadow half down — every climate_diag key stays
+    published and the three humidity keys carry the failure marker,
+    (d) never breaks the tick."""
     caplog.set_level(logging.DEBUG, logger=_COORD_LOGGER)
     async_mock_service(hass, "climate", "set_temperature")
     set_mode_setup = async_mock_service(hass, "climate", "set_hvac_mode")
@@ -196,7 +199,7 @@ async def test_humidity_decide_failure_degrades_domain_warn_once(
     # deterministic, forward-moving tick clock (convention; seeded past the
     # real monotonic so the setup tick's stamps stay in the past)
     clock = _FakeClock(time.monotonic() + 60.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
 
     # re-arm the recorders AFTER setup: platform forwarding re-registered the
     # real climate handlers, which would clobber the pre-setup mocks for the
@@ -213,18 +216,28 @@ async def test_humidity_decide_failure_degrades_domain_warn_once(
         await coord.async_refresh()
         await hass.async_block_till_done()
 
-        # (a) no dry nudge: _hum_action fell back to "idle" (line 2528)
+        # (a) no dry nudge: hum_action fell back to "idle"
         dry = [c for c in set_mode if c.data.get("hvac_mode") == "dry"]
         assert not dry, "a failing humidity block must not nudge into dry"
         # (b) exactly one WARNING on the first failure (AR-32)
         assert _warn_count(caplog) == 1
-        assert coord._hum_shadow_warned is True
-        # (c) the WHOLE climate_diag domain is gone from coord.data together
+        assert coord.runtime.diagnostics.hum_shadow_warned is True
+        # (c) the shadow half kept its own boundary — EVERY key survives
         data = coord.data or {}
         for key in _CLIMATE_DIAG_KEYS:
-            assert key not in data, (
-                f"climate_diag key {key!r} must degrade with the domain"
+            assert key in data, (
+                f"climate_diag key {key!r} must survive a humidity failure"
             )
+        # ... and the humidity keys name the failure instead of vanishing
+        assert data["humidity_action"] == "idle"
+        assert data["humidity_reason"] == _HUM_FAILED_REASON
+        # the latch is CARRIED OVER, not reset: the healthy setup tick engaged
+        # dehumidification, and a failed decision is no evidence it ended
+        assert data["dry_active"] is True
+        assert coord.runtime.humidity.dry_active is True
+        # non-vacuous shadow evidence: the fan/PMV fields carry real values
+        assert isinstance(data["cool_sp_eff"], float)
+        assert data["pmv"] is not None
         # (d) the tick itself still succeeds
         assert coord.last_update_success is True
         assert data.get("available") is True
@@ -240,9 +253,59 @@ async def test_humidity_decide_failure_degrades_domain_warn_once(
         # (a) still no dry nudge across both failing ticks
         dry = [c for c in set_mode if c.data.get("hvac_mode") == "dry"]
         assert not dry
-        # (c)+(d) unchanged degradation, tick still green
+        # (c)+(d) unchanged: shadows keep publishing, tick still green
         data = coord.data or {}
         for key in _CLIMATE_DIAG_KEYS:
-            assert key not in data
+            assert key in data
+        assert data["humidity_reason"] == _HUM_FAILED_REASON
         assert coord.last_update_success is True
         assert data.get("available") is True
+
+
+async def test_shadow_composition_failure_spares_the_live_dry_nudge(
+    hass: HomeAssistant, caplog: Any
+) -> None:
+    """The other direction of F-HUMSHADOW: a failing SHADOW composition costs
+    the band diagnostics and nothing else — the live humidity decision already
+    ran, so ``dry_active`` still latches inside the faulted tick. Before
+    phase 10 this direction did not exist: one boundary, one outcome."""
+    caplog.set_level(logging.DEBUG, logger=_COORD_LOGGER)
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_states(hass)
+    # Start BELOW the Cat-II ceiling so the setup tick leaves the latch off;
+    # the flip is then attributable to the faulted tick alone (non-vacuous).
+    hass.states.async_set("sensor.rh", "45", {"device_class": "humidity"})
+    entry = await _setup(hass)
+    coord: Any = entry.runtime_data
+    assert coord.runtime.humidity.dry_active is False
+
+    clock = _FakeClock(time.monotonic() + 60.0)
+    coord.runtime.clock = clock
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set("sensor.rh", "70", {"device_class": "humidity"})
+
+    # patched where the orchestrator BOUND it (module-level import), not in the
+    # defining module — the humidity kernel is the one that keeps its
+    # coordinator-namespace dispatch, this composition never needed it.
+    with patch(
+        "custom_components.poise.ha.tick_orchestrator.compose_climate_band",
+        side_effect=RuntimeError("injected climate shadow failure"),
+    ):
+        clock.t += 60.0
+        await coord.async_refresh()
+        await hass.async_block_till_done()
+
+    # the LIVE decision ran INSIDE the faulted tick: the latch engaged
+    assert coord.runtime.humidity.dry_active is True
+    # only the diagnostics degraded — the whole assembly is the shadow half
+    data = coord.data or {}
+    for key in _CLIMATE_DIAG_KEYS:
+        assert key not in data
+    # its own warn-once latch, distinct from the humidity one
+    assert coord.runtime.diagnostics.climate_shadow_warned is True
+    assert coord.runtime.diagnostics.hum_shadow_warned is False
+    assert "climate-band shadow composition failed" in caplog.text
+    assert coord.last_update_success is True
+    assert data.get("available") is True

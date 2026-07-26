@@ -95,7 +95,7 @@ async def test_rapid_ticks_do_not_flatly_credit_a_minute_each(
     # (1.0 per tick regardless of real elapsed time); real elapsed dt keeps
     # this well under 2.0 (first tick's 1-minute fallback + a few near-zero
     # real-time increments).
-    assert coord._hdh.eligible_min < 2.0, (
-        f"eligible_min={coord._hdh.eligible_min!r} looks like a flat "
-        "1-minute-per-tick credit, not real elapsed time"
+    assert coord.runtime.diagnostics.hdh.eligible_min < 2.0, (
+        f"eligible_min={coord.runtime.diagnostics.hdh.eligible_min!r} "
+        "looks like a flat 1-minute-per-tick credit, not real elapsed time"
     )

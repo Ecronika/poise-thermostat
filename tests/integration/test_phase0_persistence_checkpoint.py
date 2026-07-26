@@ -1,35 +1,28 @@
-"""Phase 0 (Refactoring-Plan coordinator.py 2026-07-18, Befund 12): pin the
-POSITION of the persistence checkpoint relative to the rest of the tick.
+"""Phase 10 (F-SAVEPOINT): pin the NORMALISED position of the persistence
+checkpoint relative to the rest of the tick.
 
 Plan reference: docs/Konzepte/2026-07-18_Refactoring-Plan_coordinator.md,
-Abschnitt 6 Phase 0, "Persistence-Checkpoint-Test (Befund 12)".
+Befund 12; ADR-0064.
 
-What is frozen here (coordinator.py line numbers, verified against the 3,827-line
-file):
+Until phase 10 there were TWO checkpoint positions and both sat too early:
 
-1. Normal (available) tick: the ``_maybe_save`` checkpoint at line 3327 runs
-   BEFORE the compressor-lifecycle fold (``_lifecycle.observe``, lines
-   3416-3457, call at 3443) and before the Outcome/HDH/RegQ folds (3516+).
-   A save triggered in tick N therefore persists the PRE-tick (tick N-1)
-   state of ``multi_lifecycle`` / ``outcome_stats`` / ``hdh_savings`` /
-   ``regulation_quality`` — never the state this same tick is about to fold in.
+* the normal tick saved BEFORE ``finalize_tick``, so a save in tick N carried
+  the PRE-tick state of ``multi_lifecycle`` / ``outcome_stats`` /
+  ``hdh_savings`` / ``regulation_quality`` — the folds of the very tick that
+  triggered the save landed on disk only one tick later;
+* the unavailable tick flushed BEFORE the safe-state write, so that write's
+  own ``has_actuated`` flip stayed pending.
 
-2. ``has_actuated`` flow: a SUCCESSFUL setpoint write earlier in the same tick
-   stamps its success state at lines 3183-3186, including ``_mark_actuated``
-   (1738-1750: first flip sets ``_dirty``). Because that happens BEFORE the
-   line-3327 checkpoint, the very tick of the first successful write already
-   persists ``has_actuated=True``.
+F-SAVEPOINT collapsed both into ONE end-of-tick checkpoint. What is pinned
+here now:
 
-3. Unavailable tick (room sensor lost, safe-state timeout exceeded, lines
-   1996-2040): the pending-dirty flush (2018-2019) runs BEFORE the safe-state
-   write (``_write_unavailable_safe_state`` 1929-1986, called at 2038). The
-   safe-state write's own ``_mark_actuated`` (line 1984) happens AFTER that
-   flush and the branch returns immediately (minimal payload, 2039-2040), so
-   the ``has_actuated`` flip from the safe-state write is NOT persisted in this
-   tick — it stays pending as ``_dirty=True`` for a later save.
-
-Phase-0 rule: these tests freeze TODAY's behaviour; they must be adapted to the
-observed behaviour, never the production code.
+1. Normal tick: the save runs AFTER ``finalize_tick``, so its payload carries
+   THIS tick's lifecycle fold and THIS tick's outcome/HDH/RegQ metrics.
+2. ``has_actuated`` flow: a successful setpoint write still lands in the same
+   tick's payload (it always preceded the checkpoint, and still does).
+3. Unavailable tick: the dirty flush runs AFTER the safe-state write, so the
+   user intent AND the safe write's ``has_actuated`` flip are persisted
+   together — the tick leaves nothing pending.
 
 Run (from the project root):
     ".venv-ha/Scripts/python.exe" -m pytest \
@@ -147,12 +140,12 @@ def _capture_store_saves(coord: Any) -> list[dict[str, Any]]:
     return saves
 
 
-async def test_save_persists_pre_tick_lifecycle_state(hass: HomeAssistant) -> None:
-    """(1) Normal path: the line-3327 checkpoint runs BEFORE the lifecycle fold
-    (line 3443), so a dirty-triggered save in tick N persists the PRE-tick
-    ``multi_lifecycle`` state — even though the same tick then folds a
-    recognisably NEW lifecycle state in. Outcome/HDH/RegQ are pinned the same
-    way via pre-tick snapshots (their folds sit at 3516+, after the save)."""
+async def test_save_persists_this_tick_lifecycle_state(hass: HomeAssistant) -> None:
+    """(1) Normal path, F-SAVEPOINT: the checkpoint runs AFTER
+    ``finalize_tick``, so a dirty-triggered save in tick N persists the
+    lifecycle state THIS tick folded — not the pre-tick one. The
+    outcome/HDH/RegQ metrics come from the same finalize segment and are
+    therefore consistent with it."""
     _set_room(hass, setpoint=20.0, room=20.0)
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
@@ -161,16 +154,12 @@ async def test_save_persists_pre_tick_lifecycle_state(hass: HomeAssistant) -> No
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
 
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
     coord._save_counter = 0
 
-    # pre-tick snapshots of everything the plan says the save must see
-    pre_lifecycle = lifecycle_mod.to_dict(coord._multi_lifecycle)
-    pre_outcome = coord._outcome_stats.to_dict()
-    pre_hdh = coord._hdh.to_dict()
-    pre_regq = coord._regq.to_dict()
+    pre_lifecycle = lifecycle_mod.to_dict(coord.runtime.compressor.multi_lifecycle)
 
-    # the fold (line 3443) will produce a recognisably NEW lifecycle state
+    # the fold produces a recognisably NEW lifecycle state
     post_sentinel = DeviceLifecycle(last_mode="__post_fold_sentinel__")
     assert pre_lifecycle["last_mode"] != post_sentinel.last_mode
 
@@ -180,44 +169,48 @@ async def test_save_persists_pre_tick_lifecycle_state(hass: HomeAssistant) -> No
     saves = _capture_store_saves(coord)
     # a user-intent change marks the state dirty -> forces the tick's save
     coord.set_enabled(True)
-    assert coord._dirty is True
+    assert coord.runtime.dirty is True
 
     with patch.object(lifecycle_mod, "observe", _sentinel_observe):
         await coord.async_refresh()
         await hass.async_block_till_done()
 
-    # the fold DID run this tick and stored the new state on the coordinator...
-    assert coord._multi_lifecycle.last_mode == "__post_fold_sentinel__"
-    # ...but the save that this same tick flushed carries the PRE-tick state:
+    # the fold ran this tick and stored the new state on the coordinator...
+    assert (
+        coord.runtime.compressor.multi_lifecycle.last_mode == "__post_fold_sentinel__"
+    )
+    # ...and the save this same tick flushed carries exactly that state
     assert len(saves) >= 1
     payload = saves[0]
-    assert payload["multi_lifecycle"] == pre_lifecycle
-    assert payload["multi_lifecycle"]["last_mode"] != "__post_fold_sentinel__"
-    # Outcome/HDH/RegQ folds also sit after the checkpoint -> pre-tick stands
-    assert payload["outcome_stats"] == pre_outcome
-    assert payload["hdh_savings"] == pre_hdh
-    assert payload["regulation_quality"] == pre_regq
+    assert payload["multi_lifecycle"]["last_mode"] == "__post_fold_sentinel__"
+    assert payload["multi_lifecycle"] != pre_lifecycle
+    # the metrics in the same payload are the post-finalize ones
+    assert payload["outcome_stats"] == coord.runtime.diagnostics.outcome_stats.to_dict()
+    assert payload["hdh_savings"] == coord.runtime.diagnostics.hdh.to_dict()
+    assert payload["regulation_quality"] == coord.runtime.diagnostics.regq.to_dict()
     # the dirty flag was consumed by the successful save (F6)
-    assert coord._dirty is False
+    assert coord.runtime.dirty is False
 
 
 async def test_first_successful_write_persists_has_actuated_same_tick(
     hass: HomeAssistant,
 ) -> None:
-    """(2) has_actuated flow: the setpoint write's success stamp (3183-3186,
-    ``_mark_actuated`` at 3186 flips ``_dirty``) runs BEFORE the line-3327
-    checkpoint, so THIS tick's save payload already carries has_actuated=True."""
+    """(2) has_actuated flow: the setpoint write's success stamp
+    (``_mark_actuated`` flips ``dirty``) runs before the checkpoint — as it did
+    before F-SAVEPOINT and still does now that the checkpoint moved to the end
+    of the tick — so THIS tick's save payload already carries
+    has_actuated=True."""
     _set_room(hass, setpoint=20.0, room=18.0)  # cold room -> a write is due
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
 
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
     # rewind to the pre-first-actuation state (the setup tick already wrote):
     # this makes the next successful write the "first" one of the run again.
-    coord._has_actuated = False
-    coord._dirty = False
+    coord.runtime.actuator.has_actuated = False
+    coord.runtime.dirty = False
     coord._save_counter = 0
     saves = _capture_store_saves(coord)
 
@@ -227,30 +220,31 @@ async def test_first_successful_write_persists_has_actuated_same_tick(
     # a real setpoint write happened this tick and succeeded
     trv_writes = [c for c in set_temp if c.data.get("entity_id") == "climate.trv"]
     assert trv_writes, "expected a setpoint write this tick"
-    assert coord._has_actuated is True
-    # ``_mark_actuated`` (first flip) set _dirty BEFORE the checkpoint, so the
+    assert coord.runtime.actuator.has_actuated is True
+    # ``_mark_actuated`` (first flip) set dirty before the checkpoint, so the
     # SAME tick saved — and the payload already carries the flipped gate.
     assert len(saves) >= 1
     assert saves[0]["has_actuated"] is True
-    assert coord._dirty is False  # flushed by this tick's save
+    assert coord.runtime.dirty is False  # flushed by this tick's save
 
 
-async def test_unavailable_dirty_flush_precedes_safe_state_write(
+async def test_unavailable_dirty_flush_follows_safe_state_write(
     hass: HomeAssistant,
 ) -> None:
-    """(3) Unavailable path: with a pending dirty flag and the safe-state
-    timeout exceeded, ONE tick performs the dirty flush (2018-2019) BEFORE the
-    safe-state write (2038). The ``has_actuated`` flip caused by that safe-state
-    write (line 1984 -> ``_mark_actuated``) is NOT saved again in this tick
-    (early return with the minimal payload, 2039-2040) — it stays pending."""
+    """(3) Unavailable path, F-SAVEPOINT: with a pending dirty flag and the
+    safe-state timeout exceeded, ONE tick performs the safe-state write FIRST
+    and flushes afterwards, so the payload carries both the user intent and the
+    ``has_actuated`` flip that write produced. Nothing stays pending."""
     _set_room(hass, setpoint=20.0, room=20.0)
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._has_actuated = False  # rewind: the safe write should be the 1st flip
-    coord._dirty = False
+    coord.runtime.clock = clock
+    coord.runtime.actuator.has_actuated = (
+        False  # rewind: the safe write should be the 1st flip
+    )
+    coord.runtime.dirty = False
     coord._save_counter = 0
 
     # the device sits off @ 5.0 C -> resolve_safe_state will demand a heat
@@ -262,7 +256,7 @@ async def test_unavailable_dirty_flush_precedes_safe_state_write(
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord.data == {"available": False}
-    assert coord._unavailable_since == 1000.0
+    assert coord.runtime.safety.unavailable_since == 1000.0
 
     # arm the SHARED ordered recorder: store saves, the safe-state write
     # (recorded at invocation time, so the order is deterministic even with
@@ -294,33 +288,32 @@ async def test_unavailable_dirty_flush_precedes_safe_state_write(
     # tick B: timeout exceeded AND a pending user intent (set_enabled -> dirty)
     clock.t = 1000.0 + UNAVAILABLE_SAFE_AFTER_S + 1.0
     coord.set_enabled(True)
-    assert coord._dirty is True
+    assert coord.runtime.dirty is True
 
     await coord.async_refresh()
     await hass.async_block_till_done()
 
     kinds = [k for k, _ in events]
-    # exactly ONE save this tick: the pre-safe-write dirty flush
+    # exactly ONE save this tick: the end-of-tick dirty flush
     assert kinds.count("store_save") == 1
     save_idx = kinds.index("store_save")
     safe_idx = kinds.index("safe_state_write")
     climate_idxs = [i for i, k in enumerate(kinds) if k == "climate"]
-    # ordering: dirty flush FIRST, then the safe-state write + its calls
-    assert save_idx < safe_idx, f"flush must precede the safe write: {kinds}"
+    # ordering: safe-state write + its calls FIRST, then the flush
+    assert safe_idx < save_idx, f"the safe write must precede the flush: {kinds}"
     assert climate_idxs, "the safe-state write dispatched no climate calls"
-    assert all(save_idx < i for i in climate_idxs), f"order violated: {kinds}"
+    assert all(i < save_idx for i in climate_idxs), f"order violated: {kinds}"
     # the safe write really nudged heat and wrote the floor
     climate_services = [v for k, v in events if k == "climate"]
     assert "set_hvac_mode" in climate_services
     assert "set_temperature" in climate_services
 
-    # the flushed payload is the PRE-safe-write state: intent persisted,
-    # has_actuated still False
+    # the flushed payload is the POST-safe-write state: the intent AND the
+    # has_actuated flip the safe write produced go to disk together
     payload = events[save_idx][1]
     assert payload["enabled"] is True
-    assert payload["has_actuated"] is False
-    # the safe write's flip happened AFTER the flush and is NOT yet persisted:
-    assert coord._has_actuated is True
-    assert coord._dirty is True  # pending for a later tick's save
-    # the unavailable-safe tick reports the minimal payload (2039-2040)
+    assert payload["has_actuated"] is True
+    assert coord.runtime.actuator.has_actuated is True
+    assert coord.runtime.dirty is False  # nothing left pending
+    # the unavailable-safe tick still reports the minimal payload
     assert coord.data == {"available": False, "unavailable_safe": True}

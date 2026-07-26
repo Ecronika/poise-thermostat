@@ -87,7 +87,7 @@ async def _setup(hass: HomeAssistant, data: dict[str, Any]) -> MockConfigEntry:
 
 def _recently_stopped(coord: Any) -> None:
     """Seed the lifecycle as if the compressor stopped this instant -> min-off runs."""
-    coord._multi_lifecycle = DeviceLifecycle(
+    coord.runtime.compressor.multi_lifecycle = DeviceLifecycle(
         is_on=False, last_off_wall=dt_util.utcnow().timestamp()
     )
 

@@ -121,37 +121,37 @@ def _snapshot_from_attributes(coord: Any) -> codec.PersistedZoneState:
     für Feld aus den heutigen ``self._*``-Attributen nach (deckt Vertauschungen
     im ``_save_payload``-Wiring auf, z. B. regq<->hdh)."""
     return codec.PersistedZoneState(
-        ekf=coord._ekf,
-        trm_tracker=coord._trm_tracker,
-        seasonless=coord._seasonless,
-        window_auto=coord._window_auto,
-        multi_lifecycle=coord._multi_lifecycle,
-        ref_offset=coord._ref_offset,
-        tau_settle=coord._tau_settle,
-        outcome_stats=coord._outcome_stats,
-        regq=coord._regq,
-        hdh=coord._hdh,
-        dry_active=coord._dry_active,
-        enabled=coord._enabled,
-        preset=coord._preset,
-        climate_mode=coord._climate_mode,
-        window_bypass=coord._window_bypass,
-        has_actuated=coord._has_actuated,
-        override=coord._override,
-        mode_override=coord._mode_override,
-        override_set_wall=coord._override_set_wall,
-        override_requested=coord._override_requested,
+        ekf=coord.runtime.learning.ekf,
+        trm_tracker=coord.runtime.learning.trm_tracker,
+        seasonless=coord.runtime.learning.seasonless,
+        window_auto=coord.runtime.window.window_auto,
+        multi_lifecycle=coord.runtime.compressor.multi_lifecycle,
+        ref_offset=coord.runtime.learning.ref_offset,
+        tau_settle=coord.runtime.learning.tau_settle,
+        outcome_stats=coord.runtime.diagnostics.outcome_stats,
+        regq=coord.runtime.diagnostics.regq,
+        hdh=coord.runtime.diagnostics.hdh,
+        dry_active=coord.runtime.humidity.dry_active,
+        enabled=coord.runtime.user.enabled,
+        preset=coord.runtime.user.preset,
+        climate_mode=coord.runtime.user.climate_mode,
+        window_bypass=coord.runtime.user.window_bypass,
+        has_actuated=coord.runtime.actuator.has_actuated,
+        override=coord.runtime.user.override,
+        mode_override=coord.runtime.user.mode_override,
+        override_set_wall=coord.runtime.user.override_set_wall,
+        override_requested=coord.runtime.user.override_requested,
         override_policy=coord._override_policy,
-        override_expires_at=coord._override_expires_at,
-        override_expiry_is_switchpoint=coord._override_expiry_is_switchpoint,
-        boost_expires_at=coord._boost_expires_at,
-        boost_prev_preset=coord._boost_prev_preset,
-        override_stats=coord._override_stats,
-        override_reason=coord._override_reason,
-        last_written_sp=coord._last_written_sp,
-        prev_device_sp=coord._prev_device_sp,
-        last_commanded_hvac=coord._last_commanded_hvac,
-        prev_device_mode=coord._prev_device_mode,
+        override_expires_at=coord.runtime.user.override_expires_at,
+        override_expiry_is_switchpoint=coord.runtime.user.override_expiry_is_switchpoint,
+        boost_expires_at=coord.runtime.user.boost_expires_at,
+        boost_prev_preset=coord.runtime.user.boost_prev_preset,
+        override_stats=coord.runtime.user.override_stats,
+        override_reason=coord.runtime.user.override_reason,
+        last_written_sp=coord.runtime.external.last_written_sp,
+        prev_device_sp=coord.runtime.external.prev_device_sp,
+        last_commanded_hvac=coord.runtime.external.last_commanded_hvac,
+        prev_device_mode=coord.runtime.external.prev_device_mode,
     )
 
 
@@ -207,13 +207,13 @@ async def test_store_seed_roundtrip_across_two_setups(
     coord.set_preset(OverrideMode.ECO)
     coord.set_override(21.5, reason="device_adopt_setpoint")
     coord.set_enabled(False)
-    held_set_wall = coord._override_set_wall
-    held_expires_at = coord._override_expires_at
-    held_requested = coord._override_requested
-    base_written_sp = coord._last_written_sp
-    base_prev_sp = coord._prev_device_sp
-    base_cmd_hvac = coord._last_commanded_hvac
-    base_prev_mode = coord._prev_device_mode
+    held_set_wall = coord.runtime.user.override_set_wall
+    held_expires_at = coord.runtime.user.override_expires_at
+    held_requested = coord.runtime.user.override_requested
+    base_written_sp = coord.runtime.external.last_written_sp
+    base_prev_sp = coord.runtime.external.prev_device_sp
+    base_cmd_hvac = coord.runtime.external.last_commanded_hvac
+    base_prev_mode = coord.runtime.external.prev_device_mode
     assert held_set_wall is not None and held_expires_at is not None
 
     # Zwei Setups: der Reload entlädt (echter Unload-Save) und baut neu auf.
@@ -228,20 +228,20 @@ async def test_store_seed_roundtrip_across_two_setups(
     assert codec.decode(stored, now_wall=time.time()).kind == "v1"
 
     # User-Intent + Hold-Lifecycle wertgleich restauriert.
-    assert restored._enabled is False
+    assert restored.runtime.user.enabled is False
     assert restored.preset is OverrideMode.ECO
     assert restored.climate_mode == "heat"
-    assert restored._override == 21.5
-    assert restored._override_reason == "device_adopt_setpoint"
-    assert restored._override_set_wall == held_set_wall
-    assert restored._override_expires_at == held_expires_at
-    assert restored._override_requested == held_requested
+    assert restored.runtime.user.override == 21.5
+    assert restored.runtime.user.override_reason == "device_adopt_setpoint"
+    assert restored.runtime.user.override_set_wall == held_set_wall
+    assert restored.runtime.user.override_expires_at == held_expires_at
+    assert restored.runtime.user.override_requested == held_requested
     # B5-Baselines: von Setup 1 gestempelt, über den Codec zurück (der
     # enabled=False-Setup-Tick überschreibt sie nicht).
-    assert restored._last_written_sp == base_written_sp
-    assert restored._prev_device_sp == base_prev_sp
-    assert restored._last_commanded_hvac == base_cmd_hvac
-    assert restored._prev_device_mode == base_prev_mode
+    assert restored.runtime.external.last_written_sp == base_written_sp
+    assert restored.runtime.external.prev_device_sp == base_prev_sp
+    assert restored.runtime.external.last_commanded_hvac == base_cmd_hvac
+    assert restored.runtime.external.prev_device_mode == base_prev_mode
 
 
 async def test_model_corruption_logs_single_exception_record(
@@ -283,7 +283,7 @@ async def test_model_corruption_logs_single_exception_record(
 
     # (1) Präfix-Semantik: das VOR dem Wurf geparste EKF ist restauriert
     # (der Setup-Tick lernt noch nicht: ``_last_mono`` ist None).
-    assert coord._ekf.n_updates == 7
+    assert coord.runtime.learning.ekf.n_updates == 7
     # (2) Log-Form des alten Monolithen: EIN Record, ERROR, mit Traceback.
     records = [
         r for r in caplog.records if "failed to restore learned model" in r.getMessage()
@@ -293,7 +293,7 @@ async def test_model_corruption_logs_single_exception_record(
     assert records[0].exc_info is not None
     assert records[0].exc_info[0] is ValueError
     # (3) User-Intent unversehrt.
-    assert coord._enabled is False
+    assert coord.runtime.user.enabled is False
     assert coord.preset is OverrideMode.ECO
-    assert coord._override == 21.5
-    assert coord._override_reason == "device_adopt_setpoint"
+    assert coord.runtime.user.override == 21.5
+    assert coord.runtime.user.override_reason == "device_adopt_setpoint"

@@ -160,8 +160,8 @@ async def test_unidentified_ekf_makes_zero_forecast_calls(
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     calls = _register_forecast_counter(hass)
-    coord._clock = _FakeClock(time.monotonic())
-    assert not coord._ekf.identified
+    coord.runtime.clock = _FakeClock(time.monotonic())
+    assert not coord.runtime.learning.ekf.identified
 
     await coord.async_refresh()
     await hass.async_block_till_done()
@@ -183,8 +183,8 @@ async def test_optimal_start_off_makes_zero_forecast_calls(
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     calls = _register_forecast_counter(hass)
-    coord._clock = _FakeClock(time.monotonic())
-    _make_identified(coord._ekf)
+    coord.runtime.clock = _FakeClock(time.monotonic())
+    _make_identified(coord.runtime.learning.ekf)
     assert coord._optimal_start is False
     assert coord._optimal_stop is False  # mirrors optimal_start (line 560)
 
@@ -216,9 +216,11 @@ async def test_predictive_zone_makes_exactly_one_call_then_serves_from_cache(
     async_mock_service(hass, "climate", "set_hvac_mode")
     calls = _register_forecast_counter(hass)
     clock = _FakeClock(time.monotonic())
-    coord._clock = clock
-    _make_identified(coord._ekf)
-    assert coord._forecast_at is None  # nothing fetched during setup's refresh
+    coord.runtime.clock = clock
+    _make_identified(coord.runtime.learning.ekf)
+    assert (
+        coord.forecast_provider.forecast_at is None
+    )  # nothing fetched during setup's refresh
 
     # tick 1 — predictive: exactly one fetch
     await coord.async_refresh()

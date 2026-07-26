@@ -132,13 +132,17 @@ def _seed_written_baseline(coord: Any, *, device_sp: float) -> _FakeClock:
     them.
     """
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = device_sp
-    coord._last_sp_write_ts = 1000.0
-    coord._prev_device_sp = device_sp
-    coord._pre_write_sp = 15.0  # sentinel: proves the attempt stamp of THIS tick
-    coord._has_actuated = False  # reset the success-side gate (setup tick wrote)
-    coord._dirty = False
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = device_sp
+    coord.runtime.external.last_sp_write_ts = 1000.0
+    coord.runtime.external.prev_device_sp = device_sp
+    coord.runtime.external.pre_write_sp = (
+        15.0  # sentinel: proves the attempt stamp of THIS tick
+    )
+    coord.runtime.actuator.has_actuated = (
+        False  # reset the success-side gate (setup tick wrote)
+    )
+    coord.runtime.dirty = False
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0  # echo window closed
     return clock
 
@@ -156,8 +160,8 @@ async def test_failed_write_stamps_attempt_but_not_success(
     nudges = async_mock_service(hass, "climate", "set_hvac_mode")
 
     clock = _seed_written_baseline(coord, device_sp=20.0)
-    mode_before = coord._last_written_mode
-    ctx_before = len(coord._own_write_ctx_ids)
+    mode_before = coord.runtime.actuator.last_written_mode
+    ctx_before = len(coord.runtime.external.own_write_ctx_ids)
 
     with patch.object(
         actuator_mod, "write", side_effect=HomeAssistantError("injected write failure")
@@ -170,20 +174,24 @@ async def test_failed_write_stamps_attempt_but_not_success(
     assert "actuator write failed" in caplog.text  # the Z. 3188 log site
 
     # Attempt stamps: taken BEFORE the await, so they survive the failure.
-    assert coord._pre_write_sp == 20.0  # Z. 3179 (was 15.0 sentinel)
+    assert coord.runtime.external.pre_write_sp == 20.0  # Z. 3179 (was 15.0 sentinel)
     assert nudges == []  # device already 'heat' -> no mode nudge this tick ...
     # ... so exactly the failed write registered its Context-ID (Z. 1661–1662)
-    assert len(coord._own_write_ctx_ids) == ctx_before + 1
+    assert len(coord.runtime.external.own_write_ctx_ids) == ctx_before + 1
 
     # Success stamps: NOT advanced by the failed write (Z. 3183–3186 skipped).
-    assert coord._last_written_sp == 20.0  # unchanged seed, not snap(target)
-    assert coord._last_sp_write_ts == 1000.0  # not re-stamped to clock.t
-    assert coord._last_written_mode == mode_before
-    assert coord._has_actuated is False
+    assert (
+        coord.runtime.external.last_written_sp == 20.0
+    )  # unchanged seed, not snap(target)
+    assert (
+        coord.runtime.external.last_sp_write_ts == 1000.0
+    )  # not re-stamped to clock.t
+    assert coord.runtime.actuator.last_written_mode == mode_before
+    assert coord.runtime.actuator.has_actuated is False
 
     # Z. 3187: never let actuator I/O kill the tick.
     assert coord.last_update_success is True
-    assert clock.t == coord._clock.monotonic()  # tick ran under the fake clock
+    assert clock.t == coord.runtime.clock.monotonic()  # tick ran under the fake clock
 
 
 async def test_successful_write_stamps_success_and_flushes_dirty(
@@ -200,8 +208,10 @@ async def test_successful_write_stamps_success_and_flushes_dirty(
     nudges = async_mock_service(hass, "climate", "set_hvac_mode")
 
     clock = _seed_written_baseline(coord, device_sp=20.0)
-    coord._last_written_mode = None  # sentinel: success must stamp final_mode
-    ctx_before = len(coord._own_write_ctx_ids)
+    coord.runtime.actuator.last_written_mode = (
+        None  # sentinel: success must stamp final_mode
+    )
+    ctx_before = len(coord.runtime.external.own_write_ctx_ids)
 
     # spy on the store to observe the same-tick dirty flush (behaviour untouched)
     orig_save = coord._store.save
@@ -221,16 +231,16 @@ async def test_successful_write_stamps_success_and_flushes_dirty(
     assert isinstance(written, float)
 
     # Attempt stamps are taken on the success path too.
-    assert coord._pre_write_sp == 20.0  # Z. 3179 (was 15.0 sentinel)
+    assert coord.runtime.external.pre_write_sp == 20.0  # Z. 3179 (was 15.0 sentinel)
     assert nudges == []  # no mode nudge -> the write owns the single new ctx id
-    assert len(coord._own_write_ctx_ids) == ctx_before + 1
+    assert len(coord.runtime.external.own_write_ctx_ids) == ctx_before + 1
 
     # Success stamps (Z. 3183–3186): the raw target goes on the wire, the
     # SNAPPED target (device step 0.5) becomes the echo baseline.
-    assert coord._last_written_sp == snap_to_step(written, 0.5)
-    assert coord._last_sp_write_ts == clock.t
-    assert coord._last_written_mode is not None
-    assert coord._has_actuated is True
+    assert coord.runtime.external.last_written_sp == snap_to_step(written, 0.5)
+    assert coord.runtime.external.last_sp_write_ts == clock.t
+    assert coord.runtime.actuator.last_written_mode is not None
+    assert coord.runtime.actuator.has_actuated is True
     assert coord.last_update_success is True
 
     # _mark_actuated (Z. 1738–1750) set _dirty on the first flip; the same tick's
@@ -238,7 +248,7 @@ async def test_successful_write_stamps_success_and_flushes_dirty(
     assert any(p.get("has_actuated") is True for p in saves), (
         f"no same-tick flush of has_actuated: {[list(p) for p in saves]}"
     )
-    assert coord._dirty is False
+    assert coord.runtime.dirty is False
 
 
 async def test_mode_nudge_call_precedes_setpoint_write(hass: HomeAssistant) -> None:
@@ -267,7 +277,9 @@ async def test_mode_nudge_call_precedes_setpoint_write(hass: HomeAssistant) -> N
     hass.services.async_register("climate", "set_hvac_mode", _rec_mode)
     hass.services.async_register("climate", "set_temperature", _rec_temp)
 
-    assert coord._mode_override is None  # 'off' was not grabbed as a K2 hold
+    assert (
+        coord.runtime.user.mode_override is None
+    )  # 'off' was not grabbed as a K2 hold
     await coord.async_refresh()
     await hass.async_block_till_done()
 

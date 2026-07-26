@@ -107,12 +107,12 @@ async def test_failure_falls_back_to_last_good_cache_not_flat_fallback(
     coord: Any = entry.runtime_data
 
     # first call succeeds and caches a forecast heavily biased toward 30.0 C.
-    coord._forecast_at = None
+    coord.forecast_provider.forecast_at = None
     first = await coord._forecast_outdoor(120.0, 9.9)
     assert first > 15.0, f"expected the 30 C forecast sample, got {first!r}"
 
     # force the cache stale so the next call attempts a refetch, which fails.
-    coord._forecast_at = coord._clock.monotonic() - 10_000.0
+    coord.forecast_provider.forecast_at = coord.runtime.clock.monotonic() - 10_000.0
     second = await coord._forecast_outdoor(120.0, 9.9)
     # F10: falls through to the still-cached (now stale) forecast rather than
     # collapsing straight to the flat fallback (9.9).
@@ -141,7 +141,7 @@ async def test_repeated_failures_back_off_instead_of_retrying_every_tick(
     entry = await _setup(hass, _base(**{CONF_WEATHER: "weather.home"}))
     coord: Any = entry.runtime_data
 
-    coord._forecast_at = None
+    coord.forecast_provider.forecast_at = None
     await coord._forecast_outdoor(120.0, 7.5)
     assert calls["n"] == 1
 

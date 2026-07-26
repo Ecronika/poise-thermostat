@@ -115,7 +115,7 @@ async def test_identified_model_runs_mpc_shadow(hass: HomeAssistant) -> None:
     entry = await _setup(hass, _base())
     coord = entry.runtime_data
 
-    _make_identified(coord._ekf)
+    _make_identified(coord.runtime.learning.ekf)
     await coord.async_refresh()
     await hass.async_block_till_done()
 
@@ -145,7 +145,7 @@ async def test_identified_cooling_model_tick(hass: HomeAssistant) -> None:
     entry = await _setup(hass, _base(**{CONF_OUTDOOR_SENSOR: "sensor.outdoor"}))
     coord = entry.runtime_data
 
-    _make_identified(coord._ekf)
+    _make_identified(coord.runtime.learning.ekf)
     await coord.async_refresh()
     await hass.async_block_till_done()
 
@@ -165,7 +165,7 @@ async def test_identified_boiler_zone_calls_for_heat(hass: HomeAssistant) -> Non
     entry = await _setup(hass, _base(**{CONF_CONTROLS_BOILER: True}))
     coord = entry.runtime_data
 
-    _make_identified(coord._ekf)
+    _make_identified(coord.runtime.learning.ekf)
     await coord.async_refresh()
     await hass.async_block_till_done()
 

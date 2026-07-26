@@ -159,16 +159,16 @@ async def _setup(hass: HomeAssistant):
 
 def _assert_user_intent_restored(coord: Any) -> None:
     """Die billigen Keys aus Z. 898-1033 haben den korrupten EKF ueberlebt."""
-    assert coord._enabled is False
-    assert coord._preset is OverrideMode.ECO
-    assert coord._override == 21.5
-    assert coord._mode_override == "heat"
-    assert coord._override_reason == "device_adopt_setpoint"
+    assert coord.runtime.user.enabled is False
+    assert coord.runtime.user.preset is OverrideMode.ECO
+    assert coord.runtime.user.override == 21.5
+    assert coord.runtime.user.mode_override == "heat"
+    assert coord.runtime.user.override_reason == "device_adopt_setpoint"
     # B5-Adoption-Baselines (Z. 936-947); bewusst nicht Hold-gegated.
-    assert coord._last_written_sp == 20.0
-    assert coord._prev_device_sp == 20.5
-    assert coord._last_commanded_hvac == "heat"
-    assert coord._prev_device_mode == "heat"
+    assert coord.runtime.external.last_written_sp == 20.0
+    assert coord.runtime.external.prev_device_sp == 20.5
+    assert coord.runtime.external.last_commanded_hvac == "heat"
+    assert coord.runtime.external.prev_device_mode == "heat"
 
 
 async def _assert_tick_runs(coord: Any, hass: HomeAssistant) -> None:
@@ -198,7 +198,7 @@ async def test_corrupt_ekf_values_keep_user_intent(
     # frisches Modell: kein Restlauf des korrupten Zustands. Der Setup-Tick
     # kann noch nicht gelernt haben (_learn ueberspringt den ersten Tick,
     # weil _last_mono None ist) — 0 ist also stabil assertierbar.
-    assert coord._ekf.n_updates == 0
+    assert coord.runtime.learning.ekf.n_updates == 0
     await _assert_tick_runs(coord, hass)
 
 
@@ -224,7 +224,7 @@ async def test_throwing_ekf_structure_keeps_user_intent(
     # Fall 1, der still intern recovert):
     assert "failed to restore learned model" in caplog.text
     _assert_user_intent_restored(coord)
-    assert coord._ekf.n_updates == 0  # das frische Modell aus __init__
+    assert coord.runtime.learning.ekf.n_updates == 0  # das frische Modell aus __init__
     await _assert_tick_runs(coord, hass)
 
 
@@ -241,15 +241,15 @@ async def test_empty_store_starts_fresh_with_defaults(
     coord = entry.runtime_data
 
     # Defaults, keine Phantom-Restauration:
-    assert coord._enabled is True
-    assert coord._preset is OverrideMode.NONE
-    assert coord._override is None
-    assert coord._mode_override is None
-    assert coord._override_reason is None
+    assert coord.runtime.user.enabled is True
+    assert coord.runtime.user.preset is OverrideMode.NONE
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.mode_override is None
+    assert coord.runtime.user.override_reason is None
     # ... und ohne Baseline wird das 23.0-Geraet nicht als Hold gegriffen
     # (konservatives no_baseline-Verhalten, siehe test_adopt_baseline_restore).
     await _assert_tick_runs(coord, hass)
-    assert coord._override is None
+    assert coord.runtime.user.override is None
 
 
 async def test_store_without_ekf_key_is_legacy_branch(
@@ -270,9 +270,9 @@ async def test_store_without_ekf_key_is_legacy_branch(
 
     # Heutiges Verhalten: alles Default — der User-Intent aus dem Seed ist
     # auf dem Legacy-Zweig unerreichbar.
-    assert coord._enabled is True
-    assert coord._preset is OverrideMode.NONE
-    assert coord._override is None
-    assert coord._mode_override is None
-    assert coord._ekf.n_updates == 0
+    assert coord.runtime.user.enabled is True
+    assert coord.runtime.user.preset is OverrideMode.NONE
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.mode_override is None
+    assert coord.runtime.learning.ekf.n_updates == 0
     await _assert_tick_runs(coord, hass)

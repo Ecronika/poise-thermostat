@@ -143,17 +143,17 @@ async def test_frost_rescue_ends_off_hold_in_all_four_write_outcome_cells(
     coord: Any = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
 
     # Aktiver Off-Mode-Hold mit echter Hold-Lifecycle (wie test_mode_adoption:
     # ueber den Produktionspfad, damit die Wall-Clock-Expiry real ist und der
     # Tick-Start-Expiry-Check den Hold nicht vorab loescht).
     coord._set_mode_override("off")
-    assert coord._mode_override == "off"
-    assert coord._override_expires_at is not None
+    assert coord.runtime.user.mode_override == "off"
+    assert coord.runtime.user.override_expires_at is not None
     # ``_set_mode_override`` setzt selbst ``_dirty`` — zuruecksetzen, damit der
     # Dirty-Check unten das Hold-Ende dieses Ticks misst, nicht das Seeding.
-    coord._dirty = False
+    coord.runtime.dirty = False
 
     # Gemeinsame Aufzeichnungsliste: Service-Handler UND Bus-Listener appenden
     # hinein — die Reihenfolge der Eintraege IST die beobachtete Reihenfolge
@@ -179,7 +179,7 @@ async def test_frost_rescue_ends_off_hold_in_all_four_write_outcome_cells(
     def _on_override_ended(event: Any) -> None:
         # ``_dirty`` hier festhalten: direkt nach dem Event laeuft
         # ``_maybe_save`` (Z. 3327) und setzt das Flag bei Erfolg zurueck.
-        log.append(("event", event.data.get("reason"), coord._dirty))
+        log.append(("event", event.data.get("reason"), coord.runtime.dirty))
 
     unsub = hass.bus.async_listen("poise_override_ended", _on_override_ended)
 
@@ -191,11 +191,11 @@ async def test_frost_rescue_ends_off_hold_in_all_four_write_outcome_cells(
     unsub()
 
     # 1) Hold-State in ALLEN vier Zellen geloescht (Z. 3324-3325 + _end_hold).
-    assert coord._mode_override is None
-    assert coord._override is None
-    assert coord._override_expires_at is None
-    assert coord._override_set_wall is None
-    assert coord._override_reason is None
+    assert coord.runtime.user.mode_override is None
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.override_expires_at is None
+    assert coord.runtime.user.override_set_wall is None
+    assert coord.runtime.user.override_reason is None
 
     # 2) Genau ein 'poise_override_ended' mit reason='frost_rescue', und
     #    ``_dirty`` war zum Event-Zeitpunkt True (Befund 6: _end_hold markiert

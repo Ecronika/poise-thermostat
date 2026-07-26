@@ -104,7 +104,7 @@ async def test_healthy_sensor_keeps_slope_detector_cold(hass: HomeAssistant) -> 
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._wa_prev_mono is None
+    assert coord.runtime.window.wa_prev_mono is None
     issue_id = f"window_sensor_unavailable_{entry.entry_id}"
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
 
@@ -127,7 +127,7 @@ async def test_unavailable_sensor_raises_issue_and_falls_back_to_slope(
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
     # the slope/auto detector is now the only signal available and must be
     # live (F4b), not permanently skipped just because a sensor is configured.
-    assert coord._wa_prev_mono is not None
+    assert coord.runtime.window.wa_prev_mono is not None
     # a dead sensor never reports "on" -> effective_window_open falls through
     # entirely to the (freshly-seeded, not-yet-triggered) auto signal, so the
     # zone is not incorrectly force-closed nor force-opened by the dropout
@@ -161,7 +161,7 @@ async def test_recovered_sensor_clears_a_latched_auto_open(
     # simulate a slope-detected "open" latched while the sensor was previously
     # unavailable (rather than relying on many ticks of a real temperature
     # drop to trigger it organically).
-    coord._window_auto = WindowAutoState(
+    coord.runtime.window.window_auto = WindowAutoState(
         ema_slope=10.0, n_points=5, open=True, minutes_open=12.0
     )
 
@@ -173,5 +173,5 @@ async def test_recovered_sensor_clears_a_latched_auto_open(
     assert coord.data["window_open"] is False, (
         "a stale auto-detected open must not outlive a healthy, closed sensor"
     )
-    assert coord._window_auto.open is False
+    assert coord.runtime.window.window_auto.open is False
     assert coord.data["window_auto_detected"] is False

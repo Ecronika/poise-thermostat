@@ -145,8 +145,8 @@ async def test_set_override_announces_expiry_keeps_requested(
     await hass.async_block_till_done()
 
     assert coord._override_policy == OVERRIDE_POLICY_TIMER
-    assert coord._override_expires_at is not None
-    assert abs(coord._override_expires_at - (before + 3.0 * 3600.0)) < 60.0
+    assert coord.runtime.user.override_expires_at is not None
+    assert abs(coord.runtime.user.override_expires_at - (before + 3.0 * 3600.0)) < 60.0
     state = hass.states.get(eid)
     assert state is not None
     assert state.attributes["override_requested"] == 24.0
@@ -186,8 +186,10 @@ async def test_schedule_policy_expiry_reflects_switchpoint(
     coord.set_override(22.0)
 
     assert coord._override_policy == OVERRIDE_POLICY_SCHEDULE
-    assert coord._override_expires_at is not None
-    assert set_at < coord._override_expires_at <= set_at + 8.0 * 3600.0 + 1.0
+    assert coord.runtime.user.override_expires_at is not None
+    assert (
+        set_at < coord.runtime.user.override_expires_at <= set_at + 8.0 * 3600.0 + 1.0
+    )
 
 
 # --- §1: a timer hold expires, fires poise_override_ended and clears ------------
@@ -207,14 +209,14 @@ async def test_timer_expiry_fires_event_and_clears(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     coord.set_override(24.0)
-    assert coord._override is not None
+    assert coord.runtime.user.override is not None
     events = async_capture_events(hass, "poise_override_ended")
-    coord._override_expires_at = dt_util.utcnow().timestamp() - 1.0
+    coord.runtime.user.override_expires_at = dt_util.utcnow().timestamp() - 1.0
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._override is None
-    assert coord._override_expires_at is None
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.override_expires_at is None
     assert len(events) == 1
     assert events[0].data["reason"] == "expired_timer"
     assert events[0].data["entry_id"] == entry.entry_id
@@ -234,7 +236,7 @@ async def test_resume_schedule_service_clears_targeted_zone(
     eid = _climate_eid(hass, entry)
 
     coord.set_override(22.0)
-    assert coord._override is not None
+    assert coord.runtime.user.override is not None
     assert hass.services.has_service(DOMAIN, "resume_schedule")
     events = async_capture_events(hass, "poise_override_ended")
 
@@ -243,7 +245,7 @@ async def test_resume_schedule_service_clears_targeted_zone(
     )
     await hass.async_block_till_done()
 
-    assert coord._override is None
+    assert coord.runtime.user.override is None
     assert coord.preset is OverrideMode.NONE
     assert any(e.data["reason"] == "user_resume" for e in events)
 
@@ -271,7 +273,7 @@ async def test_resume_schedule_all_zones_skips_hub(hass: HomeAssistant) -> None:
     await hass.services.async_call(DOMAIN, "resume_schedule", {}, blocking=True)
     await hass.async_block_till_done()
 
-    assert coord._override is None
+    assert coord.runtime.user.override is None
     assert any(
         e.data["reason"] == "user_resume" and e.data["entry_id"] == entry.entry_id
         for e in events
@@ -296,17 +298,17 @@ async def test_off_keeps_hold_active_mode_clears(hass: HomeAssistant) -> None:
     entity = _climate_entity(hass, _climate_eid(hass, entry))
 
     coord.set_override(23.0)
-    assert coord._override is not None
+    assert coord.runtime.user.override is not None
     events = async_capture_events(hass, "poise_override_ended")
 
     await entity.async_set_hvac_mode(HVACMode.OFF)
     await hass.async_block_till_done()
-    assert coord._override is not None
+    assert coord.runtime.user.override is not None
     assert not events
 
     await entity.async_set_hvac_mode(HVACMode.HEAT)
     await hass.async_block_till_done()
-    assert coord._override is None
+    assert coord.runtime.user.override is None
     assert any(e.data["reason"] == "mode_change" for e in events)
 
 
@@ -325,15 +327,15 @@ async def test_boost_is_timed_and_restores_previous_preset(
     coord.set_preset(OverrideMode.COMFORT)
     coord.set_preset(OverrideMode.BOOST)
     assert coord.preset is OverrideMode.BOOST
-    assert coord._boost_expires_at is not None
-    assert coord._boost_prev_preset is OverrideMode.COMFORT
+    assert coord.runtime.user.boost_expires_at is not None
+    assert coord.runtime.user.boost_prev_preset is OverrideMode.COMFORT
 
-    coord._boost_expires_at = dt_util.utcnow().timestamp() - 1.0
+    coord.runtime.user.boost_expires_at = dt_util.utcnow().timestamp() - 1.0
     await coord.async_refresh()
     await hass.async_block_till_done()
 
     assert coord.preset is OverrideMode.COMFORT
-    assert coord._boost_expires_at is None
+    assert coord.runtime.user.boost_expires_at is None
 
 
 # --- §7: a pre-0.162 (minor_version 1) zone is stamped with the timer policy ----
@@ -375,7 +377,7 @@ async def test_reload_restores_hold_policy_and_expiry(hass: HomeAssistant) -> No
     coord = entry.runtime_data
 
     coord.set_override(23.5)
-    expires = coord._override_expires_at
+    expires = coord.runtime.user.override_expires_at
     assert expires is not None
 
     await hass.config_entries.async_reload(entry.entry_id)
@@ -383,11 +385,11 @@ async def test_reload_restores_hold_policy_and_expiry(hass: HomeAssistant) -> No
 
     restored = entry.runtime_data
     assert restored is not coord  # a genuine reload built a fresh coordinator
-    assert restored._override == 23.5
-    assert restored._override_requested == 23.5
+    assert restored.runtime.user.override == 23.5
+    assert restored.runtime.user.override_requested == 23.5
     assert restored._override_policy == OVERRIDE_POLICY_TIMER
-    assert restored._override_expires_at is not None
-    assert abs(restored._override_expires_at - expires) < 1.0
+    assert restored.runtime.user.override_expires_at is not None
+    assert abs(restored.runtime.user.override_expires_at - expires) < 1.0
 
 
 # --- §1/ADR-0058: a house-gate presence flip ends the hold (presence_change) ----
@@ -410,14 +412,14 @@ async def test_presence_change_ends_hold(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     coord.set_override(22.0)
-    assert coord._override is not None
+    assert coord.runtime.user.override is not None
     events = async_capture_events(hass, "poise_override_ended")
 
     hass.states.async_set("person.someone", "not_home")
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._override is None
+    assert coord.runtime.user.override is None
     assert any(e.data["reason"] == "presence_change" for e in events)
 
 
@@ -445,24 +447,24 @@ async def test_expiry_under_open_window_returns_to_plan_not_manual(
     eid = _climate_eid(hass, entry)
 
     coord.set_override(24.0)
-    assert coord._override == 24.0
+    assert coord.runtime.user.override == 24.0
     events = async_capture_events(hass, "poise_override_ended")
 
     # the window opens AND the announced expiry falls into the past: the tick must
     # expire the hold under the active window layer, not chase the held value.
     hass.states.async_set("binary_sensor.window", "on", {"device_class": "window"})
-    coord._override_expires_at = dt_util.utcnow().timestamp() - 1.0
+    coord.runtime.user.override_expires_at = dt_util.utcnow().timestamp() - 1.0
     await coord.async_refresh()
     await hass.async_block_till_done()
 
-    assert coord._override is None
-    assert coord._override_expires_at is None
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.override_expires_at is None
     assert any(e.data["reason"] == "expired_timer" for e in events)
     state = hass.states.get(eid)
     assert state is not None
     assert state.attributes["override_active"] is False
     # the window layer keeps regulating at the frost/mould floor, NOT the held 24.0
-    assert abs(coord._last_target - FROST_FLOOR_C) < 0.05
+    assert abs(coord.runtime.actuator.last_target - FROST_FLOOR_C) < 0.05
 
 
 # --- VT#1961: a second Boost press keeps the first frozen preset (not BOOST) ---
@@ -481,17 +483,17 @@ async def test_double_boost_keeps_frozen_previous_preset(
     coord.set_preset(OverrideMode.COMFORT)
     coord.set_preset(OverrideMode.BOOST)
     assert coord.preset is OverrideMode.BOOST
-    assert coord._boost_prev_preset is OverrideMode.COMFORT
+    assert coord.runtime.user.boost_prev_preset is OverrideMode.COMFORT
 
     # a second Boost press re-arms from now but must leave the frozen restore
     # target untouched -- never stacking BOOST onto itself (VT#1961).
     coord.set_preset(OverrideMode.BOOST)
     assert coord.preset is OverrideMode.BOOST
-    assert coord._boost_prev_preset is OverrideMode.COMFORT
+    assert coord.runtime.user.boost_prev_preset is OverrideMode.COMFORT
 
     # and the expiry restores that original preset, not BOOST
-    coord._boost_expires_at = dt_util.utcnow().timestamp() - 1.0
+    coord.runtime.user.boost_expires_at = dt_util.utcnow().timestamp() - 1.0
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord.preset is OverrideMode.COMFORT
-    assert coord._boost_expires_at is None
+    assert coord.runtime.user.boost_expires_at is None

@@ -117,7 +117,7 @@ async def test_pre_adr0059_hold_recomputes_missing_expiry_on_restore(
     # simulate a pre-ADR-0059 build: the hold + its set-time exist, but this
     # in-memory instance never computed an announced expiry at all -- the
     # unload below flushes exactly this (corrupted) state to the store.
-    coord._override_expires_at = None
+    coord.runtime.user.override_expires_at = None
 
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
@@ -126,10 +126,10 @@ async def test_pre_adr0059_hold_recomputes_missing_expiry_on_restore(
 
     restored = entry.runtime_data
     assert restored is not coord
-    assert restored._override == 23.5
+    assert restored.runtime.user.override == 23.5
     # F7: recomputed from the restored set-time/policy, not left at None
     # (which would mean "runs forever").
-    assert restored._override_expires_at is not None
+    assert restored.runtime.user.override_expires_at is not None
 
 
 async def test_override_policy_option_change_survives_restart(

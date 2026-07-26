@@ -99,10 +99,10 @@ async def test_device_mode_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_commanded_hvac = "heat"  # Poise last commanded heat ...
-    coord._last_hvac_cmd_ts = 1000.0
-    coord._prev_device_mode = "heat"
+    coord.runtime.clock = clock
+    coord.runtime.external.last_commanded_hvac = "heat"  # Poise last commanded heat ...
+    coord.runtime.external.last_hvac_cmd_ts = 1000.0
+    coord.runtime.external.prev_device_mode = "heat"
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0  # past the mode echo window
     _set_ac(hass, mode="fan_only")  # ... the user turned it to fan_only
     # M1: re-register the recorder AFTER setup -- the climate platform load replaces
@@ -111,7 +111,7 @@ async def test_device_mode_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._mode_override == "fan_only"  # adopted
+    assert coord.runtime.user.mode_override == "fan_only"  # adopted
     ac_nudges = [c for c in nudges if c.data.get("entity_id") == "climate.ac"]
     assert ac_nudges == []  # not nudged back
 
@@ -127,10 +127,10 @@ async def test_user_off_is_held_and_not_restarted(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_commanded_hvac = "cool"
-    coord._last_hvac_cmd_ts = 1000.0
-    coord._prev_device_mode = "cool"
+    coord.runtime.clock = clock
+    coord.runtime.external.last_commanded_hvac = "cool"
+    coord.runtime.external.last_hvac_cmd_ts = 1000.0
+    coord.runtime.external.prev_device_mode = "cool"
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     _set_ac(hass, mode="off", room=25.0)  # user turned it off
     # M1: re-arm the recorder after setup (see note above).
@@ -138,7 +138,7 @@ async def test_user_off_is_held_and_not_restarted(hass: HomeAssistant) -> None:
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._mode_override == "off"
+    assert coord.runtime.user.mode_override == "off"
 
     # a second tick: still off, still not re-nudged on (routed to the disabled branch)
     clock.t += 60.0
@@ -164,16 +164,16 @@ async def test_opt_out_disables_mode_adoption(hass: HomeAssistant) -> None:
     assert coord._adopt_external_mode is False
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_commanded_hvac = "heat"
-    coord._last_hvac_cmd_ts = 1000.0
-    coord._prev_device_mode = "heat"
+    coord.runtime.clock = clock
+    coord.runtime.external.last_commanded_hvac = "heat"
+    coord.runtime.external.last_hvac_cmd_ts = 1000.0
+    coord.runtime.external.prev_device_mode = "heat"
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     _set_ac(hass, mode="fan_only")
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._mode_override is None
+    assert coord.runtime.user.mode_override is None
 
 
 async def test_own_mode_nudge_echo_is_not_adopted(hass: HomeAssistant) -> None:
@@ -186,18 +186,18 @@ async def test_own_mode_nudge_echo_is_not_adopted(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_commanded_hvac = "heat"
-    coord._last_hvac_cmd_ts = 1000.0
-    coord._prev_device_mode = "heat"
+    coord.runtime.clock = clock
+    coord.runtime.external.last_commanded_hvac = "heat"
+    coord.runtime.external.last_hvac_cmd_ts = 1000.0
+    coord.runtime.external.prev_device_mode = "heat"
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     own = Context()
-    coord._own_write_ctx_ids.append(own.id)
+    coord.runtime.external.own_write_ctx_ids.append(own.id)
     _set_ac(hass, mode="cool", context=own)  # our own nudge echo, not a user change
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._mode_override is None
+    assert coord.runtime.user.mode_override is None
 
 
 async def test_nudge_recorder_is_armed_after_setup(hass: HomeAssistant) -> None:
@@ -211,7 +211,7 @@ async def test_nudge_recorder_is_armed_after_setup(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
     nudges = async_mock_service(hass, "climate", "set_hvac_mode")  # re-arm after setup
     await coord.async_refresh()
     await hass.async_block_till_done()
@@ -228,18 +228,20 @@ async def test_return_to_plan_mode_ends_hold(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
     coord._set_mode_override("fan_only")  # a fan_only hold is active (real expiry)
-    coord._last_commanded_hvac = "fan_only"
-    coord._last_hvac_cmd_ts = 1000.0
-    coord._prev_device_mode = "fan_only"
+    coord.runtime.external.last_commanded_hvac = "fan_only"
+    coord.runtime.external.last_hvac_cmd_ts = 1000.0
+    coord.runtime.external.prev_device_mode = "fan_only"
     clock.t = 1000.0 + 300.0
     # the user selects heat again at the device -- the zone's plan mode for a cold room
     _set_ac(hass, mode="heat")
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._mode_override is None  # hold ended, zone back under automatic control
+    assert (
+        coord.runtime.user.mode_override is None
+    )  # hold ended, zone back under automatic control
 
 
 async def test_off_hold_ends_when_user_turns_back_on(hass: HomeAssistant) -> None:
@@ -252,7 +254,7 @@ async def test_off_hold_ends_when_user_turns_back_on(hass: HomeAssistant) -> Non
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
     # an off-hold is active -- create it the way production does so its wall-clock
     # expiry is real. A hand-seeded stale timestamp would be treated as already
     # expired by the tick-start expiry check and cleared before the escape runs.
@@ -262,4 +264,6 @@ async def test_off_hold_ends_when_user_turns_back_on(hass: HomeAssistant) -> Non
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._mode_override is None  # off-hold ended; zone resumes control
+    assert (
+        coord.runtime.user.mode_override is None
+    )  # off-hold ended; zone resumes control

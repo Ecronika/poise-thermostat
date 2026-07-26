@@ -131,9 +131,9 @@ async def test_dry_active_persist_and_restore_wiring(
     entry = await _setup_room(hass)
     coord = entry.runtime_data
 
-    coord._dry_active = True
+    coord.runtime.humidity.dry_active = True
     assert coord._save_payload()["dry_active"] is True
-    coord._dry_active = False
+    coord.runtime.humidity.dry_active = False
     assert coord._save_payload()["dry_active"] is False
 
 
@@ -198,6 +198,6 @@ async def test_autodetected_valve_is_never_written(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
     # the device-guard resolved the sibling valve (test is meaningful) ...
-    assert entry.runtime_data._valve_entity == valve
+    assert entry.runtime_data.input_reader.valve_entity == valve
     # ... but no tick wrote it.
     assert all(c.data.get("entity_id") != valve for c in number_calls)

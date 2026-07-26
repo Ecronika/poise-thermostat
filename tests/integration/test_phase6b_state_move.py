@@ -1,27 +1,26 @@
-"""Phase-6b S1 — live wiring of the ZoneRuntime state relocation (glue).
+"""Phase-6b — live wiring of the ZoneRuntime state relocation (glue).
 
-The pure gate (``tests/test_phase6b_state_move.py``) pins the proxy SHAPE by
-AST; this module pins the live behaviour on a real coordinator:
+The pure gate (``tests/test_phase6b_state_move.py``) pins by AST that the
+proxies are gone; this module pins the live behaviour on a real coordinator
+after Step 2 S-C removed them:
 
-* every relocated ``self._*`` name routes through its property proxy into
-  the ``ZoneRuntime`` group (no shadowing instance attribute, reads and
-  writes visible in BOTH directions);
-* the ``coord._clock = FakeClock(...)`` test idiom still reaches EVERY
-  clock reader — the runtime's clock reference, the coordinator's own
-  property reads and the live ``_ReaderClock`` forwarders handed to the
+* every relocated ``self._*`` name is gone from the coordinator (no
+  property, no shadowing instance attribute); its value lives on the
+  ``ZoneRuntime`` group, reached via ``coord.runtime``;
+* the ``coord.runtime.clock = FakeClock(...)`` test idiom still reaches
+  EVERY clock reader — the runtime's clock reference, the coordinator's own
+  reads and the live ``_ReaderClock`` forwarders handed to the
   ``InputReader`` and the ``ForecastProvider`` (phase-4/5A contract);
 * the adapter-owned attributes deliberately did NOT move (they stay real
   instance attributes, plan section 3 "HA-Adapter"/Health/Persistenz-Meta
   groups).
-
-Exercising every getter+setter here also keeps the proxy block inside the
-glue coverage gate (coordinator.py is measured by coverage_glue.ini).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -48,7 +47,8 @@ ROOM_DATA: dict[str, Any] = {
 # attributes and the reader/executor/provider references).  ``_dirty`` is
 # the documented S2 K1 exception: the moved pure bodies (commit/teardown/
 # mark_actuated/observe) mutate it, so the flag lives on the runtime and
-# ``coord._dirty`` became a property proxy — pinned separately below.
+# ``coord._dirty`` is gone (reached via ``coord.runtime.dirty``) — pinned
+# separately below.
 ADAPTER_OWNED = (
     "_lock",
     "_entry_id",
@@ -66,6 +66,16 @@ ADAPTER_OWNED = (
     "_forecast_provider",
     "_mpc_params",
     "_window_auto_cfg",
+)
+
+# State that LEFT the coordinator in step 3 (tick-orchestration move) and is
+# now owned by ``TickOrchestrator``.  Listed explicitly so the ownership change
+# is pinned rather than merely absent from ADAPTER_OWNED: the trace recorder is
+# built lazily by ``TickOrchestrator._maybe_record_trace`` (its only reader) and
+# the slug is still seeded from ``entry.entry_id``.
+ORCHESTRATOR_OWNED = (
+    "_trace_recorder",
+    "_trace_slug",
 )
 
 
@@ -101,25 +111,24 @@ async def _setup(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
-async def test_every_proxy_routes_into_the_zone_runtime(
+async def test_migrated_names_no_longer_exist_on_the_coordinator(
     hass: HomeAssistant,
 ) -> None:
-    """Get/set roundtrip through every proxy; nothing shadows in __dict__."""
+    """S-C deleted the proxies: each migrated name is gone from the
+    coordinator (no property, no shadow attr) while its value still lives on
+    the ``ZoneRuntime`` group, reached via ``coord.runtime``."""
     entry = await _setup(hass)
     coord = entry.runtime_data
     runtime = coord._zone_runtime
     for name, (group_attr, field) in PROXY_MAP.items():
         group = getattr(runtime, group_attr)
-        # Read path: the proxy returns exactly the group field.
-        value = getattr(coord, name)
-        assert value is getattr(group, field), name
-        # Write path: the proxy setter lands on the group field (write the
-        # value back unchanged so the coordinator state is undisturbed).
-        setattr(coord, name, value)
-        assert getattr(group, field) is value, name
-        # The property must actually route: a shadowing instance attribute
-        # in ``__dict__`` would bypass the runtime silently.
-        assert name not in vars(coord), f"{name} shadowed by an instance attr"
+        # The value still lives on the group ...
+        assert hasattr(group, field), name
+        # ... and the old proxy name no longer resolves on the coordinator:
+        # neither a property nor a shadowing instance attribute.
+        assert name not in vars(coord), f"{name} lingers as an instance attr"
+        with pytest.raises(AttributeError):
+            getattr(coord, name)
 
 
 async def test_proxy_writes_are_bidirectionally_visible(
@@ -129,11 +138,11 @@ async def test_proxy_writes_are_bidirectionally_visible(
     entry = await _setup(hass)
     coord = entry.runtime_data
     runtime = coord._zone_runtime
-    coord._override = 21.5  # proxy -> group
+    coord.runtime.user.override = 21.5  # proxy -> group
     assert runtime.user.override == 21.5
     runtime.user.override = None  # group -> proxy
-    assert coord._override is None
-    coord._prev_heating_failed = True  # SafetyRuntime moved per option A
+    assert coord.runtime.user.override is None
+    coord.runtime.safety.prev_heating_failed = True  # SafetyRuntime moved per option A
     assert runtime.safety.prev_heating_failed is True
 
 
@@ -142,11 +151,11 @@ async def test_clock_swap_reaches_every_reader(hass: HomeAssistant) -> None:
     entry = await _setup(hass)
     coord = entry.runtime_data
     fake = ManualClock(1234.5)
-    coord._clock = fake
+    coord.runtime.clock = fake
     # The property setter replaced the runtime's clock reference ...
     assert coord._zone_runtime.clock is fake
     # ... the coordinator's own reads follow ...
-    assert coord._clock.monotonic() == 1234.5
+    assert coord.runtime.clock.monotonic() == 1234.5
     # ... and the live forwarders handed to the reader and the forecast
     # provider follow the SAME swap (phase-4/5A live-clock contract).
     assert coord._input_reader._clock.monotonic() == 1234.5
@@ -169,12 +178,24 @@ async def test_adapter_owned_attributes_did_not_move(
     assert set(GROUP_CLASSES) | {"clock", "dirty"} == set(
         type(coord._zone_runtime).__slots__
     )
-    # K1 pin (S2): ``_dirty`` routes through its property proxy onto
-    # ``ZoneRuntime.dirty`` — no shadowing instance attribute, both
-    # directions visible, seeded False by the runtime.
+    # K1 pin (S-C): the ``_dirty`` proxy is GONE — the flag lives directly on
+    # ``ZoneRuntime.dirty`` (reached via ``coord.runtime.dirty``), with no
+    # shadowing instance attribute, both directions visible, seeded False.
     assert "_dirty" not in vars(coord)
-    assert coord._dirty is False
-    coord._dirty = True
+    assert coord.runtime.dirty is False
+    coord.runtime.dirty = True
     assert coord._zone_runtime.dirty is True
     coord._zone_runtime.dirty = False
-    assert coord._dirty is False
+    assert coord.runtime.dirty is False
+    # Step-3 pin: the trace attributes LEFT the coordinator. Asserted here (and
+    # not merely omitted from ADAPTER_OWNED) so the ownership change cannot
+    # reverse — or repeat for another attribute — unnoticed.
+    for name in ORCHESTRATOR_OWNED:
+        assert name not in vars(coord), f"{name} must not live on the coordinator"
+        assert not hasattr(coord, name), f"{name} must not resolve on the coordinator"
+        # The orchestrator is __slots__-based, so ownership is a slot + a value.
+        assert name in type(coord._tick).__slots__, f"{name} missing from the slots"
+        assert hasattr(coord._tick, name), f"{name} should be set in __init__"
+    # Seeded from the entry id, recorder lazily built (opt-in trace, default off).
+    assert coord._tick._trace_slug == entry.entry_id
+    assert coord._tick._trace_recorder is None

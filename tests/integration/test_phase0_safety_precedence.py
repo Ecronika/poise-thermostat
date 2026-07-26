@@ -288,4 +288,4 @@ async def test_safety_precedence_table(hass: HomeAssistant, case: Case) -> None:
     # ``_override``; the end-hold path at ~2904/2912 is gated on NOT window
     # and NOT frozen).
     if case.override_survives:
-        assert coord._override == case.override
+        assert coord.runtime.user.override == case.override

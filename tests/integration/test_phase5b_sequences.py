@@ -559,13 +559,13 @@ async def test_commit_setpoint_write_attempt_vs_success(
     (auch bei Fehlschlag, Phase-0 Fall A); success -> gesnappte Baseline,
     ts, Mode, has_actuated+dirty."""
     coord = await _coord(hass)
-    coord._pre_write_sp = 15.0  # sentinel
-    coord._last_written_sp = 20.0
-    coord._last_sp_write_ts = 1000.0
-    coord._last_written_mode = None
-    coord._has_actuated = False
-    coord._dirty = False
-    ctx_before = len(coord._own_write_ctx_ids)
+    coord.runtime.external.pre_write_sp = 15.0  # sentinel
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
+    coord.runtime.actuator.last_written_mode = None
+    coord.runtime.actuator.has_actuated = False
+    coord.runtime.dirty = False
+    ctx_before = len(coord.runtime.external.own_write_ctx_ids)
 
     failed = ExecutionReport(
         executions=(
@@ -581,13 +581,13 @@ async def test_commit_setpoint_write_attempt_vs_success(
     )
     result = coord.commit_execution(failed, now=2000.0)
     assert result.events == ()
-    assert coord._pre_write_sp == 20.0  # attempt stamp
-    assert list(coord._own_write_ctx_ids)[ctx_before:] == ["ctx-fail"]
-    assert coord._last_written_sp == 20.0  # success stamps untouched
-    assert coord._last_sp_write_ts == 1000.0
-    assert coord._last_written_mode is None
-    assert coord._has_actuated is False
-    assert coord._dirty is False
+    assert coord.runtime.external.pre_write_sp == 20.0  # attempt stamp
+    assert list(coord.runtime.external.own_write_ctx_ids)[ctx_before:] == ["ctx-fail"]
+    assert coord.runtime.external.last_written_sp == 20.0  # success stamps untouched
+    assert coord.runtime.external.last_sp_write_ts == 1000.0
+    assert coord.runtime.actuator.last_written_mode is None
+    assert coord.runtime.actuator.has_actuated is False
+    assert coord.runtime.dirty is False
 
     ok = ExecutionReport(
         executions=(
@@ -601,12 +601,15 @@ async def test_commit_setpoint_write_attempt_vs_success(
         )
     )
     coord.commit_execution(ok, now=2100.0)
-    assert coord._last_written_sp == 21.5  # der GESNAPPTE Report-Wert
-    assert coord._last_sp_write_ts == 2100.0
-    assert coord._last_written_mode == "heat"
-    assert coord._has_actuated is True
-    assert coord._dirty is True  # _mark_actuated: erster Flip persistiert
-    assert list(coord._own_write_ctx_ids)[ctx_before:] == ["ctx-fail", "ctx-ok"]
+    assert coord.runtime.external.last_written_sp == 21.5  # der GESNAPPTE Report-Wert
+    assert coord.runtime.external.last_sp_write_ts == 2100.0
+    assert coord.runtime.actuator.last_written_mode == "heat"
+    assert coord.runtime.actuator.has_actuated is True
+    assert coord.runtime.dirty is True  # _mark_actuated: erster Flip persistiert
+    assert list(coord.runtime.external.own_write_ctx_ids)[ctx_before:] == [
+        "ctx-fail",
+        "ctx-ok",
+    ]
 
 
 async def test_commit_mode_nudge_m2_gated_ts(hass: HomeAssistant) -> None:
@@ -614,9 +617,9 @@ async def test_commit_mode_nudge_m2_gated_ts(hass: HomeAssistant) -> None:
     last_hvac_cmd_ts NUR bei echtem Moduswechsel (M2, dispatch-zeitig
     evaluiert); Fehlschlag registriert nur die Context-ID."""
     coord = await _coord(hass)
-    coord._last_commanded_hvac = "heat"
-    coord._last_hvac_cmd_ts = 500.0
-    ctx_before = len(coord._own_write_ctx_ids)
+    coord.runtime.external.last_commanded_hvac = "heat"
+    coord.runtime.external.last_hvac_cmd_ts = 500.0
+    ctx_before = len(coord.runtime.external.own_write_ctx_ids)
 
     # identischer Re-Nudge (mode_changed=False): ts NICHT neu armieren (B1).
     coord.commit_execution(
@@ -625,8 +628,8 @@ async def test_commit_mode_nudge_m2_gated_ts(hass: HomeAssistant) -> None:
         ),
         now=900.0,
     )
-    assert coord._last_commanded_hvac == "heat"
-    assert coord._last_hvac_cmd_ts == 500.0
+    assert coord.runtime.external.last_commanded_hvac == "heat"
+    assert coord.runtime.external.last_hvac_cmd_ts == 500.0
 
     # echter Wechsel: ts = now.
     coord.commit_execution(
@@ -642,8 +645,8 @@ async def test_commit_mode_nudge_m2_gated_ts(hass: HomeAssistant) -> None:
         ),
         now=950.0,
     )
-    assert coord._last_commanded_hvac == "cool"
-    assert coord._last_hvac_cmd_ts == 950.0
+    assert coord.runtime.external.last_commanded_hvac == "cool"
+    assert coord.runtime.external.last_hvac_cmd_ts == 950.0
 
     # Wurf: Attempt-State (Context-ID) ja, Stempel nein.
     coord.commit_execution(
@@ -660,9 +663,9 @@ async def test_commit_mode_nudge_m2_gated_ts(hass: HomeAssistant) -> None:
         ),
         now=980.0,
     )
-    assert coord._last_commanded_hvac == "cool"  # unveraendert
-    assert coord._last_hvac_cmd_ts == 950.0
-    assert list(coord._own_write_ctx_ids)[ctx_before:] == [
+    assert coord.runtime.external.last_commanded_hvac == "cool"  # unveraendert
+    assert coord.runtime.external.last_hvac_cmd_ts == 950.0
+    assert list(coord.runtime.external.own_write_ctx_ids)[ctx_before:] == [
         "ctx-a",
         "ctx-b",
         "ctx-c",
@@ -673,11 +676,13 @@ async def test_commit_rescue_effects(hass: HomeAssistant) -> None:
     """Rescue-Nudge: ts UNCONDITIONAL (kein M2 — eigener Effekt-Typ);
     Rescue-Write: last_written_sp=None (B2) + has_actuated."""
     coord = await _coord(hass)
-    coord._last_commanded_hvac = "heat"  # schon heat -> M2 wuerde NICHT stempeln
-    coord._last_hvac_cmd_ts = 500.0
-    coord._last_written_sp = 20.0
-    coord._has_actuated = False
-    coord._dirty = False
+    coord.runtime.external.last_commanded_hvac = (
+        "heat"  # schon heat -> M2 wuerde NICHT stempeln
+    )
+    coord.runtime.external.last_hvac_cmd_ts = 500.0
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.actuator.has_actuated = False
+    coord.runtime.dirty = False
 
     coord.commit_execution(
         ExecutionReport(
@@ -688,19 +693,19 @@ async def test_commit_rescue_effects(hass: HomeAssistant) -> None:
         ),
         now=1234.0,
     )
-    assert coord._last_commanded_hvac == "heat"
-    assert coord._last_hvac_cmd_ts == 1234.0  # unconditional re-arm
-    assert coord._last_written_sp is None  # B2, NICHT der Rescue-Wert
-    assert coord._has_actuated is True
-    assert coord._dirty is True
+    assert coord.runtime.external.last_commanded_hvac == "heat"
+    assert coord.runtime.external.last_hvac_cmd_ts == 1234.0  # unconditional re-arm
+    assert coord.runtime.external.last_written_sp is None  # B2, NICHT der Rescue-Wert
+    assert coord.runtime.actuator.has_actuated is True
+    assert coord.runtime.dirty is True
 
 
 async def test_commit_ext_effects(hass: HomeAssistant) -> None:
     """Feed-Erfolg stempelt last_fed/last_fed_ts; der Select stempelt NIE
     (sequenz-interner switched-Flag); Fehlschlaege stempeln nichts."""
     coord = await _coord(hass)
-    coord._last_fed = None
-    coord._last_fed_ts = 0.0
+    coord.runtime.actuator.last_fed = None
+    coord.runtime.actuator.last_fed_ts = 0.0
 
     coord.commit_execution(
         ExecutionReport(
@@ -711,15 +716,15 @@ async def test_commit_ext_effects(hass: HomeAssistant) -> None:
         ),
         now=800.0,
     )
-    assert coord._last_fed is None  # settle skip: nichts gestempelt
-    assert coord._last_fed_ts == 0.0
+    assert coord.runtime.actuator.last_fed is None  # settle skip: nichts gestempelt
+    assert coord.runtime.actuator.last_fed_ts == 0.0
 
     coord.commit_execution(
         ExecutionReport(executions=(_exec("ext_feed", commanded_value=21.3),)),
         now=860.0,
     )
-    assert coord._last_fed == 21.3
-    assert coord._last_fed_ts == 860.0
+    assert coord.runtime.actuator.last_fed == 21.3
+    assert coord.runtime.actuator.last_fed_ts == 860.0
 
 
 async def test_commit_safe_effects(hass: HomeAssistant) -> None:
@@ -727,11 +732,11 @@ async def test_commit_safe_effects(hass: HomeAssistant) -> None:
     commanded_hvac (K2); Setpoint-Teil last_target + last_written_sp=None
     (B2) + has_actuated; attempted=False (Abbruch) stempelt nichts."""
     coord = await _coord(hass)
-    coord._last_written_mode = None
-    coord._last_commanded_hvac = None
-    coord._last_target = None
-    coord._last_written_sp = 20.0
-    coord._has_actuated = False
+    coord.runtime.actuator.last_written_mode = None
+    coord.runtime.external.last_commanded_hvac = None
+    coord.runtime.actuator.last_target = None
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.actuator.has_actuated = False
 
     coord.commit_execution(
         ExecutionReport(
@@ -741,15 +746,15 @@ async def test_commit_safe_effects(hass: HomeAssistant) -> None:
             )
         )
     )
-    assert coord._last_written_mode == "heat"
-    assert coord._last_commanded_hvac == "heat"
-    assert coord._last_target == 7.0
-    assert coord._last_written_sp is None  # B2
-    assert coord._has_actuated is True
+    assert coord.runtime.actuator.last_written_mode == "heat"
+    assert coord.runtime.external.last_commanded_hvac == "heat"
+    assert coord.runtime.actuator.last_target == 7.0
+    assert coord.runtime.external.last_written_sp is None  # B2
+    assert coord.runtime.actuator.has_actuated is True
 
     # Abbruch-Transport (Mode-Wurf): nichts stempeln.
-    coord._last_target = None
-    coord._has_actuated = False
+    coord.runtime.actuator.last_target = None
+    coord.runtime.actuator.has_actuated = False
     coord.commit_execution(
         ExecutionReport(
             executions=(
@@ -763,9 +768,9 @@ async def test_commit_safe_effects(hass: HomeAssistant) -> None:
             )
         )
     )
-    assert coord._last_written_mode == "heat"  # unveraendert
-    assert coord._last_target is None
-    assert coord._has_actuated is False
+    assert coord.runtime.actuator.last_written_mode == "heat"  # unveraendert
+    assert coord.runtime.actuator.last_target is None
+    assert coord.runtime.actuator.has_actuated is False
 
 
 async def test_commit_folds_strictly_in_report_order(hass: HomeAssistant) -> None:
@@ -773,7 +778,7 @@ async def test_commit_folds_strictly_in_report_order(hass: HomeAssistant) -> Non
     falten in Report-Reihenfolge (letzter gewinnt), Context-IDs registrieren
     in Call-Reihenfolge."""
     coord = await _coord(hass)
-    ctx_before = len(coord._own_write_ctx_ids)
+    ctx_before = len(coord.runtime.external.own_write_ctx_ids)
 
     coord.commit_execution(
         ExecutionReport(
@@ -790,7 +795,9 @@ async def test_commit_folds_strictly_in_report_order(hass: HomeAssistant) -> Non
         ),
         now=3000.0,
     )
-    assert coord._last_written_sp is None  # rescue_write (B2) faltete ZULETZT
+    assert (
+        coord.runtime.external.last_written_sp is None
+    )  # rescue_write (B2) faltete ZULETZT
 
     coord.commit_execution(
         ExecutionReport(
@@ -807,8 +814,13 @@ async def test_commit_folds_strictly_in_report_order(hass: HomeAssistant) -> Non
         ),
         now=3060.0,
     )
-    assert coord._last_written_sp == 19.0  # jetzt gewann der Setpoint-Write
-    assert list(coord._own_write_ctx_ids)[ctx_before:] == ["ctx-1", "ctx-2"]
+    assert (
+        coord.runtime.external.last_written_sp == 19.0
+    )  # jetzt gewann der Setpoint-Write
+    assert list(coord.runtime.external.own_write_ctx_ids)[ctx_before:] == [
+        "ctx-1",
+        "ctx-2",
+    ]
 
 
 async def test_commit_end_hold_teardown_without_bus_fire(
@@ -821,14 +833,14 @@ async def test_commit_end_hold_teardown_without_bus_fire(
     coord = await _coord(hass)
     fired = async_capture_events(hass, "poise_override_ended")
 
-    coord._override = 22.0
-    coord._mode_override = "off"
-    coord._override_set_wall = 1.0
-    coord._override_expires_at = 2.0
-    coord._override_requested = 22.0
-    coord._override_reason = "user"
-    coord._override_expiry_is_switchpoint = True
-    coord._dirty = False
+    coord.runtime.user.override = 22.0
+    coord.runtime.user.mode_override = "off"
+    coord.runtime.user.override_set_wall = 1.0
+    coord.runtime.user.override_expires_at = 2.0
+    coord.runtime.user.override_requested = 22.0
+    coord.runtime.user.override_reason = "user"
+    coord.runtime.user.override_expiry_is_switchpoint = True
+    coord.runtime.dirty = False
 
     result = coord.commit_execution(
         ExecutionReport(executions=()),
@@ -838,14 +850,14 @@ async def test_commit_end_hold_teardown_without_bus_fire(
 
     assert result.events == (OverrideEnded("frost_rescue"),)
     assert fired == [], "the commit must NOT fire the bus event itself"
-    assert coord._override is None
-    assert coord._mode_override is None  # K2
-    assert coord._override_set_wall is None
-    assert coord._override_expires_at is None
-    assert coord._override_requested is None
-    assert coord._override_reason is None  # K3
-    assert coord._override_expiry_is_switchpoint is False
-    assert coord._dirty is True
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.mode_override is None  # K2
+    assert coord.runtime.user.override_set_wall is None
+    assert coord.runtime.user.override_expires_at is None
+    assert coord.runtime.user.override_requested is None
+    assert coord.runtime.user.override_reason is None  # K3
+    assert coord.runtime.user.override_expiry_is_switchpoint is False
+    assert coord.runtime.dirty is True
 
     # Die anderen vier Sites nutzen weiter _end_hold: Teardown + SOFORTIGES
     # Feuern mit heutigem Payload (zone/entry_id/reason/entity_id).

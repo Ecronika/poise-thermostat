@@ -171,7 +171,7 @@ async def test_reload_preserves_override(hass: HomeAssistant) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert entry.runtime_data._override == 23.0
+    assert entry.runtime_data.runtime.user.override == 23.0
 
 
 async def test_climate_exposes_comfort_band_attributes(hass: HomeAssistant) -> None:
@@ -201,7 +201,9 @@ async def test_options_update_applies_tuning_without_reload(
     _states(hass)
     entry = await _setup_zone(hass)
     coord = entry.runtime_data
-    coord._ekf.n_heating = 123  # a learned-state marker a reload would wipe
+    coord.runtime.learning.ekf.n_heating = (
+        123  # a learned-state marker a reload would wipe
+    )
 
     hass.config_entries.async_update_entry(
         entry, options={"comfort_base": 22.5, "category": "I"}
@@ -213,4 +215,4 @@ async def test_options_update_applies_tuning_without_reload(
     # / store-restored model). One apply-triggered refresh may tick it forward.
     assert entry.runtime_data is coord
     assert coord._comfort_base == 22.5
-    assert coord._ekf.n_heating >= 123
+    assert coord.runtime.learning.ekf.n_heating >= 123

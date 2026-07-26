@@ -104,9 +104,9 @@ async def test_device_side_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
 
     # establish Poise control, then jump past the echo window
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     # the user turns the wheel to 23.0; re-arm the write recorder after setup
     _set_trv(hass, setpoint=23.0)
@@ -118,7 +118,7 @@ async def test_device_side_change_is_adopted_as_hold(hass: HomeAssistant) -> Non
     # adopted as a hold (23.0 is inside the norm envelope, so kept verbatim);
     # ``_override`` is the source of truth (the value surfaces on the climate
     # entity's attributes, not in the coordinator's tick-data dict).
-    assert coord._override == 23.0
+    assert coord.runtime.user.override == 23.0
     # ... and this tick did NOT push the schedule value back onto the device
     trv_writes = [c for c in setpoints if c.data.get("entity_id") == "climate.trv"]
     assert trv_writes == []
@@ -136,9 +136,9 @@ async def test_trv_frost_drop_is_not_adopted(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     # the TRV drops itself to 7 C -- a large move that would otherwise adopt
     _set_trv(hass, setpoint=7.0)
@@ -147,7 +147,7 @@ async def test_trv_frost_drop_is_not_adopted(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
 
     # not adopted: no phantom manual hold
-    assert coord._override is None
+    assert coord.runtime.user.override is None
 
 
 async def test_echo_or_lag_within_window_is_not_adopted(hass: HomeAssistant) -> None:
@@ -162,16 +162,18 @@ async def test_echo_or_lag_within_window_is_not_adopted(hass: HomeAssistant) -> 
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0  # Poise commanded 20.0 ...
-    coord._pre_write_sp = 22.0  # ... but the device was at 22.0 just before
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0  # Poise commanded 20.0 ...
+    coord.runtime.external.pre_write_sp = (
+        22.0  # ... but the device was at 22.0 just before
+    )
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + 30.0  # still inside the echo window
     _set_trv(hass, setpoint=22.0)  # device still reports its pre-write value (lag)
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override is None
+    assert coord.runtime.user.override is None
 
 
 async def test_in_window_third_value_is_adopted(hass: HomeAssistant) -> None:
@@ -185,10 +187,10 @@ async def test_in_window_third_value_is_adopted(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0  # commanded 20.0
-    coord._pre_write_sp = 22.0  # device was at 22.0 before that write
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0  # commanded 20.0
+    coord.runtime.external.pre_write_sp = 22.0  # device was at 22.0 before that write
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + 30.0  # INSIDE the echo window
     # the user turns the wheel to 23.0 -- neither the command nor the pre-write value
     _set_trv(hass, setpoint=23.0)
@@ -196,7 +198,9 @@ async def test_in_window_third_value_is_adopted(hass: HomeAssistant) -> None:
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override == 23.0  # provable user change -> adopted in-window
+    assert (
+        coord.runtime.user.override == 23.0
+    )  # provable user change -> adopted in-window
     # and this tick did not overwrite it back to the schedule
     trv_writes = [c for c in setpoints if c.data.get("entity_id") == "climate.trv"]
     assert trv_writes == []
@@ -215,20 +219,22 @@ async def test_own_context_change_is_not_adopted(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0
-    coord._pre_write_sp = 20.0
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.pre_write_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + 30.0  # inside the echo window
     # the device settled our write at a clamped third value 23.0, reported UNDER a
     # context Poise owns -> recognised as our own echo, not a user change
     own = Context()
-    coord._own_write_ctx_ids.append(own.id)
+    coord.runtime.external.own_write_ctx_ids.append(own.id)
     _set_trv(hass, setpoint=23.0, context=own)
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override is None  # our own clamp -> re-baselined, never adopted
+    assert (
+        coord.runtime.user.override is None
+    )  # our own clamp -> re-baselined, never adopted
 
 
 async def test_adopted_hold_is_stable_across_ticks(hass: HomeAssistant) -> None:
@@ -248,18 +254,18 @@ async def test_adopted_hold_is_stable_across_ticks(hass: HomeAssistant) -> None:
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
 
     # tick 1 — the wheel turns to 23.0 and is adopted as a hold
     _set_trv(hass, setpoint=23.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override == 23.0
-    expiry_1 = coord._override_expires_at
-    stats_1 = len(coord._override_stats)
+    assert coord.runtime.user.override == 23.0
+    expiry_1 = coord.runtime.user.override_expires_at
+    stats_1 = len(coord.runtime.user.override_stats)
 
     # tick 2 — the device still reports 23.0 (nothing changed). Without the
     # baseline stamp this re-adopts: expiry jumps and the log grows.
@@ -267,9 +273,9 @@ async def test_adopted_hold_is_stable_across_ticks(hass: HomeAssistant) -> None:
     _set_trv(hass, setpoint=23.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override == 23.0
-    assert coord._override_expires_at == expiry_1  # expiry unchanged
-    assert len(coord._override_stats) == stats_1  # log did not grow
+    assert coord.runtime.user.override == 23.0
+    assert coord.runtime.user.override_expires_at == expiry_1  # expiry unchanged
+    assert len(coord.runtime.user.override_stats) == stats_1  # log did not grow
 
     # resume — clear the hold, then one more tick with the device still at 23.0
     coord.set_override(None, reason="user_resume")
@@ -277,7 +283,7 @@ async def test_adopted_hold_is_stable_across_ticks(hass: HomeAssistant) -> None:
     _set_trv(hass, setpoint=23.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override is None  # resume sticks; 23.0 is not re-adopted
+    assert coord.runtime.user.override is None  # resume sticks; 23.0 is not re-adopted
 
 
 async def test_opt_out_disables_adoption(hass: HomeAssistant) -> None:
@@ -290,15 +296,15 @@ async def test_opt_out_disables_adoption(hass: HomeAssistant) -> None:
     assert coord._adopt_external_setpoint is False
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     _set_trv(hass, setpoint=23.0)
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override is None
+    assert coord.runtime.user.override is None
 
 
 async def test_stable_device_offset_is_not_re_adopted(hass: HomeAssistant) -> None:
@@ -314,17 +320,19 @@ async def test_stable_device_offset_is_not_re_adopted(hass: HomeAssistant) -> No
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 20.0  # Poise commanded 20.0 ...
-    coord._last_sp_write_ts = 1000.0
-    coord._prev_device_sp = 23.0  # ... but the device settled at 23.0 and holds it
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0  # Poise commanded 20.0 ...
+    coord.runtime.external.last_sp_write_ts = 1000.0
+    coord.runtime.external.prev_device_sp = (
+        23.0  # ... but the device settled at 23.0 and holds it
+    )
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0  # echo window has lapsed
     _set_trv(hass, setpoint=23.0)  # still 23.0 -- unchanged
 
     await coord.async_refresh()
     await hass.async_block_till_done()
     # stable offset (device_sp == prev_device_sp) -> not a fresh move -> no adoption
-    assert coord._override is None
+    assert coord.runtime.user.override is None
 
 
 async def test_requantise_settle_within_window_is_not_adopted(
@@ -342,16 +350,20 @@ async def test_requantise_settle_within_window_is_not_adopted(
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 21.5  # Poise commanded 21.5 ...
-    coord._pre_write_sp = 20.0  # ... and the device was at 20.0 before that write
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 21.5  # Poise commanded 21.5 ...
+    coord.runtime.external.pre_write_sp = (
+        20.0  # ... and the device was at 20.0 before that write
+    )
+    coord.runtime.external.last_sp_write_ts = 1000.0
     clock.t = 1000.0 + 30.0  # inside the echo window
     _set_trv(hass, setpoint=21.8)  # device settled 0.3 K off, within the 0.5 K step
 
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override is None  # sub-step settle -> echo, not a manual hold
+    assert (
+        coord.runtime.user.override is None
+    )  # sub-step settle -> echo, not a manual hold
 
 
 async def test_late_echo_of_previous_command_after_adoption_is_not_re_adopted(
@@ -369,19 +381,23 @@ async def test_late_echo_of_previous_command_after_adoption_is_not_re_adopted(
     coord = entry.runtime_data
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
-    coord._last_written_sp = 21.0  # Poise's previous command
-    coord._pre_write_sp = 24.0  # a stale pre-write reference (the pre-F2 poison)
-    coord._prev_device_sp = 21.0
-    coord._last_sp_write_ts = 1000.0
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 21.0  # Poise's previous command
+    coord.runtime.external.pre_write_sp = (
+        24.0  # a stale pre-write reference (the pre-F2 poison)
+    )
+    coord.runtime.external.prev_device_sp = 21.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
 
     # tick 1 -- the user turns the wheel to 26.0; adopted (well past the echo window)
     clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
     _set_trv(hass, setpoint=26.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override == 26.0
-    assert coord._pre_write_sp == 21.0  # F2: re-pointed to the previous command
+    assert coord.runtime.user.override == 26.0
+    assert (
+        coord.runtime.external.pre_write_sp == 21.0
+    )  # F2: re-pointed to the previous command
 
     # tick 2 -- the sluggish device now echoes the PREVIOUS command 21.0 under a fresh
     # context, inside the new window. Pre-F2 this was a third value (21.0 != 26.0 and
@@ -390,7 +406,9 @@ async def test_late_echo_of_previous_command_after_adoption_is_not_re_adopted(
     _set_trv(hass, setpoint=21.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override == 26.0  # the user's hold survives; not replaced by 21.0
+    assert (
+        coord.runtime.user.override == 26.0
+    )  # the user's hold survives; not replaced by 21.0
 
 
 async def test_real_pre_write_stamp_path_adopts_in_window_change(
@@ -407,13 +425,13 @@ async def test_real_pre_write_stamp_path_adopts_in_window_change(
     setpoints = async_mock_service(hass, "climate", "set_temperature")
 
     clock = _FakeClock(1000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
     # tick 1 -- the coordinator computes a plan target and WRITES it, stamping
     # _pre_write_sp = 20.0 (the device reading before the write) via the real path
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert any(c.data.get("entity_id") == "climate.trv" for c in setpoints)
-    assert coord._pre_write_sp == 20.0
+    assert coord.runtime.external.pre_write_sp == 20.0
 
     # tick 2 -- the user turns the wheel to 23.0 inside tick-1's echo window; a third
     # value (!= the written target and != the 20.0 pre-write) -> adopted
@@ -421,4 +439,4 @@ async def test_real_pre_write_stamp_path_adopts_in_window_change(
     _set_trv(hass, setpoint=23.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._override == 23.0
+    assert coord.runtime.user.override == 23.0

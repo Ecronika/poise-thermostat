@@ -105,9 +105,9 @@ async def test_forecast_cache_proxies_forward_both_ways(hass: HomeAssistant) -> 
 
     # coordinator poke -> provider state (the direction the existing
     # forecast tests use to force/inhibit a fetch)
-    coord._forecast = [(0.0, 1.5)]
-    coord._forecast_at = 123.0
-    coord._forecast_fail_at = 45.0
+    coord.forecast_provider.forecast = [(0.0, 1.5)]
+    coord.forecast_provider.forecast_at = 123.0
+    coord.forecast_provider.fail_at = 45.0
     assert prov.forecast == [(0.0, 1.5)]
     assert prov.forecast_at == 123.0
     assert prov.fail_at == 45.0
@@ -116,9 +116,9 @@ async def test_forecast_cache_proxies_forward_both_ways(hass: HomeAssistant) -> 
     prov.forecast = [(5.0, 2.0)]
     prov.forecast_at = None
     prov.fail_at = None
-    assert coord._forecast == [(5.0, 2.0)]
-    assert coord._forecast_at is None
-    assert coord._forecast_fail_at is None
+    assert coord.forecast_provider.forecast == [(5.0, 2.0)]
+    assert coord.forecast_provider.forecast_at is None
+    assert coord.forecast_provider.fail_at is None
 
 
 async def test_forecast_outdoor_delegates_under_the_live_clock(
@@ -131,15 +131,17 @@ async def test_forecast_outdoor_delegates_under_the_live_clock(
     on the swapped clock, not a stale real-monotonic snapshot)."""
     coord = await _setup(hass)
     clock = _FakeClock(5000.0)
-    coord._clock = clock
+    coord.runtime.clock = clock
     coord._weather = "weather.home"
-    coord._forecast = [(0.0, 4.0), (120.0, 4.0)]
-    coord._forecast_at = 4900.0  # fresh under the fake clock (TTL 900 s)
-    coord._forecast_fail_at = None
+    coord.forecast_provider.forecast = [(0.0, 4.0), (120.0, 4.0)]
+    coord.forecast_provider.forecast_at = (
+        4900.0  # fresh under the fake clock (TTL 900 s)
+    )
+    coord.forecast_provider.fail_at = None
 
     assert await coord._forecast_outdoor(60.0, 99.9) == 4.0  # cache, not fallback
-    assert coord._forecast_fail_at is None  # no fetch attempt was made
-    assert coord._forecast_at == 4900.0  # cache instant untouched
+    assert coord.forecast_provider.fail_at is None  # no fetch attempt was made
+    assert coord.forecast_provider.forecast_at == 4900.0  # cache instant untouched
 
 
 async def test_forecast_failure_debug_stays_on_coordinator_channel(
@@ -159,11 +161,13 @@ async def test_forecast_failure_debug_stays_on_coordinator_channel(
     hass.services.async_register(
         "weather", "get_forecasts", _boom, supports_response=SupportsResponse.ONLY
     )
-    coord._clock = _FakeClock(5000.0)
+    coord.runtime.clock = _FakeClock(5000.0)
     coord._weather = "weather.home"
-    coord._forecast = []
-    coord._forecast_at = None  # stale -> Fetch-Versuch, der fehlschlaegt
-    coord._forecast_fail_at = None
+    coord.forecast_provider.forecast = []
+    coord.forecast_provider.forecast_at = (
+        None  # stale -> Fetch-Versuch, der fehlschlaegt
+    )
+    coord.forecast_provider.fail_at = None
 
     # Auf dem PARENT-Logger capturen, damit Records beider Kandidaten-Kanaele
     # landen wuerden — der Exakt-Assert unten schliesst den Provider-Kanal aus.
@@ -178,4 +182,4 @@ async def test_forecast_failure_debug_stays_on_coordinator_channel(
     assert [(r.name, r.levelno) for r in records] == [
         ("custom_components.poise.coordinator", logging.DEBUG)
     ]
-    assert coord._forecast_fail_at == 5000.0  # F10-Backoff wie ALT gestartet
+    assert coord.forecast_provider.fail_at == 5000.0  # F10-Backoff wie ALT gestartet

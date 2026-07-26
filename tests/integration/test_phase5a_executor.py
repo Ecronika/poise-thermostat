@@ -317,10 +317,11 @@ async def test_forecast_missing_weather_entity_returns_fallback_without_call(
 async def test_forecast_fetch_pins_payload_and_serves_cache_within_ttl(
     hass: HomeAssistant,
 ) -> None:
-    """Erster Call fetcht mit exakt der heutigen Payload (``type``/
-    ``entity_id`` — der Horizont ist NICHT Teil der Payload); innerhalb der
-    TTL bedient der Cache (kein zweiter Call); nach Ablauf wird refetcht
-    (Muster test_phase0_forecast_gating)."""
+    """Erster Call (kalter Cache) fetcht mit exakt der heutigen Payload
+    (``type``/``entity_id`` — der Horizont ist NICHT Teil der Payload);
+    innerhalb der TTL bedient der Cache (kein zweiter Call); nach Ablauf
+    startet F-FORECAST den Refetch im HINTERGRUND: der Aufruf selbst wartet
+    nicht mehr darauf (Muster test_phase0_forecast_gating)."""
     payloads: list[dict[str, Any]] = []
 
     async def _handler(call: ServiceCall) -> dict[str, Any]:
@@ -345,10 +346,12 @@ async def test_forecast_fetch_pins_payload_and_serves_cache_within_ttl(
     assert await provider.mean_outdoor(WEATHER, 120.0, 9.9) == first
     assert len(payloads) == 1, "within the TTL the cache must serve"
 
-    clock.t = 1000.0 + FORECAST_TTL_S  # abgelaufen -> Refetch
+    clock.t = 1000.0 + FORECAST_TTL_S  # abgelaufen -> Hintergrund-Refetch
     assert await provider.mean_outdoor(WEATHER, 120.0, 9.9) == first
+    assert len(payloads) == 1, "F-FORECAST: der Tick wartet nicht auf den Refresh"
+    await hass.async_block_till_done()
     assert len(payloads) == 2
-    assert provider.forecast_at == clock.t
+    assert provider.forecast_at == clock.t  # Stempel = Faelligkeits-Instant
 
 
 async def test_forecast_failure_falls_back_to_last_good_cache_then_recovers(
@@ -357,7 +360,9 @@ async def test_forecast_failure_falls_back_to_last_good_cache_then_recovers(
     """F10 (Muster test_forecast_backoff): ein Fetch-Fehler faellt auf den
     letzten guten Cache zurueck (nicht auf den flachen Fallback) und startet
     den Backoff; nach Ablauf des Backoffs heilt ein erfolgreicher Fetch den
-    Zustand (``fail_at`` wieder None)."""
+    Zustand (``fail_at`` wieder None). Seit F-FORECAST laufen beide Refetches
+    im Hintergrund — der jeweilige Aufruf liefert noch den alten Cache, der
+    NAECHSTE sieht das Ergebnis."""
     calls = {"n": 0}
 
     async def _flaky(call: ServiceCall) -> dict[str, Any]:
@@ -380,20 +385,26 @@ async def test_forecast_failure_falls_back_to_last_good_cache_then_recovers(
 
     clock.t = 1000.0 + FORECAST_TTL_S  # Cache stale -> Refetch, der fehlschlaegt
     second = await provider.mean_outdoor(WEATHER, 120.0, 9.9)
-    assert calls["n"] == 2
     assert second == first, "a fetch failure must reuse the last-good cache"
+    assert calls["n"] == 1, "F-FORECAST: der Aufruf wartet nicht auf den Refetch"
+    await hass.async_block_till_done()
+    assert calls["n"] == 2
     assert provider.fail_at == clock.t  # Backoff gestartet
+    assert provider.forecast, "der letzte gute Cache ueberlebt den Fehlschlag"
 
     # sofort nochmal: Backoff aktiv -> kein weiterer Service-Call.
     assert await provider.mean_outdoor(WEATHER, 120.0, 9.9) == first
+    await hass.async_block_till_done()
     assert calls["n"] == 2
 
     clock.t += FORECAST_TTL_S  # Backoff abgelaufen -> Retry, diesmal Erfolg
-    third = await provider.mean_outdoor(WEATHER, 120.0, 9.9)
+    assert await provider.mean_outdoor(WEATHER, 120.0, 9.9) == first
+    await hass.async_block_till_done()
     assert calls["n"] == 3
-    assert third == pytest.approx(10.0)
     assert provider.fail_at is None
     assert provider.forecast_at == clock.t
+    # erst der NAECHSTE Aufruf sieht den frischen Wert
+    assert await provider.mean_outdoor(WEATHER, 120.0, 9.9) == pytest.approx(10.0)
 
 
 async def test_forecast_repeated_failures_back_off_and_empty_cache_falls_back(

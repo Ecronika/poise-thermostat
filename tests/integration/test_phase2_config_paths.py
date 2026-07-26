@@ -272,7 +272,7 @@ async def test_hot_apply_changes_tuning_but_not_structure_or_climate_mode(
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
     assert coord._comfort_base == 21.0
-    assert coord._climate_mode == "auto"
+    assert coord.runtime.user.climate_mode == "auto"
     assert coord._adopt_external_setpoint is True
 
     hass.config_entries.async_update_entry(
@@ -297,7 +297,7 @@ async def test_hot_apply_changes_tuning_but_not_structure_or_climate_mode(
     # …structure, climate_mode and the adopt toggle untouched:
     assert coord._temp == "sensor.room_temp"
     assert coord.zone_name == "Test Room"
-    assert coord._climate_mode == "auto"
+    assert coord.runtime.user.climate_mode == "auto"
     assert coord._adopt_external_setpoint is True
 
 
@@ -320,7 +320,7 @@ async def test_store_restored_climate_mode_survives_options_update(
     }
     entry = await _setup(hass, entry_id=entry_id)
     coord: Any = entry.runtime_data
-    assert coord._climate_mode == "cool"  # restored over the entry's "auto"
+    assert coord.runtime.user.climate_mode == "cool"  # restored over the entry's "auto"
 
     hass.config_entries.async_update_entry(
         entry,
@@ -333,7 +333,7 @@ async def test_store_restored_climate_mode_survives_options_update(
     await hass.async_block_till_done()
 
     assert coord._comfort_base == 22.0  # the hot-apply DID run
-    assert coord._climate_mode == "cool"  # …and left the store-owned value
+    assert coord.runtime.user.climate_mode == "cool"  # …and left the store-owned value
 
 
 async def test_structural_unchanged_options_vs_data_change(

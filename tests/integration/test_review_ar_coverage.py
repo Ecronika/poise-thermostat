@@ -113,8 +113,8 @@ async def test_room_disable_parks_heater(hass: HomeAssistant) -> None:
     )
     entry = await _setup_room(hass)
     coord = entry.runtime_data
-    coord._has_actuated = True  # AR-11: gate the teardown park
-    coord._climate_mode = "auto"
+    coord.runtime.actuator.has_actuated = True  # AR-11: gate the teardown park
+    coord.runtime.user.climate_mode = "auto"
 
     with patch("custom_components.poise._execute_park", new_callable=AsyncMock) as park:
         await hass.config_entries.async_set_disabled_by(
@@ -143,8 +143,8 @@ async def test_room_disable_parks_cool_only_off(hass: HomeAssistant) -> None:
     )
     entry = await _setup_room(hass)
     coord = entry.runtime_data
-    coord._has_actuated = True
-    coord._climate_mode = "cool_only"
+    coord.runtime.actuator.has_actuated = True
+    coord.runtime.user.climate_mode = "cool_only"
 
     with patch("custom_components.poise._execute_park", new_callable=AsyncMock) as park:
         await hass.config_entries.async_set_disabled_by(

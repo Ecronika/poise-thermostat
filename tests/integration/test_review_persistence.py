@@ -91,7 +91,7 @@ async def test_p2_6_periodic_save_cadence_and_dirty_flush(
     with patch.object(coord._store, "save", AsyncMock()) as saver:
         # start from a clean, non-dirty cadence so setup's own saves don't count.
         coord._save_counter = 0
-        coord._dirty = False
+        coord.runtime.dirty = False
         for _ in range(EKF_SAVE_EVERY_TICKS):
             await coord.async_refresh()
             await hass.async_block_till_done()
@@ -100,7 +100,7 @@ async def test_p2_6_periodic_save_cadence_and_dirty_flush(
         )
 
         # a dirty flag (e.g. an override/enabled/mode change) saves next tick.
-        coord._dirty = True
+        coord.runtime.dirty = True
         await coord.async_refresh()
         await hass.async_block_till_done()
         assert saver.call_count == 2, "the dirty flag must flush on the next tick"

@@ -1,27 +1,27 @@
-"""Phase 0 — fault injection into the legacy SHADOW error domain (CI-only).
+"""Phase 10 — fault injection into the finalize shadow segments (CI-only).
 
 Refactoring plan: docs/Konzepte/2026-07-18_Refactoring-Plan_coordinator.md,
-Befund 11a ("Legacy-Shadow-Domäne", try 3361–3497/3501) and Befunde 1–3.
-These tests freeze TODAY's degradation semantics of the one shared ``try`` in
-``coordinator.py`` around the diagnostics shadows:
+Befund 11a and Befunde 1–3; ADR-0062 (F-TPI / F-LIFECYCLE / F-PIACC).
 
-* neutral shadow defaults 3342–3360 (``tpi_duty: None`` at 3353,
-  ``multi_reason: "shadow_error"`` at 3347),
-* peak forecast ``predict_peak_operative`` at 3363 — the EARLIEST shadow step,
-* PI-integrator advance ``self._pi.acc = pi.next_acc`` at 3414–3415,
-* compressor-lifecycle fold ``self._multi_lifecycle = _lifecycle.observe(...)``
-  at 3443–3453,
-* ``shadow_objs`` assembly 3468–3496 and the single broad ``except`` 3497–3501,
-* downstream ``heat_demand`` via ``zone_heat_demand`` at 3811–3815, which falls
-  back to the binary ``float(heating)`` whenever ``tpi_duty`` is None.
+Until phase 10 the whole chain — peak forecast → MPC → TPI → PI(+acc) →
+lifecycle fold → thermal arbitration → ``shadow_objs`` — shared ONE ``try``,
+so a failure in the EARLIEST step took the whole domain down for that tick:
+``tpi_duty`` degraded to None (and ``heat_demand`` to the binary
+``float(heating)`` fallback), the compressor-lifecycle fold was skipped and
+``_pi.acc`` froze. These tests were the phase-0 pins of exactly that.
 
-An injected failure in the earliest step therefore takes down the WHOLE domain
-for that tick — ``tpi_duty`` degrades to None (and ``heat_demand`` to the
-binary heating fallback), the lifecycle fold is skipped (the pre-tick object
-survives by identity) and ``_pi.acc`` freezes — while the tick itself stays
-successful and the next healthy tick fully recovers. In Phase 10 the fixes
-F-TPI / F-LIFECYCLE / F-PIACC decouple these from diagnostics errors; these
-tests then flip into their negative tests (degradation must STOP happening).
+They are now the NEGATIVE tests of the three fixes: the same injected fault at
+the same earliest step (``predict_peak_operative``) must leave
+
+* ``tpi_duty``/``heat_demand`` intact — F-TPI,
+* the lifecycle fold running (a NEW object every tick) — F-LIFECYCLE,
+* ``_pi.acc`` advancing — F-PIACC,
+
+while only the failing segment's own keys degrade (the cover shadow's) and the
+tick itself stays successful. The MPC/arbitration segments are unaffected too;
+what remains coupled is one real DATA dependency: the arbitration consumes the
+folded lifecycle runtime, so it degrades when the FOLD fails — never when a
+diagnostic before it does.
 """
 
 from __future__ import annotations
@@ -52,9 +52,11 @@ from custom_components.poise.const import (
 )
 from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 
-# the earliest call inside the shared shadow try (coordinator.py:3363); patched
-# in the coordinator's namespace so ONLY the coordinator's call site raises.
+# the earliest shadow step (the cover segment's peak forecast); patched in the
+# coordinator's namespace so ONLY the coordinator's call site raises.
 _INJECT_AT = "custom_components.poise.coordinator.predict_peak_operative"
+# the cover segment's own log line — the ONE segment the injection degrades
+_COVER_FAILED = "shadow evaluation failed (cover)"
 
 
 class _FakeClock:
@@ -135,32 +137,31 @@ async def _setup(hass: HomeAssistant) -> Any:
     # is hundreds of seconds, the covariance predict step inflates and the
     # EKF DE-IDENTIFIES mid-tick. Continuity makes dt a deterministic ~60 s
     # per _tick on every platform.
-    coord._clock = _FakeClock(time.monotonic())
-    _make_identified(coord._ekf)
+    coord.runtime.clock = _FakeClock(time.monotonic())
+    _make_identified(coord.runtime.learning.ekf)
     return coord
 
 
 async def _tick(hass: HomeAssistant, coord: Any) -> dict[str, Any]:
-    coord._clock.t += 60.0
+    coord.runtime.clock.t += 60.0
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord.last_update_success is True
     return coord.data or {}
 
 
-async def test_shadow_fault_degrades_tpi_duty_and_heat_demand(
+async def test_f_tpi_duty_and_heat_demand_survive_a_cover_fault(
     hass: HomeAssistant, caplog: Any
 ) -> None:
-    """(a)+(d)+(e): a failure in the EARLIEST shadow step (peak forecast,
-    coordinator.py:3363) degrades ``tpi_duty`` to the neutral None default
-    (3353) — and with it ``heat_demand`` to the binary ``float(heating)``
-    fallback (3811–3815 / zone_heat_demand) — while the tick itself succeeds.
-    Phase 10 F-TPI flips this test: tpi_duty must then survive the fault."""
+    """F-TPI: a failure in the EARLIEST shadow step (the cover segment's peak
+    forecast) must no longer touch ``tpi_duty`` — and therefore no longer drop
+    ``heat_demand`` to the binary ``float(heating)`` fallback. Only the cover
+    segment degrades, and it says so on its own log line."""
     coord = await _setup(hass)
     # give the zone a writable valve so the TPI shadow is active and the
     # reference tick carries a real duty (evaluate_tpi_shadow gates on it;
     # only the shadow block + diagnostics read _valve_entity).
-    coord._valve_entity = "number.trv_valve_opening_degree"
+    coord.input_reader.valve_entity = "number.trv_valve_opening_degree"
 
     ref = await _tick(hass, coord)
     assert ref["available"] is True
@@ -175,35 +176,44 @@ async def test_shadow_fault_degrades_tpi_duty_and_heat_demand(
     with patch(_INJECT_AT, side_effect=RuntimeError("injected shadow fault")):
         d = await _tick(hass, coord)
 
-    # (d) the tick did not fail — control reporting stays online ...
+    # the tick did not fail — control reporting stays online ...
     assert d["available"] is True
-    # ... but the whole shadow domain degraded to its neutral defaults:
-    assert d["tpi_duty"] is None  # (a) default at 3353
-    assert d["tpi_active"] is False
-    assert d["mpc_active"] is False  # MPC shadow shares the domain
-    assert d["multi_reason"] == "shadow_error"
-    assert "shadow evaluation failed" in caplog.text
-    # (e) heat_demand falls back to binary heating (zone_heat_demand)
+    # ... and the TPI segment kept its own boundary (F-TPI)
+    assert d["tpi_active"] is True
+    assert isinstance(d["tpi_duty"], float)
+    assert d["tpi_duty"] == ref["tpi_duty"]
+    # the segments after the failing one are untouched as well
+    assert d["mpc_active"] is ref["mpc_active"]
+    assert d["multi_reason"] == ref["multi_reason"]
+    # heat_demand stays tied to the live duty instead of falling back to the
+    # binary heating signal. (Value-wise the two coincide in this fixture — the
+    # 18.5 °C room against a ~21 °C setpoint drives full duty — so the proof is
+    # the pair above: the fallback path publishes tpi_active False/duty None.)
     assert d["heating"] is True
-    assert d["heat_demand"] == 1.0
+    assert d["heat_demand"] == d["tpi_duty"]
+    # exactly ONE segment reported a failure, and it names itself
+    assert _COVER_FAILED in caplog.text
+    assert caplog.text.count("shadow evaluation failed") == 1
 
-    # next healthy tick fully recovers (degradation is strictly per-tick)
+    # next healthy tick is indistinguishable (degradation is strictly per-tick)
     rec = await _tick(hass, coord)
     assert isinstance(rec["tpi_duty"], float)
     assert rec["multi_reason"] != "shadow_error"
 
 
-async def test_shadow_fault_skips_lifecycle_fold(hass: HomeAssistant) -> None:
-    """(b): the compressor-lifecycle fold (coordinator.py:3443–3453) sits in the
-    SAME try as the shadows, so an earlier shadow fault skips ``observe()`` for
-    that tick: ``coord._multi_lifecycle`` stays the IDENTICAL (frozen-dataclass)
-    object, while every healthy tick replaces it with a new instance. Phase 10
-    F-LIFECYCLE flips this: the fold must then always run."""
+async def test_f_lifecycle_fold_runs_through_a_cover_fault(
+    hass: HomeAssistant,
+) -> None:
+    """F-LIFECYCLE: the compressor-lifecycle fold is LIVE state — it feeds the
+    next tick's compressor guard — and must run on every tick regardless of a
+    diagnostic shadow failing before it. ``multi_lifecycle`` is a frozen
+    dataclass replaced by a NEW object on every successful fold, so object
+    identity is the observable."""
     coord = await _setup(hass)
 
-    life_before = coord._multi_lifecycle
+    life_before = coord.runtime.compressor.multi_lifecycle
     await _tick(hass, coord)
-    life_ref = coord._multi_lifecycle
+    life_ref = coord.runtime.compressor.multi_lifecycle
     # non-vacuousness: a healthy fold always builds a NEW DeviceLifecycle
     assert life_ref is not life_before
 
@@ -211,29 +221,34 @@ async def test_shadow_fault_skips_lifecycle_fold(hass: HomeAssistant) -> None:
         d = await _tick(hass, coord)
 
     assert d["available"] is True
-    # the fold was skipped — the pre-fault object survives by identity
-    assert coord._multi_lifecycle is life_ref
-    # the published health diagnostic falls back to the pre-fault state too
-    assert d["multi_device_health"] == life_ref.health
+    # the fold ran anyway — a fresh object, not the pre-fault one
+    assert coord.runtime.compressor.multi_lifecycle is not life_ref
+    life_after = coord.runtime.compressor.multi_lifecycle
+    assert d["multi_device_health"] == life_after.health
+    # and with the fold, its two exclusive keys stay published
+    assert "compressor_gate_would_block" in d
+    assert "compressor_mode_hold_remaining" in d
 
-    # a healthy tick resumes folding
+    # the next healthy tick keeps folding
     await _tick(hass, coord)
-    assert coord._multi_lifecycle is not life_ref
+    assert coord.runtime.compressor.multi_lifecycle is not life_after
 
 
-async def test_shadow_fault_freezes_pi_acc(hass: HomeAssistant) -> None:
-    """(c): the persisted PI integrator only advances inside the shadow try
-    (coordinator.py:3414–3415, via the pure ``evaluate_pi_shadow``); an earlier
-    shadow fault silently freezes ``coord._pi.acc`` for that tick (plan
-    Befund 3). No valve entity here, so the PI shadow applies and the room
-    error (18.5 °C vs. the ~21 °C heat setpoint) accrues every healthy tick.
-    Phase 10 F-PIACC flips this: the integrator must then keep advancing."""
+async def test_f_piacc_integrator_advances_through_a_cover_fault(
+    hass: HomeAssistant,
+) -> None:
+    """F-PIACC: the PI integrator advance is the PI segment's own side effect
+    and no longer hangs off an unrelated shadow's boundary. No valve entity
+    here, so the PI shadow applies and the room error (18.5 °C vs. the ~21 °C
+    heat setpoint) accrues on every tick — including the faulted one."""
     coord = await _setup(hass)
-    assert coord._valve_entity is None  # setpoint-only device: PI shadow applies
+    assert (
+        coord.input_reader.valve_entity is None
+    )  # setpoint-only device: PI shadow applies
 
-    acc_setup = coord._pi.acc
+    acc_setup = coord.runtime.learning.pi.acc
     await _tick(hass, coord)
-    acc_ref = coord._pi.acc
+    acc_ref = coord.runtime.learning.pi.acc
     # non-vacuousness: a healthy tick DOES advance the integrator
     assert acc_ref != acc_setup
 
@@ -241,9 +256,45 @@ async def test_shadow_fault_freezes_pi_acc(hass: HomeAssistant) -> None:
         d = await _tick(hass, coord)
 
     assert d["available"] is True
-    assert coord._pi.acc == acc_ref  # frozen, bit-exact
-    assert d["pi_active"] is False  # PI shadow degraded to its neutral default
+    assert coord.runtime.learning.pi.acc != acc_ref  # kept integrating
+    assert d["pi_active"] is True  # the PI segment published its own keys
 
-    # a healthy tick resumes integrating
+    # and it keeps going on the next healthy tick
+    acc_faulted = coord.runtime.learning.pi.acc
     await _tick(hass, coord)
-    assert coord._pi.acc != acc_ref
+    assert coord.runtime.learning.pi.acc != acc_faulted
+
+
+async def test_only_the_failing_segment_degrades(
+    hass: HomeAssistant, caplog: Any
+) -> None:
+    """The complement of the three fixes: the cover segment's OWN keys are the
+    only casualty. ``cover_shade_position``/``cover_shade_reason`` fall back to
+    the neutral seed while every other shadow key matches a healthy tick."""
+    coord = await _setup(hass)
+    ref = await _tick(hass, coord)
+
+    with patch(_INJECT_AT, side_effect=RuntimeError("injected shadow fault")):
+        d = await _tick(hass, coord)
+
+    assert d["available"] is True
+    # the cover segment degraded to the neutral seed (0.0 / "")
+    assert d["cover_shade_position"] == 0.0
+    assert d["cover_would_shade"] is False
+    assert d["cover_shade_reason"] == ""
+    # non-vacuousness: the healthy tick produced a real shading reason
+    assert ref["cover_shade_reason"] != ""
+    # every OTHER shadow key survived
+    for key in (
+        "tpi_active",
+        "tpi_duty",
+        "mpc_active",
+        "mpc_regime",
+        "pi_active",
+        "multi_reason",
+        "multi_severity",
+        "multi_device_health",
+        "compressor_gate_would_block",
+    ):
+        assert key in d, f"{key} must survive an unrelated segment failure"
+    assert _COVER_FAILED in caplog.text

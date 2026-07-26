@@ -91,12 +91,12 @@ async def test_open_window_drops_learning_anchor(hass: HomeAssistant) -> None:
     # a learning tick with the window closed anchors both clocks
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._last_mono is not None
-    assert coord._prev_room_mono is not None
+    assert coord.runtime.learning.last_mono is not None
+    assert coord.runtime.learning.prev_room_mono is not None
 
     # window opens -> learning paused -> both anchors dropped (no contaminated dt)
     hass.states.async_set("binary_sensor.window", "on", {"device_class": "window"})
     await coord.async_refresh()
     await hass.async_block_till_done()
-    assert coord._last_mono is None
-    assert coord._prev_room_mono is None
+    assert coord.runtime.learning.last_mono is None
+    assert coord.runtime.learning.prev_room_mono is None

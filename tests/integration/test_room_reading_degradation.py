@@ -83,7 +83,7 @@ async def _setup(hass: HomeAssistant) -> MockConfigEntry:
 
 
 def _ekf_updates(coord: Any) -> int:
-    ekf = coord._ekf
+    ekf = coord.runtime.learning.ekf
     return ekf.n_idle + ekf.n_heating + ekf.n_cooling
 
 

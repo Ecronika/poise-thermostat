@@ -293,7 +293,7 @@ async def _normal_tick(hass: HomeAssistant) -> Any:
     # real climate handlers, clobbering any pre-setup mock).
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord.last_update_success is True
@@ -347,7 +347,7 @@ async def test_unavailable_form_is_exactly_minimal(hass: HomeAssistant) -> None:
     assert coord.data.get("available") is True  # precondition: was healthy
 
     hass.states.async_set("sensor.room_temp", "unavailable", {})
-    coord._clock.t = 1100.0  # fresh loss, far below UNAVAILABLE_SAFE_AFTER_S
+    coord.runtime.clock.t = 1100.0  # fresh loss, far below UNAVAILABLE_SAFE_AFTER_S
     await coord.async_refresh()
     await hass.async_block_till_done()
 
@@ -363,13 +363,13 @@ async def test_unavailable_safe_form_is_exactly_minimal(hass: HomeAssistant) -> 
 
     # tick 1 of the outage stamps _unavailable_since = 1100.0 (2021–2022)
     hass.states.async_set("sensor.room_temp", "unavailable", {})
-    coord._clock.t = 1100.0
+    coord.runtime.clock.t = 1100.0
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord.data == {"available": False}
 
     # tick 2 — past the timeout: safe state engages
-    coord._clock.t = 1100.0 + UNAVAILABLE_SAFE_AFTER_S + 1.0
+    coord.runtime.clock.t = 1100.0 + UNAVAILABLE_SAFE_AFTER_S + 1.0
     await coord.async_refresh()
     await hass.async_block_till_done()
 

@@ -115,10 +115,10 @@ async def test_baseline_is_persisted(hass: HomeAssistant) -> None:
     entry = await _setup(hass)
     coord = entry.runtime_data
 
-    coord._last_written_sp = 20.0
-    coord._prev_device_sp = 20.5
-    coord._last_commanded_hvac = "heat"
-    coord._prev_device_mode = "heat"
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.prev_device_sp = 20.5
+    coord.runtime.external.last_commanded_hvac = "heat"
+    coord.runtime.external.prev_device_mode = "heat"
 
     payload = coord._save_payload()
     assert payload["last_written_sp"] == 20.0
@@ -150,8 +150,8 @@ async def test_intervention_right_after_restart_is_adopted(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
-    assert coord._override is not None
-    assert coord._override_reason == "device_adopt_setpoint"
+    assert coord.runtime.user.override is not None
+    assert coord.runtime.user.override_reason == "device_adopt_setpoint"
 
 
 async def test_restored_baseline_does_not_phantom_adopt_offset_device(
@@ -169,8 +169,8 @@ async def test_restored_baseline_does_not_phantom_adopt_offset_device(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
-    assert coord._override is None
-    assert coord._override_reason is None
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.override_reason is None
 
 
 async def test_no_persisted_baseline_stays_conservative(
@@ -197,5 +197,5 @@ async def test_no_persisted_baseline_stays_conservative(
     entry = await _setup(hass)
     coord = entry.runtime_data
 
-    assert coord._override is None
-    assert coord._override_reason is None
+    assert coord.runtime.user.override is None
+    assert coord.runtime.user.override_reason is None

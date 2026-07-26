@@ -178,7 +178,7 @@ async def test_optimal_stop_coast_reachable_in_comfort(hass: HomeAssistant) -> N
     coord = entry.runtime_data
 
     # force the EKF past its identification gate (as the closed-loop harness does)
-    ekf = coord._ekf
+    ekf = coord.runtime.learning.ekf
     ekf.n_idle = 1000
     ekf.n_heating = 1000
     ekf.p[0][0] = 0.01
@@ -348,7 +348,9 @@ async def test_hub_drops_silently_stale_zone(hass: HomeAssistant) -> None:
     # the update still "succeeds" but the snapshot is far older than the staleness
     # window — the hub must stop calling for heat on it
     assert zone.runtime_data.last_update_success is True
-    zone.runtime_data.data["mono_ts"] = zone.runtime_data._clock.monotonic() - 1000.0
+    zone.runtime_data.data["mono_ts"] = (
+        zone.runtime_data.runtime.clock.monotonic() - 1000.0
+    )
     await hub.runtime_data.async_refresh()
     await hass.async_block_till_done()
     assert hub.runtime_data.data["controlling_zones"] == 0
@@ -392,7 +394,7 @@ async def test_optimal_stop_coasts_near_window_end(
         ),
     )
     coord = entry.runtime_data
-    ekf = coord._ekf
+    ekf = coord.runtime.learning.ekf
     ekf.n_idle = 1000
     ekf.n_heating = 1000
     ekf.p[0][0] = 0.01

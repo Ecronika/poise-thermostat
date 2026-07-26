@@ -254,7 +254,7 @@ async def test_guard_defers_setpoint_write_under_min_off(hass: HomeAssistant) ->
     coord = entry.runtime_data
 
     # seed the lifecycle as if the compressor just stopped -> min-off is running
-    coord._multi_lifecycle = DeviceLifecycle(
+    coord.runtime.compressor.multi_lifecycle = DeviceLifecycle(
         is_on=False, last_off_wall=dt_util.utcnow().timestamp()
     )
     # re-arm the recorders AFTER setup: the climate-platform forward registers the

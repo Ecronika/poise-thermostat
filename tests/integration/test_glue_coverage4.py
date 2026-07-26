@@ -191,13 +191,13 @@ async def test_forecast_outdoor_fetches_hourly(hass: HomeAssistant) -> None:
     entry = await _setup(hass, _base(**{CONF_WEATHER: "weather.home"}))
     coord = entry.runtime_data
 
-    coord._forecast_at = None  # force a fresh fetch
+    coord.forecast_provider.forecast_at = None  # force a fresh fetch
     out = await coord._forecast_outdoor(120.0, 9.9)
     assert isinstance(out, float)
 
     # a zone without a weather entity degrades straight to the fallback
     coord._weather = None
-    coord._forecast_at = None
+    coord.forecast_provider.forecast_at = None
     assert await coord._forecast_outdoor(60.0, 3.3) == 3.3
 
 
@@ -216,7 +216,7 @@ async def test_forecast_outdoor_degrades_on_failure(hass: HomeAssistant) -> None
     entry = await _setup(hass, _base(**{CONF_WEATHER: "weather.home"}))
     coord = entry.runtime_data
 
-    coord._forecast_at = None
+    coord.forecast_provider.forecast_at = None
     assert await coord._forecast_outdoor(120.0, 7.5) == 7.5  # fallback on failure
 
 

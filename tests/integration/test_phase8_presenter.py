@@ -113,7 +113,7 @@ async def test_available_payload_is_the_traced_object(hass: HomeAssistant) -> No
     coord: Any = entry.runtime_data
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    coord._clock = _FakeClock(1000.0)
+    coord.runtime.clock = _FakeClock(1000.0)
 
     captured: list[dict[str, Any]] = []
     orig = coord._maybe_record_trace
