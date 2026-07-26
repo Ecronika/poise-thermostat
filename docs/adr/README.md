@@ -95,9 +95,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0059](ADR-0059-Override-Lebenszyklus.md) | Override-Lebenszyklus — Gültigkeit, Rückkehr, Feedback, L1-Erfassung (manuelle Eingriffe) | Implementiert (v0.163.0) |
 | [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | Vorgeschlagen |
 | [0061](ADR-0061-Kuehlkante-Anwesenheit-vs-FreeRunning.md) | Kühlkante — fest bei Anwesenheit, adaptiv nur free-running | Implementiert (v0.165.0) |
-| [0062](ADR-0062-Fehlergrenzen-Diagnose-Segmente.md) | Fehlergrenzen — eine Grenze je Diagnose-Segment statt zwei Sammel-Domänen | Implementiert (v0.179.0) |
-| [0063](ADR-0063-Tick-Entkopplung-Datei-und-Wetter-IO.md) | Datei- und Wetter-I/O aus dem Tick-Lock (Trace-Queue, Forecast-Hintergrund-Refresh, `tick_ms`-Semantik) | Implementiert (v0.179.0) |
-| [0064](ADR-0064-Persistenz-Checkpoint-am-Tickende.md) | Persistenz-Checkpoint am Tick-Ende — ein Zustand, eine Momentaufnahme | Implementiert (v0.179.0) |
+| [0062](ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md) | Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden | Implementiert (rückwirkend dokumentiert) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
