@@ -44,6 +44,22 @@ def dewpoint(t_c: float, rh_percent: float) -> float:
     return _B * gamma / (_A - gamma)
 
 
+_R_V: float = 461.5  # J/(kg*K), specific gas constant of water vapour
+_T0_K: float = 273.15
+
+
+def absolute_humidity(t_c: float, rh_percent: float) -> float:
+    """Absolute humidity [g/m^3] (vapour density) at temperature/RH.
+
+    ``rho_v = p_v / (R_v * T)`` with ``R_v`` = 461.5 J/(kg*K). This is the
+    ecosystem/display unit (Thermal Comfort, the ventilation blueprints, the
+    effect literature); Poise's CONTROL quantity stays the mixing ratio in
+    g/kg (:func:`humidity_ratio`, EN 16798-1). ADR-0066 feature A.
+    """
+    p_v = vapour_pressure(t_c, rh_percent)
+    return 1000.0 * p_v / (_R_V * (t_c + _T0_K))
+
+
 def humidity_ratio(t_c: float, rh_percent: float, pressure_pa: float = _P_ATM) -> float:
     """Humidity ratio (mixing ratio) [g water vapour / kg dry air].
 
