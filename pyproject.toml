@@ -56,6 +56,10 @@ omit = [
     # diagnostics/ is PURE (shadows/collector + package __init__); only the
     # relocated HA platform hook stays glue-measured (was diagnostics.py).
     "custom_components/poise/diagnostics/entry.py",
+    # trace/schema.py is pure; the RECORDER is glue (executor jobs, hass task
+    # API, filesystem) and, since F-TRACEIO, a queue + drain task that only an
+    # HA runtime can exercise — measured by the glue gate instead.
+    "custom_components/poise/trace/recorder.py",
     "custom_components/poise/hub_coordinator.py",
     "custom_components/poise/binary_sensor.py",
     "custom_components/poise/switch.py",
