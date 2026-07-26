@@ -234,9 +234,16 @@ class HumidityRuntime:
     re-crosses the upper bound.
     """
 
-    PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset({"dry_active"})
+    PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"dry_active", "vent_active", "surface_rh_mean"}
+    )
 
     dry_active: bool = False  # ADR-0050/0051 dry-active hysteresis latch
+    # ADR-0066 humidity axis (advice-only): the ventilation-advice hysteresis
+    # latch and the ~48 h surface-RH EWMA (the mould CAUSE) — the mean must
+    # survive a restart or every reboot forgets days of wall history.
+    vent_active: bool = False
+    surface_rh_mean: float | None = None
 
 
 @dataclass(slots=True)

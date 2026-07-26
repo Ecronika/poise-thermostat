@@ -422,6 +422,10 @@ class ZoneRuntime:
             self.diagnostics.hdh = diag.hdh
         if diag.dry_active is not None:
             self.humidity.dry_active = diag.dry_active  # survive restart
+        if diag.vent_active is not None:
+            self.humidity.vent_active = diag.vent_active  # ADR-0066 advice latch
+        if diag.surface_rh_mean is not None:
+            self.humidity.surface_rh_mean = diag.surface_rh_mean  # ~48 h EWMA
 
     def seed_ekf_cold_start(
         self,
