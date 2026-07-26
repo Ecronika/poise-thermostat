@@ -5,7 +5,8 @@ its state changes: ``IMMEDIATE`` entities are subscribed via
 ``async_track_state_change_event`` and any real change requests a coalesced
 refresh; everything else is only picked up by the next scheduled tick. The
 ``InputRegistry`` turns the watched set into an explicit, testable contract
-instead of an inline tuple in ``attach_listeners``.
+instead of an inline tuple in ``attach_listeners`` — which consumes it, so
+this module is the single source of truth for what Poise reacts to.
 """
 
 from __future__ import annotations
@@ -58,11 +59,11 @@ def build_input_registry(
 ) -> InputRegistry:
     """Build the zone's input registry from its configured entity ids.
 
-    The ``IMMEDIATE`` set is EXACTLY the watched list — ``(temp, *windows,
-    actuator)`` with falsy ids skipped, in that order — so the listener wiring
-    consumes the registry verbatim without changing which changes trigger a
-    refresh. Every other input, including presence and occupancy, is
-    ``NEXT_TICK``.
+    The ``IMMEDIATE`` set is ``(temp, *windows, actuator, *presence,
+    *occupancy)`` with falsy ids skipped, in that order; the listener wiring
+    consumes it verbatim. Every remaining input is a slow-moving context value
+    (outdoor, humidity, mean-radiant, irradiance, weather, the TRV's external
+    temperature) whose change nothing reacts to before the next scheduled tick.
     """
     specs: list[InputSpec] = []
     if temp:
@@ -74,17 +75,19 @@ def build_input_registry(
     )
     if actuator:
         specs.append(InputSpec(actuator, Reaction.IMMEDIATE, "actuator"))
-    # Conserved listener gap: a presence flip can end a hold the moment the
-    # tick sees it, yet presence and occupancy entities are NOT watched, so the
-    # reaction waits for the next scheduled tick. Promoting them to IMMEDIATE
-    # would be a behaviour change, out of scope here.
+    # F-PRESENCE (phase 10): presence and occupancy are IMMEDIATE. They were
+    # NEXT_TICK before, which meant a presence flip that ENDS an active hold
+    # (ADR-0059 §1) or switches the cool edge between the fixed and the
+    # free-running band (ADR-0061) only took effect on the next scheduled
+    # tick — up to a full tick of latency on a change the user just made by
+    # walking into the room.
     specs.extend(
-        InputSpec(entity_id, Reaction.NEXT_TICK, "presence_home")
+        InputSpec(entity_id, Reaction.IMMEDIATE, "presence_home")
         for entity_id in presence_entities
         if entity_id
     )
     specs.extend(
-        InputSpec(entity_id, Reaction.NEXT_TICK, "occupancy")
+        InputSpec(entity_id, Reaction.IMMEDIATE, "occupancy")
         for entity_id in occupancy_entities
         if entity_id
     )

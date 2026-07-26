@@ -22,30 +22,38 @@ if TYPE_CHECKING:
     from homeassistant.core import State
 
     from ..comfort.dual_setpoint import ComfortDecision
+    from ..comfort.humidity import HumidityDecision
     from ..comfort.presence import PresenceLevel
     from ..comfort.schedule import ScheduleState
     from ..comfort.thermal_shock import AdaptiveCool
     from ..contracts import Reading, Source
     from ..multi.lifecycle import LifecyclePolicy
+    from ..multi.resolvers import DeviceRuntime
     from .tick_inputs import PresenceSnapshot, TickInputs
 
 
 class PersistencePhase(Enum):
-    """Where in the tick flow the persistence checkpoint sits.
+    """How this tick's persistence checkpoint is gated.
 
-    The save *decision* (dirty/cadence) stays in the adapter's ``_maybe_save``;
-    this directive only models the two checkpoint *positions* that exist:
+    F-SAVEPOINT (phase 10) normalised the checkpoint to ONE position — the END
+    of the tick: after ``finalize_tick`` on the normal path, after the
+    safe-state write on the unavailable one. A save therefore contains the
+    state AND the metrics of the tick that triggered it, instead of the
+    previous tick's finalize-owned state. With the position no longer varying,
+    the directive selects only the gate:
 
-    * ``AFTER_EXECUTION`` — normal tick: save after ``commit_execution`` and
-      the ``CommitResult.events``, before ``finalize_tick``, so the snapshot
-      contains the *previous* tick's finalize-owned state.
-    * ``BEFORE_EXECUTION`` — unavailable path: the dirty flush runs before the
-      safe-state write.
+    * ``ALWAYS`` — normal tick: run ``_maybe_save``; its own dirty/cadence
+      logic decides whether a write actually happens.
+    * ``DIRTY_ONLY`` — unavailable path: flush a pending user intent, but never
+      the periodic cadence, so a sensor outage does not churn the store.
+
+    The save *decision* itself (dirty/cadence, F6 clear-on-success) stays in
+    the adapter's ``_maybe_save``.
     """
 
     NONE = "none"
-    BEFORE_EXECUTION = "before_execution"
-    AFTER_EXECUTION = "after_execution"
+    ALWAYS = "always"
+    DIRTY_ONLY = "dirty_only"
 
 
 # ---------------------------------------------------------------------------
@@ -468,14 +476,14 @@ class SetpointObservation:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ShadowStageResult:
-    """LEGACY shadow-domain stage output.
+    """Diagnostics-shadow stage output.
 
-    Built once as the NEUTRAL seed by ``finalize_tick`` BEFORE the domain's ONE
-    ``try`` (the degraded payload: its ``shadow_objs`` deliberately lacks the
-    two ``compressor_gate_*`` keys, so the degraded available key set shrinks by
-    exactly those two) and once more by ``_stage_shadow_domain`` from its
-    finishing locals, which keep any partial progress a mid-domain failure left
-    behind (e.g. a computed ``cover_peak`` next to the neutral ``shadow_objs``).
+    Built once as the NEUTRAL seed by ``finalize_tick`` before the segments run
+    (its ``shadow_objs`` deliberately lacks the two ``compressor_gate_*`` keys,
+    which only the lifecycle fold produces) and once more by
+    ``_stage_shadow_domain`` from the segment fragments, so each segment's keys
+    are present exactly when THAT segment succeeded (F-TPI/F-LIFECYCLE/
+    F-PIACC).
     """
 
     operative: float
@@ -487,14 +495,44 @@ class ShadowStageResult:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class ClimateHumidityResult:
+    """Live humidity/dry decision + the two inputs the shadow half reuses.
+
+    F-HUMSHADOW split the climate band into this LIVE segment and the pure
+    shadow composition. ``decision`` is the real ``HumidityDecision`` on
+    success and a neutral "idle" one (carrying the UNCHANGED ``dry_active``
+    latch) when the segment failed, so the shadow half can always compose and
+    the three humidity keys never vanish. ``hvac_modes``/``abs_humidity_gkg``
+    are computed before the decision and survive its failure.
+    """
+
+    decision: HumidityDecision
+    hvac_modes: list[str]
+    abs_humidity_gkg: float | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LifecycleFoldResult:
+    """Compressor-lifecycle segment output (F-LIFECYCLE).
+
+    The fold advances ``CompressorRuntime.multi_lifecycle`` and is the only
+    finalize segment a later one depends on: the thermal arbitration consumes
+    ``runtime``, so it is skipped when the fold itself failed. ``objs`` carries
+    the segment's four ``shadow_objs`` keys (incl. both ``compressor_gate_*``).
+    """
+
+    runtime: DeviceRuntime
+    objs: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ValveHealthResult:
     """Valve-stuck stage output.
 
-    ``closing_steps``/``idle_steps`` come from the POSITIONED fresh read after
-    the savepoint await. ``health_updates`` carries the finalize segment's only
-    issue emission (valve_stuck, with its ``{entity}`` placeholder); the
-    coordinator emits it immediately after the stage call — between the
-    savepoint await and the trace await, the exact position.
+    ``closing_steps``/``idle_steps`` come from a fresh read inside the
+    finalize segment. ``health_updates`` carries that segment's only issue
+    emission (valve_stuck, with its ``{entity}`` placeholder); the coordinator
+    emits it immediately after the stage call — the exact position.
     """
 
     closing_steps: float | None
@@ -523,16 +561,16 @@ class PreparedState:
 class FinalizeContext:
     """Explicit prepare→finalize intermediate-value contract.
 
-    ``finalize_tick(ctx)`` receives EXACTLY the tick locals the post-savepoint
+    ``finalize_tick(ctx)`` receives EXACTLY the tick locals the finalize
     segment consumes — 50 free names, one of which (``reading``) is narrowed to
     its only consumed attribute (``reading_source``, the ``"source"``
     diagnostic key). No more, no less — an honest contract instead of 50
     implicit locals.
 
-    Deliberately NOT frozen here (live ``self._*`` reads that stay positioned
-    AFTER the savepoint await, where concurrency is observable — a
-    ``set_override`` service call arriving during the save must be visible in
-    the published payload): ``_enabled``, ``_override``, ``_mode_override``,
+    Deliberately NOT frozen here (live ``self._*`` reads that stay INSIDE
+    ``finalize_tick``, where concurrency is observable — a ``set_override``
+    service call arriving during an earlier await must be visible in the
+    published payload): ``_enabled``, ``_override``, ``_mode_override``,
     ``_preset``, ``_override_reason``/``_expires``/``_requested``/``_stats``,
     ``_boost_expires_at``, ``_window_bypass`` and every learning/diagnostics
     runtime the finalize segment itself advances.
@@ -627,7 +665,7 @@ class TickPlan:
 
     ``pre_events`` fire before the writes (hold expiry, preheat-edge hold end);
     ``post_actions`` are applied by ``commit_execution`` after the report fold.
-    ``persistence`` places the save checkpoint. ``control_data`` carries the
+    ``persistence`` gates the end-of-tick save checkpoint. ``control_data`` carries the
     live control values that finalize/diagnostics consume; ``finalize_context``
     is the explicit prepare→finalize handover. An unavailable tick can still
     carry a safe-state plan and events.

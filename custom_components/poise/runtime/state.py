@@ -290,7 +290,10 @@ class DiagnosticsRuntime:
     outcome_session: OutcomeSession = field(default_factory=OutcomeSession)
     hdh_last_mono: float | None = None  # real dt for HDH/outcome obs
     hdh: HdhSavings = field(default_factory=HdhSavings)
-    hum_shadow_warned: bool = False  # warn once per run, not per tick
+    # Warn once per run, not per tick — one latch per climate-band boundary
+    # since F-HUMSHADOW split the live humidity decision from the pure shadows.
+    hum_shadow_warned: bool = False
+    climate_shadow_warned: bool = False
 
 
 @dataclass(slots=True)
