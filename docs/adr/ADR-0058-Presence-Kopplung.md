@@ -80,3 +80,17 @@ cool_op = clamp(base + Totband + widen + eco_widen, COOLING_LOWER[cat], cool_cei
 **Signatur:** `decide(..., eco_widen: float = 0.0, cool_ceiling_override: float | None = None)` — die reine Mathematik bleibt frei von Preset-Wissen, die Deckel-Entscheidung trägt der Coordinator (der Presets UND Presence kennt). **Level→Parameter-Mapping:** COMFORT → `(0.0, None)`; ROOM_ECO → `(eco_delta, cool_hard_cap)` + `occupied=False`; AWAY → `(eco_delta_or_more, device_max)` + `occupied=False`, ohne Basisverschiebung.
 
 **Regressionsnetz (test-first, vor dem Umbau):** (i) Away-Raum 30 °C → `cool_sp` MUSS über dem Komfort-`cool_sp` liegen (schlägt am v0.149-Stand fehl — Red-Green-Nachweis des Bugs); (ii) `eco_widen = 0` → bitidentisch zum v0.149-Verhalten über die ganze bestehende Testmatrix (Nachtabsenkung/Preheat unangetastet); (iii) Dry-/Taupunkt-Pfad feuert auch mit `eco_widen > 0`.
+
+## Nachtrag (2026-07-25, v0.179.0): Präsenz ist ein SOFORT-Eingang (F-PRESENCE)
+
+Präsenz- und Belegungs-Entities waren bis v0.178 **nicht abonniert**. Der Coordinator hörte per `async_track_state_change_event` nur auf Raumfühler, Fensterkontakte und Aktor; ein Präsenz-Wechsel wurde erst vom nächsten geplanten Tick gesehen — bis zu 60 s später. Das war für die reine Eco-Relaxierung tolerabel, aber nicht mehr, seit zwei Live-Entscheidungen daran hängen: eine Präsenz-Flanke beendet einen aktiven Hold (ADR-0059 §1) und schaltet die Kühlkante zwischen festem Band und free-running um (ADR-0061). Der Nutzer betritt den Raum und wartet auf eine Reaktion, die längst hätte laufen können.
+
+**Entscheidung:** `presence_home` und `occupancy` sind `Reaction.IMMEDIATE`. Ihre Zustandswechsel fordern denselben koaleszierten Refresh an wie ein Fensterkontakt. `NEXT_TICK` bleibt für die trägen Kontextwerte (Außentemperatur, Feuchte, Strahlungstemperatur, Einstrahlung, Wetter, TRV-Externtemperatur), auf deren Änderung vor dem nächsten Tick ohnehin nichts reagiert.
+
+**Zweite Hälfte des Fixes:** `attach_listeners` konsumiert jetzt die `InputRegistry` (`runtime/input_registry.py`), statt eine eigene Inline-Liste zu führen. Die Registry war bereits gebaut und getestet, beschrieb aber eine Verdrahtung, die sie nicht steuerte — Vertrag und Abo konnten auseinanderlaufen. Jetzt IST `immediate_entities(registry)` das Abonnement.
+
+**Hot-Apply:** Die Präsenzlisten sind der einzige options-eigene, hot-applybare Teil der sonst reload-pflichtigen Struktur. Sie sind jetzt Teil des beobachteten Satzes, also richtet `_apply_hot_tuning` das Abonnement bei einer echten Änderung neu aus (alte Subscription lösen, neue setzen) — sonst würde ein neu konfigurierter Sensor zwar vom Tick gelesen, könnte aber keinen auslösen.
+
+**Konsequenz:** Mehr Refresh-Anforderungen bei Zonen mit unruhiger PIR-Sensorik. Der bestehende Churn-Filter (`_on_change` verwirft reine Attribut-Änderungen bei gleichem State) und der Debounce des Coordinators greifen unverändert; die Tick-Arbeit selbst wurde in derselben Version durch ADR-0063 spürbar leichter.
+
+**Verifizierung:** `tests/integration/test_phase10_presence_listener.py` — der beobachtete Satz ist exakt `immediate_entities(registry)` in Registrierungsreihenfolge; Präsenz- und Belegungs-Flanke fordern je einen Refresh an, ein unbeteiligtes `person.*` nicht; ein Options-Submit verschiebt das Abo nachweislich (neue Entity löst aus, alte nicht mehr). `tests/test_phase1_tick_inputs.py` pinnt die Reaktionsklassen.
