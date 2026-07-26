@@ -79,6 +79,8 @@ EXPECTED_PAYLOAD_KEYS = (
     "tau_settle",
     "hdh_savings",
     "dry_active",
+    "vent_active",
+    "surface_rh_mean",
     "window_bypass",
     "preset",
     "enabled",
@@ -225,7 +227,7 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 31
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 33  # +2 ADR-0066 humidity axis
 
 
 def test_encode_values_match_save_payload_transforms() -> None:

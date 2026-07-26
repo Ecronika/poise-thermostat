@@ -488,6 +488,20 @@ def test_evaluate_multi_shadow_with_real_kernel_selects_the_actuator() -> None:
 # ---------------------------------------------------------------------------
 
 _CLIMATE_KEY_ORDER = [
+    # ADR-0066 humidity axis (emitted first by the composition)
+    "abs_humidity_gm3",
+    "abs_humidity_out_gm3",
+    "surface_rh",
+    "surface_rh_mean",
+    "mold_capped",
+    "rh_max_safe",
+    "abs_max_safe",
+    "fabric_conflict",
+    "vent_action",
+    "vent_reason",
+    "vent_level",
+    "vent_delta_gm3",
+    "vent_advice_active",
     "cool_sp_eff",
     "cool_sp_active",
     "cool_raised",
