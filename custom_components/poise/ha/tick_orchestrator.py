@@ -1421,6 +1421,23 @@ class TickOrchestrator:
             hum_action=live.decision.action,
         )
 
+    def _outdoor_rh(self) -> float | None:
+        """Outdoor-humidity ladder (ADR-0066 B.3), stage 2: the ``humidity``
+        attribute of the ALREADY-configured weather entity — zero extra
+        hardware or config. A dedicated outdoor-RH sensor field (stage 1) is a
+        later increment; without any source the advice degrades silently to
+        ``no_data`` (design §9)."""
+        if not self._c._weather:
+            return None
+        try:
+            state = self._c.hass.states.get(self._c._weather)
+            if state is None:
+                return None
+            val = state.attributes.get("humidity")
+            return float(val) if val is not None else None
+        except (TypeError, ValueError):
+            return None
+
     def _climate_humidity(
         self,
         ing: IngestResult,
@@ -1515,7 +1532,7 @@ class TickOrchestrator:
         """
         act_state = wt.act_state
         try:
-            return compose_climate_band(
+            band = compose_climate_band(
                 heat_sp=decision.heat_sp,
                 cool_sp=decision.cool_sp,
                 room=ing.room,
@@ -1541,7 +1558,25 @@ class TickOrchestrator:
                 hvac_action=(
                     act_state.attributes.get("hvac_action") if act_state else None
                 ),
+                # ADR-0066 humidity axis (advice/monitor only). One tick minute
+                # per call feeds the surface-RH EWMA — against tau = 48 h the
+                # event-refresh error is negligible (Poise tick = 60 s,
+                # ADR-0020); a real elapsed anchor is the cost increment's job.
+                t_out_eff=ing.t_out_eff,
+                rh_out=self._outdoor_rh(),
+                surface_rh_mean_prev=self._runtime.humidity.surface_rh_mean,
+                surface_elapsed_min=1.0,
+                co2=None,  # ADR-0049 §1 backend not built yet -> rule 4 inert
+                prev_vent_active=self._runtime.humidity.vent_active,
             )
+            # Fold the advice latch + persisted surface mean back (ADR-0066).
+            self._runtime.humidity.vent_active = bool(
+                band.get("vent_advice_active", False)
+            )
+            mean = band.get("surface_rh_mean")
+            if isinstance(mean, int | float):
+                self._runtime.humidity.surface_rh_mean = float(mean)
+            return band
         except Exception:  # noqa: BLE001 - must never break the tick
             if not self._runtime.diagnostics.climate_shadow_warned:
                 self._runtime.diagnostics.climate_shadow_warned = True
