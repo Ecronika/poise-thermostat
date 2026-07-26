@@ -49,8 +49,20 @@ from ..comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
 from ..comfort.fan_cooling import fan_cool_setpoint, fan_velocity
 from ..comfort.free_running import free_running_widen
 from ..comfort.humidity import rh_high_for_category
+from ..comfort.mold import (
+    max_safe_rh,
+    mold_min_air_temperature_detail,
+    surface_relative_humidity,
+)
 from ..comfort.pmv import pmv_ppd, seasonal_clo
+from ..comfort.ventilation import (
+    DEFAULT_DRY_WARN_GM3,
+    DEFAULT_SURFACE_TAU_MIN,
+    ewma_step,
+    ventilation_advise,
+)
 from ..control.reference_offset import compensated_setpoint
+from ..estimation.psychrometrics import absolute_humidity
 from ..estimation.tau_settle import settle_confidence
 from ..multi.discovery import EntitySnapshot
 from ..multi.resolvers import ThermalDemand
@@ -330,6 +342,12 @@ def compose_climate_band(
     has_fan_modes: bool,
     fan_mode: str | None,
     hvac_action: str | None,
+    t_out_eff: float | None = None,
+    rh_out: float | None = None,
+    surface_rh_mean_prev: float | None = None,
+    surface_elapsed_min: float = 0.0,
+    co2: float | None = None,
+    prev_vent_active: bool = False,
 ) -> dict[str, object]:
     """Pure climate-band shadow composition + ``climate_diag`` assembly.
 
@@ -387,7 +405,67 @@ def compose_climate_band(
         velocity=fan_v,
         clo=seasonal_clo(t_rm_eff),
     )
+    # ADR-0066 humidity axis (all monitor/advice-only, never the write path).
+    # A: absolute humidity in the ecosystem unit; B: surface-RH EWMA (the mould
+    # CAUSE) + ventilation advice; C: mould-safe RH ceiling + fabric conflict.
+    w_in = absolute_humidity(room, rh) if rh is not None else None
+    w_out = (
+        absolute_humidity(t_out_eff, rh_out)
+        if t_out_eff is not None and rh_out is not None
+        else None
+    )
+    surface_pct = (
+        100.0 * surface_relative_humidity(room, rh, t_out_eff)
+        if rh is not None and t_out_eff is not None
+        else None
+    )
+    surface_mean = (
+        ewma_step(
+            surface_rh_mean_prev,
+            surface_pct,
+            surface_elapsed_min,
+            DEFAULT_SURFACE_TAU_MIN,
+        )
+        if surface_pct is not None
+        else surface_rh_mean_prev
+    )
+    rh_max = max_safe_rh(room, t_out_eff) if t_out_eff is not None else None
+    abs_max = absolute_humidity(room, rh_max) if rh_max is not None else None
+    # Recomputed with the SAME pure function + inputs as the floors stage
+    # (tick_pipeline), so this is by construction the undisturbed DIAGNOSTIC
+    # mould value — never the window-suppressed write value (design B.2 note).
+    mold_min: float | None = None
+    mold_capped = False
+    if rh is not None and t_out_eff is not None:
+        mold_min, mold_capped = mold_min_air_temperature_detail(t_out_eff, rh, room)
+    vent = ventilation_advise(
+        w_in_gm3=w_in,
+        w_out_gm3=w_out,
+        surface_rh_mean_pct=surface_mean,
+        mold_floor_binding=mold_min is not None and mold_min >= heat_sp,
+        mold_capped=mold_capped,
+        room_at_thermal_floor=mold_min is not None and room <= mold_min + 0.2,
+        co2_ppm=co2,
+        window_open=window_open,
+        occupied=occupied,
+        prev_advice_active=prev_vent_active,
+    )
     return {
+        "abs_humidity_gm3": round(w_in, 1) if w_in is not None else None,
+        "abs_humidity_out_gm3": round(w_out, 1) if w_out is not None else None,
+        "surface_rh": round(surface_pct, 1) if surface_pct is not None else None,
+        "surface_rh_mean": (
+            round(surface_mean, 2) if surface_mean is not None else None
+        ),
+        "mold_capped": mold_capped,
+        "rh_max_safe": round(rh_max, 1) if rh_max is not None else None,
+        "abs_max_safe": round(abs_max, 1) if abs_max is not None else None,
+        "fabric_conflict": (abs_max is not None and abs_max < DEFAULT_DRY_WARN_GM3),
+        "vent_action": vent.action,
+        "vent_reason": vent.reason,
+        "vent_level": vent.level,
+        "vent_delta_gm3": vent.delta_gm3,
+        "vent_advice_active": vent.advice_active,
         "cool_sp_eff": cool_ac.cool_sp_eff if cool_ac else cool_sp,
         "cool_sp_active": round(eff_cool, 1),
         "cool_raised": cool_ac.raised if cool_ac else False,
