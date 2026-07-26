@@ -168,6 +168,11 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # F-HUMSHADOW (phase 10) split the climate band into two boundaries, and
     # each boundary owns its own warn-once latch.
     ("diagnostics", "climate_shadow_warned"): "F-HUMSHADOW second warn-once latch",
+    # ADR-0066 humidity axis (v0.180.0): ventilation-advice latch + surface-RH
+    # EWMA — born on the group, persisted via the codec snapshot built directly
+    # from zone_runtime (no coordinator proxy ever existed).
+    ("humidity", "vent_active"): "ADR-0066 ventilation-advice hysteresis latch",
+    ("humidity", "surface_rh_mean"): "ADR-0066 surface-RH EWMA (tau=48 h)",
 }
 
 
@@ -338,11 +343,17 @@ def test_post_relocation_fields_actually_exist() -> None:
 
 
 def test_every_persisted_field_is_reachable_through_a_proxy() -> None:
-    """PERSISTED_FIELDS chain: the unchanged encode path keeps full coverage."""
+    """PERSISTED_FIELDS chain: the unchanged encode path keeps full coverage.
+
+    Post-relocation fields are exempt: they are encoded straight off the
+    group (codec snapshot reads ``zone_runtime.<group>.<field>``), so no
+    historical coordinator proxy exists or is needed.
+    """
     reachable = {PROXY_MAP[name] for name in PROXY_MAP}
     for group, cls in GROUP_CLASSES.items():
         for field in cls.PERSISTED_FIELDS:
-            assert (group, field) in reachable, (
+            key = (group, field)
+            assert key in reachable or key in POST_RELOCATION_FIELDS, (
                 f"persisted {cls.__name__}.{field} has no coordinator proxy"
             )
 
