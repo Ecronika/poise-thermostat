@@ -1,7 +1,7 @@
 """Phase 10 — F-TPI/F-LIFECYCLE/F-PIACC: one boundary per shadow segment.
 
 Refactoring plan ``docs/Konzepte/2026-07-18_Refactoring-Plan_coordinator.md``
-Befunde 1-3/11a; ADR-0062.
+Befunde 1-3/11a; ADR-0065 (Fehlergrenzen; bis 2026-07-26 als ADR-0062 nummeriert).
 
 test_phase0_fault_shadow_domain injects into the FIRST segment (the cover
 shadow) and proves the three fixes. This module walks the remaining segments
