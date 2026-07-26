@@ -260,40 +260,47 @@ def test_input_registry_is_an_ordered_tuple() -> None:
     assert all(isinstance(spec, InputSpec) for spec in registry)
 
 
-def test_immediate_set_is_exactly_todays_watched_list() -> None:
-    """IMMEDIATE == {temp} | windows | {actuator} — nothing more.
+def test_immediate_set_is_the_watched_list_in_order() -> None:
+    """IMMEDIATE == temp, windows, actuator, presence, occupancy — in exactly
+    that order.
 
-    ``attach_listeners`` subscribes to ``(temp, *windows, actuator)`` and
-    nothing else (coordinator.py line 1193); the registry must reproduce that
-    set AND its order verbatim so the listener wiring can consume it as-is.
+    ``attach_listeners`` consumes ``immediate_entities(...)`` verbatim, so this
+    tuple IS the subscription. Order is contract (listener registration order).
     """
     specs = _registry()
-    watched = ("sensor.room", "binary_sensor.w1", "binary_sensor.w2", "climate.trv")
+    watched = (
+        "sensor.room",
+        "binary_sensor.w1",
+        "binary_sensor.w2",
+        "climate.trv",
+        "person.a",
+        "device_tracker.phone",
+        "binary_sensor.occ",
+    )
     assert immediate_entities(specs) == watched
     assert {s.entity_id for s in specs if s.reaction is Reaction.IMMEDIATE} == set(
         watched
     )
 
 
-def test_presence_and_occupancy_are_next_tick() -> None:
-    """Finding 7 (plan section 1.7): the listener gap is CONSERVED.
+def test_presence_and_occupancy_are_immediate() -> None:
+    """F-PRESENCE (phase 10) closed the listener gap of plan finding 7.
 
-    A presence flip can end a hold (coordinator.py lines 787-804), but the
-    presence entities are not in the watched list (line 1193) — the reaction
-    waits for the next tick. The registry pins today's behaviour; promoting
-    presence/occupancy to IMMEDIATE is behaviour fix F-PRESENCE (phase 10).
+    A presence flip can end an active hold (ADR-0059 §1) and switches the cool
+    edge between the fixed and the free-running band (ADR-0061). Those entities
+    used to be unwatched, so the reaction waited for the next scheduled tick;
+    they are IMMEDIATE now.
     """
     by_id = {s.entity_id: s for s in _registry()}
     for entity_id in ("person.a", "device_tracker.phone", "binary_sensor.occ"):
-        assert by_id[entity_id].reaction is Reaction.NEXT_TICK
+        assert by_id[entity_id].reaction is Reaction.IMMEDIATE
 
 
 def test_every_other_input_is_next_tick() -> None:
+    """What remains NEXT_TICK is exactly the slow-moving context: nothing
+    reacts to a change of these before the next scheduled tick."""
     next_tick = {s.entity_id for s in _registry() if s.reaction is Reaction.NEXT_TICK}
     assert next_tick == {
-        "person.a",
-        "device_tracker.phone",
-        "binary_sensor.occ",
         "sensor.outdoor",
         "sensor.humidity",
         "sensor.trm",
@@ -316,7 +323,7 @@ def test_roles_are_assigned() -> None:
 
 
 def test_unset_and_empty_ids_are_skipped() -> None:
-    """Mirrors the ``if e`` filter of today's watched list (line 1193)."""
+    """Falsy ids never reach the subscription."""
     specs = build_input_registry(
         temp="",
         windows=("", "binary_sensor.w"),

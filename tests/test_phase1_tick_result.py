@@ -224,7 +224,7 @@ def _tick_plan() -> TickPlan:
         ),
         pre_events=(OverrideEnded("hold_expired"),),
         post_actions=(EndHold("frost_rescue"),),
-        persistence=PersistencePhase.AFTER_EXECUTION,
+        persistence=PersistencePhase.ALWAYS,
         control_data={"final_mode": "heat"},
         finalize_context=_finalize_context(),
     )
@@ -238,10 +238,10 @@ def _tick_plan() -> TickPlan:
 def test_persistence_phase_members_and_values() -> None:
     assert [p.value for p in PersistencePhase] == [
         "none",
-        "before_execution",
-        "after_execution",
+        "always",
+        "dirty_only",
     ]
-    assert PersistencePhase("after_execution") is PersistencePhase.AFTER_EXECUTION
+    assert PersistencePhase("always") is PersistencePhase.ALWAYS
 
 
 # ---------------------------------------------------------------------------
@@ -757,30 +757,30 @@ def test_tick_plan_construction() -> None:
     assert plan.actuator_plan == _actuator_plan()
     assert plan.pre_events == (OverrideEnded("hold_expired"),)
     assert plan.post_actions == (EndHold("frost_rescue"),)
-    assert plan.persistence is PersistencePhase.AFTER_EXECUTION
+    assert plan.persistence is PersistencePhase.ALWAYS
     assert plan.control_data["final_mode"] == "heat"
     assert plan.finalize_context == _finalize_context()
 
 
 def test_tick_plan_unavailable_shape() -> None:
     # Finding 4+12: an unavailable tick may carry no writes but still flush
-    # dirty state BEFORE any (safe-state) execution. Phase 6a (S3): the
-    # short-circuit carries NO finalize context (no finalize segment —
-    # minimal present) and no actuator plan (the SafeStatePlan decision is
-    # positioned AFTER the BEFORE_EXECUTION save; documented reorder-proof
-    # gap in ``_run_unavailable_tick``).
+    # dirty state. Phase 6a (S3): the short-circuit carries NO finalize
+    # context (no finalize segment — minimal present) and no actuator plan
+    # (the SafeStatePlan decision needs an await-relative actuator read, see
+    # ``_run_unavailable_tick``). Since F-SAVEPOINT the DIRTY_ONLY gate fires
+    # at the END of that path, after the safe-state write.
     plan = TickPlan(
         actuator_plan=None,
         external_temperature_plan=None,
         pre_events=(),
         post_actions=(),
-        persistence=PersistencePhase.BEFORE_EXECUTION,
+        persistence=PersistencePhase.DIRTY_ONLY,
         control_data={},
         finalize_context=None,
     )
     assert plan.actuator_plan is None
     assert plan.external_temperature_plan is None
-    assert plan.persistence is PersistencePhase.BEFORE_EXECUTION
+    assert plan.persistence is PersistencePhase.DIRTY_ONLY
     assert plan.finalize_context is None
 
 

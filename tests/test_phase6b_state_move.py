@@ -1,27 +1,29 @@
-"""Phase-6b S1 consistency gate: coordinator proxies <-> ZoneRuntime state.
+"""Phase-6b consistency gate: ZoneRuntime state relocation (proxies removed).
 
 Step S1 of phase 6b (option A) moved the eleven long-lived domain-state
 groups out of ``PoiseCoordinator.__init__`` into ``ZoneRuntime``
-(``runtime/zone_runtime.py``), keeping every historically pinned
-``self._*`` name as a property proxy (getter+setter).  This module locks
-the three-way consistency the plan demands (proxy names <-> group fields
-<-> ``PERSISTED_FIELDS``):
+(``runtime/zone_runtime.py``).  During the migration every historically
+pinned ``self._*`` name kept a transparent property proxy (getter+setter);
+Step 2 S-C then DELETED those proxies once every call site read the group
+directly.  This module locks the relocation and its completion (relocation
+table <-> group fields <-> ``PERSISTED_FIELDS``):
 
-* every moved coordinator attribute has EXACTLY the uniform proxy shape
-  (one ``return self._zone_runtime.<group>.<field>`` getter, one
-  mirroring setter) — verified by AST over the coordinator SOURCE, so
-  this stays pure (no Home Assistant import);
-* the mapping is a bijection: every field of every state group is
-  reachable through exactly one proxy, and no proxy targets a phantom
-  field;
-* every persisted field (``PERSISTED_FIELDS``) is therefore covered by a
-  proxy, which is what keeps the unchanged ``_save_payload``/codec
-  encode path reading the runtime state;
+* no migrated name survives as a coordinator ``@property``/setter — the
+  proxies are gone, verified by AST over the coordinator SOURCE, so this
+  stays pure (no Home Assistant import);
+* ``PROXY_MAP`` stays the canonical relocation table and is a bijection onto
+  the group fields MINUS ``POST_RELOCATION_FIELDS``: every relocated field is
+  reached by exactly one entry, no entry targets a phantom field, and any
+  field born after phase 6b must be declared as such instead of being given a
+  fictional historical proxy name;
+* every persisted field (``PERSISTED_FIELDS``) is therefore covered by the
+  relocation table, which is what keeps the unchanged ``_save_payload``/
+  codec encode path reading the runtime state;
 * ``__init__`` no longer seeds any moved attribute directly — the ONE
   entry-dependent seed (``climate_mode``, AR-04) is injected into the
   ``ZoneRuntime`` construction instead of taking the dataclass default;
 * ``ZoneRuntime`` owns the eleven group instances plus a replaceable
-  clock reference (the ``coord._clock`` test-swap contract).
+  clock reference (the ``coord.runtime.clock`` test-swap contract).
 """
 
 from __future__ import annotations
@@ -158,6 +160,16 @@ PROXY_MAP: dict[str, tuple[str, str]] = {
     "_cool_sp_eff_prev": ("latches", "cool_sp_eff_prev"),
 }
 
+# Group fields that were BORN in the runtime, after the phase-6b relocation —
+# they never had a coordinator attribute, so they have no row above. Listing
+# them here keeps the bijection honest instead of inventing a historical proxy
+# name. Every entry needs a reason.
+POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
+    # F-HUMSHADOW (phase 10) split the climate band into two boundaries, and
+    # each boundary owns its own warn-once latch.
+    ("diagnostics", "climate_shadow_warned"): "F-HUMSHADOW second warn-once latch",
+}
+
 
 def _coordinator_class() -> ast.ClassDef:
     tree = ast.parse(COORDINATOR_SRC.read_text(encoding="utf-8"))
@@ -201,44 +213,38 @@ def _properties(
     return getters, setters
 
 
-def test_every_moved_name_has_the_uniform_proxy_pair() -> None:
-    """Each relocated attribute is a getter+setter onto its group field."""
+def test_no_migrated_name_remains_a_coordinator_proxy() -> None:
+    """S-C deleted the proxies: no migrated name may survive as a coordinator
+    ``@property``/setter.
+
+    Every relocated field now lives ONLY on its ``ZoneRuntime`` group,
+    reached directly (``coord.runtime.<group>.<field>``); a lingering proxy
+    would mean a call site still routes through the coordinator instead of
+    the group.  ``PROXY_MAP`` remains the canonical relocation table — the
+    bijection and persisted-field tests below still hold it to the group
+    dataclasses.
+    """
     getters, setters = _properties(_coordinator_class())
-    for name, (group, field) in PROXY_MAP.items():
-        expected = ("self", "_zone_runtime", group, field)
-        getter = getters.get(name)
-        assert getter is not None, f"missing @property getter for {name}"
-        assert len(getter.body) == 1 and isinstance(getter.body[0], ast.Return), (
-            f"{name}: getter must be a single return"
-        )
-        ret = getter.body[0].value
-        assert ret is not None and _attr_chain(ret) == expected, (
-            f"{name}: getter must return self._zone_runtime.{group}.{field}"
-        )
-        setter = setters.get(name)
-        assert setter is not None, f"missing setter for {name}"
-        assert len(setter.body) == 1 and isinstance(setter.body[0], ast.Assign), (
-            f"{name}: setter must be a single assignment"
-        )
-        assign = setter.body[0]
-        assert len(assign.targets) == 1
-        assert _attr_chain(assign.targets[0]) == expected, (
-            f"{name}: setter must assign self._zone_runtime.{group}.{field}"
-        )
-        assert isinstance(assign.value, ast.Name) and assign.value.id == "value"
+    for name in PROXY_MAP:
+        assert name not in getters, f"{name} still exposes a @property getter proxy"
+        assert name not in setters, f"{name} still exposes a setter proxy"
 
 
-def test_clock_proxy_targets_the_runtime_clock() -> None:
-    """``coord._clock`` reads/replaces ``zone_runtime.clock`` (test-swap pin)."""
+def test_clock_proxy_was_removed() -> None:
+    """The ``_clock`` and ``_dirty`` proxies are gone too (S-C).
+
+    These are the two removed proxies that are NOT in ``PROXY_MAP`` (neither is
+    a relocated group field), so the loop above does not cover them; pin both
+    directly here.  Readers reach the live clock via ``coord.runtime.clock``
+    and the ``_ReaderClock`` forwarder; the ``_dirty`` flag (S2 K1) lives on
+    ``ZoneRuntime.dirty``, reached via ``coord.runtime.dirty``.  Neither
+    ``coord._clock`` nor ``coord._dirty`` is a property any more.
+    """
     getters, setters = _properties(_coordinator_class())
-    expected = ("self", "_zone_runtime", "clock")
-    getter = getters["_clock"]
-    assert isinstance(getter.body[0], ast.Return)
-    ret = getter.body[0].value
-    assert ret is not None and _attr_chain(ret) == expected
-    setter = setters["_clock"]
-    assert isinstance(setter.body[0], ast.Assign)
-    assert _attr_chain(setter.body[0].targets[0]) == expected
+    assert "_clock" not in getters
+    assert "_clock" not in setters
+    assert "_dirty" not in getters
+    assert "_dirty" not in setters
 
 
 def test_init_no_longer_seeds_moved_attributes() -> None:
@@ -301,18 +307,34 @@ def test_init_constructs_zone_runtime_with_climate_mode_seed() -> None:
 
 
 def test_proxy_map_is_a_bijection_onto_the_group_fields() -> None:
-    """Every group field has exactly one proxy; no proxy hits a phantom field."""
+    """Every relocated group field has exactly one proxy row; no row hits a
+    phantom field; every field without a row is declared post-relocation."""
     per_group: dict[str, set[str]] = {group: set() for group in GROUP_CLASSES}
     for name, (group, field) in PROXY_MAP.items():
         assert group in GROUP_CLASSES, f"{name}: unknown group {group}"
         assert field not in per_group[group], f"{group}.{field} proxied twice"
         per_group[group].add(field)
     for group, cls in GROUP_CLASSES.items():
-        field_names = {f.name for f in dataclasses.fields(cls)}
+        born_later = {f for (g, f) in POST_RELOCATION_FIELDS if g == group}
+        field_names = {f.name for f in dataclasses.fields(cls)} - born_later
         assert per_group[group] == field_names, (
             f"{cls.__name__}: proxies {sorted(per_group[group])} != "
-            f"fields {sorted(field_names)}"
+            f"fields {sorted(field_names)} (fields added after phase 6b belong "
+            f"in POST_RELOCATION_FIELDS, not in PROXY_MAP)"
         )
+
+
+def test_post_relocation_fields_actually_exist() -> None:
+    """The escape hatch may not rot: every declared field must still be a real
+    field of its group, and must NOT also carry a proxy row."""
+    for (group, field), reason in POST_RELOCATION_FIELDS.items():
+        assert group in GROUP_CLASSES, f"unknown group {group}"
+        names = {f.name for f in dataclasses.fields(GROUP_CLASSES[group])}
+        assert field in names, f"{group}.{field} no longer exists ({reason})"
+        assert (group, field) not in set(PROXY_MAP.values()), (
+            f"{group}.{field} is both relocated and declared post-relocation"
+        )
+        assert reason, f"{group}.{field} needs a reason"
 
 
 def test_every_persisted_field_is_reachable_through_a_proxy() -> None:

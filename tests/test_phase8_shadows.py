@@ -63,13 +63,17 @@ from custom_components.poise.diagnostics.entry import (
     async_get_config_entry_diagnostics as entry_hook,
 )
 from custom_components.poise.diagnostics.shadows import (
-    assemble_shadow_objs,
+    arbitration_shadow_objs,
     build_outcome_diag,
     capped_elapsed_min,
     compose_climate_band,
     evaluate_cover_shadow,
     evaluate_multi_shadow,
+    lifecycle_shadow_objs,
+    mpc_shadow_objs,
     neutral_shadow_objs,
+    pi_shadow_objs,
+    tpi_shadow_objs,
 )
 from custom_components.poise.estimation.tau_settle import (
     settle_confidence,
@@ -133,6 +137,9 @@ def test_neutral_shadow_objs_exact_payload_and_freshness() -> None:
 
 
 def _assembled(comp_block: str | None) -> dict[str, object]:
+    """The five per-segment fragments merged — what a fully healthy tick
+    publishes. Since F-TPI/F-LIFECYCLE/F-PIACC each fragment lands on its own,
+    so the merge here is the coordinator's ``objs.update(...)`` chain."""
     life = _lifecycle.observe(
         _lifecycle.DeviceLifecycle(),
         conditioning=True,
@@ -140,40 +147,90 @@ def _assembled(comp_block: str | None) -> dict[str, object]:
         now=1_000.0,
         health="ok",
     )
-    return assemble_shadow_objs(
-        pi=PiShadow(active=True, setpoint=21.4, offset=0.4, next_acc=1.2),
-        multi_shadow=ThermalShadow(
-            active_source="climate.trv",
-            reason="selected",
-            severity="info",
-            blocked=("cycle_lock",),
-            capabilities=("thermal:heat",),
-        ),
-        tpi=TpiShadow(active=True, duty=0.62, valve_percent=62.0),
-        shadow=MpcShadow(
-            active=True, power=0.5, weight=0.7, setpoint=21.0, regime="cruise"
-        ),
-        lifecycle=life,
-        now_wall=1_030.0,
-        multi_policy=_lifecycle.LifecyclePolicy(),
-        comp_pol=_lifecycle.LifecyclePolicy(min_off_s=300, min_mode_hold_s=600),
-        comp_block=comp_block,
-        min_off_remaining_fn=_lifecycle.min_off_remaining,
-        mode_hold_remaining_fn=_lifecycle.mode_hold_remaining,
+    objs: dict[str, object] = {}
+    objs.update(
+        mpc_shadow_objs(
+            MpcShadow(
+                active=True, power=0.5, weight=0.7, setpoint=21.0, regime="cruise"
+            )
+        )
     )
+    objs.update(tpi_shadow_objs(TpiShadow(active=True, duty=0.62, valve_percent=62.0)))
+    objs.update(
+        pi_shadow_objs(PiShadow(active=True, setpoint=21.4, offset=0.4, next_acc=1.2))
+    )
+    objs.update(
+        lifecycle_shadow_objs(
+            lifecycle=life,
+            now_wall=1_030.0,
+            multi_policy=_lifecycle.LifecyclePolicy(),
+            comp_pol=_lifecycle.LifecyclePolicy(min_off_s=300, min_mode_hold_s=600),
+            comp_block=comp_block,
+            min_off_remaining_fn=_lifecycle.min_off_remaining,
+            mode_hold_remaining_fn=_lifecycle.mode_hold_remaining,
+        )
+    )
+    objs.update(
+        arbitration_shadow_objs(
+            ThermalShadow(
+                active_source="climate.trv",
+                reason="selected",
+                severity="info",
+                blocked=("cycle_lock",),
+                capabilities=("thermal:heat",),
+            )
+        )
+    )
+    return objs
 
 
-def test_assemble_shadow_objs_is_neutral_plus_exactly_two_compressor_keys() -> None:
-    """The healthy assembly's key set == neutral fallback + the two
-    ``compressor_gate_*`` keys — the phase-0 pinned shrink-by-two."""
-    objs = _assembled("min_off")
-    assert set(objs) == set(_NEUTRAL_EXPECTED) | {
+def test_segment_fragments_partition_the_healthy_key_set() -> None:
+    """The five fragments are a PARTITION of neutral + the two
+    ``compressor_gate_*`` keys: their union is the full healthy payload and no
+    two segments claim the same key — which is what makes a failing segment
+    cost exactly its own keys and nothing else."""
+    fragments = [
+        set(mpc_shadow_objs(MpcShadow(active=False))),
+        set(tpi_shadow_objs(TpiShadow(active=False))),
+        set(pi_shadow_objs(PiShadow(active=False))),
+        set(
+            lifecycle_shadow_objs(
+                lifecycle=_lifecycle.DeviceLifecycle(),
+                now_wall=0.0,
+                multi_policy=_lifecycle.LifecyclePolicy(),
+                comp_pol=_lifecycle.LifecyclePolicy(),
+                comp_block=None,
+                min_off_remaining_fn=_lifecycle.min_off_remaining,
+                mode_hold_remaining_fn=_lifecycle.mode_hold_remaining,
+            )
+        ),
+        set(
+            arbitration_shadow_objs(
+                ThermalShadow(
+                    active_source=None,
+                    reason="none",
+                    severity="info",
+                    blocked=(),
+                    capabilities=(),
+                )
+            )
+        ),
+    ]
+    union: set[str] = set().union(*fragments)
+    assert union == set(_NEUTRAL_EXPECTED) | {
+        "compressor_gate_would_block",
+        "compressor_mode_hold_remaining",
+    }
+    assert sum(len(f) for f in fragments) == len(union)  # disjoint
+    # the two compressor_gate_* keys belong to the LIFECYCLE fragment alone —
+    # they are exactly the pair that disappears when the fold fails
+    assert fragments[3] - set(_NEUTRAL_EXPECTED) == {
         "compressor_gate_would_block",
         "compressor_mode_hold_remaining",
     }
 
 
-def test_assemble_shadow_objs_wires_values_and_lifecycle_fns() -> None:
+def test_fragments_wire_values_and_lifecycle_fns() -> None:
     objs = _assembled("min_off")
     assert objs["pi_active"] is True
     assert objs["pi_setpoint"] == 21.4
@@ -188,11 +245,11 @@ def test_assemble_shadow_objs_wires_values_and_lifecycle_fns() -> None:
     assert objs["mpc_regime"] == "cruise"
 
 
-def test_assemble_shadow_objs_comp_block_none_becomes_empty_string() -> None:
+def test_comp_block_none_becomes_empty_string() -> None:
     assert _assembled(None)["compressor_gate_would_block"] == ""
 
 
-def test_assemble_shadow_objs_dispatches_via_injected_fns() -> None:
+def test_lifecycle_fragment_dispatches_via_injected_fns() -> None:
     """The lifecycle remaining-time kernels must ONLY be reached through the
     injected callables (the coordinator resolves ``_lifecycle.*`` from its
     module globals at call time — the patchable dispatch)."""
@@ -209,17 +266,7 @@ def test_assemble_shadow_objs_dispatches_via_injected_fns() -> None:
     life = _lifecycle.DeviceLifecycle()
     pol_multi = _lifecycle.LifecyclePolicy()
     pol_comp = _lifecycle.LifecyclePolicy(min_off_s=1.0)
-    objs = assemble_shadow_objs(
-        pi=PiShadow(active=False),
-        multi_shadow=ThermalShadow(
-            active_source=None,
-            reason="none",
-            severity="info",
-            blocked=(),
-            capabilities=(),
-        ),
-        tpi=TpiShadow(active=False),
-        shadow=MpcShadow(active=False),
+    objs = lifecycle_shadow_objs(
         lifecycle=life,
         now_wall=7.0,
         multi_policy=pol_multi,
