@@ -4,7 +4,7 @@ Mould risk is governed by the relative humidity at the *coldest surface*, not
 the room air. The surface temperature factor ``f_Rsi = (θ_si - θ_e)/(θ_i - θ_e)``
 links surface to air; the growth criterion is surface RH <= 80 %. We invert it
 to the minimum air temperature that keeps the surface below the limit
-(charter G4, ADR-0010).
+(charter G4, ADR-0062).
 """
 
 from __future__ import annotations
