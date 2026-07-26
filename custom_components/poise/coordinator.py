@@ -884,6 +884,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 regq=self._zone_runtime.diagnostics.regq,
                 hdh=self._zone_runtime.diagnostics.hdh,
                 dry_active=self._zone_runtime.humidity.dry_active,
+                vent_active=self._zone_runtime.humidity.vent_active,
+                surface_rh_mean=self._zone_runtime.humidity.surface_rh_mean,
                 enabled=self._zone_runtime.user.enabled,
                 preset=self._zone_runtime.user.preset,
                 climate_mode=self._zone_runtime.user.climate_mode,
