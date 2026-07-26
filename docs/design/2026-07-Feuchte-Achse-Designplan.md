@@ -79,6 +79,7 @@ Literaturlage: der Gradient ist belegt ([Shaman & Kohn 2009](https://www.pnas.or
 
 - `humidity_decide` — Signatur, Schwellen, Dry-Guard, Latch: unverändert.
 - Der 12-g/kg-Backstop bleibt, wo er ist. Klarzustellen ist nur seine Rolle: er entspricht bei 20 °C ≈ 82 % RH und bindet erst **ab ≈ 25 °C** vor der Kategorie-RH-Decke — er ist ein **Warmraum-Schwülekriterium**, kein Winter-Schimmelschutz. Das leistet allein `mold.py`. Gehört als Kommentar an die Konstante, nicht als Verhaltensänderung.
+- **Zitat-Korrektur (Bestand):** `comfort/humidity.py` und ADR-0050 führen die Konstante als „EN 16798-1 / **ASHRAE-55** comfort ceiling". Die ASHRAE-Hälfte ist überholt — die obere Feuchtegrenze von 0,012 kg/kg bestand bis **55-2017** und wurde in **[ASHRAE 55-2020](https://www.ashrae.org/file%20library/technical%20resources/standards%20and%20guidelines/standards%20addenda/55_2020_h_20221230.pdf) aus der Graphic Comfort Zone entfernt**; der Standard nennt seither keine Feuchte-Obergrenze mehr und verweist auf nicht-thermische Effekte (Hautaustrocknung, Schleimhautreizung). Der **Wert** bleibt gedeckt (EN 16798-1 trägt ihn weiter als Auslegungsgröße), die Quellenangabe nicht. Reine Doku-Korrektur, kein Verhalten betroffen — und ein weiteres Argument dafür, den Backstop als Komfort- und nicht als Grenzwertkriterium zu lesen.
 - Keine neue Regelgröße, kein neuer Aktor, kein neuer Schreibpfad.
 
 ---
@@ -342,7 +343,7 @@ Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formuli
 | **0057** (Card-Layout) | ja, Erweiterung | „Schimmel-Tick display-only" bleibt gültig; ein neuer Chip kommt in die `resolveChips`-Tokenliste |
 | **0016** (Entity-/Card-Vertrag) | ja, Erweiterung | neue Attribute + eine Diagnose-Entität — der reguläre Weg |
 | **0012** (Redaction) | ja, mechanisch | optionaler Außen-Feuchtesensor gehört in `REDACT_KEYS` |
-| **0050** (Dry-Pfad) | nein | Regelpfad unberührt; die 12-g/kg-Klarstellung (A.4) ist ein Kommentar |
+| **0050** (Dry-Pfad) | ja, **Zitat-Korrektur** | Regelpfad unberührt; die 12-g/kg-Klarstellung (A.4) ist ein Kommentar — aber die Quellenangabe „ASHRAE-55" ist seit 55-2020 überholt und gehört in ADR-0050 **und** im `humidity.py`-Docstring richtiggestellt |
 | **0041** (Fenster) | nein, aber Randbedingung | die 30-Minuten-Unterdrückung — Konsumvorschrift in B.2, keine Änderung |
 | **0030** (Anti-Garbage-In) | nein | stützt die „selbst rechnen"-Entscheidung (§12.1a) |
 | **0026 / 0033** (Shadow-first) | nein | trivial erfüllt — es wird nie aktuiert |
@@ -438,6 +439,8 @@ Die Frage war ursprünglich als „wie viel Reserve vor der 80-%-Grenze?" gestel
 ### 12.2 Verbleibend offen
 
 **Die Zeitkonstante α des Oberflächen-RH-Mittels.** 48 h (Airthings-Linie) ist erklärbar und reagiert schnell; mehrere Tage liegt näher an den Keimungsdauern der Isoplethen-Modelle und ist alarmfester. Das ist die einzige verbliebene Zahl, die sich nicht am Schreibtisch entscheiden lässt — sie braucht Live-Daten, sobald die Oberflächen-RH mitgeschrieben wird. Bis dahin gilt als Arbeitswert die Airthings-Linie (~48 h), weil sie die konservativere Wahl in Richtung *zu früh* statt *zu spät* ist.
+
+**α ist ausdrücklich nicht normativ hergeleitet** — dieser Missverständnis-Falle ist vorzubeugen, sie ist in einem Review bereits aufgetreten. Die Keimzeit-Isoplethen nach Sedlbauer sind in **Tagen** skaliert, und im *kritischen Übergangsbereich* knapp oberhalb der LIM-Kurve liegen sie am **langsamen** Ende (Wochen); 48 h ist das schnelle Ende bei hoher Feuchte und Wärme. Hinzu kommt ein Modellunterschied: im Isoplethenmodell **setzt die Keimung zurück**, sobald die Bedingungen unter die LIM fallen ([Krus/Sedlbauer, WUFI-Bio](http://www.wufi.no/workshop-08/WUFI-BIO-Englisch.pdf)), während ein exponentiell gewichtetes Mittel **abklingt**. Das EWMA ist eine bewusste, pragmatische Vereinfachung (Begründung §12.1c) — **kein Isoplethenmodell** und nicht als solches zu begründen. α bleibt damit ein Reaktivitäts-Kompromiss und ein Kalibrierziel, kein hergeleiteter Wert.
 
 ---
 
