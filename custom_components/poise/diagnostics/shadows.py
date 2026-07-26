@@ -7,9 +7,13 @@ Every evaluation *kernel* is already a pure function in its established module
 ``comfort/*``, the outcome/savings folds in ``control``/``estimation``).  This
 module therefore holds only COMPOSITION: the argument preparation and dict
 assemblies the coordinator's finalize/climate segments performed inline.  The
-*call sites* — and with them both LEGACY error domains (the ONE shadow ``try``
-in ``finalize_tick``, the ONE climate-band ``try`` in ``_stage_climate_band``)
-— stay in the coordinator until F-TPI/F-LIFECYCLE/F-PIACC/F-HUMSHADOW.
+*call sites* stay in the coordinator, each inside its OWN narrow error
+boundary since phase 10 (F-TPI/F-LIFECYCLE/F-PIACC split the finalize domain
+into six independent segments, F-HUMSHADOW split the climate band into the
+live humidity decision plus the pure shadows).  That is why the ``objs``
+helpers below come in per-segment fragments instead of one 19-key assembly: a
+failing segment contributes nothing and every other segment still publishes
+its own keys.
 
 PATCH SURFACES: the finalize domain dispatches ``predict_peak_operative``,
 ``evaluate_shadow``, ``evaluate_tpi_shadow``, ``evaluate_pi_shadow`` and the
@@ -114,14 +118,15 @@ class EvaluateThermalShadowFn(Protocol):
 
 
 def neutral_shadow_objs(lifecycle_health: str) -> dict[str, Any]:
-    """The neutral shadow fallback for a shadow-domain failure.
+    """The neutral shadow seed every segment overwrites with its own keys.
 
     Deliberately WITHOUT the ``compressor_gate_would_block`` /
-    ``compressor_mode_hold_remaining`` keys: on a shadow-domain failure the
-    published available key set SHRINKS by exactly those two keys.
-    ``lifecycle_health`` is the pre-tick lifecycle's health — the fold is
-    skipped on the degraded path, so the pre-fault value survives
-    (pinned by test_phase0_fault_shadow_domain).
+    ``compressor_mode_hold_remaining`` keys: they exist only once the
+    lifecycle segment folded, so the published key set shrinks by exactly
+    those two when THAT segment fails (since F-LIFECYCLE nothing else can
+    suppress them).  ``lifecycle_health`` is the pre-tick lifecycle's health,
+    which therefore survives a failing fold (pinned by
+    test_phase0_fault_shadow_domain).
     """
     return {
         "pi_active": False,
@@ -214,8 +219,9 @@ def evaluate_multi_shadow(
 
     Builds the ``EntitySnapshot``/``ThermalDemand`` inputs and dispatches the
     kernel via ``*_fn`` (the coordinator resolves ``evaluate_thermal_shadow``
-    from its globals at call time).  Runs INSIDE the legacy shadow domain,
-    after the lifecycle fold.
+    from its globals at call time).  Runs in the LAST finalize segment: it
+    consumes the folded lifecycle's ``DeviceRuntime``, so it is the one
+    segment with a real data dependency on its predecessor.
     """
     return evaluate_thermal_shadow_fn(
         EntitySnapshot(
@@ -229,12 +235,37 @@ def evaluate_multi_shadow(
     )
 
 
-def assemble_shadow_objs(
+def mpc_shadow_objs(shadow: MpcShadow) -> dict[str, Any]:
+    """The MPC segment's five ``shadow_objs`` keys (ADR-0033)."""
+    return {
+        "mpc_active": shadow.active,
+        "mpc_power": shadow.power,
+        "mpc_weight": shadow.weight,
+        "mpc_setpoint": shadow.setpoint,
+        "mpc_regime": shadow.regime,
+    }
+
+
+def tpi_shadow_objs(tpi: TpiShadow) -> dict[str, Any]:
+    """The TPI segment's three ``shadow_objs`` keys (ADR-0036)."""
+    return {
+        "tpi_active": tpi.active,
+        "tpi_duty": tpi.duty,
+        "tpi_valve_percent": tpi.valve_percent,
+    }
+
+
+def pi_shadow_objs(pi: PiShadow) -> dict[str, Any]:
+    """The PI segment's three ``shadow_objs`` keys (ADR-0037)."""
+    return {
+        "pi_active": pi.active,
+        "pi_setpoint": pi.setpoint,
+        "pi_offset": pi.offset,
+    }
+
+
+def lifecycle_shadow_objs(
     *,
-    pi: PiShadow,
-    multi_shadow: ThermalShadow,
-    tpi: TpiShadow,
-    shadow: MpcShadow,
     lifecycle: DeviceLifecycle,
     now_wall: float,
     multi_policy: LifecyclePolicy,
@@ -243,22 +274,16 @@ def assemble_shadow_objs(
     min_off_remaining_fn: Callable[[DeviceLifecycle, float, LifecyclePolicy], float],
     mode_hold_remaining_fn: Callable[[DeviceLifecycle, float, LifecyclePolicy], float],
 ) -> dict[str, Any]:
-    """The healthy-path ``shadow_objs`` assembly (19 keys).
+    """The lifecycle segment's four keys, incl. both ``compressor_gate_*``.
 
-    Superset of :func:`neutral_shadow_objs` plus the two ``compressor_gate_*``
-    keys.  ``lifecycle`` is the freshly folded ``DeviceLifecycle``; the two
+    ``lifecycle`` is the freshly folded ``DeviceLifecycle``; the two
     remaining-time kernels arrive as ``*_fn`` parameters so the coordinator
     keeps dispatching them through its ``_lifecycle`` module-global alias at
-    call time.
+    call time.  These are the two keys the neutral fallback deliberately omits
+    — since F-LIFECYCLE the fold is independent of the other shadows, so they
+    are absent only when the fold ITSELF fails.
     """
     return {
-        "pi_active": pi.active,
-        "pi_setpoint": pi.setpoint,
-        "pi_offset": pi.offset,
-        "multi_active_source": multi_shadow.active_source,
-        "multi_reason": multi_shadow.reason,
-        "multi_severity": multi_shadow.severity,
-        "multi_blocked": list(multi_shadow.blocked),
         "multi_min_off_remaining": round(
             min_off_remaining_fn(lifecycle, now_wall, multi_policy)
         ),
@@ -267,14 +292,16 @@ def assemble_shadow_objs(
         "compressor_mode_hold_remaining": round(
             mode_hold_remaining_fn(lifecycle, now_wall, comp_pol)
         ),
-        "tpi_active": tpi.active,
-        "tpi_duty": tpi.duty,
-        "tpi_valve_percent": tpi.valve_percent,
-        "mpc_active": shadow.active,
-        "mpc_power": shadow.power,
-        "mpc_weight": shadow.weight,
-        "mpc_setpoint": shadow.setpoint,
-        "mpc_regime": shadow.regime,
+    }
+
+
+def arbitration_shadow_objs(multi_shadow: ThermalShadow) -> dict[str, Any]:
+    """The thermal-arbitration segment's four keys (ADR-0046)."""
+    return {
+        "multi_active_source": multi_shadow.active_source,
+        "multi_reason": multi_shadow.reason,
+        "multi_severity": multi_shadow.severity,
+        "multi_blocked": list(multi_shadow.blocked),
     }
 
 
