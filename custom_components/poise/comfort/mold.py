@@ -61,6 +61,28 @@ def mold_min_air_temperature_detail(
     return min(raw, _MOLD_MAX_C), raw > _MOLD_MAX_C
 
 
+def max_safe_rh(
+    t_air: float,
+    t_out: float,
+    f_rsi: float = DEFAULT_F_RSI,
+    limit: float = SURFACE_RH_LIMIT,
+) -> float:
+    """Mould-safe ROOM-RH ceiling [%] at the current air/outdoor temperatures.
+
+    The same surface-humidity criterion as :func:`mold_min_air_temperature`,
+    solved for relative humidity instead of temperature (ADR-0066 feature C):
+    ``rh_max = 100 * limit * p_sat(t_si) / p_sat(t_air)``. This is the target a
+    foreign humidifier (``generic_hygrostat``) lacks — published monitor-only,
+    never actuated (ADR-0048 §3 / ``tests/test_non_goals.py``). Clamped to
+    [0, 100]; inverse-consistent with the floor (round-trip reference test).
+    """
+    f = min(max(f_rsi, _F_RSI_FLOOR), 1.0)
+    lim = min(max(limit, 0.01), 1.0)
+    t_si = surface_temperature(t_air, t_out, f)
+    rh = 100.0 * lim * saturation_pressure(t_si) / saturation_pressure(t_air)
+    return min(max(rh, 0.0), 100.0)
+
+
 def mold_min_air_temperature(
     t_out: float,
     rh_percent: float,

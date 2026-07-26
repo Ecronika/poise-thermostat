@@ -28,7 +28,11 @@ from .en16798 import Category
 DEFAULT_RH_HIGH: float = 60.0  # Cat II ceiling; fallback when no category given
 DEFAULT_RH_LOW: float = 40.0  # dry-guard floor; below this, block all drying
 DEFAULT_RH_HYSTERESIS: float = 5.0  # exit RH = rh_high - hysteresis
-DEFAULT_ABS_HIGH_GKG: float = 12.0  # EN 16798-1 / ASHRAE-55 absolute-moisture cap
+# EN 16798-1 absolute-moisture design ceiling. Role note (ADR-0066): at 20 °C
+# this is ~82 % RH — the category RH ceiling binds long before it, and they
+# only cross at ~25 °C. It is a WARM-room mugginess criterion, not winter
+# mould protection (that is mold.py / ADR-0062, via the air-temperature floor).
+DEFAULT_ABS_HIGH_GKG: float = 12.0
 DEFAULT_ABS_HYSTERESIS_GKG: float = 1.0  # exit w = abs_high - hysteresis (11 g/kg)
 
 # EN 16798-1 Annex B dehumidification RH ceilings [%] per comfort category.
