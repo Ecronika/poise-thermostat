@@ -5,7 +5,7 @@ gegen ``_ATTRS``" + the 6a-S1 object-identity chain):
 
 * **``_ATTRS`` compatibility** — the entity platforms select their published
   attributes via ``data.get`` over tuples that must stay serveable:
-  ``climate._ATTRS`` selects from the ZONE coordinator payload (the 156-key
+  ``climate._ATTRS`` selects from the ZONE coordinator payload (the 168-key
   ``EXPECTED_AVAILABLE_KEYS`` snapshot of ``test_phase0_data_contract``);
   ``binary_sensor._ATTRS`` selects from the HUB coordinator payload (a
   different coordinator — its keys are deliberately NOT in the zone
@@ -56,7 +56,7 @@ from tests.integration.test_phase0_data_contract import (
 
 def test_climate_attrs_are_subset_of_the_available_key_snapshot() -> None:
     """Every attribute key the climate entity publishes exists in the frozen
-    156-key available-form snapshot — the presenter's served key set covers
+    168-key available-form snapshot — the presenter's served key set covers
     the entity surface (a drift shows up here BEFORE it blanks an attribute)."""
     missing = sorted(set(CLIMATE_ATTRS) - set(EXPECTED_AVAILABLE_KEYS))
     assert not missing, (

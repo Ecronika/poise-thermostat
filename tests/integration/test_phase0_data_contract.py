@@ -79,13 +79,17 @@ HUB_CRITICAL_KEYS = (
 TIMING_KEYS = ("tick_ms", "tick_ms_ewma", "tick_ms_max", "tick_over_budget")
 
 # Frozen once from the Ist-Zustand (this exact ROOM_DATA, one normal tick,
-# 156 keys). A mismatch = deliberate coordinator.data API change -> review,
+# 168 keys; re-frozen for the 12 ADR-0066 humidity-axis keys in v0.180.0).
+# A mismatch = deliberate coordinator.data API change -> review,
 # then re-freeze. NOTE: 'compressor_gate_would_block' and
 # 'compressor_mode_hold_remaining' exist only when the shadow try
 # (coordinator.py 3361-3496) succeeds — their absence would also reveal a
 # silently failing shadow block.
 EXPECTED_AVAILABLE_KEYS: list[str] = [
     "abs_humidity_gkg",
+    "abs_humidity_gm3",
+    "abs_humidity_out_gm3",
+    "abs_max_safe",
     "actuator_hvac_action",
     "adaptive_cool",
     "adaptive_cool_mode",
@@ -125,6 +129,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "dry_active",
     "dynamics_profile",
     "en_cool_upper",
+    "fabric_conflict",
     "fan_ce_k",
     "fan_circ_reason",
     "fan_circ_shadow",
@@ -205,6 +210,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "ref_offset_trusted",
     "reg_period_s",
     "rh_high_used",
+    "rh_max_safe",
     "room_absent_min",
     "savings_eur_month",
     "savings_kwh_month",
@@ -216,6 +222,8 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "sensor_placement_suspect",
     "source",
     "sp_adopt_reason",
+    "surface_rh",
+    "surface_rh_mean",
     "t_rm",
     "t_rm_internal",
     "t_rm_source",
@@ -236,6 +244,11 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "valve_closing_steps",
     "valve_health",
     "valve_idle_steps",
+    "vent_action",
+    "vent_advice_active",
+    "vent_delta_gm3",
+    "vent_level",
+    "vent_reason",
     "window_auto_detected",
     "window_auto_slope",
     "window_auto_threshold",
