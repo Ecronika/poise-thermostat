@@ -1,6 +1,6 @@
 # Designplan: Erweiterung der Feuchte-Achse (Trockenheits-Bewertung · Lüftungs-Empfehlung · Feuchte-Obergrenze)
 
-**Datum:** 2026-07-25 · **Typ:** Entwurf (Design), **kein** Implementierungsplan; Entwurfsentscheidungen in §12 festgehalten, Umsetzung nicht begonnen · **Grundlage:** [Recherche-Notiz vom 2026-07-25](../research/2026-07-Feuchte-Steuerung-und-Lueftungshinweise.md) · **Bezug:** ADR-0010, ADR-0016, ADR-0035, ADR-0041, ADR-0045, ADR-0048, ADR-0049, ADR-0050, ADR-0058
+**Datum:** 2026-07-25 · **Typ:** Entwurf (Design), **kein** Implementierungsplan; Entwurfsentscheidungen in §12 festgehalten, Umsetzung nicht begonnen · **Grundlage:** [Recherche-Notiz vom 2026-07-25](../research/2026-07-Feuchte-Steuerung-und-Lueftungshinweise.md) · **Bezug:** ADR-0062 (Schimmelboden), ADR-0016, ADR-0035, ADR-0041, ADR-0045, ADR-0048, ADR-0049, ADR-0050, ADR-0058 · **Ziel-ADR:** ADR-0063
 
 > **Randbedingung:** Der Coordinator wird gerade refaktoriert. Dieser Plan beschreibt deshalb **Verantwortlichkeiten, Datenverträge und Schichtgrenzen** — keine Aufrufreihenfolge, keine Stage-Zuschnitte, keine Tick-Verdrahtung. Alle fachliche Logik landet in **puren Modulen**; die einzige Naht zum Coordinator ist die Argument-Konstruktion einer bereits existierenden puren Komposition. Der Entwurf gilt damit unabhängig davon, wie der Tick am Ende geschnitten ist.
 
@@ -343,18 +343,20 @@ Der Entwurf bewegt sich innerhalb des Leitprinzips, berührt aber dessen Formuli
 | **0057** (Card-Layout) | ja, Erweiterung | „Schimmel-Tick display-only" bleibt gültig; ein neuer Chip kommt in die `resolveChips`-Tokenliste |
 | **0016** (Entity-/Card-Vertrag) | ja, Erweiterung | neue Attribute + eine Diagnose-Entität — der reguläre Weg |
 | **0012** (Redaction) | ja, mechanisch | optionaler Außen-Feuchtesensor gehört in `REDACT_KEYS` |
-| **0050** (Dry-Pfad) | ja, **Zitat-Korrektur** | Regelpfad unberührt; die 12-g/kg-Klarstellung (A.4) ist ein Kommentar — aber die Quellenangabe „ASHRAE-55" ist seit 55-2020 überholt und gehört in ADR-0050 **und** im `humidity.py`-Docstring richtiggestellt |
+| **0050** (Dry-Pfad) | ja, **Zitat-Korrektur** | Regelpfad unberührt; die 12-g/kg-Klarstellung (A.4) ist ein Kommentar — aber die Quellenangabe „ASHRAE-55" ist seit 55-2020 überholt und in ADR-0050 (Nachtrag 2026-07-26) **und** im `humidity.py`-Docstring richtiggestellt ✔ |
 | **0041** (Fenster) | nein, aber Randbedingung | die 30-Minuten-Unterdrückung — Konsumvorschrift in B.2, keine Änderung |
 | **0030** (Anti-Garbage-In) | nein | stützt die „selbst rechnen"-Entscheidung (§12.1a) |
 | **0026 / 0033** (Shadow-first) | nein | trivial erfüllt — es wird nie aktuiert |
 
-### 8.2 Bestandsbefund: das Schimmelmodell hat keinen ADR
+### 8.2 Bestandsbefund: das Schimmelmodell hatte keinen ADR — **erledigt**
+
+> **Erledigt am 2026-07-26 mit [ADR-0062](../adr/ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md).** Der Schimmelboden ist dort rückwirkend dokumentiert (Kriterium, `f_Rsi`, 24-°C-Deckelung, `was_capped`, Fenster-Unterdrückung, die bewusst abweichende Zeitbasis), und die vier Fehlverweise sind korrigiert. **Nummern-Hinweis:** ADR-0061 war bereits vergeben (Kühlkante), daher trägt das Schimmelmodell die **0062** — die Feuchte-Achsen-Erweiterung aus diesem Entwurf wird entsprechend **ADR-0063**. Der ursprüngliche Befund bleibt unten als Begründung stehen.
 
 Beim Abgleich der Verweise: `mold.py` nennt „charter G4, ADR-0010", `estimation/psychrometrics.py` „ADR-0010 mould/psychrometrics", ADR-0048 und ADR-0050 zitieren „ADR-0010 (Schimmel/Taupunkt)" — **ADR-0010 ist aber „Solar-Buchhaltung"**. Kein ADR im Verzeichnis behandelt `f_Rsi`, DIN 4108-2 oder EN ISO 13788 als *Entscheidung*; die einzigen Treffer (ADR-0011, ADR-0014, ADR-0048) sind Test- bzw. Abgrenzungskontexte. Das referenzierte „charter G4" liegt nicht im Repo.
 
 Damit ist die **härteste Sicherheitsschranke des Systems die einzige undokumentierte**, und vier Stellen zeigen auf die falsche Nummer. Das macht nichts ungültig und blockiert diesen Entwurf nicht — es sollte nur nicht mit ihm mitwachsen.
 
-**Vorschlag:** ein **eigener, rückwirkend dokumentierender ADR** für den Schimmelboden (Vorbild: ADR-0048 hat die Nicht-Ziele nachträglich festgeschrieben), nicht ein Kontext-Abschnitt in ADR-0062. Sonst stünde die Bestandsentscheidung in einem Dokument, das eine Erweiterung beschreibt — und der nächste Leser sucht sie wieder an der falschen Stelle. Die Korrektur der vier Verweise gehört in denselben Zug.
+**Vorschlag (umgesetzt, s. o.):** ein **eigener, rückwirkend dokumentierender ADR** für den Schimmelboden (Vorbild: ADR-0048 hat die Nicht-Ziele nachträglich festgeschrieben), nicht ein Kontext-Abschnitt in dem Erweiterungs-ADR. Sonst stünde die Bestandsentscheidung in einem Dokument, das eine Erweiterung beschreibt — und der nächste Leser sucht sie wieder an der falschen Stelle. Die Korrektur der vier Verweise gehört in denselben Zug.
 
 ---
 

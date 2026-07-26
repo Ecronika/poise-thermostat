@@ -1,7 +1,7 @@
 """Psychrometric helpers (Magnus / Alduchov-Eskridge, over water).
 
 Used by the comfort layer for dewpoint and surface-humidity (mould) checks
-(ADR-0010 mould/psychrometrics). Every formula carries a reference test.
+(ADR-0062 mould/psychrometrics). Every formula carries a reference test.
 """
 
 from __future__ import annotations
