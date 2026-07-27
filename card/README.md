@@ -32,6 +32,7 @@ unknown or invalid values fall back silently to defaults.
 | `sections.chips` | subset of `[hvac, window, temperature, humidity, co2, ca]` · `false` = none (default: all) |
 | `sections.pmv` · `.shadow_pill` · `.learning` · `.presets` | booleans, default **true** |
 | `temperature_scale` · `humidity_thresholds` · `co2_scheme` · `co2_thresholds` | ADR-0049 room-condition traffic-light thresholds |
+| `abs_humidity_floors` | ADR-0066 dry-side floors of the humidity lamp in ABSOLUTE humidity `[alertLo, warnLo]` g/m³ (default `[5, 7]`); silently falls back to the RH floors when the zone publishes no `abs_humidity_gm3` |
 
 Legacy aliases: `compact: true` → `density: compact`; `show_shadow` →
 `sections.shadow_pill`. The dial renders a **mould-limit tick** at the
