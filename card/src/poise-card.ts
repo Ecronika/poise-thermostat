@@ -551,6 +551,24 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       if (a["window_bypass"])
         chips.push(this._chip("mdi:window-closed-variant", t(lang, "bypass")));
     }
+    // ADR-0066 B: ventilation advice — a chip (override_clamped pattern), not a
+    // lamp; it carries text, no measurand. Gated with the humidity element.
+    if (r.chips.has("humidity") && a["vent_advice_active"]) {
+      const reason = String(a["vent_reason"] ?? "");
+      const known = ["mold_risk", "moisture_out", "co2"].includes(reason);
+      const label = known
+        ? `${t(lang, "vent_open")} (${t(lang, "vent_" + reason)})`
+        : t(lang, "vent_open");
+      chips.push(
+        this._chip(
+          "mdi:weather-windy",
+          label,
+          undefined,
+          lang,
+          a["vent_level"] === "alert",
+        ),
+      );
+    }
     return chips.length
       ? html`<div
           class="chips"
@@ -565,9 +583,15 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       : nothing;
   }
 
-  private _chip(icon: string, label: string, minutes?: unknown, lang?: string) {
+  private _chip(
+    icon: string,
+    label: string,
+    minutes?: unknown,
+    lang?: string,
+    alert = false,
+  ) {
     const m = num(minutes);
-    return html`<div class="chip">
+    return html`<div class="chip ${alert ? "chip-alert" : ""}">
       <ha-icon icon=${icon}></ha-icon><span>${label}</span>
       ${m != null ? html`<em>${Math.round(m)} ${t(lang, "min_left")}</em>` : nothing}
     </div>`;
@@ -584,6 +608,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           num(a["operative_temperature"]) ?? num(a["current_temperature"]),
         comfortVerdict: band?.verdict ?? null,
         humidity: num(a["humidity"]) ?? num(a["current_humidity"]),
+        absHumidityGm3: num(a["abs_humidity_gm3"]),
         co2: num(a["co2"]) ?? num(a["carbon_dioxide"]),
         pmv: num(a["pmv"]),
         ppd: num(a["ppd"]),
@@ -596,6 +621,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       {
         temperature_scale: this._config.temperature_scale,
         humidity_thresholds: this._config.humidity_thresholds,
+        abs_humidity_floors: this._config.abs_humidity_floors,
         co2_scheme: this._config.co2_scheme,
         co2_thresholds: this._config.co2_thresholds,
         outdoor_co2: num(a["outdoor_co2"]),
@@ -626,7 +652,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       val =
         l.key === "temperature" ? l.value.toFixed(1) : String(Math.round(l.value));
     }
-    const desc = `${label}: ${val} ${l.unit} — ${lvl}`;
+    const desc = `${label}: ${val} ${l.unit} — ${lvl}${l.detail ? ` · ${l.detail}` : ""}`;
     return html`<div class="lamp" title=${desc} aria-label=${desc}>
       <span class="dot" style="background:${l.color}"></span>
       <span class="lk">${label}</span>
@@ -692,6 +718,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       border-radius: 14px; background: var(--secondary-background-color); font-size: 13px; }
     .chip ha-icon { --mdc-icon-size: 16px; }
     .chip em { font-style: normal; color: var(--secondary-text-color); }
+    .chip-alert { border: 1px solid var(--error-color, #e53935);
+      color: var(--error-color, #e53935); }
+    .chip-alert ha-icon { color: var(--error-color, #e53935); }
     .learn { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
     .bar { flex: 1; height: 6px; border-radius: 3px; background: var(--divider-color); overflow: hidden; }
     .bar i { display: block; height: 100%; background: var(--primary-color); }

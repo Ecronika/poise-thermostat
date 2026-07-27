@@ -61,6 +61,10 @@ const EN: Dict = {
   air_ok: "OK",
   air_warn: "Elevated",
   air_alert: "Critical",
+  vent_open: "Air out",
+  vent_mold_risk: "mould risk",
+  vent_moisture_out: "moisture",
+  vent_co2: "CO₂",
 };
 const DE: Dict = {
   in_band: "Im Komfortband",
@@ -123,6 +127,10 @@ const DE: Dict = {
   air_ok: "OK",
   air_warn: "Erhöht",
   air_alert: "Kritisch",
+  vent_open: "Lüften",
+  vent_mold_risk: "Schimmelrisiko",
+  vent_moisture_out: "Feuchte",
+  vent_co2: "CO₂",
 };
 
 export function t(lang: string | undefined, key: string): string {

@@ -51,6 +51,7 @@ export interface PoiseCardConfig extends LovelaceCardConfig {
   // ADR-0049 room-condition traffic lights — card-side verdict, no recorder load
   temperature_scale?: TemperatureScale; // "comfort" (default) | "asr_office"
   humidity_thresholds?: number[]; // [alertLo, warnLo, warnHi, alertHi]
+  abs_humidity_floors?: number[]; // ADR-0066 dry side [alertLo, warnLo] g/m³
   co2_scheme?: Co2Scheme; // "uba" (default) | "en16798"
   co2_thresholds?: number[]; // UBA mode [warn, alert]
 }
@@ -67,6 +68,7 @@ export interface ResolvedConfig {
   presets: boolean;
   temperature_scale?: TemperatureScale;
   humidity_thresholds?: number[];
+  abs_humidity_floors?: number[];
   co2_scheme?: Co2Scheme;
   co2_thresholds?: number[];
 }
@@ -130,6 +132,7 @@ export function resolveConfig(raw: PoiseCardConfig): ResolvedConfig {
     presets: boolOr(s.presets, true),
     temperature_scale: raw.temperature_scale,
     humidity_thresholds: raw.humidity_thresholds,
+    abs_humidity_floors: raw.abs_humidity_floors,
     co2_scheme: raw.co2_scheme,
     co2_thresholds: raw.co2_thresholds,
   };

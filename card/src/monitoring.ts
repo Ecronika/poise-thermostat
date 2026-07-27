@@ -27,6 +27,11 @@ export function levelColor(level: Level): string {
 export const DEFAULT_CO2_THRESHOLDS: readonly [number, number] = [1000, 2000]; // UBA
 export const DEFAULT_HUMIDITY_THRESHOLDS: readonly [number, number, number, number] =
   [30, 40, 60, 65];
+// ADR-0066 A.3: dry-side floors in ABSOLUTE humidity [alertLo, warnLo] g/m³ —
+// the temperature-robust rewrite of the RH floors at 20 °C design temperature
+// (5.0 ≈ 29 % RH, 7.0 ≈ 40.6 % RH @ 20 °C). Mucosal dry-out is an absolute
+// effect; RH drifts with room temperature.
+export const DEFAULT_ABS_HUMIDITY_FLOORS: readonly [number, number] = [5.0, 7.0];
 export const ASR_OFFICE_THRESHOLDS: readonly [number, number] = [26, 30]; // ASR A3.5
 export const EN16798_OUTDOOR_CO2 = 420; // assumed outdoor ppm when none supplied
 export const EN16798_CO2_RISE: readonly [number, number] = [800, 1350]; // Cat II/III
@@ -85,13 +90,27 @@ export function co2Verdict(value: number | null, opts?: Co2Opts): Level {
 
 // --- Humidity: thresholds = [alertLo, warnLo, warnHi, alertHi] ---
 // green inside [warnLo, warnHi]; warn in the two side-bands; alert beyond.
+// ADR-0066 A.2 split responsibility: the MOIST side (top) stays relative —
+// mould is a surface-RH phenomenon; the DRY side (bottom) is judged by the
+// ABSOLUTE humidity in g/m³ when available (mucosal dry-out is absolute).
+// Without an absolute value the dry side silently degrades to the RH floors —
+// behaviour exactly as before.
 export function humidityVerdict(
   value: number | null,
   thresholds?: readonly number[],
+  absGm3?: number | null,
+  absFloors?: readonly number[],
 ): Level {
   if (!isNum(value)) return "unknown";
   const [aLo, wLo, wHi, aHi] = quadOr(thresholds, DEFAULT_HUMIDITY_THRESHOLDS);
-  if (value < aLo || value >= aHi) return "alert";
+  if (value >= aHi) return "alert"; // moist side: always relative
+  if (isNum(absGm3)) {
+    const [dryAlert, dryWarn] = pairOr(absFloors, DEFAULT_ABS_HUMIDITY_FLOORS);
+    if (absGm3 < dryAlert) return "alert";
+    if (absGm3 < dryWarn) return "warn";
+    return value > wHi ? "warn" : "ok";
+  }
+  if (value < aLo) return "alert";
   if (value < wLo || value > wHi) return "warn";
   return "ok";
 }
@@ -191,6 +210,7 @@ export interface MonitorInput {
   comfortVerdict?: Verdict | null;
   humidity: number | null;
   co2: number | null;
+  absHumidityGm3?: number | null; // ADR-0066: drives the dry side of the lamp
   pmv?: number | null;
   ppd?: number | null;
   ca?: CaInput | null;
@@ -200,6 +220,7 @@ export interface MonitorConfig {
   temperature_scale?: TempScale;
   asr_thresholds?: readonly number[];
   humidity_thresholds?: readonly number[];
+  abs_humidity_floors?: readonly number[]; // ADR-0066 [alertLo, warnLo] g/m³
   co2_scheme?: Co2Scheme;
   co2_thresholds?: readonly number[];
   outdoor_co2?: number | null;
@@ -211,6 +232,7 @@ export interface Lamp {
   unit: string;
   level: Level;
   color: string;
+  detail?: string; // extra context for title/aria (e.g. "14.3 g/m³")
 }
 
 export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[] {
@@ -227,13 +249,21 @@ export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[
     color: levelColor(tLevel),
   });
   if (isNum(input.humidity)) {
-    const h = humidityVerdict(input.humidity, config?.humidity_thresholds);
+    const abs = input.absHumidityGm3 ?? null;
+    const h = humidityVerdict(
+      input.humidity,
+      config?.humidity_thresholds,
+      abs,
+      config?.abs_humidity_floors,
+    );
     lamps.push({
       key: "humidity",
       value: input.humidity,
       unit: "%",
       level: h,
       color: levelColor(h),
+      // ADR-0066 §6: the g/m³ value travels in title/aria, not as the number.
+      ...(isNum(abs) ? { detail: `${abs.toFixed(1)} g/m³` } : {}),
     });
   }
   if (isNum(input.co2)) {
