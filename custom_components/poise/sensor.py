@@ -227,6 +227,18 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=lambda d: 1.0 if d.get("mode_nudge_blocked") else 0.0,
     ),
+    # ADR-0066 B.5: ventilation-advice state token for automations — the
+    # slow rail (the bus event `poise_ventilation_advice` is the fast edge).
+    # Deliberately WITHOUT the fast-changing delta/cost attributes (design §6).
+    PoiseSensorDescription(
+        key="vent_advice",
+        translation_key="vent_advice",
+        entity_registry_enabled_default=False,
+        device_class=SensorDeviceClass.ENUM,
+        entity_category=_DIAG,
+        options=["idle", "open", "close", "discourage"],
+        value_fn=lambda d: d.get("vent_action") or None,
+    ),
     # ADR-0020: per-zone tick wall-time (smoothed) — the performance-budget signal.
     PoiseSensorDescription(
         key="tick_duration_ms",

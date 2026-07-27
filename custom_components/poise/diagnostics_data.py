@@ -18,6 +18,8 @@ REDACT_KEYS = frozenset(
         "trm_sensor",
         "outdoor_sensor",
         "humidity_sensor",
+        # ADR-0066 B.3 outdoor-RH ladder stage 1 (same id-hygiene rule).
+        "outdoor_humidity_sensor",
         "mrt_sensor",
         "window_sensor",
         "weather_entity",

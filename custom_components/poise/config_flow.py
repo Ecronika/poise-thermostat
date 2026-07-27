@@ -78,6 +78,7 @@ from .const import (
     CONF_OCCUPANCY_SENSOR,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
+    CONF_OUTDOOR_HUMIDITY_SENSOR,
     CONF_OUTDOOR_SENSOR,
     CONF_OVERRIDE_END_ON_PRESENCE,
     CONF_OVERRIDE_MAX_H,
@@ -92,6 +93,7 @@ from .const import (
     CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
+    CONF_VENT_NOTIFY,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
@@ -173,6 +175,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_COMPRESSOR_MIN_OFF,
         CONF_COMPRESSOR_MODE_HOLD,
         CONF_TRACE_RECORDING,
+        CONF_VENT_NOTIFY,
     ),
     "energy": (CONF_ANNUAL_KWH, CONF_PRICE_EUR_KWH),
 }
@@ -183,6 +186,7 @@ _RECONFIGURE_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_TRM_SENSOR,
         CONF_OUTDOOR_SENSOR,
         CONF_HUMIDITY_SENSOR,
+        CONF_OUTDOOR_HUMIDITY_SENSOR,
         CONF_MRT_SENSOR,
         CONF_WINDOW_SENSOR,
         CONF_WEATHER,
@@ -228,6 +232,15 @@ def _reconfigure_schema(
                     vol.Optional(CONF_TRM_SENSOR): _temp(own),
                     vol.Optional(CONF_OUTDOOR_SENSOR): _temp(own),
                     vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
+                        selector.EntitySelectorConfig(
+                            domain="sensor",
+                            device_class="humidity",
+                            exclude_entities=own,
+                        )
+                    ),
+                    # ADR-0066 B.3: outdoor-RH ladder stage 1 (dedicated
+                    # sensor beats the weather entity's humidity attribute).
+                    vol.Optional(CONF_OUTDOOR_HUMIDITY_SENSOR): selector.EntitySelector(
                         selector.EntitySelectorConfig(
                             domain="sensor",
                             device_class="humidity",
@@ -345,6 +358,16 @@ def _setup_schema(hass: HomeAssistant) -> vol.Schema:
                         ),
                         vol.Optional(CONF_OUTDOOR_SENSOR): _temp(own),
                         vol.Optional(CONF_HUMIDITY_SENSOR): selector.EntitySelector(
+                            selector.EntitySelectorConfig(
+                                domain="sensor",
+                                device_class="humidity",
+                                exclude_entities=own,
+                            )
+                        ),
+                        # ADR-0066 B.3: outdoor-RH ladder stage 1.
+                        vol.Optional(
+                            CONF_OUTDOOR_HUMIDITY_SENSOR
+                        ): selector.EntitySelector(
                             selector.EntitySelectorConfig(
                                 domain="sensor",
                                 device_class="humidity",
@@ -766,6 +789,11 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                         # ADR-0011: opt-in field-trace recorder (one JSONL/tick).
                         vol.Optional(
                             CONF_TRACE_RECORDING, default=False
+                        ): selector.BooleanSelector(),
+                        # ADR-0066 B.5: opt-in self-clearing ventilation-advice
+                        # notification (the bus event always fires).
+                        vol.Optional(
+                            CONF_VENT_NOTIFY, default=False
                         ): selector.BooleanSelector(),
                     }
                 ),

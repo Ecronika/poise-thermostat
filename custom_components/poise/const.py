@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.181.1"
+VERSION: Final = "0.182.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -71,6 +71,9 @@ CONF_ACTUATOR: Final = "actuator"
 CONF_TRM_SENSOR: Final = "trm_sensor"
 CONF_OUTDOOR_SENSOR: Final = "outdoor_sensor"
 CONF_HUMIDITY_SENSOR: Final = "humidity_sensor"
+# ADR-0066 B.3: dedicated outdoor-RH sensor = stage 1 of the outdoor-humidity
+# ladder (stage 2 = the weather entity's `humidity` attribute).
+CONF_OUTDOOR_HUMIDITY_SENSOR: Final = "outdoor_humidity_sensor"
 CONF_MRT_SENSOR: Final = "mrt_sensor"
 CONF_CATEGORY: Final = "category"
 CONF_WINDOW_SENSOR: Final = "window_sensor"
@@ -137,6 +140,11 @@ DEFAULT_COMPRESSOR_MODE_HOLD_S: Final = 300.0
 # Field-trace recorder (ADR-0011 golden-file replay); opt-in, default off.
 CONF_TRACE_RECORDING: Final = "trace_recording"
 DEFAULT_TRACE_MAX_BYTES: Final = 20 * 1024 * 1024
+
+# ADR-0066 B.5: opt-in self-clearing persistent notification for the
+# ventilation advice (the bus event `poise_ventilation_advice` always fires).
+CONF_VENT_NOTIFY: Final = "vent_notify"
+EVENT_VENT_ADVICE: Final = "poise_ventilation_advice"
 
 # Presence coupling (ADR-0058): optional home/room entities feed `occupied`
 # hierarchically; absent both -> today's behaviour, zero regression.

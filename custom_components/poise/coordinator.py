@@ -220,6 +220,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._trm: str | None = structure.trm
         self._outdoor: str | None = structure.outdoor
         self._humidity: str | None = structure.humidity
+        # ADR-0066 B.3: outdoor-RH ladder stage 1 (dedicated sensor).
+        self._outdoor_humidity: str | None = structure.outdoor_humidity
         self._mrt: str | None = structure.mrt
         # window: multiple=True, structural (data) -> re-read only on reload.
         self._windows: list[str] = list(structure.windows)
@@ -416,6 +418,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comp_min_off_opt = tuning.comp_min_off_opt
         self._comp_mode_hold_opt = tuning.comp_mode_hold_opt
         self._trace_enabled = tuning.trace_enabled
+        # ADR-0066 B.5: opt-in ventilation-advice notification (hot-applied).
+        self._vent_notify = tuning.vent_notify
         # ADR-0058 presence coupling — options-owned and hot-applied although
         # modelled structurally; the coordinator keeps its list attributes.
         self._presence_home_entities = list(hot.presence_home_entities)
