@@ -135,3 +135,40 @@ def ventilation_advise(
     if window_open and delta < cfg.delta_off_gm3:
         return VentilationAdvice("close", "target_reached", "ok", round(delta, 1))
     return VentilationAdvice("idle", "no_gain", "ok", round(delta, 1))
+
+
+# --- B.5 emission edge (ADR-0066): pure decision, delivery stays in glue ----
+
+
+@dataclass(frozen=True, slots=True)
+class AdviceEmission:
+    """What the glue should deliver for one advice transition.
+
+    ``fire_event`` announces EVERY action change on the bus (automations see
+    open AND the all-clear); the notification pair is the opt-in human rail
+    and tracks only the "open" episode (self-clearing, design B.5).
+    """
+
+    fire_event: bool
+    notify_create: bool
+    notify_dismiss: bool
+
+
+def advice_transition(
+    prev_action: str, action: str, *, notify_opt_in: bool
+) -> AdviceEmission:
+    """Edge-detect one tick's advice ACTION token against the previous tick.
+
+    ``prev_action == ""`` is the cold start (fresh runtime, no restore):
+    settling into ``idle`` announces nothing, but waking up INTO an active
+    advice (e.g. restart during an open episode) re-announces it — the
+    notification would otherwise be lost across the restart.
+    """
+    changed = action != prev_action
+    if not changed or (prev_action == "" and action == "idle"):
+        return AdviceEmission(False, False, False)
+    return AdviceEmission(
+        fire_event=True,
+        notify_create=notify_opt_in and action == "open",
+        notify_dismiss=notify_opt_in and prev_action == "open",
+    )
