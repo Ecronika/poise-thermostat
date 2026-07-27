@@ -84,9 +84,11 @@ so it cannot happen a second time unnoticed.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.util import dt as dt_util
 
 from ..adaptive_cool import adaptive_cool_mode
@@ -102,9 +104,11 @@ from ..comfort.presence import (
 )
 from ..comfort.schedule import ScheduleState
 from ..comfort.thermal_shock import adaptive_cool_setpoint, rate_limit
+from ..comfort.ventilation import advice_transition
 from ..const import (
     DEFAULT_TRACE_MAX_BYTES,
     DEVICE_MAX_C,
+    EVENT_VENT_ADVICE,
     EXTERNAL_FEED_KEEPALIVE_S,
     FROST_FLOOR_C,
     TICK_INTERVAL_S,
@@ -255,6 +259,15 @@ _THERMAL_DIR: dict[str, Direction] = {"heat": Direction.HEAT, "cool": Direction.
 # (F-HUMSHADOW). Before phase 10 the key simply vanished together with the rest
 # of the climate band; naming the failure is what replaced that silence.
 _HUM_FAILED_REASON = "humidity block failed"
+
+# ADR-0066 B.5: notification wording per reason token (English, concise —
+# persistent notifications have no i18n rail; the stable token itself travels
+# on the bus event for automations).
+_VENT_REASON_TEXT = {
+    "mold_risk": "sustained surface humidity, mould risk",
+    "moisture_out": "outside air is drier, airing removes moisture",
+    "co2": "CO₂ is elevated",
+}
 
 
 class _CoordinatorGlobals:
@@ -1414,21 +1427,68 @@ class TickOrchestrator:
         untouched. Warn-once per boundary (AR-32) is preserved.
         """
         live = self._climate_humidity(ing, lvl, op, decision, wt)
+        climate_diag = self._climate_shadows(ing, obs, sp, lvl, op, decision, wt, live)
+        self._announce_vent_advice(climate_diag)
         return ClimateBandResult(
-            climate_diag=self._climate_shadows(
-                ing, obs, sp, lvl, op, decision, wt, live
-            ),
+            climate_diag=climate_diag,
             hum_action=live.decision.action,
         )
 
+    def _announce_vent_advice(self, diag: Mapping[str, Any]) -> None:
+        """ADR-0066 B.5 emission rail: bus event on every advice-ACTION change
+        plus the opt-in self-clearing notification for "open" episodes.
+
+        The decision is pure (``advice_transition``); this method only tracks
+        the previous token and DELIVERS. Its own boundary: a delivery failure
+        must never break the tick and never poisons the shadow boundary above.
+        """
+        action = str(diag.get("vent_action") or "")
+        if not action:
+            return  # composition failed or produced no advice — nothing moved
+        prev = self._runtime.humidity.vent_last_action
+        self._runtime.humidity.vent_last_action = action
+        try:
+            em = advice_transition(prev, action, notify_opt_in=self._c._vent_notify)
+            if not em.fire_event:
+                return
+            payload: dict[str, Any] = {
+                "zone": self._c.zone_name,
+                "entry_id": self._c._entry_id,
+                "action": action,
+                "reason": str(diag.get("vent_reason") or ""),
+                "delta_gm3": diag.get("vent_delta_gm3"),
+            }
+            self._c.hass.bus.async_fire(EVENT_VENT_ADVICE, payload)
+            notification_id = f"poise_vent_{self._c._entry_id}"
+            if em.notify_create:
+                reason_txt = _VENT_REASON_TEXT.get(payload["reason"], payload["reason"])
+                delta = payload["delta_gm3"]
+                delta_txt = (
+                    f" (inside {delta:+.1f} g/m³ vs outside)"
+                    if isinstance(delta, int | float)
+                    else ""
+                )
+                persistent_notification.async_create(
+                    self._c.hass,
+                    f"Airing recommended — {reason_txt}{delta_txt}.",
+                    title=f"Poise · {self._c.zone_name}",
+                    notification_id=notification_id,
+                )
+            elif em.notify_dismiss:
+                persistent_notification.async_dismiss(self._c.hass, notification_id)
+        except Exception:  # noqa: BLE001 - announcement must never break the tick
+            self._log.debug("Poise ventilation-advice emission failed", exc_info=True)
+
     def _outdoor_rh(self) -> float | None:
-        """Outdoor-humidity ladder (ADR-0066 B.3), stage 2: the ``humidity``
-        attribute of the ALREADY-configured weather entity — zero extra
-        hardware or config. A dedicated outdoor-RH sensor field (stage 1) is a
-        later increment; without any source the advice degrades silently to
-        ``no_data`` (design §9)."""
-        # Routed through the InputReader (phase-4 read boundary) — the only
-        # module allowed to touch hass.states.
+        """Outdoor-humidity ladder (ADR-0066 B.3). Stage 1: the dedicated
+        outdoor-RH sensor when configured; stage 2: the ``humidity`` attribute
+        of the ALREADY-configured weather entity — zero extra hardware or
+        config. Without any source the advice degrades silently to ``no_data``
+        (design §9). Both reads routed through the InputReader (phase-4 read
+        boundary) — the only module allowed to touch hass.states."""
+        dedicated = self._c._input_reader.read(self._c._outdoor_humidity)
+        if dedicated is not None:
+            return dedicated
         return self._c._input_reader.attr_number(self._c._weather, "humidity")
 
     def _climate_humidity(
@@ -2364,7 +2424,13 @@ class TickOrchestrator:
                 evaluate_tpi_shadow(
                     valve_available=self._reader.valve_entity is not None,
                     model=self._runtime.learning.ekf.get_model(),
-                    target=ctx.decision.heat_sp,
+                    # Shadow honesty: regulate toward the WRITE path's resolved
+                    # heat target (manual override incl. band/frost/mould
+                    # clamps), not the raw corridor edge — a live TPI would
+                    # have to honour the override exactly like the setpoint
+                    # write does, and ``heat_demand`` (hub boiler demand, R13)
+                    # is fed from this duty.
+                    target=(ctx.target if ctx.mode == "heat" else ctx.decision.heat_sp),
                     room=ctx.room,
                     t_out=ctx.t_out_eff,
                 )
@@ -2384,7 +2450,10 @@ class TickOrchestrator:
             pi = evaluate_pi_shadow(
                 self._runtime.learning.pi,
                 applies=self._reader.valve_entity is None,
-                target=ctx.decision.heat_sp,
+                # Same shadow-honesty rule as the TPI branch above: the write
+                # path's resolved heat target (override + clamps), not the
+                # raw corridor edge.
+                target=(ctx.target if ctx.mode == "heat" else ctx.decision.heat_sp),
                 room=ctx.room,
                 external=ctx.t_out_eff,  # real outdoor temp
                 dt_h=TICK_INTERVAL_S / 3600.0,
