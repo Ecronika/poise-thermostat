@@ -244,6 +244,11 @@ class HumidityRuntime:
     # survive a restart or every reboot forgets days of wall history.
     vent_active: bool = False
     surface_rh_mean: float | None = None
+    # ADR-0066 B.5: previous advice-ACTION token for the emission edge.
+    # Deliberately TRANSIENT (not persisted): "" after a restart makes the
+    # edge re-announce a still-open episode (the notification survives the
+    # reboot) and stay silent when settling into idle.
+    vent_last_action: str = ""
 
 
 @dataclass(slots=True)

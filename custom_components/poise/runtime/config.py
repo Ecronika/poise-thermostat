@@ -71,6 +71,7 @@ from ..const import (
     CONF_OCCUPANCY_SENSOR,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
+    CONF_OUTDOOR_HUMIDITY_SENSOR,
     CONF_OUTDOOR_SENSOR,
     CONF_OVERRIDE_END_ON_PRESENCE,
     CONF_OVERRIDE_MAX_H,
@@ -85,6 +86,7 @@ from ..const import (
     CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
     CONF_TRV_EXTERNAL_TEMP,
+    CONF_VENT_NOTIFY,
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
@@ -205,6 +207,7 @@ class ZoneStructure:
     trm: str | None  # running-mean outdoor sensor (EN 16798-1 t_rm)
     outdoor: str | None
     humidity: str | None
+    outdoor_humidity: str | None  # ADR-0066 B.3 ladder stage 1 (dedicated RH)
     mrt: str | None  # mean-radiant sensor for operative temperature
     presence_home_entities: tuple[str, ...]  # ADR-0058: OR-reduced house gate
     occupancy_entities: tuple[str, ...]  # ADR-0058: OR-reduced room occupancy
@@ -229,6 +232,7 @@ class ZoneStructure:
             trm=merged.get(CONF_TRM_SENSOR),
             outdoor=merged.get(CONF_OUTDOOR_SENSOR),
             humidity=merged.get(CONF_HUMIDITY_SENSOR),
+            outdoor_humidity=merged.get(CONF_OUTDOOR_HUMIDITY_SENSOR),
             mrt=merged.get(CONF_MRT_SENSOR),
             presence_home_entities=tuple(
                 as_entity_list(merged.get(CONF_PRESENCE_HOME))
@@ -265,6 +269,7 @@ class ZoneTuning:
     override_policy: str  # ADR-0059 §1 hold-expiry policy (timer/schedule/…)
     override_cfg: OverrideConfig  # ADR-0042 preset offsets + revert window
     trace_enabled: bool  # ADR-0011 opt-in golden-file trace recorder
+    vent_notify: bool  # ADR-0066 B.5 opt-in ventilation-advice notification
     presence_cfg: PresenceConfig  # ADR-0058 absence timing + eco delta
     category: Category  # EN 16798-1 comfort category
     comfort_base: float  # user comfort base [degC]
@@ -336,6 +341,7 @@ class ZoneTuning:
             ),
             override_cfg=override_cfg,
             trace_enabled=bool(merged.get(CONF_TRACE_RECORDING, False)),
+            vent_notify=bool(merged.get(CONF_VENT_NOTIFY, False)),
             presence_cfg=PresenceConfig(
                 absence_after_min=float(
                     merged.get(CONF_ABSENCE_AFTER_MIN, DEFAULT_ABSENCE_AFTER_MIN)
