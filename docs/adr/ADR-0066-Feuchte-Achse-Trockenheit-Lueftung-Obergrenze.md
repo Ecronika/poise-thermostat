@@ -1,6 +1,6 @@
 # ADR-0066: Feuchte-Achse — Trockenheits-Bewertung, Lüftungs-Empfehlung, schimmelsichere Feuchte-Obergrenze
 
-**Status:** In Arbeit (60 %) · **Wirkung:** Live-D · **Datum:** 2026-07-26 · **Bezug:** ADR-0062 (Schimmelboden), ADR-0048 (Monitoring vs. Control), ADR-0049 (Ampel), ADR-0050 (Dry-Pfad), ADR-0041 (Fenster), ADR-0058 (Presence), ADR-0016 (Attribut-Vertrag), ADR-0012 (Redaction) · **Grundlage:** [Designplan 2026-07-25](../design/2026-07-Feuchte-Achse-Designplan.md) + [Recherche](../research/2026-07-Feuchte-Steuerung-und-Lueftungshinweise.md) + [Implementierungsplan](../design/2026-07-Feuchte-Achse-Implementierungsplan.md)
+**Status:** In Arbeit (75 %) · **Wirkung:** Live-D · **Datum:** 2026-07-26 · **Bezug:** ADR-0062 (Schimmelboden), ADR-0048 (Monitoring vs. Control), ADR-0049 (Ampel), ADR-0050 (Dry-Pfad), ADR-0041 (Fenster), ADR-0058 (Presence), ADR-0016 (Attribut-Vertrag), ADR-0012 (Redaction) · **Grundlage:** [Designplan 2026-07-25](../design/2026-07-Feuchte-Achse-Designplan.md) + [Recherche](../research/2026-07-Feuchte-Steuerung-und-Lueftungshinweise.md) + [Implementierungsplan](../design/2026-07-Feuchte-Achse-Implementierungsplan.md)
 
 ## Entscheidung
 
@@ -16,7 +16,9 @@ Drei additive, **nie regelnde** Fähigkeiten (alle Entwurfsentscheidungen des De
 
 ## Umsetzungsstand
 
-**Inkrement 1 (v0.180.0):** A + C vollständig; B ohne Kosten/Emission; Naht, Attribute, Persistenz, Guard-Test (Rat erreicht nie `humidity_decide`/`dual_setpoint`/Solver/`tick_resolve`/`arbitration`), 12-g/kg-Rollen-Kommentar (Design A.4). **Offen:** Inkr. 2 Card (untere Lampen-Seite g/m³ + Vent-Chip → dann Nachträge ADR-0049 §5/0057) · Inkr. 3 Emissions-Rand (`persistent_notification` opt-in + Bus-Event + Diagnose-Entität → Nachträge 0016/0012) + Außen-RH-Sensor-Feld · Inkr. 4 Kosten (`vent_cost_*`) + τ-Kalibrierung an Felddaten.
+**Inkrement 1 (v0.180.0):** A + C vollständig; B ohne Kosten/Emission; Naht, Attribute, Persistenz, Guard-Test (Rat erreicht nie `humidity_decide`/`dual_setpoint`/Solver/`tick_resolve`/`arbitration`), 12-g/kg-Rollen-Kommentar (Design A.4). Live-verifiziert (Home-Deploy, Bad-Zone: Werte-Kreuzprobe + korrekter `mold_risk`-Alert).
+
+**Inkrement 2 (v0.181.0):** Card — Feuchte-Lampe geteilt: Trocken-Seite auf `abs_humidity_gm3` gegen `[5,0, 7,0] g/m³` (`abs_humidity_floors` YAML-konfigurierbar), stiller RH-Fallback ohne Absolutwert; g/m³ in `title`/`aria-label`; **Lüftungs-Rat-Chip** (`vent_advice_active`, Grund-i18n de/en, alert-Rand bei `vent_level=alert`), mit dem `humidity`-Element gegated. Trace v2 um die Achse ergänzt (defaulted, kein Versions-Bump): `abs_humidity_gm3/-_out_gm3`, `surface_rh_mean`, `vent_action/-_reason`. Nachträge ADR-0049 §5 + ADR-0057 geschrieben. **Offen:** Inkr. 3 Emissions-Rand (`persistent_notification` opt-in + Bus-Event + Diagnose-Entität → Nachträge 0016/0012) + Außen-RH-Sensor-Feld · Inkr. 4 Kosten (`vent_cost_*`) + τ-Kalibrierung an Felddaten.
 
 ## Konsequenzen
 

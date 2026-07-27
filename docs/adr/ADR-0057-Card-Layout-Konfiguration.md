@@ -39,3 +39,5 @@ Rein card-seitige Auflösungs-/Render-Logik, generisch, eigenständig (G29/G30).
 ## Verknüpfungen
 
 **Erweitert ADR-0040/0016** (Card-/Entity-Vertrag um Layout-Config, `mould_floor`/`dewpoint`), **ADR-0049/0054/0055** (die Ampel-/PMV-/CA-Lampen sind jetzt per `sections` schaltbar). **Belege:** Nutzer-Designentwürfe (Wohnzimmer-/Büro-Mockup); HA `ha-form` Expandable/Selector-Vertrag; `climate.set_preset_mode`.
+
+**Nachtrag v0.181.0 (ADR-0066 B):** Die Chip-Reihe erhält einen **Lüftungs-Rat-Chip** (`vent_advice_active` → „Lüften (Grund)", `mdi:weather-windy`, alert-Rand bei `vent_level=alert`). Er ist bewusst **kein neues `chips`-Token**, sondern mit dem bestehenden `humidity`-Element gegated (Feuchte aus → Rat aus) — die Tokenliste bleibt stabil. Der Chip trägt Text, keine Messgröße; das YAML-Feld `abs_humidity_floors` ergänzt die ADR-0049-Schwellenfelder (YAML-only, wie `humidity_thresholds`). „Schimmel-Tick display-only" gilt unverändert.
