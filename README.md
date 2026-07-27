@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.181.1-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.182.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -44,6 +44,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Regulation-quality metric (EN 15500-1 CA)** — continuous, bilateral control accuracy: mean Kelvin outside the comfort band, time-in-band and a regime-change ("hunting") rate, time-weighted and persisted (`ca_*`). This is the measurable acceptance gate that will authorise each shadow→live flip — today it only measures (ADR-0055).
 - **Fan cooling-effect** — the ASHRAE-55 elevated-air-speed credit a running fan would allow on the cooling setpoint (`fan_ce_k`), diagnostic only (ADR-0054 stage 3 / roadmap M3).
 - **Efficiency report** — a live heating-degree-hour savings estimate in kWh / €, computed each tick and published as `savings_*` climate attributes (ADR-0045); diagnostic only, never actuates.
+- **Humidity axis (advise-only)** — absolute humidity in g/m³ (`abs_humidity_gm3`, plus the outdoor comparison from a dedicated sensor or the weather entity), a **ventilation advice** built from mould cause (~48 h surface-RH mean), dryness veto and moisture/CO₂ comfort rules (`vent_action`/`vent_reason`/`vent_level`), and the **mould-safe humidity ceiling** (`rh_max_safe` / `abs_max_safe`) a third-party humidifier should respect. Surfaces: card lamp (dry side judged in g/m³) + chip, bus event `poise_ventilation_advice` on every advice change, an opt-in self-clearing notification, and a `vent_advice` diagnostic sensor. Never actuates — no fan, no window, no humidifier commands (ADR-0066, ADR-0048 line).
 
 ### 🗺️ Roadmap (built or designed, not in the active path)
 
