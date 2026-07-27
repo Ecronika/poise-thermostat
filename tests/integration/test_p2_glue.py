@@ -201,3 +201,80 @@ async def test_autodetected_valve_is_never_written(hass: HomeAssistant) -> None:
     assert entry.runtime_data.input_reader.valve_entity == valve
     # ... but no tick wrote it.
     assert all(c.data.get("entity_id") != valve for c in number_calls)
+
+
+async def test_manual_override_drives_tpi_shadow_duty(hass: HomeAssistant) -> None:
+    """Shadow honesty: a manual heat override must drive the TPI shadow duty.
+
+    Live-found (Badezimmer Sonoff Test, 2026-07-27): with the room ABOVE the
+    corridor heat edge the shadow showed ``tpi_duty == 0`` even while a manual
+    override was actively heating the TRV — the shadow regulated toward the
+    corridor edge instead of the write path's resolved target. A live TPI
+    would have to honour the override exactly like the setpoint write does,
+    and ``heat_demand`` (the hub's boiler-demand input, R13) is fed from this
+    duty: without the fix a wintertime override would open the valve but never
+    request the boiler.
+    """
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    async_mock_service(hass, "number", "set_value")
+
+    dev_entry = MockConfigEntry(domain="demo", title="TRV Device 2")
+    dev_entry.add_to_hass(hass)
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=dev_entry.entry_id, identifiers={("demo", "trv2")}
+    )
+    ent_reg = er.async_get(hass)
+
+    def _reg(domain: str, obj: str, uid: str, **kw: Any) -> str:
+        return ent_reg.async_get_or_create(
+            domain,
+            "demo",
+            uid,
+            config_entry=dev_entry,
+            device_id=device.id,
+            suggested_object_id=obj,
+            **kw,
+        ).entity_id
+
+    act = _reg("climate", "trv2", "act2")
+    _reg("number", "trv2_valve_opening_degree", "valve2")
+
+    # Room WARM: above the corridor heat edge -> corridor duty is 0.
+    hass.states.async_set("sensor.room_temp", "23.0", {"device_class": "temperature"})
+    hass.states.async_set(
+        act,
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 21.0,
+            "current_temperature": 23.0,
+            "target_temperature_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+        },
+    )
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id=act,
+        data=_room(**{CONF_ACTUATOR: act}),
+        title="Test Room 2",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coord = entry.runtime_data
+    assert coord.input_reader.valve_entity is not None  # TPI branch active
+    # Baseline: warm room, no override -> corridor duty 0 (unchanged semantics).
+    assert (coord.data.get("tpi_duty") or 0.0) == 0.0
+
+    # Manual heat override well above the room drives the shadow duty ...
+    coord.set_override(25.0, reason="ui_setpoint")
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    duty = coord.data.get("tpi_duty")
+    assert duty is not None and duty > 0.0
+    # ... and with it the published hub boiler-demand input (R13).
+    assert (coord.data.get("heat_demand") or 0.0) > 0.0
