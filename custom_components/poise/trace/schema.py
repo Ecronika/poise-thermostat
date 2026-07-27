@@ -97,6 +97,14 @@ class TraceRecord:
     abs_humidity_gkg: float | None = None
     rh_ceiling: float | None = None  # category RH ceiling in effect [%]
     occupied: bool = False  # occupancy used by the humidity comfort gate
+    # --- ADR-0066 humidity axis (added within v2; all defaulted, so records
+    # from either side of the change load unchanged — same compat mechanism
+    # as the v1->v2 fields, no version bump needed) ------------------------
+    abs_humidity_gm3: float | None = None  # indoor absolute humidity [g/m³]
+    abs_humidity_out_gm3: float | None = None  # outdoor comparison value
+    surface_rh_mean: float | None = None  # EWMA surface RH — rule-1 trigger
+    vent_action: str = ""  # ventilation advice: idle|open|close|discourage
+    vent_reason: str = ""  # stable reason token (mold_risk|moisture_out|...)
 
     def to_json_line(self) -> str:
         """One compact JSON line; floats rounded and ``None`` fields dropped."""
@@ -196,4 +204,9 @@ def build_record(
         abs_humidity_gkg=_maybe_f("abs_humidity_gkg"),
         rh_ceiling=_maybe_f("rh_high_used"),
         occupied=_b("occupied"),
+        abs_humidity_gm3=_maybe_f("abs_humidity_gm3"),
+        abs_humidity_out_gm3=_maybe_f("abs_humidity_out_gm3"),
+        surface_rh_mean=_maybe_f("surface_rh_mean"),
+        vent_action=str(data.get("vent_action", "")),
+        vent_reason=str(data.get("vent_reason", "")),
     )
