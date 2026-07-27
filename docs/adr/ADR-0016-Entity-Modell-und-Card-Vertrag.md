@@ -34,3 +34,5 @@ Standard-HA-Entity-Muster; eigenständig umgesetzt; generisch.
 
 ## Verknüpfungen
 Konsumiert Diagnose-Felder aus ADR-0007/0009/0013 (binding_limit_cause, confidence). Attribut-Vertrag unterliegt der Versionspolitik ADR-0018. Card-Trennung stützt ADR-0005 (keine privaten Felder über Grenzen).
+
+**Nachtrag v0.182.0 (ADR-0066 B.5):** Das Entity-Modell wächst um die Diagnose-Entität `sensor.<zone>_vent_advice` (ENUM `idle|open|close|discourage`, diagnostic, default-disabled — der reguläre Weg dieses ADRs) und das Bus-Event `poise_ventilation_advice` `{zone, entry_id, action, reason, delta_gm3}` als Automations-Schiene neben `poise_override_ended`. Die schnellen Δ-/Kosten-Werte bleiben bewusst Climate-Attribute, nicht Sensor-Attribute (ADR-0066 §6).
