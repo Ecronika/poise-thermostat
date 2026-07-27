@@ -2425,12 +2425,17 @@ class TickOrchestrator:
                     valve_available=self._reader.valve_entity is not None,
                     model=self._runtime.learning.ekf.get_model(),
                     # Shadow honesty: regulate toward the WRITE path's resolved
-                    # heat target (manual override incl. band/frost/mould
-                    # clamps), not the raw corridor edge — a live TPI would
-                    # have to honour the override exactly like the setpoint
-                    # write does, and ``heat_demand`` (hub boiler demand, R13)
-                    # is fed from this duty.
-                    target=(ctx.target if ctx.mode == "heat" else ctx.decision.heat_sp),
+                    # target (incl. band/frost/mould clamps), not the raw
+                    # corridor edge — a live TPI would have to honour it
+                    # exactly like the setpoint write does, and ``heat_demand``
+                    # (hub boiler demand, R13) is fed from this duty. "manual"
+                    # is the override mode (tick_resolve); a below-room manual
+                    # target is directionally safe (heating duty clamps to 0).
+                    target=(
+                        ctx.target
+                        if ctx.mode in ("heat", "manual")
+                        else ctx.decision.heat_sp
+                    ),
                     room=ctx.room,
                     t_out=ctx.t_out_eff,
                 )
@@ -2451,9 +2456,13 @@ class TickOrchestrator:
                 self._runtime.learning.pi,
                 applies=self._reader.valve_entity is None,
                 # Same shadow-honesty rule as the TPI branch above: the write
-                # path's resolved heat target (override + clamps), not the
-                # raw corridor edge.
-                target=(ctx.target if ctx.mode == "heat" else ctx.decision.heat_sp),
+                # path's resolved target ("manual" = override mode, incl.
+                # clamps), not the raw corridor edge.
+                target=(
+                    ctx.target
+                    if ctx.mode in ("heat", "manual")
+                    else ctx.decision.heat_sp
+                ),
                 room=ctx.room,
                 external=ctx.t_out_eff,  # real outdoor temp
                 dt_h=TICK_INTERVAL_S / 3600.0,
