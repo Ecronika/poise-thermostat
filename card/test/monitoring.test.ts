@@ -58,6 +58,27 @@ test("humidityVerdict: green 40-60, warn side-bands, alert <30 or >=65", () => {
   assert.equal(humidityVerdict(35, [60, 50, 40, 30]), "warn");
 });
 
+test("humidityVerdict ADR-0066: absolute g/m³ drives the dry side", () => {
+  // 24 °C / 32 % RH = 6.98 g/m³ -> today wrongly warn; abs says warn is right
+  // at 6.98 (<7) but ok at 7.2 — the warm room is no longer needlessly yellow.
+  assert.equal(humidityVerdict(32, undefined, 7.2), "ok");
+  // 18 °C / 44 % RH = 6.8 g/m³ -> RH says ok, abs finally flags the cool dry room.
+  assert.equal(humidityVerdict(44, undefined, 6.8), "warn");
+  assert.equal(humidityVerdict(44, undefined, 4.9), "alert");
+  // exact floor values are not below the floor
+  assert.equal(humidityVerdict(40, undefined, 5.0), "warn");
+  assert.equal(humidityVerdict(40, undefined, 7.0), "ok");
+  // moist side stays RELATIVE regardless of a healthy absolute value
+  assert.equal(humidityVerdict(62, undefined, 10), "warn");
+  assert.equal(humidityVerdict(66, undefined, 10), "alert");
+  // custom floors + silent fallback on a non-ascending pair
+  assert.equal(humidityVerdict(40, undefined, 5.5, [6, 8]), "alert");
+  assert.equal(humidityVerdict(40, undefined, 5.5, [8, 6]), "warn");
+  // no absolute value -> exact pre-ADR-0066 RH behaviour (silent degrade)
+  assert.equal(humidityVerdict(32, undefined, null), "warn");
+  assert.equal(humidityVerdict(29, undefined, null), "alert");
+});
+
 test("tempVerdictComfort maps band verdict to level", () => {
   assert.equal(tempVerdictComfort("in_band"), "ok");
   assert.equal(tempVerdictComfort("cool_edge"), "warn");
@@ -108,6 +129,28 @@ test("buildMonitor: temperature always, humidity/co2 only when present", () => {
   assert.equal(all[1].level, "alert"); // 70 % humidity
   assert.equal(all[2].level, "warn"); // 1500 ppm UBA
   assert.match(all[2].color, /--warning-color/);
+});
+
+test("buildMonitor: absolute humidity feeds the lamp verdict + title detail", () => {
+  const lamps = buildMonitor({
+    temperature: 24,
+    comfortVerdict: "in_band",
+    humidity: 32, // RH alone would say warn
+    absHumidityGm3: 7.3, // abs says the warm room is fine (ADR-0066 A.3)
+    co2: null,
+  });
+  const hum = lamps.find((l) => l.key === "humidity");
+  assert.equal(hum?.level, "ok");
+  assert.equal(hum?.detail, "7.3 g/m³");
+  // absent abs value -> no detail, RH fallback verdict
+  const fallback = buildMonitor({
+    temperature: 24,
+    comfortVerdict: "in_band",
+    humidity: 32,
+    co2: null,
+  }).find((l) => l.key === "humidity");
+  assert.equal(fallback?.level, "warn");
+  assert.equal(fallback?.detail, undefined);
 });
 
 test("buildMonitor comfort scale uses the band verdict, not ASR heat", () => {
