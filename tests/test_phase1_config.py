@@ -38,6 +38,7 @@ def _structure(*, temperature_sensor: str = "sensor.living_temp") -> ZoneStructu
         trm="sensor.outdoor_running_mean",
         outdoor="sensor.outdoor_temp",
         humidity="sensor.living_rh",
+        outdoor_humidity=None,
         mrt=None,
         presence_home_entities=("person.alice", "person.bob"),
         occupancy_entities=("binary_sensor.living_occupancy",),
@@ -55,6 +56,7 @@ def _tuning(*, comfort_base: float = 21.0) -> ZoneTuning:
         override_policy="schedule",
         override_cfg=OverrideConfig(),
         trace_enabled=False,
+        vent_notify=False,
         presence_cfg=PresenceConfig(),
         category=Category.II,
         comfort_base=comfort_base,
@@ -107,7 +109,8 @@ def test_zone_config_construction_roundtrip() -> None:
 
 
 def test_structure_field_contract_is_exactly_the_plan_table() -> None:
-    # Plan section 3, ZoneStructure row: 13 fields, in wiring order.
+    # Plan section 3, ZoneStructure row: 13 fields in wiring order, +1
+    # ADR-0066 outdoor-RH sensor (v0.182.0) = 14.
     assert _field_names(ZoneStructure) == (
         "zone_name",
         "temperature_sensor",
@@ -115,6 +118,7 @@ def test_structure_field_contract_is_exactly_the_plan_table() -> None:
         "trm",
         "outdoor",
         "humidity",
+        "outdoor_humidity",
         "mrt",
         "presence_home_entities",
         "occupancy_entities",
@@ -126,12 +130,14 @@ def test_structure_field_contract_is_exactly_the_plan_table() -> None:
 
 
 def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
-    # Plan section 3, ZoneTuning row: 27 fields (climate_mode removed, rev. 3).
+    # Plan section 3, ZoneTuning row: 27 fields (climate_mode removed, rev. 3),
+    # +1 ADR-0066 vent_notify (v0.182.0) = 28.
     assert _field_names(ZoneTuning) == (
         "window_auto_cfg",
         "override_policy",
         "override_cfg",
         "trace_enabled",
+        "vent_notify",
         "presence_cfg",
         "category",
         "comfort_base",
@@ -156,7 +162,7 @@ def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
         "adopt_external_mode",
         "operative_input",
     )
-    assert len(dataclasses.fields(ZoneTuning)) == 27
+    assert len(dataclasses.fields(ZoneTuning)) == 28  # +1 ADR-0066 vent_notify
 
 
 def test_tuning_has_no_climate_mode_field() -> None:

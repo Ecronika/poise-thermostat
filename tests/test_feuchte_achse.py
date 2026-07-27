@@ -10,6 +10,7 @@ from custom_components.poise.comfort.mold import (
 )
 from custom_components.poise.comfort.ventilation import (
     VentilationAdvice,
+    advice_transition,
     ewma_step,
     ventilation_advise,
 )
@@ -182,6 +183,40 @@ def test_ewma_persistent_wet_wall_crosses_and_recovers() -> None:
 def test_ewma_seeds_and_ignores_bad_dt() -> None:
     assert ewma_step(None, 70.0, dt_min=5.0, tau_min=2880.0) == 70.0
     assert ewma_step(60.0, 90.0, dt_min=0.0, tau_min=2880.0) == 60.0
+
+
+# --- B.5 emission edge (ADR-0066): event on change, notify on open episode --
+
+
+def test_advice_transition_edges() -> None:
+    # steady state: nothing
+    assert advice_transition("idle", "idle", notify_opt_in=True) == (
+        advice_transition("open", "open", notify_opt_in=True)
+    )
+    assert not advice_transition("idle", "idle", notify_opt_in=True).fire_event
+    # any change fires the bus event, notification only on the open episode
+    em = advice_transition("idle", "open", notify_opt_in=True)
+    assert em.fire_event and em.notify_create and not em.notify_dismiss
+    em = advice_transition("open", "close", notify_opt_in=True)
+    assert em.fire_event and em.notify_dismiss and not em.notify_create
+    em = advice_transition("close", "idle", notify_opt_in=True)
+    assert em.fire_event and not em.notify_create and not em.notify_dismiss
+    # opt-out: event still fires, notifications never
+    em = advice_transition("idle", "open", notify_opt_in=False)
+    assert em.fire_event and not em.notify_create
+    em = advice_transition("open", "idle", notify_opt_in=False)
+    assert em.fire_event and not em.notify_dismiss
+
+
+def test_advice_transition_cold_start() -> None:
+    # settling into idle after a fresh start announces nothing ...
+    em = advice_transition("", "idle", notify_opt_in=True)
+    assert not (em.fire_event or em.notify_create or em.notify_dismiss)
+    # ... but waking INTO an open episode re-announces (restart mid-episode)
+    em = advice_transition("", "open", notify_opt_in=True)
+    assert em.fire_event and em.notify_create and not em.notify_dismiss
+    em = advice_transition("", "discourage", notify_opt_in=True)
+    assert em.fire_event and not em.notify_create
 
 
 # --- guard: advice never reaches the control path (ADR-0048, design §10) ----

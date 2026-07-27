@@ -173,6 +173,7 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # from zone_runtime (no coordinator proxy ever existed).
     ("humidity", "vent_active"): "ADR-0066 ventilation-advice hysteresis latch",
     ("humidity", "surface_rh_mean"): "ADR-0066 surface-RH EWMA (tau=48 h)",
+    ("humidity", "vent_last_action"): "ADR-0066 B.5 emission edge (transient)",
 }
 
 

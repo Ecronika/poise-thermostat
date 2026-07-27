@@ -172,6 +172,7 @@ def test_realistic_structure_parse() -> None:
         trm="sensor.aussen_running_mean",
         outdoor="sensor.aussen_temperatur",
         humidity="sensor.wohnzimmer_feuchte",
+        outdoor_humidity=None,  # ADR-0066 stage-1 sensor not configured
         mrt=None,  # not configured -> None
         presence_home_entities=("person.alice", "person.bob"),
         # legacy bare string normalises to a one-element tuple:
@@ -242,6 +243,7 @@ def test_structure_defaults_on_minimal_entry() -> None:
         trm=None,
         outdoor=None,
         humidity=None,
+        outdoor_humidity=None,
         mrt=None,
         presence_home_entities=(),
         occupancy_entities=(),
@@ -259,6 +261,7 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         override_policy="schedule",  # DEFAULT_OVERRIDE_POLICY
         override_cfg=OverrideConfig(),
         trace_enabled=False,  # literal default, no DEFAULT_ constant
+        vent_notify=False,  # ADR-0066 B.5 opt-in, literal default
         presence_cfg=PresenceConfig(absence_after_min=30.0, eco_delta=2.0),
         category=Category.II,
         comfort_base=21.0,
