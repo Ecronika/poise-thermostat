@@ -553,7 +553,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     }
     // ADR-0066 B: ventilation advice — a chip (override_clamped pattern), not a
     // lamp; it carries text, no measurand. Gated with the humidity element.
-    if (r.chips.has("humidity") && a["vent_advice_active"]) {
+    // Derived from vent_action ("open" IS advice-active by definition) —
+    // vent_advice_active is a payload/latch key, deliberately NOT an entity
+    // attribute (v0.181.1 fix: the attribute read could never fire).
+    if (r.chips.has("humidity") && a["vent_action"] === "open") {
       const reason = String(a["vent_reason"] ?? "");
       const known = ["mold_risk", "moisture_out", "co2"].includes(reason);
       const label = known
