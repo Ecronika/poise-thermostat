@@ -20,6 +20,7 @@
               "trm_sensor": "Running-mean outdoor temperature",
               "outdoor_sensor": "Outdoor temperature",
               "humidity_sensor": "Room humidity (enables mould protection)",
+              "outdoor_humidity_sensor": "Outdoor humidity (ventilation advice)",
               "mrt_sensor": "Mean radiant temperature",
               "window_sensor": "Window / contact sensor (pauses heating when open)",
               "weather_entity": "Weather entity (forecast)",
@@ -60,6 +61,7 @@
               "category": "EN 16798 comfort category (I / II / III)",
               "outdoor_sensor": "Outdoor temperature",
               "humidity_sensor": "Room humidity (enables mould protection)",
+              "outdoor_humidity_sensor": "Outdoor humidity (ventilation advice)",
               "window_sensor": "Window / contact sensor (pauses heating when open)",
               "weather_entity": "Weather entity (forecast, for optimal start)"
             }
@@ -178,7 +180,8 @@
               "compressor_guard": "Compressor guard (single AC)",
               "compressor_min_off_s": "Compressor min-off (s)",
               "compressor_mode_hold_s": "Compressor mode-hold (s)",
-              "trace_recording": "Field-trace recording"
+              "trace_recording": "Field-trace recording",
+              "vent_notify": "Ventilation-advice notification"
             },
             "data_description": {
               "cool_hard_cap_c": "ASR A3.5 ceiling for the adaptive cooling edge (default 26 °C). Lowering it cools more; raising above 26 is an opt-in.",
@@ -187,7 +190,8 @@
               "compressor_guard": "Hold cool/dry starts and flips that would short-cycle the compressor.",
               "compressor_min_off_s": "Wait after a stop before a restart (blank = 300).",
               "compressor_mode_hold_s": "Wait before a cool↔dry flip (blank = 300).",
-              "trace_recording": "One JSONL line per tick for offline replay analysis (advanced)."
+              "trace_recording": "One JSONL line per tick for offline replay analysis (advanced).",
+              "vent_notify": "Self-clearing notification while airing is recommended; the bus event poise_ventilation_advice fires either way."
             }
           },
           "energy": {
@@ -296,6 +300,15 @@
       },
       "identification_progress": {
         "name": "Identification progress"
+      },
+      "vent_advice": {
+        "name": "Ventilation advice",
+        "state": {
+          "idle": "Idle",
+          "open": "Air out",
+          "close": "Close windows",
+          "discourage": "Keep closed"
+        }
       },
       "learning_phase": {
         "name": "Learning phase",

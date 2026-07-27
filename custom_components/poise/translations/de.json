@@ -20,6 +20,7 @@
               "trm_sensor": "Gleitendes Außentemperatur-Mittel",
               "outdoor_sensor": "Außentemperatur",
               "humidity_sensor": "Raumfeuchte (aktiviert Schimmelschutz)",
+              "outdoor_humidity_sensor": "Außenluftfeuchte (Lüftungs-Empfehlung)",
               "mrt_sensor": "Mittlere Strahlungstemperatur",
               "window_sensor": "Fenster-/Kontaktsensor (pausiert Heizen bei offenem Fenster)",
               "weather_entity": "Wetter-Entität (Prognose)",
@@ -60,6 +61,7 @@
               "category": "EN-16798-Komfortkategorie (I / II / III)",
               "outdoor_sensor": "Außentemperatur",
               "humidity_sensor": "Raumfeuchte (aktiviert Schimmelschutz)",
+              "outdoor_humidity_sensor": "Außenluftfeuchte (Lüftungs-Empfehlung)",
               "window_sensor": "Fenster-/Kontaktsensor (pausiert Heizen bei offenem Fenster)",
               "weather_entity": "Wetter-Entität (Prognose, für Optimal-Start)"
             }
@@ -131,6 +133,15 @@
       },
       "identification_progress": {
         "name": "Identifikations-Fortschritt"
+      },
+      "vent_advice": {
+        "name": "Lüftungs-Empfehlung",
+        "state": {
+          "idle": "Kein Bedarf",
+          "open": "Lüften",
+          "close": "Fenster schließen",
+          "discourage": "Geschlossen halten"
+        }
       },
       "learning_phase": {
         "name": "Lernphase",
@@ -327,7 +338,8 @@
               "compressor_guard": "Kompressorschutz (Einzel-AC)",
               "compressor_min_off_s": "Kompressor-Mindest-Aus-Zeit (s)",
               "compressor_mode_hold_s": "Kompressor-Modus-Haltezeit (s)",
-              "trace_recording": "Feld-Trace-Aufzeichnung (fortgeschritten)"
+              "trace_recording": "Feld-Trace-Aufzeichnung (fortgeschritten)",
+              "vent_notify": "Lüftungs-Hinweis als Benachrichtigung"
             },
             "data_description": {
               "cool_hard_cap_c": "ASR-A3.5-Deckel für die adaptive Kühlkante (Standard 26 °C). Absenken kühlt mehr; über 26 anheben ist Opt-in.",
@@ -336,7 +348,8 @@
               "compressor_guard": "Hält Kühl-/Trocken-Starts und -Wechsel zurück, die den Kompressor kurzschließen würden.",
               "compressor_min_off_s": "Nach einem Stopp vor dem Neustart warten (leer = 300).",
               "compressor_mode_hold_s": "Vor einem Kühlen↔Trocknen-Wechsel warten (leer = 300).",
-              "trace_recording": "Eine JSONL-Zeile je Tick für die Offline-Replay-Analyse (fortgeschritten)."
+              "trace_recording": "Eine JSONL-Zeile je Tick für die Offline-Replay-Analyse (fortgeschritten).",
+              "vent_notify": "Selbstlöschende Benachrichtigung, solange Lüften empfohlen ist; das Bus-Event poise_ventilation_advice feuert unabhängig davon."
             }
           },
           "energy": {
