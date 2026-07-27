@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import replace
 
@@ -269,6 +270,43 @@ def test_build_record_populates_the_v2_humidity_fields() -> None:
     assert r.device_hvac_mode == "dry" and r.hvac_action == "drying"
     assert r.dewpoint == 12.4 and r.abs_humidity_gkg == 8.9
     assert r.rh_ceiling == 50.0 and r.occupied is False
+
+
+def test_adr0066_humidity_axis_fields_map_round_trip_and_default() -> None:
+    """The ADR-0066 additions ride within v2: build_record maps them from the
+    data dict, they survive the JSON round trip, and a pre-ADR-0066 v2 line
+    (without the keys) loads with defaults — no version bump required."""
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    data = {
+        "abs_humidity_gm3": 14.3,
+        "abs_humidity_out_gm3": 13.5,
+        "surface_rh_mean": 77.35,
+        "vent_action": "open",
+        "vent_reason": "mold_risk",
+    }
+    r = build_record(
+        data, model, ts=1.0, mono=60.0, room=22.9, t_out=16.0, u_h=0.0, u_c=0.0
+    )
+    assert r.abs_humidity_gm3 == 14.3 and r.abs_humidity_out_gm3 == 13.5
+    assert r.surface_rh_mean == 77.35
+    assert r.vent_action == "open" and r.vent_reason == "mold_risk"
+    back = TraceRecord.from_json_line(r.to_json_line())
+    assert back == r
+    # a v2 line recorded BEFORE ADR-0066 (keys genuinely absent) still loads,
+    # every new field defaulted
+    payload = json.loads(r.to_json_line())
+    for key in (
+        "abs_humidity_gm3",
+        "abs_humidity_out_gm3",
+        "surface_rh_mean",
+        "vent_action",
+        "vent_reason",
+    ):
+        payload.pop(key, None)
+    rec = TraceRecord.from_dict(payload)
+    assert rec.abs_humidity_gm3 is None and rec.abs_humidity_out_gm3 is None
+    assert rec.surface_rh_mean is None
+    assert rec.vent_action == "" and rec.vent_reason == ""
 
 
 def test_load_trace_drops_unsupported_versions() -> None:
