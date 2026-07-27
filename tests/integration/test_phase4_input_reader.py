@@ -51,6 +51,7 @@ def _structure(**overrides: Any) -> ZoneStructure:
         "trm": "sensor.trm",
         "outdoor": "sensor.outdoor",
         "humidity": "sensor.humidity",
+        "outdoor_humidity": None,
         "mrt": "sensor.mrt",
         "presence_home_entities": (),
         "occupancy_entities": (),
