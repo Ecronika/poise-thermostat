@@ -1633,6 +1633,7 @@ class TickOrchestrator:
                 co2=None,  # ADR-0049 §1 backend not built yet -> rule 4 inert
                 prev_vent_active=self._runtime.humidity.vent_active,
                 t_forecast_day=diag_rt.clo_forecast_day,
+                room_profile=self._c._room_profile,
             )
             # Fold the advice latch + persisted surface mean back (ADR-0066).
             self._runtime.humidity.vent_active = bool(
