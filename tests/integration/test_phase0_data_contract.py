@@ -79,7 +79,8 @@ HUB_CRITICAL_KEYS = (
 TIMING_KEYS = ("tick_ms", "tick_ms_ewma", "tick_ms_max", "tick_over_budget")
 
 # Frozen once from the Ist-Zustand (this exact ROOM_DATA, one normal tick,
-# 168 keys; re-frozen for the 12 ADR-0066 humidity-axis keys in v0.180.0).
+# 168 keys; re-frozen for the 12 ADR-0066 humidity-axis keys in v0.180.0 and
+# for the 2 ADR-0054-V1 clo keys — clo_used/clo_source).
 # A mismatch = deliberate coordinator.data API change -> review,
 # then re-freeze. NOTE: 'compressor_gate_would_block' and
 # 'compressor_mode_hold_remaining' exist only when the shadow try
@@ -103,6 +104,8 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "ca_minutes",
     "ca_time_in_band",
     "category",
+    "clo_source",
+    "clo_used",
     "coasting",
     "comfort_high",
     "comfort_low",
