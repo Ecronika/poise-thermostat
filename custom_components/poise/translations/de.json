@@ -278,11 +278,13 @@
               "comfort_base": "Komfort-Basistemperatur (°C)",
               "category": "EN-16798-Komfortkategorie",
               "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
-              "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)"
+              "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
+              "room_profile": "Raumprofil (Behaglichkeitsbewertung)"
             },
             "data_description": {
               "comfort_base": "Die Mitte des Komfortbands; die Kategorie legt die Bandbreite fest.",
-              "comfort_weight": "0 = Energie sparen (breiteres Band), 100 = engster Komfort. Standard 70."
+              "comfort_weight": "0 = Energie sparen (breiteres Band), 100 = engster Komfort. Standard 70.",
+              "room_profile": "Aktivitäts- und Bekleidungsannahme für die Behaglichkeits-Diagnose (PMV): Büro ist der neutrale Standard; Wohnzimmer rechnet die Sofa-Isolation ein, Schlafzimmer ruhende Aktivität, Küche Hausarbeit. Wirkt nur auf die Behaglichkeits-Lampe, nie auf den Sollwert. Im Schlafzimmer-Profil wird kein PMV bewertet (Schlafen liegt außerhalb des ISO-7730-Gültigkeitsbereichs) — die Behaglichkeits-Lampe bleibt dort stumm."
             }
           },
           "schedule": {
@@ -424,6 +426,14 @@
         "schedule": "Bis nächster Schaltpunkt",
         "timer": "Fester Timer",
         "permanent": "Dauerhaft"
+      }
+    },
+    "room_profile": {
+      "options": {
+        "office": "Büro / neutral (Standard)",
+        "living": "Wohnzimmer (Sofa, entspannt)",
+        "bedroom": "Schlafzimmer (ruhend)",
+        "kitchen": "Küche (Hausarbeit)"
       }
     }
   },

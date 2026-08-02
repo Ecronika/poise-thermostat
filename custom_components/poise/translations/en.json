@@ -120,11 +120,13 @@
               "comfort_base": "Comfort base temperature (°C)",
               "category": "EN 16798 comfort category",
               "climate_mode": "Climate mode",
-              "comfort_weight": "Comfort vs efficiency"
+              "comfort_weight": "Comfort vs efficiency",
+              "room_profile": "Room profile (comfort evaluation)"
             },
             "data_description": {
               "comfort_base": "The centre of the comfort band; the category sets how wide the band is around it.",
-              "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. Default 70."
+              "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. Default 70.",
+              "room_profile": "Activity and clothing assumption for the comfort (PMV) diagnosis: office is the neutral default; living adds the sofa insulation, bedroom assumes resting, kitchen assumes housework. Affects the comfort lamp only, never the setpoint. With the bedroom profile no PMV is evaluated (sleeping is outside the ISO 7730 validity range) — the comfort lamp stays silent there."
             }
           },
           "schedule": {
@@ -266,6 +268,14 @@
         "schedule": "Schedule",
         "timer": "Timer",
         "permanent": "Permanent"
+      }
+    },
+    "room_profile": {
+      "options": {
+        "office": "Office / neutral (default)",
+        "living": "Living room (sofa, relaxed)",
+        "bedroom": "Bedroom (resting)",
+        "kitchen": "Kitchen (housework)"
       }
     }
   },
