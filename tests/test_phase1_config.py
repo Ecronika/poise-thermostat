@@ -80,6 +80,7 @@ def _tuning(*, comfort_base: float = 21.0) -> ZoneTuning:
         adopt_external_setpoint=True,
         adopt_external_mode=False,
         operative_input=False,
+        room_profile="office",
     )
 
 
@@ -131,7 +132,7 @@ def test_structure_field_contract_is_exactly_the_plan_table() -> None:
 
 def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
     # Plan section 3, ZoneTuning row: 27 fields (climate_mode removed, rev. 3),
-    # +1 ADR-0066 vent_notify (v0.182.0) = 28.
+    # +1 ADR-0066 vent_notify (v0.182.0), +1 ADR-0054-V2 room_profile = 29.
     assert _field_names(ZoneTuning) == (
         "window_auto_cfg",
         "override_policy",
@@ -161,8 +162,9 @@ def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
         "adopt_external_setpoint",
         "adopt_external_mode",
         "operative_input",
+        "room_profile",
     )
-    assert len(dataclasses.fields(ZoneTuning)) == 28  # +1 ADR-0066 vent_notify
+    assert len(dataclasses.fields(ZoneTuning)) == 29  # +vent_notify +room_profile
 
 
 def test_tuning_has_no_climate_mode_field() -> None:

@@ -97,6 +97,7 @@ def _options() -> dict[str, Any]:
         "absence_after_min": 45,
         "category": "III",
         "comfort_base": 21.5,
+        "room_profile": "bedroom",
         "annual_heating_kwh": 9000,
         "actuator_dynamics": "fast_air",
         "compressor_guard": "off",
@@ -217,6 +218,7 @@ def test_realistic_tuning_parse() -> None:
     assert tuning.adopt_external_setpoint is False
     assert tuning.adopt_external_mode is False
     assert tuning.operative_input is True
+    assert tuning.room_profile == "bedroom"  # ADR-0054 V2
 
 
 def test_realistic_hold_parse() -> None:
@@ -285,6 +287,7 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         adopt_external_setpoint=True,
         adopt_external_mode=True,
         operative_input=False,  # literal default
+        room_profile="office",  # ADR-0054 V2: backward-compatible default
     )
 
 

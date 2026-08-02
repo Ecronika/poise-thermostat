@@ -41,7 +41,12 @@ from custom_components.poise.comfort.humidity import (
     HumidityDecision,
     rh_high_for_category,
 )
-from custom_components.poise.comfort.pmv import pmv_ppd, predictive_clo
+from custom_components.poise.comfort.pmv import (
+    clo_dynamic,
+    pmv_ppd,
+    predictive_clo,
+    resolve_room_profile,
+)
 from custom_components.poise.comfort.thermal_shock import AdaptiveCool
 from custom_components.poise.control.cover_shading import (
     predict_peak_operative,
@@ -531,6 +536,8 @@ _CLIMATE_KEY_ORDER = [
     "pmv_category",
     "clo_used",
     "clo_source",
+    "met_used",
+    "pmv_valid",
 ]
 
 
@@ -544,9 +551,11 @@ def _climate_band(
     rh: float | None = 55.0,
     abs_w: float | None = 8.34,
     t_forecast_day: float | None = None,
+    room_profile: str | None = None,
 ) -> dict[str, object]:
     return compose_climate_band(
         t_forecast_day=t_forecast_day,
+        room_profile=room_profile,
         heat_sp=21.0,
         cool_sp=26.0,
         room=22.0,
@@ -635,6 +644,45 @@ def test_compose_climate_band_matches_the_inline_kernels() -> None:
     assert diag["pmv_category"] == pmv.category
     assert diag["clo_used"] == round(predictive_clo(18.0), 2)
     assert diag["clo_source"] == "rm"
+    assert diag["met_used"] == 1.2  # office default = historical assumption
+    assert diag["pmv_valid"] is True
+
+
+def test_compose_climate_band_room_profile_shifts_met_and_clo() -> None:
+    """ADR-0054 Nachtrag V2: the room profile drives met, the clothing
+    surcharge and the ASHRAE dynamic-insulation correction."""
+    still = fan_velocity(fan_mode=None, hvac_action=None, can_recirculate=False)
+    # kitchen: met 1.8 -> dynamic correction shrinks the effective clo.
+    diag = _climate_band(
+        cool_ac=None, hvac_modes=["cool", "off"], room_profile="kitchen"
+    )
+    prof = resolve_room_profile("kitchen")
+    clo_eff = clo_dynamic(predictive_clo(18.0) + prof.clo_add, prof.met)
+    assert diag["met_used"] == 1.8
+    assert diag["clo_used"] == round(clo_eff, 2)
+    pmv = pmv_ppd(t_air=22.0, t_mrt=22.5, rh=55.0, velocity=still, clo=clo_eff, met=1.8)
+    assert diag["pmv"] == pmv.pmv
+    # living: sofa surcharge, met 1.1 -> no dynamic correction.
+    diag = _climate_band(
+        cool_ac=None, hvac_modes=["cool", "off"], room_profile="living"
+    )
+    assert diag["met_used"] == 1.1
+    assert diag["clo_used"] == round(predictive_clo(18.0) + 0.21, 2)
+
+
+def test_compose_climate_band_bedroom_pmv_flagged_not_validated() -> None:
+    """ADR-0054 Nachtrag V3: sleeping (0.7 met) is outside the ISO 7730
+    domain — no PMV number is published (card lamp goes silent), only the
+    flag plus the clo/met inputs for field plausibility."""
+    diag = _climate_band(
+        cool_ac=None, hvac_modes=["cool", "off"], room_profile="bedroom"
+    )
+    assert diag["pmv_valid"] is False
+    assert diag["pmv"] is None
+    assert diag["ppd"] is None
+    assert diag["pmv_category"] is None
+    assert diag["met_used"] == 0.7
+    assert diag["clo_used"] == round(predictive_clo(18.0), 2)  # still published
 
 
 def test_compose_climate_band_forecast_blends_the_clo_input() -> None:

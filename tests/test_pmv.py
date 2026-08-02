@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from custom_components.poise.comfort.pmv import pmv_ppd, predictive_clo
+from custom_components.poise.comfort.pmv import (
+    ROOM_PROFILES,
+    RoomProfile,
+    clo_dynamic,
+    pmv_ppd,
+    pmv_validity,
+    predictive_clo,
+    resolve_room_profile,
+)
 
 
 def test_iso7730_optimal_operative_temps_are_neutral() -> None:
@@ -106,3 +114,55 @@ def test_predictive_clo_none_fallback_stays_summer_default() -> None:
 def test_predictive_clo_output_within_bounds() -> None:
     for t in range(-40, 41):
         assert 0.4 <= predictive_clo(float(t)) <= 1.2
+
+
+# --- ADR-0054 Nachtrag V2: met room profiles + dynamic clo ------------------
+
+
+def test_room_profiles_table() -> None:
+    # office IS today's exact behavior: met 1.2, no clothing surcharge (the
+    # +0.10 office-chair surcharge is deliberately NOT applied — backward
+    # compatible default).
+    assert ROOM_PROFILES["office"] == RoomProfile(met=1.2, clo_add=0.0)
+    # living: seated relaxed/TV between 1.0 and 1.2 met; ISO 9920 sofa +0.21.
+    assert ROOM_PROFILES["living"] == RoomProfile(met=1.1, clo_add=0.21)
+    # bedroom: real resting metabolism (ASHRAE 55 sleeping) — below the ISO
+    # 7730 floor, so the V3 validity flag suppresses the PMV there.
+    assert ROOM_PROFILES["bedroom"] == RoomProfile(met=0.7, clo_add=0.0)
+    assert ROOM_PROFILES["kitchen"] == RoomProfile(met=1.8, clo_add=0.0)
+
+
+def test_resolve_room_profile_defaults_to_office() -> None:
+    assert resolve_room_profile(None) is ROOM_PROFILES["office"]
+    assert resolve_room_profile("no_such_profile") is ROOM_PROFILES["office"]
+    assert resolve_room_profile("kitchen") is ROOM_PROFILES["kitchen"]
+
+
+def test_clo_dynamic_ashrae_correction() -> None:
+    # No correction at or below sedentary 1.2 met (ASHRAE 55 App. B).
+    assert clo_dynamic(0.5, 1.2) == 0.5
+    assert clo_dynamic(1.0, 0.8) == 1.0
+    # Cooking 1.8 met: 0.5 * (0.6 + 0.4/1.8) = 0.4111...
+    assert abs(clo_dynamic(0.5, 1.8) - 0.41111) <= 1e-4
+    # Faster movement pumps the clothing -> less effective insulation.
+    assert clo_dynamic(0.5, 2.0) < clo_dynamic(0.5, 1.5) < 0.5
+
+
+# --- ADR-0054 Nachtrag V3: ISO 7730 validity flag ---------------------------
+
+
+def test_pmv_validity_iso_bounds() -> None:
+    # ISO 7730 application domain: 0.8 <= met <= 4.0, 0 <= clo <= 2.0.
+    assert pmv_validity(met=1.2, clo=0.5)
+    assert pmv_validity(met=0.8, clo=2.0)  # inclusive edges
+    assert not pmv_validity(met=0.7, clo=0.5)  # sleeping - below the floor
+    assert not pmv_validity(met=4.5, clo=0.5)
+    assert not pmv_validity(met=1.2, clo=2.5)
+
+
+def test_bedroom_is_the_only_profile_outside_iso_validity() -> None:
+    # Bedding systems (0.9-4.9 clo, coverage-dominated) are outside any
+    # ensemble estimate - the bedroom PMV is flagged, never published wrong.
+    assert not pmv_validity(met=ROOM_PROFILES["bedroom"].met, clo=0.5)
+    others = (p for k, p in ROOM_PROFILES.items() if k != "bedroom")
+    assert all(pmv_validity(met=p.met, clo=0.5) for p in others)
