@@ -147,6 +147,8 @@ _ATTRS = (
     "pmv",
     "ppd",
     "pmv_category",
+    "clo_used",
+    "clo_source",
     "ca_deviation_k",
     "ca_time_in_band",
     "ca_cycles_per_h",
