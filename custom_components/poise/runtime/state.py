@@ -306,6 +306,11 @@ class DiagnosticsRuntime:
     # since F-HUMSHADOW split the live humidity decision from the pure shadows.
     hum_shadow_warned: bool = False
     climate_shadow_warned: bool = False
+    # ADR-0054 Nachtrag V1: today's forecast daily mean for the clo blend,
+    # latched once per local day.  Deliberately TRANSIENT: the first tick
+    # after a restart recomputes it from the forecast cache.
+    clo_forecast_key: str | None = None
+    clo_forecast_day: float | None = None
 
 
 @dataclass(slots=True)
