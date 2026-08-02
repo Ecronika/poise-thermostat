@@ -121,6 +121,7 @@ from ..control.dynamics import PROFILES
 from ..control.hub_aggregate import zone_heat_demand
 from ..control.lifecycle import resolve_safe_state
 from ..control.mpc_shadow import evaluate_shadow
+from ..control.optimal_start import latched_forecast_day
 from ..control.outcome_scoring import observe_session
 from ..control.override import OverrideMode, hold_ends_at_preheat, mode_comfort_base
 from ..control.pi_shadow import evaluate_pi_shadow
@@ -1585,6 +1586,16 @@ class TickOrchestrator:
         """
         act_state = wt.act_state
         try:
+            # ADR-0054 Nachtrag V1: today's forecast daily mean for the clo
+            # blend, latched once per local day from the optimal-start cache
+            # (empty cache -> None -> pure running-mean clo).
+            diag_rt = self._runtime.diagnostics
+            diag_rt.clo_forecast_key, diag_rt.clo_forecast_day = latched_forecast_day(
+                diag_rt.clo_forecast_key,
+                diag_rt.clo_forecast_day,
+                dt_util.now().date().isoformat(),
+                self._c._forecast_provider.forecast,
+            )
             band = compose_climate_band(
                 heat_sp=decision.heat_sp,
                 cool_sp=decision.cool_sp,
@@ -1621,6 +1632,7 @@ class TickOrchestrator:
                 surface_elapsed_min=1.0,
                 co2=None,  # ADR-0049 §1 backend not built yet -> rule 4 inert
                 prev_vent_active=self._runtime.humidity.vent_active,
+                t_forecast_day=diag_rt.clo_forecast_day,
             )
             # Fold the advice latch + persisted surface mean back (ADR-0066).
             self._runtime.humidity.vent_active = bool(
