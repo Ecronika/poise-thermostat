@@ -4,7 +4,9 @@ import pytest
 
 from custom_components.poise.control.optimal_start import (
     advise,
+    forecast_day_mean,
     heatup_minutes,
+    latched_forecast_day,
     mean_forecast_outdoor,
 )
 from custom_components.poise.estimation.thermal_ekf import ThermalModel
@@ -144,3 +146,36 @@ def test_plan_preheat_no_coast_when_disabled() -> None:
         coast_lower=20.0,
     )
     assert not plan.coasting and plan.base == 21.0
+
+
+# --- ADR-0054 Nachtrag V1: forecast daily mean for the clo blend ------------
+
+
+def test_forecast_day_mean_is_the_24h_window_mean() -> None:
+    # 20 C rising to 30 C at 12 h (segment mean 25), then held flat at 30 C
+    # for the second half -> (25*720 + 30*720) / 1440 = 27.5.
+    samples = [(0.0, 20.0), (720.0, 30.0)]
+    assert forecast_day_mean(samples) == pytest.approx(27.5)
+
+
+def test_forecast_day_mean_none_without_samples() -> None:
+    assert forecast_day_mean([]) is None
+
+
+def test_latched_forecast_day_updates_once_per_day() -> None:
+    # First evaluation of the day computes from the cache...
+    key, val = latched_forecast_day(None, None, "2026-08-02", [(0.0, 24.0)])
+    assert (key, val) == ("2026-08-02", 24.0)
+    # ...later ticks of the SAME day keep the latched value even though the
+    # rolling forecast cache has moved on (one clo update per day).
+    key, val = latched_forecast_day(key, val, "2026-08-02", [(0.0, 30.0)])
+    assert (key, val) == ("2026-08-02", 24.0)
+    # A new local day recomputes from the fresh cache.
+    key, val = latched_forecast_day(key, val, "2026-08-03", [(0.0, 30.0)])
+    assert (key, val) == ("2026-08-03", 30.0)
+
+
+def test_latched_forecast_day_new_day_without_forecast_clears() -> None:
+    # Yesterday's anticipation must not linger into a forecast-less day.
+    key, val = latched_forecast_day("2026-08-02", 31.0, "2026-08-03", [])
+    assert (key, val) == ("2026-08-03", None)

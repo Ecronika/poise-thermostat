@@ -41,7 +41,7 @@ from custom_components.poise.comfort.humidity import (
     HumidityDecision,
     rh_high_for_category,
 )
-from custom_components.poise.comfort.pmv import pmv_ppd, seasonal_clo
+from custom_components.poise.comfort.pmv import pmv_ppd, predictive_clo
 from custom_components.poise.comfort.thermal_shock import AdaptiveCool
 from custom_components.poise.control.cover_shading import (
     predict_peak_operative,
@@ -529,6 +529,8 @@ _CLIMATE_KEY_ORDER = [
     "pmv",
     "ppd",
     "pmv_category",
+    "clo_used",
+    "clo_source",
 ]
 
 
@@ -541,8 +543,10 @@ def _climate_band(
     hvac_action: str | None = None,
     rh: float | None = 55.0,
     abs_w: float | None = 8.34,
+    t_forecast_day: float | None = None,
 ) -> dict[str, object]:
     return compose_climate_band(
+        t_forecast_day=t_forecast_day,
         heat_sp=21.0,
         cool_sp=26.0,
         room=22.0,
@@ -600,7 +604,7 @@ def test_compose_climate_band_matches_the_inline_kernels() -> None:
         cool_sp=26.5, air_speed=fan_v, fan_running=True, upper_cap=29.0
     )
     pmv = pmv_ppd(
-        t_air=22.0, t_mrt=22.5, rh=55.0, velocity=fan_v, clo=seasonal_clo(18.0)
+        t_air=22.0, t_mrt=22.5, rh=55.0, velocity=fan_v, clo=predictive_clo(18.0)
     )
     assert diag["cool_sp_eff"] == 26.0  # no cool_ac -> falls back to cool_sp
     assert diag["cool_sp_active"] == 26.5
@@ -629,6 +633,24 @@ def test_compose_climate_band_matches_the_inline_kernels() -> None:
     assert diag["pmv"] == pmv.pmv
     assert diag["ppd"] == pmv.ppd
     assert diag["pmv_category"] == pmv.category
+    assert diag["clo_used"] == round(predictive_clo(18.0), 2)
+    assert diag["clo_source"] == "rm"
+
+
+def test_compose_climate_band_forecast_blends_the_clo_input() -> None:
+    """ADR-0054 Nachtrag V1: a forecast daily mean shifts the clo input
+    direction-symmetrically; the source is surfaced for field plausibility."""
+    diag = _climate_band(cool_ac=None, hvac_modes=["cool", "off"], t_forecast_day=28.0)
+    assert diag["clo_source"] == "forecast_blend"
+    assert diag["clo_used"] == round(predictive_clo(18.0, 28.0), 2)
+    pmv = pmv_ppd(
+        t_air=22.0,
+        t_mrt=22.5,
+        rh=55.0,
+        velocity=fan_velocity(fan_mode=None, hvac_action=None, can_recirculate=False),
+        clo=predictive_clo(18.0, 28.0),
+    )
+    assert diag["pmv"] == pmv.pmv
 
 
 def test_compose_climate_band_cool_ac_fields_pass_through() -> None:
@@ -662,7 +684,7 @@ def test_compose_climate_band_none_defaults_for_rh_and_abs_humidity() -> None:
         t_mrt=22.5,
         rh=50.0,
         velocity=fan_velocity(fan_mode=None, hvac_action=None, can_recirculate=False),
-        clo=seasonal_clo(18.0),
+        clo=predictive_clo(18.0),
     )
     assert diag["pmv"] == pmv.pmv
 
