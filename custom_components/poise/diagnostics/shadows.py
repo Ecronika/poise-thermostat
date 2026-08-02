@@ -54,7 +54,13 @@ from ..comfort.mold import (
     mold_min_air_temperature_detail,
     surface_relative_humidity,
 )
-from ..comfort.pmv import pmv_ppd, predictive_clo
+from ..comfort.pmv import (
+    clo_dynamic,
+    pmv_ppd,
+    pmv_validity,
+    predictive_clo,
+    resolve_room_profile,
+)
 from ..comfort.ventilation import (
     DEFAULT_DRY_WARN_GM3,
     DEFAULT_SURFACE_TAU_MIN,
@@ -349,6 +355,7 @@ def compose_climate_band(
     co2: float | None = None,
     prev_vent_active: bool = False,
     t_forecast_day: float | None = None,
+    room_profile: str | None = None,
 ) -> dict[str, object]:
     """Pure climate-band shadow composition + ``climate_diag`` assembly.
 
@@ -400,15 +407,30 @@ def compose_climate_band(
     # ADR-0054 SHADOW: ISO 7730 PMV/PPD — humidity and the (estimated) fan
     # velocity finally enter the comfort evaluation; diagnostic only.  clo is
     # the graded ASHRAE 55 predictive model on the running mean, blended with
-    # today's forecast daily mean when the glue provides one (Nachtrag V1).
-    clo_val = predictive_clo(t_rm_eff, t_forecast_day)
-    pmv = pmv_ppd(
-        t_air=room,
-        t_mrt=t_mrt if t_mrt is not None else room,
-        rh=rh if rh is not None else 50.0,
-        velocity=fan_v,
-        clo=clo_val,
+    # today's forecast daily mean when the glue provides one (Nachtrag V1),
+    # plus the room profile's surcharge and its met with the ASHRAE dynamic-
+    # insulation correction (Nachtrag V2).
+    prof = resolve_room_profile(room_profile)
+    clo_val = clo_dynamic(
+        predictive_clo(t_rm_eff, t_forecast_day) + prof.clo_add, prof.met
     )
+    # V3: outside the ISO 7730 domain (sleeping at 0.7 met) no PMV number is
+    # published — the absent value silences the card lamp (ADR-0049 §6), the
+    # flag says why, and clo/met stay visible for field plausibility.
+    valid = pmv_validity(met=prof.met, clo=clo_val)
+    pmv_out: float | None = None
+    ppd_out: float | None = None
+    cat_out: str | None = None
+    if valid:
+        pmv = pmv_ppd(
+            t_air=room,
+            t_mrt=t_mrt if t_mrt is not None else room,
+            rh=rh if rh is not None else 50.0,
+            velocity=fan_v,
+            clo=clo_val,
+            met=prof.met,
+        )
+        pmv_out, ppd_out, cat_out = pmv.pmv, pmv.ppd, pmv.category
     # ADR-0066 humidity axis (all monitor/advice-only, never the write path).
     # A: absolute humidity in the ecosystem unit; B: surface-RH EWMA (the mould
     # CAUSE) + ventilation advice; C: mould-safe RH ceiling + fabric conflict.
@@ -496,11 +518,13 @@ def compose_climate_band(
         "presence_level": presence_level,
         "room_absent_min": round(absent_min, 1),
         "home_present": home_present,
-        "pmv": pmv.pmv,
-        "ppd": pmv.ppd,
-        "pmv_category": pmv.category,
+        "pmv": pmv_out,
+        "ppd": ppd_out,
+        "pmv_category": cat_out,
         "clo_used": round(clo_val, 2),
         "clo_source": "forecast_blend" if t_forecast_day is not None else "rm",
+        "met_used": prof.met,
+        "pmv_valid": valid,
     }
 
 
