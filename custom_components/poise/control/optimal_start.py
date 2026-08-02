@@ -127,6 +127,39 @@ def mean_forecast_outdoor(
     return integral / horizon_min
 
 
+_DAY_HORIZON_MIN = 1440.0
+
+
+def forecast_day_mean(samples: Sequence[tuple[float, float]]) -> float | None:
+    """Mean forecast outdoor temp over the next 24 h — ``None`` without samples.
+
+    The clo anticipation input (ADR-0054 Nachtrag V1): a daily statistic, so
+    the source model's interchangeable-daily-statistics argument applies.
+    """
+    if not samples:
+        return None
+    # fallback is unreachable: samples is non-empty and the horizon positive.
+    return mean_forecast_outdoor(samples, _DAY_HORIZON_MIN, 0.0)
+
+
+def latched_forecast_day(
+    prev_key: str | None,
+    prev_value: float | None,
+    day_key: str,
+    samples: Sequence[tuple[float, float]],
+) -> tuple[str, float | None]:
+    """Hold today's forecast daily mean for the whole local day.
+
+    One clo update per day (ADR-0054 Nachtrag V1): later ticks of the same day
+    keep the first value even as the rolling forecast cache moves on; a new day
+    recomputes — and clears to ``None`` on an empty cache, so yesterday's
+    anticipation never lingers into a forecast-less day.
+    """
+    if prev_key == day_key:
+        return day_key, prev_value
+    return day_key, forecast_day_mean(samples)
+
+
 @dataclass(frozen=True, slots=True)
 class PreheatPlan:
     """Result of the schedule -> setback -> optimal-start orchestration."""
