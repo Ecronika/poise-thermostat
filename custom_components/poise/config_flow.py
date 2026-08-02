@@ -25,6 +25,7 @@ from homeassistant.helpers import selector
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 
 from .adaptive_cool import adaptive_cool_mode
+from .comfort.pmv import ROOM_PROFILES
 from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from .config_reconcile import reconcile_reconfigure
 from .config_sections import flatten_sections, nest_by_section
@@ -86,6 +87,7 @@ from .const import (
     CONF_OVERRIDE_TIMER_H,
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
+    CONF_ROOM_PROFILE,
     CONF_SETBACK_DELTA,
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
@@ -122,6 +124,7 @@ from .const import (
     DEFAULT_OVERRIDE_POLICY,
     DEFAULT_OVERRIDE_TIMER_H,
     DEFAULT_PRICE_EUR_KWH,
+    DEFAULT_ROOM_PROFILE,
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
@@ -139,6 +142,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_COMFORT_BASE,
         CONF_CATEGORY,
         CONF_COMFORT_WEIGHT,
+        CONF_ROOM_PROFILE,
     ),
     "schedule": (
         CONF_COMFORT_START,
@@ -530,6 +534,16 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                                 max=100,
                                 step=5,
                                 mode=selector.NumberSelectorMode.SLIDER,
+                            )
+                        ),
+                        # ADR-0054 V2: met/clo room profile for the PMV shadow.
+                        vol.Optional(
+                            CONF_ROOM_PROFILE, default=DEFAULT_ROOM_PROFILE
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=list(ROOM_PROFILES),
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="room_profile",
                             )
                         ),
                     }

@@ -417,6 +417,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._compressor_guard = tuning.compressor_guard
         self._comp_min_off_opt = tuning.comp_min_off_opt
         self._comp_mode_hold_opt = tuning.comp_mode_hold_opt
+        # ADR-0054 V2: met/clo room profile for the PMV shadow (hot-applied).
+        self._room_profile = tuning.room_profile
         self._trace_enabled = tuning.trace_enabled
         # ADR-0066 B.5: opt-in ventilation-advice notification (hot-applied).
         self._vent_notify = tuning.vent_notify
