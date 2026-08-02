@@ -79,6 +79,7 @@ from ..const import (
     CONF_OVERRIDE_TIMER_H,
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
+    CONF_ROOM_PROFILE,
     CONF_SETBACK_DELTA,
     CONF_SOURCE_POLICY,
     CONF_TEMP_SENSOR,
@@ -108,6 +109,7 @@ from ..const import (
     DEFAULT_OVERRIDE_TIMER_H,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_PRICE_GAS_EUR_KWH,
+    DEFAULT_ROOM_PROFILE,
     DEFAULT_SETBACK_DELTA,
 )
 from ..control.dynamics import DeviceDynamics
@@ -295,6 +297,7 @@ class ZoneTuning:
     adopt_external_setpoint: bool  # TRV wheel -> manual hold
     adopt_external_mode: bool  # IR remote -> manual mode-hold
     operative_input: bool  # ADR-0029 operative-temperature input mode
+    room_profile: str  # ADR-0054 V2 met/clo profile (office/living/bedroom/kitchen)
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneTuning:
@@ -405,6 +408,7 @@ class ZoneTuning:
                 merged.get(CONF_ADOPT_EXTERNAL_MODE, DEFAULT_ADOPT_EXTERNAL_MODE)
             ),
             operative_input=bool(merged.get(CONF_OPERATIVE_INPUT, False)),
+            room_profile=str(merged.get(CONF_ROOM_PROFILE, DEFAULT_ROOM_PROFILE)),
         )
 
 
