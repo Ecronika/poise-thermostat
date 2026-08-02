@@ -100,6 +100,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0064](ADR-0064-Persistenz-Checkpoint-am-Tickende.md) | Persistenz-Checkpoint am Tick-Ende — ein Zustand, eine Momentaufnahme | Implementiert (v0.179.0) |
 | [0065](ADR-0065-Fehlergrenzen-Diagnose-Segmente.md) | Fehlergrenzen — eine Grenze je Segment statt zwei Sammel-Domänen | Implementiert (v0.179.0) |
 | [0066](ADR-0066-Feuchte-Achse-Trockenheit-Lueftung-Obergrenze.md) | Feuchte-Achse — Trockenheits-Bewertung (g/m³), Lüftungs-Empfehlung, schimmelsichere Feuchte-Obergrenze | In Arbeit (90 %) |
+| [0067](ADR-0067-Haushalts-clo-Offset-Feedback-Vorschlag.md) | Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4) | Vorgeschlagen (Entwurf) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
