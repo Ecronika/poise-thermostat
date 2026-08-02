@@ -127,3 +127,53 @@ def predictive_clo(
     else:
         clo = 0.46
     return min(max(clo, _CLO_MIN), _CLO_MAX)
+
+
+@dataclass(frozen=True, slots=True)
+class RoomProfile:
+    """Per-room activity/clothing assumptions (ADR-0054 Nachtrag V2)."""
+
+    met: float  # metabolic rate (ISO 8996 level-1 table values)
+    clo_add: float  # additive insulation surcharge (chair/sofa, ISO 9920)
+
+
+# ISO-8996-level-1 / ASHRAE-55-table values.  "office" is the backward-
+# compatible default — exactly the historical fixed assumption (met 1.2, no
+# surcharge).  "bedroom" is real sleeping metabolism (ASHRAE 55: 0.7 met) and
+# thereby OUTSIDE the ISO 7730 domain — ``pmv_validity`` flags it and the
+# shadow publishes no PMV number there (V3).  The sofa surcharge is ISO 9920
+# (+0.21); max total clo stays inside the ASHRAE ceiling: 1.2 + 0.21 < 1.5.
+ROOM_PROFILES: dict[str, RoomProfile] = {
+    "office": RoomProfile(met=MET_OFFICE, clo_add=0.0),
+    "living": RoomProfile(met=1.1, clo_add=0.21),
+    "bedroom": RoomProfile(met=0.7, clo_add=0.0),
+    "kitchen": RoomProfile(met=1.8, clo_add=0.0),
+}
+
+
+def resolve_room_profile(name: str | None) -> RoomProfile:
+    """Profile for a config token — unknown/unset falls back to office."""
+    return ROOM_PROFILES.get(name or "office", ROOM_PROFILES["office"])
+
+
+def clo_dynamic(clo: float, met: float) -> float:
+    """ASHRAE 55 dynamic insulation: movement pumps the clothing.
+
+    ``Icl,dyn = Icl * (0.6 + 0.4 / met)`` for met > 1.2; identity at or below
+    sedentary (Normative Appendix B) — which is why the correction only became
+    meaningful once met stopped being fixed at 1.2 (Nachtrag V2).
+    """
+    if met <= 1.2:
+        return clo
+    return clo * (0.6 + 0.4 / met)
+
+
+def pmv_validity(*, met: float, clo: float) -> bool:
+    """Inside the ISO 7730 application domain (0.8-4.0 met, 0-2.0 clo)?
+
+    Outside it — above all sleeping at 0.7 met, where bedding systems
+    (0.9-4.9 clo, coverage-dominated) defeat any ensemble estimate — the PMV
+    equation is formally not validated: the shadow publishes the flag instead
+    of a wrong number (ADR-0054 Nachtrag V3).
+    """
+    return 0.8 <= met <= 4.0 and 0.0 <= clo <= 2.0
