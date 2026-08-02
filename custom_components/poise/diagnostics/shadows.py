@@ -54,7 +54,7 @@ from ..comfort.mold import (
     mold_min_air_temperature_detail,
     surface_relative_humidity,
 )
-from ..comfort.pmv import pmv_ppd, seasonal_clo
+from ..comfort.pmv import pmv_ppd, predictive_clo
 from ..comfort.ventilation import (
     DEFAULT_DRY_WARN_GM3,
     DEFAULT_SURFACE_TAU_MIN,
@@ -348,6 +348,7 @@ def compose_climate_band(
     surface_elapsed_min: float = 0.0,
     co2: float | None = None,
     prev_vent_active: bool = False,
+    t_forecast_day: float | None = None,
 ) -> dict[str, object]:
     """Pure climate-band shadow composition + ``climate_diag`` assembly.
 
@@ -397,13 +398,16 @@ def compose_climate_band(
         upper_cap=cool_hard_cap,
     )
     # ADR-0054 SHADOW: ISO 7730 PMV/PPD — humidity and the (estimated) fan
-    # velocity finally enter the comfort evaluation; diagnostic only.
+    # velocity finally enter the comfort evaluation; diagnostic only.  clo is
+    # the graded ASHRAE 55 predictive model on the running mean, blended with
+    # today's forecast daily mean when the glue provides one (Nachtrag V1).
+    clo_val = predictive_clo(t_rm_eff, t_forecast_day)
     pmv = pmv_ppd(
         t_air=room,
         t_mrt=t_mrt if t_mrt is not None else room,
         rh=rh if rh is not None else 50.0,
         velocity=fan_v,
-        clo=seasonal_clo(t_rm_eff),
+        clo=clo_val,
     )
     # ADR-0066 humidity axis (all monitor/advice-only, never the write path).
     # A: absolute humidity in the ecosystem unit; B: surface-RH EWMA (the mould
@@ -495,6 +499,8 @@ def compose_climate_band(
         "pmv": pmv.pmv,
         "ppd": pmv.ppd,
         "pmv_category": pmv.category,
+        "clo_used": round(clo_val, 2),
+        "clo_source": "forecast_blend" if t_forecast_day is not None else "rm",
     }
 
 
