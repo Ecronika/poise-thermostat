@@ -38,9 +38,7 @@ async def async_setup_entry(
     )
 
 
-class PoiseComfortFeedbackButton(  # type: ignore[misc]
-    CoordinatorEntity[PoiseCoordinator], ButtonEntity
-):
+class PoiseComfortFeedbackButton(CoordinatorEntity[PoiseCoordinator], ButtonEntity):  # type: ignore[misc]
     """One direction of the "too warm / too cold" feedback channel."""
 
     _attr_has_entity_name = True

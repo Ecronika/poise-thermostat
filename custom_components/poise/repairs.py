@@ -34,7 +34,7 @@ _BASE_MIN_C = 16.0
 _BASE_MAX_C = 26.0
 
 
-class OverrideSuggestionFixFlow(RepairsFlow):
+class OverrideSuggestionFixFlow(RepairsFlow):  # type: ignore[misc]
     """Two-choice flow: apply the suggested config change, or dismiss."""
 
     def __init__(self, hass: HomeAssistant, data: dict[str, Any]) -> None:
