@@ -105,6 +105,8 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "feedback_stats",
     "suggestion_rejected_key",
     "suggestion_rejected_at",
+    "clo_suggestion_rejected_key",
+    "clo_suggestion_rejected_at",
     "override_reason",
     "last_written_sp",
     "prev_device_sp",
@@ -186,6 +188,9 @@ class PersistedZoneState:
     # ADR-0060 L2 rejection suppression (defaulted: additive)
     suggestion_rejected_key: str | None = None
     suggestion_rejected_at: float | None = None
+    # ADR-0067 F2 rejection suppression (defaulted: additive)
+    clo_suggestion_rejected_key: str | None = None
+    clo_suggestion_rejected_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The v1 store dict (key set, transforms, values).
@@ -233,6 +238,8 @@ class PersistedZoneState:
             "feedback_stats": self.feedback_stats,  # ADR-0067 F1, by reference
             "suggestion_rejected_key": self.suggestion_rejected_key,  # ADR-0060 L2
             "suggestion_rejected_at": self.suggestion_rejected_at,
+            "clo_suggestion_rejected_key": self.clo_suggestion_rejected_key,
+            "clo_suggestion_rejected_at": self.clo_suggestion_rejected_at,
             "override_reason": self.override_reason,  # hold origin
             "last_written_sp": self.last_written_sp,
             "prev_device_sp": self.prev_device_sp,
@@ -295,6 +302,9 @@ class OverrideLifecycleSection:
     # ADR-0060 L2 rejection suppression — type-guarded, not hold-gated.
     suggestion_rejected_key: str | None = None
     suggestion_rejected_at: float | None = None
+    # ADR-0067 F2 rejection suppression — same semantics, own slot.
+    clo_suggestion_rejected_key: str | None = None
+    clo_suggestion_rejected_at: float | None = None
     override_policy: str | None = None  # stored copy; NEVER apply (F13)
 
 
@@ -424,6 +434,8 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
     fstats = data.get("feedback_stats")
     srk = data.get("suggestion_rejected_key")
     sra = data.get("suggestion_rejected_at")
+    csrk = data.get("clo_suggestion_rejected_key")
+    csra = data.get("clo_suggestion_rejected_at")
     opol = data.get("override_policy")
     return OverrideLifecycleSection(
         override=override,
@@ -460,6 +472,10 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
         ),
         suggestion_rejected_key=srk if isinstance(srk, str) else None,
         suggestion_rejected_at=(float(sra) if isinstance(sra, (int, float)) else None),
+        clo_suggestion_rejected_key=csrk if isinstance(csrk, str) else None,
+        clo_suggestion_rejected_at=(
+            float(csra) if isinstance(csra, (int, float)) else None
+        ),
         override_policy=opol if isinstance(opol, str) else None,
     )
 
