@@ -356,6 +356,7 @@ def compose_climate_band(
     prev_vent_active: bool = False,
     t_forecast_day: float | None = None,
     room_profile: str | None = None,
+    clo_offset: float = 0.0,
 ) -> dict[str, object]:
     """Pure climate-band shadow composition + ``climate_diag`` assembly.
 
@@ -412,7 +413,9 @@ def compose_climate_band(
     # insulation correction (Nachtrag V2).
     prof = resolve_room_profile(room_profile)
     clo_val = clo_dynamic(
-        predictive_clo(t_rm_eff, t_forecast_day) + prof.clo_add, prof.met
+        predictive_clo(t_rm_eff, t_forecast_day, household_offset=clo_offset)
+        + prof.clo_add,
+        prof.met,
     )
     # V3: outside the ISO 7730 domain (sleeping at 0.7 met) no PMV number is
     # published — the absent value silences the card lamp (ADR-0049 §6), the
@@ -522,9 +525,13 @@ def compose_climate_band(
         "ppd": ppd_out,
         "pmv_category": cat_out,
         "clo_used": round(clo_val, 2),
-        "clo_source": "forecast_blend" if t_forecast_day is not None else "rm",
+        "clo_source": (
+            ("forecast_blend" if t_forecast_day is not None else "rm")
+            + ("+offset" if clo_offset else "")
+        ),
         "met_used": prof.met,
         "pmv_valid": valid,
+        "clo_offset": round(clo_offset, 2),
     }
 
 
