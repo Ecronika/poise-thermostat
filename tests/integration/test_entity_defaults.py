@@ -2,8 +2,10 @@
 
 A new install should show a *lean* set: the main climate entity, the
 window-bypass switch, the three most useful diagnostic sensors (operative
-temperature, learning phase, model confidence) and -- since P1-4b -- the manual
-hold's expiry timestamp, so the override end-time is visible without the card.
+temperature, learning phase, model confidence), -- since P1-4b -- the manual
+hold's expiry timestamp, and -- since ADR-0067 F1 -- the two comfort-feedback
+buttons: like the bypass switch they are user-facing INPUT (not diagnostics),
+and a hidden feedback button collects nothing for the suggestion learning.
 Every other diagnostic sensor is registered but ``disabled_by == INTEGRATION`` so
 it stays out of the default dashboard until the user opts in.
 
@@ -67,6 +69,9 @@ EXPECTED_ENABLED = {
     "sensor.test_room_learning_phase",
     "sensor.test_room_model_confidence",
     "sensor.test_room_override_expires_at",
+    # ADR-0067 F1: the feedback channel is user-facing input, not diagnostics.
+    "button.test_room_too_warm",
+    "button.test_room_too_cold",
 }
 
 
@@ -91,7 +96,7 @@ def _set_room_and_actuator(hass: HomeAssistant, *, room: float, sp: float) -> No
 
 
 async def test_default_enabled_entities_are_lean(hass: HomeAssistant) -> None:
-    """Only climate + bypass + 3 sensors are enabled; the rest are INTEGRATION-off."""
+    """Climate + bypass + feedback buttons + 4 sensors; the rest INTEGRATION-off."""
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     _set_room_and_actuator(hass, room=19.5, sp=18.0)
