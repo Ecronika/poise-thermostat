@@ -41,6 +41,7 @@ from .const import (
     TICK_INTERVAL_S,
 )
 from .control import override_runtime
+from .control.feedback import CloSuggestion
 from .control.mpc import MpcParams
 from .control.override import (
     OverrideConfig,
@@ -422,6 +423,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._room_profile = tuning.room_profile
         # ADR-0060 L2: gate for the suggestion EMISSION (detection always runs).
         self._override_suggestions = tuning.override_suggestions
+        # ADR-0067: learned household clo bias (config-owned, fix-flow-written).
+        self._clo_offset = tuning.clo_offset
         self._trace_enabled = tuning.trace_enabled
         # ADR-0066 B.5: opt-in ventilation-advice notification (hot-applied).
         self._vent_notify = tuning.vent_notify
@@ -657,16 +660,58 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._zone_runtime.dirty = True
 
     def record_suggestion_decision(self, key: str) -> None:
-        """Stamp the 30-day cool-down for one pattern key (ADR-0060 L2).
+        """Stamp the 30-day cool-down for one pattern key (ADR-0060 L2 /
+        ADR-0067 F2 - routed by key prefix into the family's own slot).
 
         Used for a REJECTION and equally after an ACCEPT: the old evidence
-        stays in the L1 statistic, so without the stamp the just-applied
-        pattern would immediately re-raise itself.
+        stays in the statistic, so without the stamp the just-applied pattern
+        would immediately re-raise itself.
         """
         user = self._zone_runtime.user
-        user.suggestion_rejected_key = key
-        user.suggestion_rejected_at = _utcnow_ts()
+        if key.startswith("clo_offset:"):
+            user.clo_suggestion_rejected_key = key
+            user.clo_suggestion_rejected_at = _utcnow_ts()
+        else:
+            user.suggestion_rejected_key = key
+            user.suggestion_rejected_at = _utcnow_ts()
         self._zone_runtime.dirty = True
+
+    def _sync_clo_suggestion_issue(self, suggestion: CloSuggestion | None) -> None:
+        """ADR-0067 F2: mirror the emittable clo reading into a fixable issue.
+
+        Same trust rules as L2: gated on the ``override_suggestions`` opt-in;
+        the caller already resolved the #4 conflict, so ``None`` here also
+        covers a blocked reading.
+        """
+        from homeassistant.helpers import issue_registry as ir
+
+        issue_id = f"clo_suggestion_{self._entry_id}"
+        if not (self._override_suggestions and suggestion):
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=(
+                "clo_suggestion_up"
+                if suggestion.direction > 0
+                else "clo_suggestion_down"
+            ),
+            translation_placeholders={
+                "name": self.zone_name,
+                "count": str(suggestion.evidence),
+                "step": "0.1",
+            },
+            data={
+                "entry_id": self._entry_id,
+                "kind": "clo_offset",
+                "direction": suggestion.direction,
+                "key": suggestion.key,
+            },
+        )
 
     def _sync_suggestion_issue(
         self, suggestion: OverrideSuggestion | None, suppressed: bool
@@ -1058,6 +1103,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 feedback_stats=self._zone_runtime.user.feedback_stats,
                 suggestion_rejected_key=self._zone_runtime.user.suggestion_rejected_key,
                 suggestion_rejected_at=self._zone_runtime.user.suggestion_rejected_at,
+                clo_suggestion_rejected_key=(
+                    self._zone_runtime.user.clo_suggestion_rejected_key
+                ),
+                clo_suggestion_rejected_at=(
+                    self._zone_runtime.user.clo_suggestion_rejected_at
+                ),
                 override_reason=self._zone_runtime.user.override_reason,
                 last_written_sp=self._zone_runtime.external.last_written_sp,
                 prev_device_sp=self._zone_runtime.external.prev_device_sp,

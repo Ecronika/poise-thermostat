@@ -151,6 +151,7 @@ _ATTRS = (
     "clo_source",
     "met_used",
     "pmv_valid",
+    "clo_offset",
     "ca_deviation_k",
     "ca_time_in_band",
     "ca_cycles_per_h",

@@ -81,6 +81,11 @@ CONF_COMFORT_BASE: Final = "comfort_base"
 # ADR-0054 Nachtrag V2: met/clo room profile for the PMV evaluation.
 CONF_ROOM_PROFILE: Final = "room_profile"
 DEFAULT_ROOM_PROFILE: Final = "office"
+# ADR-0067: learned household clo offset (config-owned, written only via the
+# visible suggestion fix flow; hard bounds +-0.3).
+CONF_CLO_OFFSET: Final = "clo_offset"
+DEFAULT_CLO_OFFSET: Final = 0.0
+CLO_OFFSET_MAX: Final = 0.3
 CONF_CLIMATE_MODE: Final = "climate_mode"
 CONF_COOL_MIN_OUTDOOR: Final = "cool_min_outdoor"
 CONF_HEAT_MAX_OUTDOOR: Final = "heat_max_outdoor"

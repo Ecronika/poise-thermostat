@@ -19,7 +19,13 @@ from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 
 from .comfort.schedule import parse_hhmm
-from .const import CONF_COMFORT_BASE, CONF_COMFORT_START
+from .const import (
+    CLO_OFFSET_MAX,
+    CONF_CLO_OFFSET,
+    CONF_COMFORT_BASE,
+    CONF_COMFORT_START,
+)
+from .control.feedback import CLO_SUGGEST_STEP
 from .control.suggestion import SUGGEST_EARLIER_MIN, SUGGEST_STEP_K
 
 # The comfort-base write stays inside the options-flow selector range; the
@@ -47,7 +53,13 @@ class OverrideSuggestionFixFlow(RepairsFlow):
         if entry is not None:
             merged = {**entry.data, **entry.options}
             options = dict(entry.options)
-            if self._data["kind"] == "comfort_base":
+            if self._data["kind"] == "clo_offset":
+                current = float(merged.get(CONF_CLO_OFFSET, 0.0))
+                new_off = current + float(self._data["direction"]) * CLO_SUGGEST_STEP
+                options[CONF_CLO_OFFSET] = round(
+                    min(max(new_off, -CLO_OFFSET_MAX), CLO_OFFSET_MAX), 2
+                )
+            elif self._data["kind"] == "comfort_base":
                 base = float(merged.get(CONF_COMFORT_BASE, 21.0))
                 new_base = base + float(self._data["direction"]) * SUGGEST_STEP_K
                 options[CONF_COMFORT_BASE] = round(
@@ -92,7 +104,9 @@ async def async_create_fix_flow(
     schema = vol.Schema(
         {
             vol.Required("entry_id"): str,
-            vol.Required("kind"): vol.In(["comfort_base", "comfort_earlier"]),
+            vol.Required("kind"): vol.In(
+                ["comfort_base", "comfort_earlier", "clo_offset"]
+            ),
             vol.Required("direction"): vol.In([1, -1]),
             vol.Required("key"): str,
         },
