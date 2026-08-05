@@ -325,6 +325,36 @@
     "season_hint_cool_only_in_heating": {
       "title": "Poise: Nur-Kühlen-Modus in der Heizsaison",
       "description": "{name}: Der Klima-Modus steht fest auf Nur-Kühlen, aber das Außen-Laufmittel ({t_rm} °C) liegt seit Tagen auf/unter der Kühl-Sperrgrenze ({threshold} °C) — Kühlen ist ohnehin gesperrt, Heizen könnte nötig sein. Klima-Modus der Zone umstellen? Rein beratend: Poise stellt nie selbst um. Der Hinweis verschwindet, sobald Saison oder Modus wechseln."
+    },
+    "clo_suggestion_up": {
+      "title": "Poise: Bekleidungsannahme anheben?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: Bekleidungsannahme anheben?",
+            "description": "{name}: Binnen 30 Tagen wurde {count}× „zu warm“ bei rechnerisch neutraler Behaglichkeit gemeldet. Haushalts-Bekleidungsannahme um {step} clo anheben (kühleres Ziel)? Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
+            "menu_options": {
+              "apply": "Vorgeschlagene Änderung übernehmen",
+              "dismiss": "Ablehnen (Muster 30 Tage stummschalten)"
+            }
+          }
+        }
+      }
+    },
+    "clo_suggestion_down": {
+      "title": "Poise: Bekleidungsannahme absenken?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: Bekleidungsannahme absenken?",
+            "description": "{name}: Binnen 30 Tagen wurde {count}× „zu kalt“ bei rechnerisch neutraler Behaglichkeit gemeldet. Haushalts-Bekleidungsannahme um {step} clo absenken (wärmeres Ziel)? Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
+            "menu_options": {
+              "apply": "Vorgeschlagene Änderung übernehmen",
+              "dismiss": "Ablehnen (Muster 30 Tage stummschalten)"
+            }
+          }
+        }
+      }
     }
   },
   "options": {

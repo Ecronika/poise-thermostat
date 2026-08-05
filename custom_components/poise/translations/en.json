@@ -520,6 +520,36 @@
     "season_hint_cool_only_in_heating": {
       "title": "Poise: cool-only mode in the heating season",
       "description": "{name}: the climate mode is fixed to cool-only, but the outdoor running mean ({t_rm} °C) has been at or below the cooling lockout ({threshold} °C) for days — cooling is gated anyway and heating may be needed. Consider switching the zone's climate mode. Purely advisory: Poise never switches it itself. The hint clears when the season or the mode changes."
+    },
+    "clo_suggestion_up": {
+      "title": "Poise: raise the clothing assumption?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: raise the clothing assumption?",
+            "description": "{name}: 'too warm' was reported {count}x at computed-neutral comfort within 30 days. Raise the household clothing assumption by {step} clo (cooler target)? Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
+            "menu_options": {
+              "apply": "Apply the suggested change",
+              "dismiss": "Dismiss (mute this pattern for 30 days)"
+            }
+          }
+        }
+      }
+    },
+    "clo_suggestion_down": {
+      "title": "Poise: lower the clothing assumption?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: lower the clothing assumption?",
+            "description": "{name}: 'too cold' was reported {count}x at computed-neutral comfort within 30 days. Lower the household clothing assumption by {step} clo (warmer target)? Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
+            "menu_options": {
+              "apply": "Apply the suggested change",
+              "dismiss": "Dismiss (mute this pattern for 30 days)"
+            }
+          }
+        }
+      }
     }
   }
 }
