@@ -42,6 +42,12 @@ class PoiseComfortFeedbackButton(CoordinatorEntity[PoiseCoordinator], ButtonEnti
     """One direction of the "too warm / too cold" feedback channel."""
 
     _attr_has_entity_name = True
+    # Like the window-bypass switch (P2-9): enabled by default because it is
+    # user-facing INPUT, not a diagnostic — a hidden feedback button collects
+    # nothing, and the ADR-0060-§3 tuning round lives on this statistic.
+    # Deliberately part of the lean default-entity contract
+    # (test_entity_defaults).
+    _attr_entity_registry_enabled_default = True
 
     def __init__(
         self, coordinator: PoiseCoordinator, entry: ConfigEntry, direction: str
