@@ -386,6 +386,9 @@ class ZoneRuntime:
         self.user.boost_prev_preset = hold.boost_prev_preset
         self.user.boost_expires_at = hold.boost_expires_at
         self.user.override_stats = hold.override_stats
+        self.user.feedback_stats = hold.feedback_stats  # ADR-0067 F1
+        self.user.suggestion_rejected_key = hold.suggestion_rejected_key  # L2
+        self.user.suggestion_rejected_at = hold.suggestion_rejected_at
         self.user.window_bypass = user.window_bypass
         if user.climate_mode is not None:
             self.user.climate_mode = user.climate_mode

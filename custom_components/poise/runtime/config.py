@@ -76,6 +76,7 @@ from ..const import (
     CONF_OVERRIDE_END_ON_PRESENCE,
     CONF_OVERRIDE_MAX_H,
     CONF_OVERRIDE_POLICY,
+    CONF_OVERRIDE_SUGGESTIONS,
     CONF_OVERRIDE_TIMER_H,
     CONF_PRESENCE_HOME,
     CONF_PRICE_EUR_KWH,
@@ -106,6 +107,7 @@ from ..const import (
     DEFAULT_OVERRIDE_END_ON_PRESENCE,
     DEFAULT_OVERRIDE_MAX_H,
     DEFAULT_OVERRIDE_POLICY,
+    DEFAULT_OVERRIDE_SUGGESTIONS,
     DEFAULT_OVERRIDE_TIMER_H,
     DEFAULT_PRICE_EUR_KWH,
     DEFAULT_PRICE_GAS_EUR_KWH,
@@ -298,6 +300,7 @@ class ZoneTuning:
     adopt_external_mode: bool  # IR remote -> manual mode-hold
     operative_input: bool  # ADR-0029 operative-temperature input mode
     room_profile: str  # ADR-0054 V2 met/clo profile (office/living/bedroom/kitchen)
+    override_suggestions: bool  # ADR-0060 L2 suggestion emission (opt-in, §3)
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneTuning:
@@ -409,6 +412,9 @@ class ZoneTuning:
             ),
             operative_input=bool(merged.get(CONF_OPERATIVE_INPUT, False)),
             room_profile=str(merged.get(CONF_ROOM_PROFILE, DEFAULT_ROOM_PROFILE)),
+            override_suggestions=bool(
+                merged.get(CONF_OVERRIDE_SUGGESTIONS, DEFAULT_OVERRIDE_SUGGESTIONS)
+            ),
         )
 
 

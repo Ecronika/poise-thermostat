@@ -77,6 +77,9 @@ class UserControlState:
             "boost_expires_at",
             "boost_prev_preset",
             "override_stats",
+            "feedback_stats",
+            "suggestion_rejected_key",
+            "suggestion_rejected_at",
         }
     )
 
@@ -98,6 +101,12 @@ class UserControlState:
     boost_expires_at: float | None = None
     boost_prev_preset: OverrideMode | None = None  # pre-Boost preset, restored
     override_stats: list[dict[str, Any]] = field(default_factory=list)  # §5 stats
+    # ADR-0067 F1: explicit comfort-feedback statistic (observe only, cap 50).
+    feedback_stats: list[dict[str, Any]] = field(default_factory=list)
+    # ADR-0060 L2: a rejected suggestion suppresses exactly that pattern key
+    # for 30 days — wall-clock stamped, restart-proof.
+    suggestion_rejected_key: str | None = None
+    suggestion_rejected_at: float | None = None
     last_adopt_log: str = ""  # transient: debounces the adoption-suppression log
 
 
@@ -311,6 +320,10 @@ class DiagnosticsRuntime:
     # after a restart recomputes it from the forecast cache.
     clo_forecast_key: str | None = None
     clo_forecast_day: float | None = None
+    # ADR-0060 §2: hysteresis anchor of the season-mode advisory — transient
+    # (T_rm re-raises the hint after a restart when still clearly beyond the
+    # threshold; inside the hysteresis band it simply clears).
+    season_hint_prev: str | None = None
 
 
 @dataclass(slots=True)
