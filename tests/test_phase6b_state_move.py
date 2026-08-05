@@ -182,6 +182,8 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # transient (T_rm re-raises it after a restart when still beyond the
     # raise threshold).
     ("diagnostics", "season_hint_prev"): "ADR-0060 §2 season-hint hysteresis",
+    # ADR-0067 §4: transient emission-slot memory of the conflict rule.
+    ("diagnostics", "pending_suggestion_family"): "ADR-0067 §4 suggestion slot",
     # ADR-0067 F1: comfort-feedback statistic — born on the group, persisted
     # via the codec snapshot (no coordinator proxy ever existed).
     ("user", "feedback_stats"): "ADR-0067 F1 comfort-feedback statistic",
@@ -189,6 +191,10 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # key for 30 days — must survive a restart.
     ("user", "suggestion_rejected_key"): "ADR-0060 L2 rejected pattern key",
     ("user", "suggestion_rejected_at"): "ADR-0060 L2 rejection wall stamp",
+    # ADR-0067 F2: own cool-down slot — a clo rejection must not overwrite a
+    # remembered L2 rejection (two independent suggestion families).
+    ("user", "clo_suggestion_rejected_key"): "ADR-0067 F2 rejected pattern key",
+    ("user", "clo_suggestion_rejected_at"): "ADR-0067 F2 rejection wall stamp",
 }
 
 

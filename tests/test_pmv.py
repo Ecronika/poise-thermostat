@@ -166,3 +166,27 @@ def test_bedroom_is_the_only_profile_outside_iso_validity() -> None:
     assert not pmv_validity(met=ROOM_PROFILES["bedroom"].met, clo=0.5)
     others = (p for k, p in ROOM_PROFILES.items() if k != "bedroom")
     assert all(pmv_validity(met=p.met, clo=0.5) for p in others)
+
+
+# --- ADR-0067 §3: household clo offset --------------------------------------
+
+
+def test_household_offset_shifts_the_prior_inside_bounds() -> None:
+    # T_rm 0 -> prior 0.818: +-0.2 stays comfortably inside the 0.4..1.2
+    # bounds, so the shift is exact there.
+    base = predictive_clo(0.0)
+    assert abs(predictive_clo(0.0, household_offset=0.2) - (base + 0.2)) <= 1e-9
+    assert abs(predictive_clo(0.0, household_offset=-0.2) - (base - 0.2)) <= 1e-9
+    # Default 0 is bit-identical to the unshifted prior.
+    assert predictive_clo(0.0, household_offset=0.0) == base
+
+
+def test_household_offset_is_clamped_by_the_prior_bounds() -> None:
+    # Summer floor 0.46 minus 0.3 would undershoot the 0.4 bound...
+    assert predictive_clo(30.0, household_offset=-0.3) == 0.4
+    # ...and the winter plateau 1.0 plus 0.3 would overshoot 1.2.
+    assert predictive_clo(-10.0, household_offset=0.3) == 1.2
+
+
+def test_household_offset_ignored_without_running_mean() -> None:
+    assert predictive_clo(None, household_offset=0.3) == 0.5  # fallback wins

@@ -99,6 +99,7 @@ def _options() -> dict[str, Any]:
         "comfort_base": 21.5,
         "room_profile": "bedroom",
         "override_suggestions": True,
+        "clo_offset": -0.2,
         "annual_heating_kwh": 9000,
         "actuator_dynamics": "fast_air",
         "compressor_guard": "off",
@@ -221,6 +222,7 @@ def test_realistic_tuning_parse() -> None:
     assert tuning.operative_input is True
     assert tuning.room_profile == "bedroom"  # ADR-0054 V2
     assert tuning.override_suggestions is True  # ADR-0060 L2, explicit opt-in
+    assert tuning.clo_offset == -0.2  # ADR-0067 household clo offset
 
 
 def test_realistic_hold_parse() -> None:
@@ -293,6 +295,7 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         # ADR-0060 §3: opt-in until the golden-replay threshold tuning ran;
         # the ADR's decided end state (default on) follows after that round.
         override_suggestions=False,
+        clo_offset=0.0,  # ADR-0067: no learned household bias by default
     )
 
 

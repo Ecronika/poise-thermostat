@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from custom_components.poise.control.feedback import (
     FEEDBACK_CAP,
+    CloSuggestion,
+    clo_suggestion_reason,
+    detect_feedback_pattern,
     feedback_mask_reason,
     record_feedback,
 )
@@ -93,3 +96,76 @@ def test_record_feedback_shape_and_cap() -> None:
         "phase": "comfort",
         "presence_level": "present",
     }
+
+
+# --- ADR-0067 F2: clo-offset suggestion from the feedback statistic ---------
+
+
+def _fb(days_ago: float, direction: str) -> dict[str, object]:
+    return {"ts": 1_700_000_000.0 - days_ago * 86400.0, "direction": direction}
+
+
+NOW = 1_700_000_000.0
+
+
+def test_five_cold_feedbacks_suggest_lowering_clo() -> None:
+    # "5x too cold at computed-neutral PMV -> lower the clothing assumption
+    # by 0.1 clo" (less clo assumed -> warmer target).
+    stats = [_fb(d, "cold") for d in (25.0, 20.0, 12.0, 5.0, 1.0)]
+    s = detect_feedback_pattern(stats, now_ts=NOW)
+    assert s == CloSuggestion(direction=-1, evidence=5)
+    assert s.key == "clo_offset:-1"
+
+
+def test_five_warm_feedbacks_suggest_raising_clo() -> None:
+    stats = [_fb(d, "warm") for d in (22.0, 15.0, 9.0, 4.0, 2.0)]
+    s = detect_feedback_pattern(stats, now_ts=NOW)
+    assert s is not None and (s.direction, s.evidence) == (1, 5)
+
+
+def test_too_few_or_stale_feedbacks_stay_silent() -> None:
+    stats = [_fb(d, "cold") for d in (35.0, 20.0, 12.0, 5.0, 1.0)]  # one stale
+    assert detect_feedback_pattern(stats, now_ts=NOW) is None
+
+
+def test_stronger_direction_wins_and_malformed_skipped() -> None:
+    stats = [_fb(d, "warm") for d in (28.0, 21.0, 14.0, 7.0, 3.0)]
+    stats += [_fb(d, "cold") for d in (26.0, 19.0, 13.0, 6.0, 2.0, 1.0)]  # 6 > 5
+    stats.append({"direction": "sideways", "ts": NOW})  # unknown direction
+    stats.append({"direction": "cold"})  # no ts
+    s = detect_feedback_pattern(stats, now_ts=NOW)
+    assert s is not None and (s.direction, s.evidence) == (-1, 6)
+
+
+def test_clo_suggestion_reason_precedence() -> None:
+    s = CloSuggestion(direction=-1, evidence=5)
+    kw = {"rejected_key": None, "rejected_at": None, "now_ts": NOW}
+    # No pattern at all.
+    assert (
+        clo_suggestion_reason(None, l2_pending=False, override_direction=None, **kw)
+        == "no_pattern"
+    )
+    # An open L2 comfort-base reading blocks the clo reading (ADR-0067 §4).
+    assert (
+        clo_suggestion_reason(s, l2_pending=True, override_direction=1, **kw)
+        == "l2_pending"
+    )
+    # Feedback "too cold" but overrides nudging DOWN: contradictory signals.
+    assert (
+        clo_suggestion_reason(s, l2_pending=False, override_direction=-1, **kw)
+        == "inconsistent_signals"
+    )
+    # A matching override pattern (up) is consistent -> emittable.
+    assert clo_suggestion_reason(s, l2_pending=False, override_direction=1, **kw) == ""
+    # A recent rejection of exactly this key suppresses for 30 days.
+    assert (
+        clo_suggestion_reason(
+            s,
+            l2_pending=False,
+            override_direction=None,
+            rejected_key="clo_offset:-1",
+            rejected_at=NOW - 5 * 86400.0,
+            now_ts=NOW,
+        )
+        == "rejected"
+    )

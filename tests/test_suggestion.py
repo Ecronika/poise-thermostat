@@ -8,6 +8,7 @@ from custom_components.poise.control.suggestion import (
     SUGGEST_REJECT_DAYS,
     OverrideSuggestion,
     detect_override_pattern,
+    resolve_suggestion_conflict,
     season_mode_hint,
     suggestion_suppressed,
 )
@@ -228,3 +229,37 @@ def test_hint_silent_on_auto_missing_trm_or_mode_switch() -> None:
         )
         is None
     )
+
+
+# --- ADR-0067 §4: conflict resolution between the two suggestion families ---
+
+
+def test_conflict_resolution_never_emits_two_families() -> None:
+    # Nothing pending.
+    assert resolve_suggestion_conflict(
+        l2_pending=False, clo_pending=False, open_family=None
+    ) == (False, False, None)
+    # Single family emits and claims the slot.
+    assert resolve_suggestion_conflict(
+        l2_pending=True, clo_pending=False, open_family=None
+    ) == (True, False, "override")
+    assert resolve_suggestion_conflict(
+        l2_pending=False, clo_pending=True, open_family=None
+    ) == (False, True, "clo")
+    # Fresh tie: the override reading wins (the stronger evidence).
+    assert resolve_suggestion_conflict(
+        l2_pending=True, clo_pending=True, open_family=None
+    ) == (True, False, "override")
+    # "und umgekehrt": an already-open clo suggestion is NOT displaced by a
+    # later L2 pattern...
+    assert resolve_suggestion_conflict(
+        l2_pending=True, clo_pending=True, open_family="clo"
+    ) == (False, True, "clo")
+    # ...and an open override suggestion keeps its slot symmetrically.
+    assert resolve_suggestion_conflict(
+        l2_pending=True, clo_pending=True, open_family="override"
+    ) == (True, False, "override")
+    # A vanished pattern releases the slot to the other family.
+    assert resolve_suggestion_conflict(
+        l2_pending=True, clo_pending=False, open_family="clo"
+    ) == (True, False, "override")

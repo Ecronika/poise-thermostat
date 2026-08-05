@@ -55,6 +55,8 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
             "feedback_stats",
             "suggestion_rejected_key",
             "suggestion_rejected_at",
+            "clo_suggestion_rejected_key",
+            "clo_suggestion_rejected_at",
         }
     ),
     ExternalOverrideRuntime: frozenset(
@@ -155,6 +157,8 @@ def test_default_values_match_coordinator_init() -> None:
     assert user.feedback_stats == []  # ADR-0067 F1
     assert user.suggestion_rejected_key is None  # ADR-0060 L2
     assert user.suggestion_rejected_at is None
+    assert user.clo_suggestion_rejected_key is None  # ADR-0067 F2
+    assert user.clo_suggestion_rejected_at is None
     assert user.last_adopt_log == ""
 
     ext = ExternalOverrideRuntime()

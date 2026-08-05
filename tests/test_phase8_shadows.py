@@ -538,6 +538,7 @@ _CLIMATE_KEY_ORDER = [
     "clo_source",
     "met_used",
     "pmv_valid",
+    "clo_offset",
 ]
 
 
@@ -552,10 +553,12 @@ def _climate_band(
     abs_w: float | None = 8.34,
     t_forecast_day: float | None = None,
     room_profile: str | None = None,
+    clo_offset: float = 0.0,
 ) -> dict[str, object]:
     return compose_climate_band(
         t_forecast_day=t_forecast_day,
         room_profile=room_profile,
+        clo_offset=clo_offset,
         heat_sp=21.0,
         cool_sp=26.0,
         room=22.0,
@@ -646,6 +649,7 @@ def test_compose_climate_band_matches_the_inline_kernels() -> None:
     assert diag["clo_source"] == "rm"
     assert diag["met_used"] == 1.2  # office default = historical assumption
     assert diag["pmv_valid"] is True
+    assert diag["clo_offset"] == 0.0  # no learned bias -> plain "rm" source
 
 
 def test_compose_climate_band_room_profile_shifts_met_and_clo() -> None:
@@ -668,6 +672,15 @@ def test_compose_climate_band_room_profile_shifts_met_and_clo() -> None:
     )
     assert diag["met_used"] == 1.1
     assert diag["clo_used"] == round(predictive_clo(18.0) + 0.21, 2)
+
+
+def test_compose_climate_band_household_offset_shifts_clo() -> None:
+    """ADR-0067 §3: the learned bias shifts the prior and is surfaced both as
+    its own key and as a clo_source suffix."""
+    diag = _climate_band(cool_ac=None, hvac_modes=["cool", "off"], clo_offset=0.2)
+    assert diag["clo_offset"] == 0.2
+    assert diag["clo_source"] == "rm+offset"
+    assert diag["clo_used"] == round(predictive_clo(18.0, household_offset=0.2), 2)
 
 
 def test_compose_climate_band_bedroom_pmv_flagged_not_validated() -> None:

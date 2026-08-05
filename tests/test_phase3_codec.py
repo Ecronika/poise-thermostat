@@ -97,6 +97,8 @@ EXPECTED_PAYLOAD_KEYS = (
     "feedback_stats",
     "suggestion_rejected_key",
     "suggestion_rejected_at",
+    "clo_suggestion_rejected_key",
+    "clo_suggestion_rejected_at",
     "override_reason",
     "last_written_sp",
     "prev_device_sp",
@@ -212,6 +214,8 @@ def _rich_state() -> codec.PersistedZoneState:
         feedback_stats=[{"direction": "cold", "ts": 123.0}],
         suggestion_rejected_key="comfort_base:+1",
         suggestion_rejected_at=NOW_WALL - 86400.0,
+        clo_suggestion_rejected_key="clo_offset:-1",
+        clo_suggestion_rejected_at=NOW_WALL - 43200.0,
         override_reason="device_adopt_setpoint",
         last_written_sp=20.0,
         prev_device_sp=20.5,
@@ -233,7 +237,7 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 36  # +0066 +0067 +0060-L2 keys
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 38  # +0066 +0067-F1/F2 +0060-L2
 
 
 def test_encode_values_match_save_payload_transforms() -> None:
@@ -270,6 +274,8 @@ def test_encode_values_match_save_payload_transforms() -> None:
     assert payload["feedback_stats"] is state.feedback_stats  # by reference
     assert payload["suggestion_rejected_key"] == "comfort_base:+1"
     assert payload["suggestion_rejected_at"] == NOW_WALL - 86400.0
+    assert payload["clo_suggestion_rejected_key"] == "clo_offset:-1"
+    assert payload["clo_suggestion_rejected_at"] == NOW_WALL - 43200.0
     assert payload["override_reason"] == "device_adopt_setpoint"
     assert payload["last_written_sp"] == 20.0
     assert payload["prev_device_sp"] == 20.5
@@ -341,6 +347,8 @@ def test_roundtrip_decode_encode_semantic_identity() -> None:
     assert ovr.feedback_stats == [{"direction": "cold", "ts": 123.0}]  # ADR-0067
     assert ovr.suggestion_rejected_key == "comfort_base:+1"  # ADR-0060 L2
     assert ovr.suggestion_rejected_at == NOW_WALL - 86400.0
+    assert ovr.clo_suggestion_rejected_key == "clo_offset:-1"  # ADR-0067 F2
+    assert ovr.clo_suggestion_rejected_at == NOW_WALL - 43200.0
     assert ovr.override_policy == "switchpoint"  # decoded, config-owned
 
     base = decoded.adoption_baselines
@@ -389,6 +397,8 @@ def test_minimal_v1_payload_decodes_to_defaults() -> None:
     assert ovr.feedback_stats == []
     assert ovr.suggestion_rejected_key is None
     assert ovr.suggestion_rejected_at is None
+    assert ovr.clo_suggestion_rejected_key is None
+    assert ovr.clo_suggestion_rejected_at is None
 
 
 def test_suggestion_rejection_decode_is_type_guarded() -> None:
@@ -400,6 +410,8 @@ def test_suggestion_rejection_decode_is_type_guarded() -> None:
     ovr = decoded.override_lifecycle
     assert ovr.suggestion_rejected_key is None
     assert ovr.suggestion_rejected_at is None
+    assert ovr.clo_suggestion_rejected_key is None
+    assert ovr.clo_suggestion_rejected_at is None
     assert decoded.adoption_baselines == codec.AdoptionBaselinesSection()
     learn = decoded.learning
     assert isinstance(learn.ekf, ThermalEKF) and learn.ekf.n_updates == 0
