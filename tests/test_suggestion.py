@@ -8,6 +8,7 @@ from custom_components.poise.control.suggestion import (
     SUGGEST_REJECT_DAYS,
     OverrideSuggestion,
     detect_override_pattern,
+    season_mode_hint,
     suggestion_suppressed,
 )
 
@@ -132,3 +133,98 @@ def test_suppression_is_per_pattern_key_for_30_days() -> None:
     assert suggestion_suppressed(key, key, old, NOW) is False
     # No rejection recorded.
     assert suggestion_suppressed(key, None, None, NOW) is False
+
+
+# --- ADR-0060 §2: advisory season-mode hint ---------------------------------
+
+
+def test_heat_only_in_cooling_season_raises_hint() -> None:
+    # T_rm at/above the heating lockout: heating is gated anyway, the fixed
+    # heat_only mode is season-wrong. T_rm's multi-day memory IS the
+    # "persistently" condition — no extra dwell timer.
+    assert (
+        season_mode_hint(
+            climate_mode="heat_only",
+            t_rm=22.0,
+            heat_max_outdoor=22.0,
+            cool_min_outdoor=16.0,
+            prev_hint=None,
+        )
+        == "heat_only_in_cooling"
+    )
+
+
+def test_cool_only_in_heating_season_raises_hint() -> None:
+    assert (
+        season_mode_hint(
+            climate_mode="cool_only",
+            t_rm=16.0,
+            heat_max_outdoor=22.0,
+            cool_min_outdoor=16.0,
+            prev_hint=None,
+        )
+        == "cool_only_in_heating"
+    )
+
+
+def test_hint_has_hysteresis_against_threshold_flapping() -> None:
+    kw = {
+        "climate_mode": "heat_only",
+        "heat_max_outdoor": 22.0,
+        "cool_min_outdoor": 16.0,
+    }
+    # Below the raise threshold nothing raises...
+    assert season_mode_hint(t_rm=21.5, prev_hint=None, **kw) is None
+    # ...but a raised hint holds until 1 K below it...
+    assert (
+        season_mode_hint(t_rm=21.5, prev_hint="heat_only_in_cooling", **kw)
+        == "heat_only_in_cooling"
+    )
+    # ...and clears beyond the hysteresis band.
+    assert season_mode_hint(t_rm=20.9, prev_hint="heat_only_in_cooling", **kw) is None
+    # Mirror for the cooling side.
+    kw2 = {
+        "climate_mode": "cool_only",
+        "heat_max_outdoor": 22.0,
+        "cool_min_outdoor": 16.0,
+    }
+    assert (
+        season_mode_hint(t_rm=16.8, prev_hint="cool_only_in_heating", **kw2)
+        == "cool_only_in_heating"
+    )
+    assert season_mode_hint(t_rm=17.1, prev_hint="cool_only_in_heating", **kw2) is None
+
+
+def test_hint_silent_on_auto_missing_trm_or_mode_switch() -> None:
+    # auto is never season-wrong; no T_rm degrades to silent; a stale prev
+    # hint for another mode does not stick.
+    assert (
+        season_mode_hint(
+            climate_mode="auto",
+            t_rm=30.0,
+            heat_max_outdoor=22.0,
+            cool_min_outdoor=16.0,
+            prev_hint="heat_only_in_cooling",
+        )
+        is None
+    )
+    assert (
+        season_mode_hint(
+            climate_mode="heat_only",
+            t_rm=None,
+            heat_max_outdoor=22.0,
+            cool_min_outdoor=16.0,
+            prev_hint="heat_only_in_cooling",
+        )
+        is None
+    )
+    assert (
+        season_mode_hint(
+            climate_mode="cool_only",
+            t_rm=21.5,
+            heat_max_outdoor=22.0,
+            cool_min_outdoor=16.0,
+            prev_hint="heat_only_in_cooling",  # wrong kind for this mode
+        )
+        is None
+    )

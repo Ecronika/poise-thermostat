@@ -178,6 +178,10 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # once per local day — transient, recomputed on the first tick of a run.
     ("diagnostics", "clo_forecast_key"): "ADR-0054 V1 clo forecast day latch key",
     ("diagnostics", "clo_forecast_day"): "ADR-0054 V1 clo forecast daily mean",
+    # ADR-0060 §2: hysteresis anchor of the advisory season-mode hint —
+    # transient (T_rm re-raises it after a restart when still beyond the
+    # raise threshold).
+    ("diagnostics", "season_hint_prev"): "ADR-0060 §2 season-hint hysteresis",
     # ADR-0067 F1: comfort-feedback statistic — born on the group, persisted
     # via the codec snapshot (no coordinator proxy ever existed).
     ("user", "feedback_stats"): "ADR-0067 F1 comfort-feedback statistic",
