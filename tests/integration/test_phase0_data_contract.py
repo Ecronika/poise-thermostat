@@ -222,6 +222,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "savings_kwh_month",
     "savings_pct",
     "schedule_state",
+    "season_hint",
     "seasonless_phase",
     "seasonless_rate",
     "sensor_frozen",
