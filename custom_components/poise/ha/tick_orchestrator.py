@@ -118,6 +118,7 @@ from ..const import (
 )
 from ..contracts import ActuatorCommand, ActuatorPath
 from ..control.dynamics import PROFILES
+from ..control.feedback import clo_suggestion_reason, detect_feedback_pattern
 from ..control.hub_aggregate import zone_heat_demand
 from ..control.lifecycle import resolve_safe_state
 from ..control.mpc_shadow import evaluate_shadow
@@ -129,6 +130,7 @@ from ..control.reference_offset import update_offset
 from ..control.scoring_expectation import model_expected_minutes
 from ..control.suggestion import (
     detect_override_pattern,
+    resolve_suggestion_conflict,
     season_mode_hint,
     suggestion_suppressed,
 )
@@ -1639,6 +1641,7 @@ class TickOrchestrator:
                 prev_vent_active=self._runtime.humidity.vent_active,
                 t_forecast_day=diag_rt.clo_forecast_day,
                 room_profile=self._c._room_profile,
+                clo_offset=self._c._clo_offset,
             )
             # Fold the advice latch + persisted surface mean back (ADR-0066).
             self._runtime.humidity.vent_active = bool(
@@ -2851,8 +2854,30 @@ class TickOrchestrator:
             prev_hint=self._runtime.diagnostics.season_hint_prev,
         )
         self._runtime.diagnostics.season_hint_prev = _season_hint
+        # ADR-0067 F2: the clo-family reading + the #4 conflict resolution
+        # (never two competing readings; an open family keeps its slot).
+        _fb_sugg = detect_feedback_pattern(
+            self._runtime.user.feedback_stats, now_ts=_sugg_now
+        )
+        _fb_reason = clo_suggestion_reason(
+            _fb_sugg,
+            l2_pending=False,  # the collision is resolved below with slot memory
+            override_direction=_sugg.direction if _sugg is not None else None,
+            rejected_key=self._runtime.user.clo_suggestion_rejected_key,
+            rejected_at=self._runtime.user.clo_suggestion_rejected_at,
+            now_ts=_sugg_now,
+        )
+        _emit_l2, _emit_clo, _family = resolve_suggestion_conflict(
+            l2_pending=_sugg is not None and not _sugg_suppressed,
+            clo_pending=_fb_reason == "",
+            open_family=self._runtime.diagnostics.pending_suggestion_family,
+        )
+        self._runtime.diagnostics.pending_suggestion_family = _family
+        if _fb_reason == "" and not _emit_clo:
+            _fb_reason = "l2_pending"
         try:
-            self._c._sync_suggestion_issue(_sugg, _sugg_suppressed)
+            self._c._sync_suggestion_issue(_sugg, _sugg_suppressed or not _emit_l2)
+            self._c._sync_clo_suggestion_issue(_fb_sugg if _emit_clo else None)
             self._c._sync_season_hint_issue(_season_hint)
         except Exception:  # noqa: BLE001 - suggestion glue must never break the tick
             self._log.debug("Poise suggestion issue sync failed", exc_info=True)
@@ -2956,6 +2981,10 @@ class TickOrchestrator:
             "suggestion_evidence": _sugg.evidence if _sugg else 0,
             "suggestion_suppressed": _sugg_suppressed,
             "season_hint": _season_hint,
+            # ADR-0067 F2: the clo-family reading ("" reason = emittable).
+            "clo_suggestion_direction": _fb_sugg.direction if _fb_sugg else None,
+            "clo_suggestion_evidence": _fb_sugg.evidence if _fb_sugg else 0,
+            "clo_suggestion_reason": _fb_reason,
             "boost_expires_at": _iso_utc(self._runtime.user.boost_expires_at),
             "override_clamped": override_clamped,
             "cover_predicted_peak": round(_cover_peak, 1),
