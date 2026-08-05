@@ -93,7 +93,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0057](ADR-0057-Card-Layout-Konfiguration.md) | Card-Layout & Konfiguration (Dichte, Bedienung dial/buttons/none, Abschnitte, Schimmel-Tick, UI-Editor) | Implementiert (v0.138.0) |
 | [0058](ADR-0058-Presence-Kopplung.md) | Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco) | In Arbeit (70 %) |
 | [0059](ADR-0059-Override-Lebenszyklus.md) | Override-Lebenszyklus — Gültigkeit, Rückkehr, Feedback, L1-Erfassung (manuelle Eingriffe) | Implementiert (v0.163.0) |
-| [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | In Arbeit (L2, Emission opt-in) |
+| [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | In Arbeit (L2 + §2, Emission opt-in) |
 | [0061](ADR-0061-Kuehlkante-Anwesenheit-vs-FreeRunning.md) | Kühlkante — fest bei Anwesenheit, adaptiv nur free-running | Implementiert (v0.165.0) |
 | [0062](ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md) | Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden | Implementiert (rückwirkend dokumentiert) |
 | [0063](ADR-0063-Tick-Entkopplung-Datei-und-Wetter-IO.md) | Datei-/Wetter-I/O aus dem Tick-Lock — und was `tick_ms` danach misst | Implementiert (v0.179.0) |
