@@ -93,14 +93,14 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0057](ADR-0057-Card-Layout-Konfiguration.md) | Card-Layout & Konfiguration (Dichte, Bedienung dial/buttons/none, Abschnitte, Schimmel-Tick, UI-Editor) | Implementiert (v0.138.0) |
 | [0058](ADR-0058-Presence-Kopplung.md) | Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco) | In Arbeit (70 %) |
 | [0059](ADR-0059-Override-Lebenszyklus.md) | Override-Lebenszyklus — Gültigkeit, Rückkehr, Feedback, L1-Erfassung (manuelle Eingriffe) | Implementiert (v0.163.0) |
-| [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | Vorgeschlagen |
+| [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | In Arbeit (L2, Emission opt-in) |
 | [0061](ADR-0061-Kuehlkante-Anwesenheit-vs-FreeRunning.md) | Kühlkante — fest bei Anwesenheit, adaptiv nur free-running | Implementiert (v0.165.0) |
 | [0062](ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md) | Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden | Implementiert (rückwirkend dokumentiert) |
 | [0063](ADR-0063-Tick-Entkopplung-Datei-und-Wetter-IO.md) | Datei-/Wetter-I/O aus dem Tick-Lock — und was `tick_ms` danach misst | Implementiert (v0.179.0) |
 | [0064](ADR-0064-Persistenz-Checkpoint-am-Tickende.md) | Persistenz-Checkpoint am Tick-Ende — ein Zustand, eine Momentaufnahme | Implementiert (v0.179.0) |
 | [0065](ADR-0065-Fehlergrenzen-Diagnose-Segmente.md) | Fehlergrenzen — eine Grenze je Segment statt zwei Sammel-Domänen | Implementiert (v0.179.0) |
 | [0066](ADR-0066-Feuchte-Achse-Trockenheit-Lueftung-Obergrenze.md) | Feuchte-Achse — Trockenheits-Bewertung (g/m³), Lüftungs-Empfehlung, schimmelsichere Feuchte-Obergrenze | In Arbeit (90 %) |
-| [0067](ADR-0067-Haushalts-clo-Offset-Feedback-Vorschlag.md) | Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4) | Vorgeschlagen (Entwurf) |
+| [0067](ADR-0067-Haushalts-clo-Offset-Feedback-Vorschlag.md) | Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4) | In Arbeit (F1 umgesetzt) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
