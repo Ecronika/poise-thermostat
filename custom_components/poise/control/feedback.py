@@ -12,9 +12,18 @@ behaviour and feeds nothing.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
+from .suggestion import suggestion_suppressed
+
 FEEDBACK_CAP = 50
+# ADR-0067 F2: the deliberately conservative suggestion gate.
+CLO_SUGGEST_MIN_EVENTS = 5
+CLO_SUGGEST_WINDOW_DAYS = 30.0
+CLO_SUGGEST_STEP = 0.1  # per-suggestion step; total config offset |x| <= 0.3
+
+_DAY_S = 86400.0
 # The anticipation-extreme-day mask (research 2026-08 §9): while the forecast
 # blend is fighting a warned heat/cold episode, feedback reflects the episode.
 EXTREME_DAY_DELTA_K = 8.0
