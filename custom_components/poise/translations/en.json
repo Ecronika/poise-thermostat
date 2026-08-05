@@ -216,12 +216,14 @@
               "override_end_on_presence_change": "End on home presence change",
               "adopt_external_setpoint": "Adopt device-side setpoint changes as a hold",
               "adopt_external_mode": "Adopt device-side mode changes as a hold",
-              "boost_duration_min": "Boost duration (min)"
+              "boost_duration_min": "Boost duration (min)",
+              "override_suggestions": "Suggest tuning from repeated manual changes"
             },
             "data_description": {
               "override_policy": "When a manual setpoint returns to automatic.",
               "adopt_external_setpoint": "Only adopted when it can be told apart from an echo of Poise's own write: a prior write is needed as a baseline (persisted, so it survives a restart — it is only missing until Poise has written once), and a change within 120 s of one counts as its echo. Suppressed while the device's own schedule runs. The resulting hold is still clamped by window/frost/mould and the comfort band. Changing this option takes effect only after the zone is reloaded or Home Assistant restarts.",
-              "adopt_external_mode": "Same baseline and 120 s echo conditions as the setpoint. Not adopted while a window is open or sensors are frozen, or for modes the device does not support (incl. heat_cool). Fan speed, swing and device-side presets are never adopted. Changing this option takes effect only after the zone is reloaded or Home Assistant restarts."
+              "adopt_external_mode": "Same baseline and 120 s echo conditions as the setpoint. Not adopted while a window is open or sensors are frozen, or for modes the device does not support (incl. heat_cool). Fan speed, swing and device-side presets are never adopted. Changing this option takes effect only after the zone is reloaded or Home Assistant restarts.",
+              "override_suggestions": "After at least 3 same-direction manual nudges (>= 0.5 K, same schedule phase, 14 days) Poise raises a visible suggestion (repair issue) to adjust the comfort base or the comfort window. Nothing is ever changed silently. Off by default until the detection thresholds finished field tuning."
             }
           }
         }
@@ -277,12 +279,28 @@
         "bedroom": "Bedroom (resting)",
         "kitchen": "Kitchen (housework)"
       }
+    },
+    "feedback_direction": {
+      "options": {
+        "warm": "Too warm",
+        "cold": "Too cold"
+      }
     }
   },
   "services": {
     "resume_schedule": {
       "name": "Resume schedule",
       "description": "Return manual holds to automatic control."
+    },
+    "comfort_feedback": {
+      "name": "Comfort feedback",
+      "description": "Record one explicit 'too warm' or 'too cold' observation for the household clothing assumption (observe-only; unsuitable situations are discarded).",
+      "fields": {
+        "direction": {
+          "name": "Direction",
+          "description": "How the room currently feels."
+        }
+      }
     }
   },
   "entity": {
@@ -363,6 +381,14 @@
       "window_bypass": {
         "name": "Ignore open-window reaction"
       }
+    },
+    "button": {
+      "too_warm": {
+        "name": "Too warm"
+      },
+      "too_cold": {
+        "name": "Too cold"
+      }
     }
   },
   "issues": {
@@ -441,6 +467,59 @@
     "heating_failure": {
       "title": "Heating failure — {zone}",
       "description": "{zone} is not warming up despite a heating demand. Check the TRV/valve, the radiator, or the boiler. Poise keeps commanding heat; this notice clears automatically once the room warms."
+    },
+    "override_suggestion_base_up": {
+      "title": "Poise: raise the comfort base?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: raise the comfort base?",
+            "description": "{name}: the setpoint was manually raised {count}x by at least 0.5 K within 14 days. Raise the comfort base by {step} K? Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
+            "menu_options": {
+              "apply": "Apply the suggested change",
+              "dismiss": "Dismiss (mute this pattern for 30 days)"
+            }
+          }
+        }
+      }
+    },
+    "override_suggestion_base_down": {
+      "title": "Poise: lower the comfort base?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: lower the comfort base?",
+            "description": "{name}: the setpoint was manually lowered {count}x by at least 0.5 K within 14 days. Lower the comfort base by {step} K? Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
+            "menu_options": {
+              "apply": "Apply the suggested change",
+              "dismiss": "Dismiss (mute this pattern for 30 days)"
+            }
+          }
+        }
+      }
+    },
+    "override_suggestion_earlier": {
+      "title": "Poise: start the comfort window earlier?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: start the comfort window earlier?",
+            "description": "{name}: during setback the setpoint was manually raised {count}x within 14 days. Start the comfort window {step} min earlier? Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
+            "menu_options": {
+              "apply": "Apply the suggested change",
+              "dismiss": "Dismiss (mute this pattern for 30 days)"
+            }
+          }
+        }
+      }
+    },
+    "season_hint_heat_only_in_cooling": {
+      "title": "Poise: heat-only mode in the cooling season",
+      "description": "{name}: the climate mode is fixed to heat-only, but the outdoor running mean ({t_rm} °C) has been at or above the heating lockout ({threshold} °C) for days — heating is gated anyway and cooling may be needed. Consider switching the zone's climate mode. Purely advisory: Poise never switches it itself. The hint clears when the season or the mode changes."
+    },
+    "season_hint_cool_only_in_heating": {
+      "title": "Poise: cool-only mode in the heating season",
+      "description": "{name}: the climate mode is fixed to cool-only, but the outdoor running mean ({t_rm} °C) has been at or below the cooling lockout ({threshold} °C) for days — cooling is gated anyway and heating may be needed. Consider switching the zone's climate mode. Purely advisory: Poise never switches it itself. The hint clears when the season or the mode changes."
     }
   }
 }

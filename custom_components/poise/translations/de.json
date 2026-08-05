@@ -186,6 +186,14 @@
       "window_bypass": {
         "name": "Fenster-Reaktion ignorieren"
       }
+    },
+    "button": {
+      "too_warm": {
+        "name": "Zu warm"
+      },
+      "too_cold": {
+        "name": "Zu kalt"
+      }
     }
   },
   "issues": {
@@ -264,6 +272,59 @@
     "heating_failure": {
       "title": "Heizausfall — {zone}",
       "description": "{zone} wird trotz Heizanforderung nicht wärmer. Prüfe das TRV/Ventil, den Heizkörper oder den Kessel. Poise fordert weiter Wärme an; dieser Hinweis verschwindet automatisch, sobald der Raum wärmer wird."
+    },
+    "override_suggestion_base_up": {
+      "title": "Poise: Komfortbasis anheben?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: Komfortbasis anheben?",
+            "description": "{name}: Der Sollwert wurde binnen 14 Tagen {count}× um mindestens 0,5 K manuell angehoben. Komfortbasis um {step} K anheben? Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
+            "menu_options": {
+              "apply": "Vorgeschlagene Änderung übernehmen",
+              "dismiss": "Ablehnen (Muster 30 Tage stummschalten)"
+            }
+          }
+        }
+      }
+    },
+    "override_suggestion_base_down": {
+      "title": "Poise: Komfortbasis absenken?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: Komfortbasis absenken?",
+            "description": "{name}: Der Sollwert wurde binnen 14 Tagen {count}× um mindestens 0,5 K manuell abgesenkt. Komfortbasis um {step} K absenken? Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
+            "menu_options": {
+              "apply": "Vorgeschlagene Änderung übernehmen",
+              "dismiss": "Ablehnen (Muster 30 Tage stummschalten)"
+            }
+          }
+        }
+      }
+    },
+    "override_suggestion_earlier": {
+      "title": "Poise: Komfortfenster früher beginnen?",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: Komfortfenster früher beginnen?",
+            "description": "{name}: Während der Absenkung wurde der Sollwert binnen 14 Tagen {count}× manuell angehoben. Komfortfenster {step} min früher beginnen? Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
+            "menu_options": {
+              "apply": "Vorgeschlagene Änderung übernehmen",
+              "dismiss": "Ablehnen (Muster 30 Tage stummschalten)"
+            }
+          }
+        }
+      }
+    },
+    "season_hint_heat_only_in_cooling": {
+      "title": "Poise: Nur-Heizen-Modus in der Kühlsaison",
+      "description": "{name}: Der Klima-Modus steht fest auf Nur-Heizen, aber das Außen-Laufmittel ({t_rm} °C) liegt seit Tagen auf/über der Heiz-Sperrgrenze ({threshold} °C) — Heizen ist ohnehin gesperrt, Kühlen könnte nötig sein. Klima-Modus der Zone umstellen? Rein beratend: Poise stellt nie selbst um. Der Hinweis verschwindet, sobald Saison oder Modus wechseln."
+    },
+    "season_hint_cool_only_in_heating": {
+      "title": "Poise: Nur-Kühlen-Modus in der Heizsaison",
+      "description": "{name}: Der Klima-Modus steht fest auf Nur-Kühlen, aber das Außen-Laufmittel ({t_rm} °C) liegt seit Tagen auf/unter der Kühl-Sperrgrenze ({threshold} °C) — Kühlen ist ohnehin gesperrt, Heizen könnte nötig sein. Klima-Modus der Zone umstellen? Rein beratend: Poise stellt nie selbst um. Der Hinweis verschwindet, sobald Saison oder Modus wechseln."
     }
   },
   "options": {
@@ -374,12 +435,14 @@
               "override_end_on_presence_change": "Bei Anwesenheitswechsel (Haus) beenden",
               "adopt_external_setpoint": "Geräteseitige Sollwertänderung als Halt übernehmen",
               "adopt_external_mode": "Geräteseitige Modusänderung als Halt übernehmen",
-              "boost_duration_min": "Boost-Dauer (Min.)"
+              "boost_duration_min": "Boost-Dauer (Min.)",
+              "override_suggestions": "Vorschläge aus wiederholten manuellen Eingriffen"
             },
             "data_description": {
               "override_policy": "Wann ein manueller Sollwert zur Automatik zurückkehrt.",
               "adopt_external_setpoint": "Wird nur übernommen, wenn sie sich vom Echo des eigenen Schreibvorgangs unterscheiden lässt: ein vorheriger Schreibvorgang dient als Vergleichswert (wird mitgespeichert und übersteht damit einen Neustart — er fehlt nur, bis Poise einmal geschrieben hat), und eine Änderung binnen 120 s danach gilt als dessen Echo. Unterdrückt, solange die geräteeigene Zeitschaltuhr läuft. Der entstehende Halt wird weiterhin von Fenster/Frost/Schimmel und vom Komfortband geklemmt. Eine Änderung dieser Option wird erst nach dem Neuladen der Zone oder einem Neustart von Home Assistant wirksam.",
-              "adopt_external_mode": "Gleiche Vergleichswert- und 120-s-Echo-Bedingungen wie beim Sollwert. Keine Übernahme bei offenem Fenster, eingefrorener Sensorik oder für Modi, die das Gerät nicht beherrscht (inkl. heat_cool). Lüfterstufe, Swing und geräteseitige Presets werden nie übernommen. Eine Änderung dieser Option wird erst nach dem Neuladen der Zone oder einem Neustart von Home Assistant wirksam."
+              "adopt_external_mode": "Gleiche Vergleichswert- und 120-s-Echo-Bedingungen wie beim Sollwert. Keine Übernahme bei offenem Fenster, eingefrorener Sensorik oder für Modi, die das Gerät nicht beherrscht (inkl. heat_cool). Lüfterstufe, Swing und geräteseitige Presets werden nie übernommen. Eine Änderung dieser Option wird erst nach dem Neuladen der Zone oder einem Neustart von Home Assistant wirksam.",
+              "override_suggestions": "Nach mindestens 3 gleichgerichteten manuellen Eingriffen (≥ 0,5 K, gleiche Zeitplan-Phase, 14 Tage) erzeugt Poise einen sichtbaren Vorschlag (Reparatur-Hinweis), die Komfortbasis oder das Komfortfenster anzupassen. Es wird nie still geändert. Standardmäßig aus, bis die Erkennungsschwellen feld-kalibriert sind."
             }
           }
         }
@@ -435,12 +498,28 @@
         "bedroom": "Schlafzimmer (ruhend)",
         "kitchen": "Küche (Hausarbeit)"
       }
+    },
+    "feedback_direction": {
+      "options": {
+        "warm": "Zu warm",
+        "cold": "Zu kalt"
+      }
     }
   },
   "services": {
     "resume_schedule": {
       "name": "Zeitplan fortsetzen",
       "description": "Manuelle Eingriffe beenden und zur automatischen Regelung zurückkehren."
+    },
+    "comfort_feedback": {
+      "name": "Behaglichkeits-Feedback",
+      "description": "Eine explizite „zu warm“/„zu kalt“-Beobachtung für die Haushalts-Bekleidungsannahme erfassen (nur beobachtend; ungeeignete Situationen werden verworfen).",
+      "fields": {
+        "direction": {
+          "name": "Richtung",
+          "description": "Wie sich der Raum gerade anfühlt."
+        }
+      }
     }
   }
 }
