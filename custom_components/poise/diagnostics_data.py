@@ -71,8 +71,12 @@ def build_diagnostics(
     # It carries only ts/direction/delta/phase/presence_level (no entity ids ->
     # no redaction); lift it out of the tick so it is not also dumped under data.
     override_stats = tick.pop("override_stats", []) if tick is not None else []
+    # ADR-0067 F1: same lift-out for the comfort-feedback statistic (only
+    # ts/direction/pmv-context values, no entity ids -> no redaction).
+    feedback_stats = tick.pop("feedback_stats", []) if tick is not None else []
     return {
         "config": redact(config, redact_keys),
         "data": (redact(tick, coordinator_redact_keys) if tick is not None else None),
         "override_stats": override_stats,
+        "feedback_stats": feedback_stats,
     }

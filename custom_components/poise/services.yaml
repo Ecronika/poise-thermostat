@@ -7,3 +7,22 @@ resume_schedule:
     entity:
       integration: poise
       domain: climate
+
+# ADR-0067 F1: fold one explicit comfort feedback ("too warm"/"too cold") into
+# the observe-only statistic of the targeted room zones. Masked situations
+# (window open, active hold, setback/absent, frozen sensors, invalid PMV,
+# extreme day, far-from-neutral PMV) are discarded.
+comfort_feedback:
+  target:
+    entity:
+      integration: poise
+      domain: climate
+  fields:
+    direction:
+      required: true
+      selector:
+        select:
+          options:
+            - "warm"
+            - "cold"
+          translation_key: feedback_direction

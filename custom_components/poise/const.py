@@ -177,7 +177,7 @@ CONF_OVERRIDE_TIMER_H: Final = "override_timer_h"
 CONF_OVERRIDE_MAX_H: Final = "override_max_h"
 CONF_OVERRIDE_END_ON_PRESENCE: Final = "override_end_on_presence_change"
 CONF_BOOST_DURATION_MIN: Final = "boost_duration_min"
-CONF_OVERRIDE_SUGGESTIONS: Final = "override_suggestions"  # L2 (v2), latent
+CONF_OVERRIDE_SUGGESTIONS: Final = "override_suggestions"  # ADR-0060 L2
 OVERRIDE_POLICY_SCHEDULE: Final = "schedule"
 OVERRIDE_POLICY_TIMER: Final = "timer"
 OVERRIDE_POLICY_PERMANENT: Final = "permanent"
@@ -188,7 +188,11 @@ DEFAULT_OVERRIDE_TIMER_H: Final = 2.0
 DEFAULT_OVERRIDE_MAX_H: Final = 8.0
 DEFAULT_OVERRIDE_END_ON_PRESENCE: Final = True
 DEFAULT_BOOST_DURATION_MIN: Final = 60.0
-DEFAULT_OVERRIDE_SUGGESTIONS: Final = True
+# ADR-0060 §3: opt-in (False) until the golden-replay threshold-tuning round
+# confirmed a near-zero false-positive rate on field traces; the ADR's decided
+# end state (default ON) is the flip AFTER that round — detection/diagnostics
+# run regardless, only the repair-issue emission is gated.
+DEFAULT_OVERRIDE_SUGGESTIONS: Final = False
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30

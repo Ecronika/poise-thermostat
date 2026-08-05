@@ -101,6 +101,38 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
             await coordinator.async_request_refresh()
 
     hass.services.async_register(DOMAIN, "resume_schedule", _resume_schedule)
+
+    # ADR-0067 F1: poise.comfort_feedback — fold one explicit "too warm/cold"
+    # observation into the targeted room zones' feedback statistic (or every
+    # room zone without a target). Observe-only; same defensive entry walk as
+    # resume_schedule.
+    import voluptuous as vol
+
+    async def _comfort_feedback(call: ServiceCall) -> None:
+        direction = call.data["direction"]
+        has_target = any(call.data.get(key) for key in _resume_target_keys)
+        referenced = (
+            await async_extract_config_entry_ids(hass, call) if has_target else set()
+        )
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            if _is_system(entry):
+                continue
+            if has_target and entry.entry_id not in referenced:
+                continue
+            coordinator = getattr(entry, "runtime_data", None)
+            if coordinator is None:
+                continue
+            coordinator.submit_comfort_feedback(direction)
+
+    hass.services.async_register(
+        DOMAIN,
+        "comfort_feedback",
+        _comfort_feedback,
+        schema=vol.Schema(
+            {vol.Required("direction"): vol.In(["warm", "cold"])},
+            extra=vol.ALLOW_EXTRA,  # HA target keys ride along
+        ),
+    )
     return True
 
 
@@ -202,7 +234,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(
-        entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
+        entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
     )
     # AR-23: attach the state/stop/options listeners only AFTER the platforms set
     # up successfully. Registering them before the forward would leave dangling
@@ -327,7 +359,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return bool(unloaded_sys)
 
     unloaded = await hass.config_entries.async_unload_platforms(
-        entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
+        entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
     )
     if unloaded:
         # final save + repair-issue/notification cleanup (no learning loss)

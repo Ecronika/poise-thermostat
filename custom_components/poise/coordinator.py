@@ -46,6 +46,7 @@ from .control.override import (
     OverrideConfig,
     OverrideMode,
 )
+from .control.suggestion import OverrideSuggestion
 from .control.tick_budget import TickBudget
 from .control.window_auto import (
     WindowAutoConfig,
@@ -419,6 +420,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comp_mode_hold_opt = tuning.comp_mode_hold_opt
         # ADR-0054 V2: met/clo room profile for the PMV shadow (hot-applied).
         self._room_profile = tuning.room_profile
+        # ADR-0060 L2: gate for the suggestion EMISSION (detection always runs).
+        self._override_suggestions = tuning.override_suggestions
         self._trace_enabled = tuning.trace_enabled
         # ADR-0066 B.5: opt-in ventilation-advice notification (hot-applied).
         self._vent_notify = tuning.vent_notify
@@ -598,6 +601,151 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         )
         if result.dirty:
             self._zone_runtime.dirty = True
+
+    def submit_comfort_feedback(self, direction: str) -> None:
+        """Fold one explicit "too warm/cold" feedback (ADR-0067 F1, observe-only).
+
+        Context comes from the last published tick; masked feedback is
+        DISCARDED with a debug log (the mask reasons are the ADR-0067 §F1
+        list), accepted feedback lands in the persisted L1-style statistic
+        and is checkpointed at the next tick end (ADR-0064).
+        """
+        from .control.feedback import feedback_mask_reason, record_feedback
+
+        data = self.data or {}
+        user = self._zone_runtime.user
+
+        def _num(key: str) -> float | None:
+            v = data.get(key)
+            return float(v) if isinstance(v, (int, float)) else None
+
+        reason = feedback_mask_reason(
+            window_open=bool(data.get("window_open")),
+            override_active=(
+                user.override is not None or user.mode_override is not None
+            ),
+            is_comfort=data.get("schedule_state") == "comfort",
+            occupied=bool(data.get("occupied")),
+            frozen=bool(data.get("sensor_frozen")),
+            pmv_valid=bool(data.get("pmv_valid")),
+            pmv=_num("pmv"),
+            t_rm=_num("t_rm"),
+            t_forecast_day=self._zone_runtime.diagnostics.clo_forecast_day,
+        )
+        if reason is not None:
+            _LOGGER.debug(
+                "Poise %s: comfort feedback '%s' discarded (%s)",
+                self.zone_name,
+                direction,
+                reason,
+            )
+            return
+        record_feedback(
+            user.feedback_stats,
+            direction=direction,
+            now_ts=_utcnow_ts(),
+            pmv=_num("pmv"),
+            ppd=_num("ppd"),
+            clo_used=_num("clo_used"),
+            met_used=_num("met_used"),
+            clo_source=(
+                str(data.get("clo_source")) if data.get("clo_source") else None
+            ),
+            phase="comfort",
+            presence_level=str(data.get("presence_level", "")),
+        )
+        self._zone_runtime.dirty = True
+
+    def record_suggestion_decision(self, key: str) -> None:
+        """Stamp the 30-day cool-down for one pattern key (ADR-0060 L2).
+
+        Used for a REJECTION and equally after an ACCEPT: the old evidence
+        stays in the L1 statistic, so without the stamp the just-applied
+        pattern would immediately re-raise itself.
+        """
+        user = self._zone_runtime.user
+        user.suggestion_rejected_key = key
+        user.suggestion_rejected_at = _utcnow_ts()
+        self._zone_runtime.dirty = True
+
+    def _sync_suggestion_issue(
+        self, suggestion: OverrideSuggestion | None, suppressed: bool
+    ) -> None:
+        """Mirror the detected L2 pattern into a fixable repair issue.
+
+        Emission is gated on the ``override_suggestions`` opt-in (§3: default
+        off until the golden-replay tuning round); the issue disappears as
+        soon as the pattern does. ``async_create_issue`` is idempotent per
+        tick.
+        """
+        from homeassistant.helpers import issue_registry as ir
+
+        issue_id = f"override_suggestion_{self._entry_id}"
+        if not (self._override_suggestions and suggestion and not suppressed):
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        if suggestion.kind == "comfort_base":
+            translation_key = (
+                "override_suggestion_base_up"
+                if suggestion.direction > 0
+                else "override_suggestion_base_down"
+            )
+            step = f"{suggestion.step_k:.1f}"
+        else:
+            translation_key = "override_suggestion_earlier"
+            step = str(suggestion.step_min)
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=translation_key,
+            translation_placeholders={
+                "name": self.zone_name,
+                "count": str(suggestion.evidence),
+                "step": step,
+            },
+            data={
+                "entry_id": self._entry_id,
+                "kind": suggestion.kind,
+                "direction": suggestion.direction,
+                "key": suggestion.key,
+            },
+        )
+
+    def _sync_season_hint_issue(self, hint: str | None) -> None:
+        """ADR-0060 §2: mirror the season-mode advisory into a repair issue.
+
+        NON-fixable (purely advisory — the user switches the mode, never
+        Poise); same trust rules as L2: gated on the ``override_suggestions``
+        opt-in, and the issue disappears as soon as the condition does.
+        """
+        from homeassistant.helpers import issue_registry as ir
+
+        issue_id = f"season_mode_hint_{self._entry_id}"
+        if not (self._override_suggestions and hint):
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        threshold = (
+            self._heat_max_outdoor
+            if hint == "heat_only_in_cooling"
+            else self._cool_min_outdoor
+        )
+        t_rm = (self.data or {}).get("t_rm")
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=f"season_hint_{hint}",
+            translation_placeholders={
+                "name": self.zone_name,
+                "t_rm": str(t_rm) if t_rm is not None else "?",
+                "threshold": f"{threshold:.0f}",
+            },
+        )
 
     @property
     def preset(self) -> OverrideMode:
@@ -907,6 +1055,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 boost_expires_at=self._zone_runtime.user.boost_expires_at,
                 boost_prev_preset=self._zone_runtime.user.boost_prev_preset,
                 override_stats=self._zone_runtime.user.override_stats,
+                feedback_stats=self._zone_runtime.user.feedback_stats,
+                suggestion_rejected_key=self._zone_runtime.user.suggestion_rejected_key,
+                suggestion_rejected_at=self._zone_runtime.user.suggestion_rejected_at,
                 override_reason=self._zone_runtime.user.override_reason,
                 last_written_sp=self._zone_runtime.external.last_written_sp,
                 prev_device_sp=self._zone_runtime.external.prev_device_sp,
