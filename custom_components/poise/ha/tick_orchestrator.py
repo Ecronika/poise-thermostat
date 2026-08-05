@@ -127,6 +127,11 @@ from ..control.override import OverrideMode, hold_ends_at_preheat, mode_comfort_
 from ..control.pi_shadow import evaluate_pi_shadow
 from ..control.reference_offset import update_offset
 from ..control.scoring_expectation import model_expected_minutes
+from ..control.suggestion import (
+    detect_override_pattern,
+    season_mode_hint,
+    suggestion_suppressed,
+)
 from ..control.tick_resolve import (
     external_feed_due,
     frost_rescue_target,
@@ -2821,6 +2826,36 @@ class TickOrchestrator:
         _cover_reason, shadow_objs = shadow.cover_reason, shadow.shadow_objs
         valve_health, closing_steps = valve.valve_health, valve.closing_steps
         idle_steps = valve.idle_steps
+        # ADR-0060 L2 SHADOW: the suggestion the L1 statistic would raise —
+        # always computed and published (the §3 field-tuning round needs the
+        # would-be suggestions); the repair-issue EMISSION alone is opt-in
+        # gated inside _sync_suggestion_issue.
+        _sugg_now = dt_util.utcnow().timestamp()
+        _sugg = detect_override_pattern(
+            self._runtime.user.override_stats, now_ts=_sugg_now
+        )
+        _sugg_suppressed = _sugg is not None and suggestion_suppressed(
+            _sugg.key,
+            self._runtime.user.suggestion_rejected_key,
+            self._runtime.user.suggestion_rejected_at,
+            _sugg_now,
+        )
+        # ADR-0060 §2: advisory season-mode hint — the zone's own lockout
+        # thresholds define "season-wrong", T_rm's multi-day memory is the
+        # "persistently"; hysteresis anchor is transient runtime state.
+        _season_hint = season_mode_hint(
+            climate_mode=self._runtime.user.climate_mode,
+            t_rm=t_rm_eff,
+            heat_max_outdoor=self._c._heat_max_outdoor,
+            cool_min_outdoor=self._c._cool_min_outdoor,
+            prev_hint=self._runtime.diagnostics.season_hint_prev,
+        )
+        self._runtime.diagnostics.season_hint_prev = _season_hint
+        try:
+            self._c._sync_suggestion_issue(_sugg, _sugg_suppressed)
+            self._c._sync_season_hint_issue(_season_hint)
+        except Exception:  # noqa: BLE001 - suggestion glue must never break the tick
+            self._log.debug("Poise suggestion issue sync failed", exc_info=True)
         _tick_data: dict[str, Any] = {
             "available": True,
             **outcome_diag,
@@ -2905,6 +2940,22 @@ class TickOrchestrator:
             # ADR-0059 §5: the persisted L1 nudge log (observe-only). A shadow key
             # (absent from _ATTRS) -> diagnostics-only, never a recorded attribute.
             "override_stats": list(self._runtime.user.override_stats),
+            "feedback_stats": list(self._runtime.user.feedback_stats),
+            # ADR-0060 L2: the would-be suggestion (shadow keys, not _ATTRS).
+            "suggestion_kind": _sugg.kind if _sugg else None,
+            "suggestion_direction": _sugg.direction if _sugg else None,
+            "suggestion_value": (
+                (
+                    _sugg.step_k
+                    if _sugg.step_k is not None
+                    else float(_sugg.step_min or 0)
+                )
+                if _sugg
+                else None
+            ),
+            "suggestion_evidence": _sugg.evidence if _sugg else 0,
+            "suggestion_suppressed": _sugg_suppressed,
+            "season_hint": _season_hint,
             "boost_expires_at": _iso_utc(self._runtime.user.boost_expires_at),
             "override_clamped": override_clamped,
             "cover_predicted_peak": round(_cover_peak, 1),
