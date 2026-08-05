@@ -99,6 +99,31 @@ def detect_override_pattern(
     )
 
 
+def resolve_suggestion_conflict(
+    *,
+    l2_pending: bool,
+    clo_pending: bool,
+    open_family: str | None,
+) -> tuple[bool, bool, str | None]:
+    """ADR-0067 §4: never two competing readings at once.
+
+    Returns ``(emit_l2, emit_clo, new_open_family)``.  An already-open family
+    keeps its slot while its pattern persists (the "und umgekehrt" of §4 —
+    an unanswered clo suggestion is not displaced by a later L2 pattern); on
+    a fresh tie the override reading wins (actual interventions are the
+    stronger evidence).  A vanished pattern releases the slot.
+    """
+    if l2_pending and clo_pending:
+        winner = open_family if open_family in ("override", "clo") else "override"
+    elif l2_pending:
+        winner = "override"
+    elif clo_pending:
+        winner = "clo"
+    else:
+        return (False, False, None)
+    return (winner == "override", winner == "clo", winner)
+
+
 SEASON_HINT_HYSTERESIS_K = 1.0
 
 
