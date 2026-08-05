@@ -104,6 +104,8 @@ def predictive_clo(
     t_out_running_mean: float | None,
     t_forecast_day: float | None = None,
     anticipation: float = CLO_ANTICIPATION,
+    *,
+    household_offset: float = 0.0,
 ) -> float:
     """Graded clothing insulation [clo] — ASHRAE 55 predictive clothing model
     (Schiavon & Lee 2013) evaluated on a direction-symmetric blend of thermal
@@ -111,7 +113,9 @@ def predictive_clo(
     ``T_eff = (1-w)*T_rm + w*T_forecast``.  The running mean stands in for the
     paper's 6:00 temperature (collinear daily statistics, chosen "arbitrarily"
     there).  No forecast -> pure running-mean input; no running mean -> the
-    historical 0.5 summer default."""
+    historical 0.5 summer default.  ``household_offset`` is the learned
+    ADR-0067 bias (config, |x| <= 0.3): applied to the PRIOR before the
+    bounds clamp — exactly the headroom the 0.4..1.2 bounds reserved."""
     if t_out_running_mean is None:
         return CLO_SUMMER
     t_eff = t_out_running_mean
@@ -126,7 +130,7 @@ def predictive_clo(
         clo = 10.0 ** (-0.1635 - 0.0066 * t)
     else:
         clo = 0.46
-    return min(max(clo, _CLO_MIN), _CLO_MAX)
+    return min(max(clo + household_offset, _CLO_MIN), _CLO_MAX)
 
 
 @dataclass(frozen=True, slots=True)
