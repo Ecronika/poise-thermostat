@@ -72,7 +72,7 @@ from ..multi import lifecycle as _lifecycle
 from ..multi.lifecycle import DeviceLifecycle
 
 # The v1 payload key set, in insertion order (the wire order of the dict).
-# 31 keys = the 30-field union of the ``PERSISTED_FIELDS`` constants in
+# 36 keys = the union of the ``PERSISTED_FIELDS`` constants in
 # ``runtime/state.py`` (three storage-key renames, see STORAGE_KEY_RENAMES)
 # plus the config-owned ``override_policy`` special case.
 PAYLOAD_KEYS: Final[tuple[str, ...]] = (
@@ -102,6 +102,9 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "boost_expires_at",
     "boost_prev_preset",
     "override_stats",
+    "feedback_stats",
+    "suggestion_rejected_key",
+    "suggestion_rejected_at",
     "override_reason",
     "last_written_sp",
     "prev_device_sp",
@@ -178,6 +181,11 @@ class PersistedZoneState:
     # ADR-0066 humidity axis (defaulted: additive to the v1 store shape)
     vent_active: bool = False
     surface_rh_mean: float | None = None
+    # ADR-0067 F1 comfort-feedback statistic (defaulted: additive, by reference)
+    feedback_stats: list[dict[str, Any]] = field(default_factory=list)
+    # ADR-0060 L2 rejection suppression (defaulted: additive)
+    suggestion_rejected_key: str | None = None
+    suggestion_rejected_at: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The v1 store dict (key set, transforms, values).
@@ -222,6 +230,9 @@ class PersistedZoneState:
                 else None
             ),
             "override_stats": self.override_stats,
+            "feedback_stats": self.feedback_stats,  # ADR-0067 F1, by reference
+            "suggestion_rejected_key": self.suggestion_rejected_key,  # ADR-0060 L2
+            "suggestion_rejected_at": self.suggestion_rejected_at,
             "override_reason": self.override_reason,  # hold origin
             "last_written_sp": self.last_written_sp,
             "prev_device_sp": self.prev_device_sp,
@@ -278,6 +289,12 @@ class OverrideLifecycleSection:
     boost_expires_at: float | None = None
     boost_prev_preset: OverrideMode | None = None
     override_stats: list[dict[str, Any]] = field(default_factory=list)
+    # ADR-0067 F1: comfort-feedback statistic — same decode semantics as the
+    # L1 override statistic, deliberately NOT hold-gated.
+    feedback_stats: list[dict[str, Any]] = field(default_factory=list)
+    # ADR-0060 L2 rejection suppression — type-guarded, not hold-gated.
+    suggestion_rejected_key: str | None = None
+    suggestion_rejected_at: float | None = None
     override_policy: str | None = None  # stored copy; NEVER apply (F13)
 
 
@@ -404,6 +421,9 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
         boost_prev_preset = None
     bea = data.get("boost_expires_at")
     ostats = data.get("override_stats")
+    fstats = data.get("feedback_stats")
+    srk = data.get("suggestion_rejected_key")
+    sra = data.get("suggestion_rejected_at")
     opol = data.get("override_policy")
     return OverrideLifecycleSection(
         override=override,
@@ -433,6 +453,13 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
             if isinstance(ostats, list)
             else []
         ),
+        feedback_stats=(
+            [r for r in fstats if isinstance(r, dict)][-50:]
+            if isinstance(fstats, list)
+            else []
+        ),
+        suggestion_rejected_key=srk if isinstance(srk, str) else None,
+        suggestion_rejected_at=(float(sra) if isinstance(sra, (int, float)) else None),
         override_policy=opol if isinstance(opol, str) else None,
     )
 
