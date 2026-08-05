@@ -42,6 +42,7 @@ from ..comfort.presence import PresenceConfig
 from ..comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
 from ..comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from ..const import (
+    CLO_OFFSET_MAX,
     COMPRESSOR_GUARD_AUTO,
     CONF_ABSENCE_AFTER_MIN,
     CONF_ACTUATOR,
@@ -51,6 +52,7 @@ from ..const import (
     CONF_ANNUAL_KWH,
     CONF_BOOST_DURATION_MIN,
     CONF_CATEGORY,
+    CONF_CLO_OFFSET,
     CONF_COMFORT_BASE,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
@@ -97,6 +99,7 @@ from ..const import (
     DEFAULT_ADOPT_EXTERNAL_SETPOINT,
     DEFAULT_ANNUAL_KWH,
     DEFAULT_BOOST_DURATION_MIN,
+    DEFAULT_CLO_OFFSET,
     DEFAULT_COMFORT_BASE,
     DEFAULT_COMFORT_WEIGHT,
     DEFAULT_COOL_LOCKOUT_ENABLED,
@@ -301,6 +304,7 @@ class ZoneTuning:
     operative_input: bool  # ADR-0029 operative-temperature input mode
     room_profile: str  # ADR-0054 V2 met/clo profile (office/living/bedroom/kitchen)
     override_suggestions: bool  # ADR-0060 L2 suggestion emission (opt-in, §3)
+    clo_offset: float  # ADR-0067 learned household clo bias, clamped +-0.3
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneTuning:
@@ -414,6 +418,15 @@ class ZoneTuning:
             room_profile=str(merged.get(CONF_ROOM_PROFILE, DEFAULT_ROOM_PROFILE)),
             override_suggestions=bool(
                 merged.get(CONF_OVERRIDE_SUGGESTIONS, DEFAULT_OVERRIDE_SUGGESTIONS)
+            ),
+            # Defensive clamp: the fix flow writes inside +-0.3 already, but a
+            # hand-edited entry must not exceed the ADR-0067 bounds either.
+            clo_offset=max(
+                -CLO_OFFSET_MAX,
+                min(
+                    CLO_OFFSET_MAX,
+                    float(merged.get(CONF_CLO_OFFSET, DEFAULT_CLO_OFFSET)),
+                ),
             ),
         )
 

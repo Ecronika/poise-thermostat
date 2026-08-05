@@ -389,6 +389,8 @@ class ZoneRuntime:
         self.user.feedback_stats = hold.feedback_stats  # ADR-0067 F1
         self.user.suggestion_rejected_key = hold.suggestion_rejected_key  # L2
         self.user.suggestion_rejected_at = hold.suggestion_rejected_at
+        self.user.clo_suggestion_rejected_key = hold.clo_suggestion_rejected_key
+        self.user.clo_suggestion_rejected_at = hold.clo_suggestion_rejected_at
         self.user.window_bypass = user.window_bypass
         if user.climate_mode is not None:
             self.user.climate_mode = user.climate_mode

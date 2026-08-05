@@ -80,6 +80,8 @@ class UserControlState:
             "feedback_stats",
             "suggestion_rejected_key",
             "suggestion_rejected_at",
+            "clo_suggestion_rejected_key",
+            "clo_suggestion_rejected_at",
         }
     )
 
@@ -107,6 +109,10 @@ class UserControlState:
     # for 30 days — wall-clock stamped, restart-proof.
     suggestion_rejected_key: str | None = None
     suggestion_rejected_at: float | None = None
+    # ADR-0067 F2: own cool-down slot for the clo family — a clo rejection
+    # must not overwrite a remembered L2 rejection.
+    clo_suggestion_rejected_key: str | None = None
+    clo_suggestion_rejected_at: float | None = None
     last_adopt_log: str = ""  # transient: debounces the adoption-suppression log
 
 
@@ -324,6 +330,10 @@ class DiagnosticsRuntime:
     # (T_rm re-raises the hint after a restart when still clearly beyond the
     # threshold; inside the hysteresis band it simply clears).
     season_hint_prev: str | None = None
+    # ADR-0067 #4: which suggestion family currently holds the emission slot
+    # ("override"/"clo") - transient; after a restart a fresh tie resolves to
+    # the override family (documented edge).
+    pending_suggestion_family: str | None = None
 
 
 @dataclass(slots=True)
