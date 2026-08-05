@@ -52,6 +52,9 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
             "boost_expires_at",
             "boost_prev_preset",
             "override_stats",
+            "feedback_stats",
+            "suggestion_rejected_key",
+            "suggestion_rejected_at",
         }
     ),
     ExternalOverrideRuntime: frozenset(
@@ -149,6 +152,9 @@ def test_default_values_match_coordinator_init() -> None:
     assert user.override is None
     assert user.override_expiry_is_switchpoint is False
     assert user.override_stats == []
+    assert user.feedback_stats == []  # ADR-0067 F1
+    assert user.suggestion_rejected_key is None  # ADR-0060 L2
+    assert user.suggestion_rejected_at is None
     assert user.last_adopt_log == ""
 
     ext = ExternalOverrideRuntime()
@@ -182,6 +188,8 @@ def test_mutable_defaults_are_not_shared() -> None:
     a, b = UserControlState(), UserControlState()
     a.override_stats.append({"reason": "test"})
     assert b.override_stats == []
+    a.feedback_stats.append({"direction": "cold"})
+    assert b.feedback_stats == []
 
     ea, eb = ExternalOverrideRuntime(), ExternalOverrideRuntime()
     ea.own_write_ctx_ids.append("ctx-1")

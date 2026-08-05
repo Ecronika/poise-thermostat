@@ -94,6 +94,9 @@ EXPECTED_PAYLOAD_KEYS = (
     "boost_expires_at",
     "boost_prev_preset",
     "override_stats",
+    "feedback_stats",
+    "suggestion_rejected_key",
+    "suggestion_rejected_at",
     "override_reason",
     "last_written_sp",
     "prev_device_sp",
@@ -206,6 +209,9 @@ def _rich_state() -> codec.PersistedZoneState:
         boost_expires_at=NOW_WALL + 900.0,
         boost_prev_preset=OverrideMode.COMFORT,
         override_stats=[{"reason": "user_setpoint", "minutes": 45.0}],
+        feedback_stats=[{"direction": "cold", "ts": 123.0}],
+        suggestion_rejected_key="comfort_base:+1",
+        suggestion_rejected_at=NOW_WALL - 86400.0,
         override_reason="device_adopt_setpoint",
         last_written_sp=20.0,
         prev_device_sp=20.5,
@@ -227,7 +233,7 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 33  # +2 ADR-0066 humidity axis
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 36  # +0066 +0067 +0060-L2 keys
 
 
 def test_encode_values_match_save_payload_transforms() -> None:
@@ -261,6 +267,9 @@ def test_encode_values_match_save_payload_transforms() -> None:
     assert payload["boost_expires_at"] == NOW_WALL + 900.0
     assert payload["boost_prev_preset"] == "comfort"  # enum-or-None
     assert payload["override_stats"] is state.override_stats  # by reference
+    assert payload["feedback_stats"] is state.feedback_stats  # by reference
+    assert payload["suggestion_rejected_key"] == "comfort_base:+1"
+    assert payload["suggestion_rejected_at"] == NOW_WALL - 86400.0
     assert payload["override_reason"] == "device_adopt_setpoint"
     assert payload["last_written_sp"] == 20.0
     assert payload["prev_device_sp"] == 20.5
@@ -329,6 +338,9 @@ def test_roundtrip_decode_encode_semantic_identity() -> None:
     assert ovr.boost_expires_at == NOW_WALL + 900.0
     assert ovr.boost_prev_preset is OverrideMode.COMFORT
     assert ovr.override_stats == [{"reason": "user_setpoint", "minutes": 45.0}]
+    assert ovr.feedback_stats == [{"direction": "cold", "ts": 123.0}]  # ADR-0067
+    assert ovr.suggestion_rejected_key == "comfort_base:+1"  # ADR-0060 L2
+    assert ovr.suggestion_rejected_at == NOW_WALL - 86400.0
     assert ovr.override_policy == "switchpoint"  # decoded, config-owned
 
     base = decoded.adoption_baselines
@@ -374,6 +386,20 @@ def test_minimal_v1_payload_decodes_to_defaults() -> None:
     ovr = decoded.override_lifecycle
     assert ovr == codec.OverrideLifecycleSection()
     assert ovr.hold_active is False and ovr.override_stats == []
+    assert ovr.feedback_stats == []
+    assert ovr.suggestion_rejected_key is None
+    assert ovr.suggestion_rejected_at is None
+
+
+def test_suggestion_rejection_decode_is_type_guarded() -> None:
+    """ADR-0060 L2: garbage types decode to None (never raise)."""
+    decoded = codec.decode(
+        _v1(suggestion_rejected_key=42, suggestion_rejected_at="soon"),
+        now_wall=NOW_WALL,
+    )
+    ovr = decoded.override_lifecycle
+    assert ovr.suggestion_rejected_key is None
+    assert ovr.suggestion_rejected_at is None
     assert decoded.adoption_baselines == codec.AdoptionBaselinesSection()
     learn = decoded.learning
     assert isinstance(learn.ekf, ThermalEKF) and learn.ekf.n_updates == 0
@@ -503,6 +529,23 @@ def test_override_stats_element_filter_and_tail_cap() -> None:
         codec.decode(
             _v1(override_stats="nope"), now_wall=NOW_WALL
         ).override_lifecycle.override_stats
+        == []
+    )
+
+
+def test_feedback_stats_element_filter_and_tail_cap() -> None:
+    """``feedback_stats`` (ADR-0067 F1): identical decode semantics to the L1
+    override statistic — non-list -> [], dict-elements only, last 50."""
+    rows: list[Any] = [{"i": i} for i in range(60)]
+    rows.insert(0, "not-a-dict")
+    decoded = codec.decode(_v1(feedback_stats=rows), now_wall=NOW_WALL)
+    stats = decoded.override_lifecycle.feedback_stats
+    assert len(stats) == 50
+    assert stats[0] == {"i": 10} and stats[-1] == {"i": 59}
+    assert (
+        codec.decode(
+            _v1(feedback_stats="nope"), now_wall=NOW_WALL
+        ).override_lifecycle.feedback_stats
         == []
     )
 

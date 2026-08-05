@@ -178,6 +178,13 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # once per local day — transient, recomputed on the first tick of a run.
     ("diagnostics", "clo_forecast_key"): "ADR-0054 V1 clo forecast day latch key",
     ("diagnostics", "clo_forecast_day"): "ADR-0054 V1 clo forecast daily mean",
+    # ADR-0067 F1: comfort-feedback statistic — born on the group, persisted
+    # via the codec snapshot (no coordinator proxy ever existed).
+    ("user", "feedback_stats"): "ADR-0067 F1 comfort-feedback statistic",
+    # ADR-0060 L2: rejection of a suggestion suppresses exactly that pattern
+    # key for 30 days — must survive a restart.
+    ("user", "suggestion_rejected_key"): "ADR-0060 L2 rejected pattern key",
+    ("user", "suggestion_rejected_at"): "ADR-0060 L2 rejection wall stamp",
 }
 
 
