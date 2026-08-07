@@ -74,9 +74,15 @@ def build_diagnostics(
     # ADR-0067 F1: same lift-out for the comfort-feedback statistic (only
     # ts/direction/pmv-context values, no entity ids -> no redaction).
     feedback_stats = tick.pop("feedback_stats", []) if tick is not None else []
+    # ADR-0060 §3: the season-gate floor stamp, lifted next to the statistics
+    # it floors — the replay instrument reads it to model the gate.
+    season_floor = (
+        tick.pop("season_hint_last_active_ts", None) if tick is not None else None
+    )
     return {
         "config": redact(config, redact_keys),
         "data": (redact(tick, coordinator_redact_keys) if tick is not None else None),
         "override_stats": override_stats,
         "feedback_stats": feedback_stats,
+        "season_hint_last_active_ts": season_floor,
     }

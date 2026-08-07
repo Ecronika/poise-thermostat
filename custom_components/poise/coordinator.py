@@ -1109,6 +1109,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 clo_suggestion_rejected_at=(
                     self._zone_runtime.user.clo_suggestion_rejected_at
                 ),
+                season_hint_last_active_ts=(
+                    self._zone_runtime.user.season_hint_last_active_ts
+                ),
                 override_reason=self._zone_runtime.user.override_reason,
                 last_written_sp=self._zone_runtime.external.last_written_sp,
                 prev_device_sp=self._zone_runtime.external.prev_device_sp,

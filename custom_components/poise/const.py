@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.182.0"
+VERSION: Final = "0.183.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -193,11 +193,12 @@ DEFAULT_OVERRIDE_TIMER_H: Final = 2.0
 DEFAULT_OVERRIDE_MAX_H: Final = 8.0
 DEFAULT_OVERRIDE_END_ON_PRESENCE: Final = True
 DEFAULT_BOOST_DURATION_MIN: Final = 60.0
-# ADR-0060 §3: opt-in (False) until the golden-replay threshold-tuning round
-# confirmed a near-zero false-positive rate on field traces; the ADR's decided
-# end state (default ON) is the flip AFTER that round — detection/diagnostics
-# run regardless, only the repair-issue emission is gated.
-DEFAULT_OVERRIDE_SUGGESTIONS: Final = False
+# ADR-0060 §3 tuning round CLOSED (2026-08-07): two field zones replayed, both
+# rise edges human-reviewed — one true positive (wanted), one valve-test false
+# positive that the season gate now removes structurally (0 FP after gate).
+# Hence the ADR's decided end state: emission ON by default; the toggle stays
+# the per-zone opt-out, detection/diagnostics run regardless.
+DEFAULT_OVERRIDE_SUGGESTIONS: Final = True
 
 # Persistence (ADR-0007)
 EKF_SAVE_EVERY_TICKS: Final = 30

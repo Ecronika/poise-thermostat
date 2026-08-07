@@ -721,9 +721,9 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                                 mode=box,
                             )
                         ),
-                        # ADR-0060 L2: opt-in suggestion emission (default off
-                        # until the §3 golden-replay tuning round; detection
-                        # and diagnostics always run).
+                        # ADR-0060 L2: suggestion emission, default ON since
+                        # the §3 tuning round closed (2026-08-07) — the toggle
+                        # is the opt-out; detection and diagnostics always run.
                         vol.Optional(
                             CONF_OVERRIDE_SUGGESTIONS,
                             default=DEFAULT_OVERRIDE_SUGGESTIONS,
