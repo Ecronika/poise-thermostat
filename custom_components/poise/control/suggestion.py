@@ -49,11 +49,16 @@ def detect_override_pattern(
     stats: list[dict[str, Any]],
     *,
     now_ts: float,
+    since_ts: float | None = None,
 ) -> OverrideSuggestion | None:
     """The ADR-0060 §1 pattern predicate over the L1 statistic.
 
     Malformed events (old shapes, missing/garbage keys) are skipped, never
-    raising — the statistic is store-restored data.
+    raising — the statistic is store-restored data.  ``since_ts`` is the §3
+    season-gate floor: events recorded at or before it — while the zone's
+    fixed mode was season-wrong — are mode signals, not comfort evidence,
+    and never qualify (``<=``: the floor stamp is written in the very tick
+    that saw the hint active).
     """
     cutoff = now_ts - SUGGEST_WINDOW_DAYS * _DAY_S
     buckets: dict[tuple[str, int], list[float]] = {}
@@ -63,6 +68,8 @@ def detect_override_pattern(
         direction = ev.get("direction")
         phase = ev.get("phase")
         if not isinstance(ts, (int, float)) or float(ts) < cutoff:
+            continue
+        if since_ts is not None and float(ts) <= since_ts:
             continue
         if not isinstance(delta, (int, float)) or abs(delta) < SUGGEST_MIN_DELTA_K:
             continue
@@ -156,6 +163,40 @@ def season_mode_hint(
         threshold = cool_min_outdoor + (SEASON_HINT_HYSTERESIS_K if raised else 0.0)
         return "cool_only_in_heating" if t_rm <= threshold else None
     return None
+
+
+def season_gate_floor(
+    *, hint_active: bool, last_active_ts: float | None, now_ts: float
+) -> float | None:
+    """ADR-0060 §3 season gate: the floor for the L2 emission detection.
+
+    Overrides recorded while the zone's fixed mode was season-wrong (§2 hint
+    standing) are MODE signals, not comfort evidence — the round's confirmed
+    field false positive was a stuck-valve test in a heat_only zone during
+    the cooling season.  While the hint stands, everything up to ``now`` is
+    mismatch-era; afterwards the PERSISTED stamp keeps flooring, because a
+    mode switch (following the hint's own advice!), a restart inside the
+    hysteresis band, or a T_rm sensor flicker all clear the HINT without
+    clearing the contamination.  Deliberately conservative: pre-mismatch
+    events are floored too — a genuine preference re-accrues within days,
+    a false emission cannot be un-shown.
+    """
+    if hint_active:
+        return now_ts
+    return last_active_ts
+
+
+def season_hint_t_rm(t_rm_eff: float, t_rm_source: str | None) -> float | None:
+    """The §2 hint input: only REAL running-mean sources count.
+
+    Without any T_rm source the pipeline regulates on a fabricated outdoor
+    fallback constant — for the season hint that value is not "cold
+    weather", it is "unknowable": a cool_only zone without outdoor data
+    would otherwise inherit a permanent fabricated hint (fallback below the
+    lockout) that kills the L2 family forever and shows a standing false
+    advisory.  Degrading to ``None`` keeps the hint silent instead.
+    """
+    return t_rm_eff if t_rm_source is not None else None
 
 
 def suggestion_suppressed(
