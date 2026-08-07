@@ -565,6 +565,9 @@ def build_outcome_diag(
         "ca_time_in_band": regq.time_in_band_pct,
         "ca_cycles_per_h": round(regq.cycles_per_hour, 2),
         "ca_minutes": round(regq.minutes, 0),
+        # ADR-0055 N1: the comfort-flip gate component (valid-PMV ticks only).
+        "ca_ppd": round(regq.ppd, 1),
+        "ca_ppd_minutes": round(regq.ppd_minutes, 0),
         "ref_offset": (round(ref_offset.offset, 2) if ref_offset is not None else None),
         "ref_offset_dev": (
             round(ref_offset.deviation, 2) if ref_offset is not None else None
