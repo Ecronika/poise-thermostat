@@ -391,6 +391,7 @@ class ZoneRuntime:
         self.user.suggestion_rejected_at = hold.suggestion_rejected_at
         self.user.clo_suggestion_rejected_key = hold.clo_suggestion_rejected_key
         self.user.clo_suggestion_rejected_at = hold.clo_suggestion_rejected_at
+        self.user.season_hint_last_active_ts = hold.season_hint_last_active_ts  # §3
         self.user.window_bypass = user.window_bypass
         if user.climate_mode is not None:
             self.user.climate_mode = user.climate_mode

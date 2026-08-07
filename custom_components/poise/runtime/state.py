@@ -82,6 +82,7 @@ class UserControlState:
             "suggestion_rejected_at",
             "clo_suggestion_rejected_key",
             "clo_suggestion_rejected_at",
+            "season_hint_last_active_ts",
         }
     )
 
@@ -113,6 +114,11 @@ class UserControlState:
     # must not overwrite a remembered L2 rejection.
     clo_suggestion_rejected_key: str | None = None
     clo_suggestion_rejected_at: float | None = None
+    # ADR-0060 §3 season gate: wall-clock of the last tick the season-mode
+    # hint stood.  Floors the L2 emission detection (mismatch-era overrides
+    # are mode signals, not comfort evidence) — persisted, because a mode
+    # switch or a restart clears the HINT without clearing the contamination.
+    season_hint_last_active_ts: float | None = None
     last_adopt_log: str = ""  # transient: debounces the adoption-suppression log
 
 
@@ -314,6 +320,9 @@ class DiagnosticsRuntime:
     outcome_stats: OutcomeStats = field(default_factory=OutcomeStats)
     regq: RegulationQuality = field(default_factory=RegulationQuality)
     ca_last_mono: float | None = None  # real dt for the CA metric
+    # ADR-0055 N1: own elapsed anchor for the time-weighted PPD fold — PMV
+    # validity and the CA fairness mask diverge, so the PPD clock is separate.
+    ppd_last_mono: float | None = None
     outcome_session: OutcomeSession = field(default_factory=OutcomeSession)
     hdh_last_mono: float | None = None  # real dt for HDH/outcome obs
     hdh: HdhSavings = field(default_factory=HdhSavings)
@@ -328,7 +337,9 @@ class DiagnosticsRuntime:
     clo_forecast_day: float | None = None
     # ADR-0060 §2: hysteresis anchor of the season-mode advisory — transient
     # (T_rm re-raises the hint after a restart when still clearly beyond the
-    # threshold; inside the hysteresis band it simply clears).
+    # threshold; inside the hysteresis band it simply clears).  The §3 season
+    # GATE does NOT depend on this anchor: it floors on the persisted
+    # ``UserControlState.season_hint_last_active_ts`` and survives restarts.
     season_hint_prev: str | None = None
     # ADR-0067 #4: which suggestion family currently holds the emission slot
     # ("override"/"clo") - transient; after a restart a fresh tie resolves to
