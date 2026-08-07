@@ -191,3 +191,21 @@ Bewertung nach Volltext-Lektüre der Revisionskandidaten (ADR-0048, ADR-0055, AD
 **Wissenschaft/Norm:** Cheung et al. 2019 (doi:10.1016/j.buildenv.2019.01.055, PMV 34 %) · Humphreys & Nicol 2002 · Kim/Schiavon/Brager 2018 (Personal Comfort Models) · arXiv:2309.09073 (Active Learning) · CBE Thermal Comfort Tool + Fans Guidebook (Cooling Effect, Heatwave-Grenzen, 0,8 m/s) · Raftery et al. 2021 (99 Deckenfans) · Singapur-ZEB 2023 · REHVA „Effects of indoor air humidity" (+20/50/80 %) · DIN 4108-2/EN ISO 13788 (80 % Oberflächen-RH) · EN 16798-1 Annex B · pythermalcomfort-Doku · MDPI Buildings 12(1):38 (PMV-MPC ~19 %).
 
 **Code-Verifikation (Stichproben, 2026-07-30):** `control/override.py:17-49` (Presets = Offsets) · `multi/model.py:22,35` (VENTILATION/HUMIDIFY Non-Goals) · `config_flow.py:228` (1 Aktor, climate-only) · `control/tick_pipeline.py:959-963` (mode_arbitration/dry live) · ADR-0046/0048/0053/0054/0055/0060/0066 + Plan_Komfortregime vollständig gelesen (0048/0055/0060/0066 für §9).
+
+---
+
+## 11. Nachtrag: Stand v0.183.0 (2026-08-07)
+
+**Seit dieser Recherche geschlossen:**
+
+- **§1.3-Lücke 5 („Kein Feedback-Kanal") ist geschlossen.** ADR-0067 F1 liefert „zu warm/zu kalt"-Buttons + Service + maskierte Statistik (default-enabled); F2 das Vorschlags-Lernen daraus (±0,1-clo-Schritte, Repair-Fix-Flow, §4-Kollisionsregel gegen L2). Emission ist seit dem ADR-0060-§3-Abschluss **default-an** (Toggle = Opt-out).
+- **§9.2 N2 (clo/met-Lücken in ADR-0054) ist umgesetzt** (Nachtrag V1–V4): graded predictive clo (Schiavon & Lee auf dem T_rm-Laufmittel) mit richtungssymmetrischem Forecast-Blend für Extremtage, met-Raumprofile (inkl. Schlafzimmer 0,7), `clo_dynamic`, ISO-7730-Gültigkeits-Gate (`pmv_valid`), Haushalts-clo-Offset (V4 = ADR-0067). Vertiefung: [2026-08-Bekleidungsmodell-clo-met.md](2026-08-Bekleidungsmodell-clo-met.md).
+- **§8-Frage 1 ist teilbeantwortet:** Der dort empfohlene Evolutionspfad „PMV/SET als Start, Feedback als Lernsignal obendrauf" hat seine Lern-Infrastruktur — explizites Feedback wird zum sichtbar bestätigten clo-Offset, nie still. Die §3-Tuning-Runde (zwei Feld-Zonen, beide Flanken menschlich geurteilt: 1 True Positive, 1 Ventiltest-FP → Saison-Gate) hat die Vorschlagsmechanik validiert; ADR-0059/0060-Vehikel (§9.3) ist produktiv.
+
+**Unverändert offen (die Kernaussagen §0 gelten fort):**
+
+- **M1 (ADR-0055, 40 %) bleibt der kritische Pfad jeder Ausbaustufe** — Feldkalibrierung über die Saison; Stufe-2-Offset und Fan-Credit bleiben Shadow (ADR-0054 35 %, ADR-0053 40 %).
+- **R2 und N1 (§9) sind nicht begonnen.** Für N1 gilt: die jetzt je Tick publizierten `pmv_valid`/`ppd`-Keys machen die zeitgewichtete PPD-Komponente des Flip-Gates erstmals sauber berechenbar (ungültige Samples ausschließbar).
+- **Stufe B unbeziffert** (ADR-0046 30 %: Config-Flow 1 Aktor climate-only, kein fan/humidifier-Executor, kein Nebengeräte-Ownership); §8-Fragen 3–8 unentschieden; der ADR-0046-P5-vs-ADR-0048-§3-Widerspruch steht noch.
+
+**Abgeleitete Reihenfolge der nächsten Schritte:** (1) M1-Feldkalibrierung vorantreiben + N1-Nachtrag (PPD-Komponente + Risiko-Stufung) — ohne beides hat kein Komfort-Flip ein Abnahmekriterium; (2) R2-Folge-ADR (Lüfter als erste Kühlstufe — größter Hebel, kleinste Kontroverse, ADR-Arbeit unabhängig von M1 startbar); (3) Stufe-A-Spezifikation (Bedienelement Preset vs. Options-Toggle + Namensfrage §8.8; der Flip selbst wartet auf M1+N1); (4) Stufe-B-Aufwandsschätzung (§8 Fragen 4+5); (5) R1 nur bei bewusster Stufe-C-Entscheidung — die seit dem Default-Flip auflaufenden Feedback-Felddaten schärfen genau diese Entscheidung.
