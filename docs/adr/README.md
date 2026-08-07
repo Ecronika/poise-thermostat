@@ -88,19 +88,21 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0052](ADR-0052-Aktor-Dynamik-Profile.md) | Aktor-Dynamik-Profile — Regler-Zeitkonstanten je HVAC-Typ (PI/MPC) | In Arbeit (85 %) |
 | [0053](ADR-0053-Leerlauf-Belegt-Luefterumwaelzung.md) | Leerlauf-/Belegt-Lüfterumwälzung (Fan-Low im besetzten Totband) | In Arbeit (40 %) |
 | [0054](ADR-0054-PMV-PPD-Behaglichkeitsbewertung.md) | PMV/PPD-Behaglichkeitsbewertung (ISO 7730) — Diagnose + begrenzter Offset | In Arbeit (35 %) |
-| [0055](ADR-0055-Regelguete-Metrik-Control-Accuracy.md) | M1 Regelgüte-Metrik (EN 15500-1 CA) — Komfortabweichung + Pendel-Detektor als Flip-Gate | In Arbeit (40 %) |
+| [0055](ADR-0055-Regelguete-Metrik-Control-Accuracy.md) | M1 Regelgüte-Metrik (EN 15500-1 CA) — Komfortabweichung + Pendel-Detektor als Flip-Gate | In Arbeit (55 %) |
 | [0056](ADR-0056-Referenzrahmen-Abgleich-Aktor-Raum.md) | Referenzrahmen-Abgleich Aktor-Interntemperatur ↔ Raumfühler (Offset-Kompensation self-regulating) | In Arbeit (25 %) |
 | [0057](ADR-0057-Card-Layout-Konfiguration.md) | Card-Layout & Konfiguration (Dichte, Bedienung dial/buttons/none, Abschnitte, Schimmel-Tick, UI-Editor) | Implementiert (v0.138.0) |
 | [0058](ADR-0058-Presence-Kopplung.md) | Presence-Kopplung — hierarchische Belegung (Haus-Gate + Raum-Eco) | In Arbeit (70 %) |
 | [0059](ADR-0059-Override-Lebenszyklus.md) | Override-Lebenszyklus — Gültigkeit, Rückkehr, Feedback, L1-Erfassung (manuelle Eingriffe) | Implementiert (v0.163.0) |
-| [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | In Arbeit (L2 + §2, Emission opt-in) |
+| [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | Implementiert (§3-Runde abgeschlossen, Emission default-an) |
 | [0061](ADR-0061-Kuehlkante-Anwesenheit-vs-FreeRunning.md) | Kühlkante — fest bei Anwesenheit, adaptiv nur free-running | Implementiert (v0.165.0) |
 | [0062](ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md) | Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden | Implementiert (rückwirkend dokumentiert) |
 | [0063](ADR-0063-Tick-Entkopplung-Datei-und-Wetter-IO.md) | Datei-/Wetter-I/O aus dem Tick-Lock — und was `tick_ms` danach misst | Implementiert (v0.179.0) |
 | [0064](ADR-0064-Persistenz-Checkpoint-am-Tickende.md) | Persistenz-Checkpoint am Tick-Ende — ein Zustand, eine Momentaufnahme | Implementiert (v0.179.0) |
 | [0065](ADR-0065-Fehlergrenzen-Diagnose-Segmente.md) | Fehlergrenzen — eine Grenze je Segment statt zwei Sammel-Domänen | Implementiert (v0.179.0) |
 | [0066](ADR-0066-Feuchte-Achse-Trockenheit-Lueftung-Obergrenze.md) | Feuchte-Achse — Trockenheits-Bewertung (g/m³), Lüftungs-Empfehlung, schimmelsichere Feuchte-Obergrenze | In Arbeit (90 %) |
-| [0067](ADR-0067-Haushalts-clo-Offset-Feedback-Vorschlag.md) | Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4) | In Arbeit (F1+F2, Emission opt-in) |
+| [0067](ADR-0067-Haushalts-clo-Offset-Feedback-Vorschlag.md) | Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4) | Implementiert (Emission default-an, §5-Feld-Validierung läuft) |
+| [0068](ADR-0068-Luefter-als-erste-Kuehlstufe.md) | Lüfter als erste Kühlstufe — dritte Rolle der `air_movement`-Achse (R2) | Vorgeschlagen |
+| [0069](ADR-0069-Aktive-Behaglichkeit-Stufe-A.md) | „Aktive Behaglichkeit" — Stufe-A-Spezifikation (Bedienelement, Name, Verhaltensumfang) | Vorgeschlagen |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 

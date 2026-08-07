@@ -263,7 +263,7 @@ Der **Schema-Builder ist rein** (Phase-0-tabellentestbar: „gegeben Geräte-Men
 | **P2** | Per-Device-Lifecycle | Lease, Min-Cycle, Health, Standby **persistieren Neustart** (Wall-Clock); pro Gerät |
 | **P3** | Thermal Opt-in (+ Storage-Migration, + Add-Device-Subentry) | TRV+AC live; Failover; Single-Active; Boost; nicht-gewählte Geräte nach Standby-Policy; Migration verlustfrei |
 | **P4** | Humidity Shadow | nur über **Taupunkt/absolute Feuchte/Oberflächenrisiko**; kein RH-only |
-| **P5** | Humidity Opt-in | Entfeuchter/Befeuchter zuerst, AC-`dry` später; Kondensationsdeckel hart |
+| **P5** | Humidity Opt-in | Entfeuchter zuerst (Befeuchter gestrichen — Stufe-C-Nachtrag 2026-08-07), AC-`dry` später; Kondensationsdeckel hart |
 | **P6** | Air-Movement Shadow | Komfort-Kredit nur mit Präsenz/Freigabe; **kein** Free-Cooling über Umluft |
 | **P7** | Air-Movement Opt-in | Coast-in-fan; Belegung/Override/Noise berücksichtigt |
 | **P8** | Hub-Resource-Coordination (eigene Sub-ADR zuerst, §10) | Hub **blockiert gegensätzliche** Shared-Resource-Requests; Konfliktklassen §10 |
@@ -349,3 +349,11 @@ Der Roadmap-Punkt „Dry-Pfad-Kompressorschutz für den live schaltenden `dry`-N
 **⚠️ Bekannte Limitation (NICHT test-gepinnt):** Der „un-braked revert auf einer nicht-adoptierten Intervention (T-4)" bleibt offen, bis dieser Redesign kommt. Es existiert kein Test, der dieses Rest-Verhalten fixiert; es ist als Follow-up markiert und darf beim Kommentar-Cleanup **nicht** stillschweigend als erledigt gelöscht werden.
 
 **Pinning:** `tests/integration/test_dry_actuation.py::test_dry_nudge_when_humid_and_idle`, `tests/integration/test_mode_adoption.py`. **Code-Ort:** `control/external_override.py::stage_hold_routing`, der Fold selbst in `coordinator.py` (`observe()`-Aufruf im finalize-Segment), F1-Auflösung in `control/tick_pipeline.py`.
+
+---
+
+## Nachtrag (2026-08-07): P5 auf Entfeuchter-only gekürzt — Stufe-C-Entscheidung; ADR-0068-Vorschau für P6/P7
+
+**Widerspruchsauflösung (Behaglichkeitsmodus-Recherche §9.1 R1):** §14 P5 plante „Entfeuchter/**Befeuchter** zuerst, AC-`dry` später" und §7/§11 führen Befeuchter-Standby und `humidify_capped_condensation_risk` — während ADR-0048 §3 aktive Befeuchtung normativ verbietet. Die Stufe-C-Entscheidung vom 2026-08-07 (Begründung im ADR-0048-Nachtrag gleichen Datums: EN-16798-1-Zurückhaltung, schwache Komfort-Evidenz, REHVA-Energiekosten, Hygiene-Unsichtbarkeit) löst den Widerspruch **zugunsten von ADR-0048** auf: **P5 = Entfeuchter-Opt-in only** („Entfeuchter zuerst, AC-`dry` später; Kondensationsdeckel hart" — das Wort „Befeuchter" ist aus dem P5-Scope gestrichen). `Direction.HUMIDIFY` bleibt inventory-only; die Befeuchter-Standby-Zeile (§7: Default `off`, Kondensationsdeckel hart) und der Reason-Code `humidify_capped_condensation_risk` (§11) bleiben als **reservierte Vertrags-Slots für den Sicherheits-Pfad** bestehen — ein inventarisierter fremder Befeuchter wird in Standby verwaltet und gedeckelt-diagnostiziert, nie befeuchtend aktuiert. Guard-Test unverändert. Revisit-Kriterien im ADR-0048-Nachtrag.
+
+**P6/P7-Vorschau:** Für die `air_movement`-Achse liegt mit **ADR-0068** (Vorgeschlagen) die dritte Rolle „gestufte Kühlung" vor — v1 bewusst auf den **eigenen Lüfter des gebundenen Klimageräts** begrenzt (`set_fan_mode`, kein fan-Domain-Gerät); P6/P7 bleiben der Pfad für dedizierte Ventilatoren und erben die ADR-0068-Guard-Liste (35-°C-Hitzegrenze, 0,8-m/s-Deckel, Belegung, Nacht). Vor P7 ist das fehlende Nachtruhe-/Zeitfenster-Konzept zu designen (Lücke, s. [Stufe-B-Schätzung](../Konzepte/2026-08-07_Stufe-B-Aufwandsschaetzung_Multi-Aktor.md) WP4).

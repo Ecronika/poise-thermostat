@@ -1,6 +1,6 @@
 # ADR-0067: Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4)
 
-**Status:** In Arbeit (F1+F2 umgesetzt, Emission opt-in bis ADR-0060-§3-Tuning) · **Wirkung:** Live-D · **Datum:** 2026-08-03 · **Bezug:** ADR-0054 Nachtrag V1–V3 (clo-Pipeline, dieser ADR ist dessen V4), ADR-0059 §5 (Grundsatz „Eingriffe sind Ausnahmen, keine Trainingssignale"), ADR-0060 (Vorschlagsmechanik L2 — Auslieferungsvehikel und Abgrenzung), ADR-0055 (Maskierungsmuster), ADR-0012 (Repair-Fix-Flow), ADR-0008 (Reconfigure-Pfad), ADR-0027/0035 (Norm-Klemme), ADR-0011 (Golden-Replay) · **Grundlage:** [Recherche 2026-08 Bekleidungsmodell](../research/2026-08-Bekleidungsmodell-clo-met.md) §1/§5/§8.4; [Recherche 2026-07 Behaglichkeitsmodus](../research/2026-07-Behaglichkeitsmodus.md) §5/§8 (Ambi-Muster, fehlender Feedback-Kanal)
+**Status:** Implementiert (F1+F2; Emission default-an seit 2026-08-07 mit dem ADR-0060-§3-Abschluss — §5-Feld-Validierung der F2-Schwellen ausstehend, läuft im Feld) · **Wirkung:** Live-D · **Datum:** 2026-08-03 · **Bezug:** ADR-0054 Nachtrag V1–V3 (clo-Pipeline, dieser ADR ist dessen V4), ADR-0059 §5 (Grundsatz „Eingriffe sind Ausnahmen, keine Trainingssignale"), ADR-0060 (Vorschlagsmechanik L2 — Auslieferungsvehikel und Abgrenzung), ADR-0055 (Maskierungsmuster), ADR-0012 (Repair-Fix-Flow), ADR-0008 (Reconfigure-Pfad), ADR-0027/0035 (Norm-Klemme), ADR-0011 (Golden-Replay) · **Grundlage:** [Recherche 2026-08 Bekleidungsmodell](../research/2026-08-Bekleidungsmodell-clo-met.md) §1/§5/§8.4; [Recherche 2026-07 Behaglichkeitsmodus](../research/2026-07-Behaglichkeitsmodus.md) §5/§8 (Ambi-Muster, fehlender Feedback-Kanal)
 
 > **Warum ein eigener ADR:** Der ADR-0054-Nachtrag hat V4 bewusst ausgekoppelt: Ein *lernender* Anteil an der Bekleidungsannahme berührt den Grundsatz „nie still lernen" und braucht eine Feld-Tuning-Runde — beides gehört nicht in einen Umsetzungs-Nachtrag. Dieser Entwurf ändert **nichts** am ausgelieferten V1–V3-Verhalten.
 
@@ -16,7 +16,11 @@
 
 **Glue:** Orchestrator publiziert `clo_suggestion_direction/-_evidence/-_reason` (Datenvertrag +4 inkl. `clo_offset`); Emission über `_sync_clo_suggestion_issue` (fixable, gleicher `override_suggestions`-Toggle) und die L2-Emission respektiert den Konflikt symmetrisch. Fix-Flow um `kind="clo_offset"` erweitert: Annahme schreibt `clo_offset` ± 0,1 (geklemmt ± 0,3) sichtbar via Reconfigure-Pfad, Cooldown-Routing per Key-Präfix in den Familien-Slot; i18n EN/DE (2 Issue-Texte mit Menü). Suite 1219 grün, ruff check/format clean (mypy + HA-Runtime: CI).
 
-**Offen:** Golden-Replay-Tuning **beider** Familien (ADR-0060 §3) → danach der gemeinsame Default-Flip; HA-Runtime-Integrationstests (CI); Hub-Haushalts-Kanal (Folge-Nachtrag, §Konsequenzen).
+**Glue-Tests (2026-08-03):** `tests/integration/test_feedback_glue.py` — Button-Press → Fold mit Tick-Kontext, Service-Pfad, deterministische `override_active`-Maske; Fix-Flow direkt getrieben (Menü, `comfort_base`-Apply inkl. Hot-Apply-Nachweis, `clo_offset`-Apply mit **Slot-Routing-Nachweis** (L2-Slot bleibt unberührt), Dismiss ohne Options-Write, `comfort_earlier` mit Fenster −30 min und Stale-Fallback ohne Fenster). Beide Dateien in der Glue-Coverage-Include-Liste (`coverage_glue.ini`), Pure-Omit bleibt (Parität). Läuft nur im CI (Sandbox-HA-Cap).
+
+**Offen:** Golden-Replay-Tuning **beider** Familien (ADR-0060 §3) → danach der gemeinsame Default-Flip; Hub-Haushalts-Kanal (Folge-Nachtrag, §Konsequenzen).
+
+**Nachtrag Entity-Defaults (2026-08-03):** Die zwei Feedback-Buttons sind **default-enabled** und Teil des Lean-Entity-Vertrags (`test_entity_defaults`) — wie der Bypass-Switch sind sie nutzerseitiger *Eingabekanal*, kein Diagnose-Sensor; ein ausgeblendeter Feedback-Button sammelt nichts, und die §3-Tuning-Runde lebt von dieser Statistik (Begründung am Entity-Attribut).
 
 ## Kontext
 
@@ -58,6 +62,8 @@ Erkennt die Statistik ein Muster — **≥ 5 gleichgerichtete, maskierungs-saube
 ### 4. Plausibilisierung & Kollisionsregel gegen L2
 
 Ein clo-Vorschlag wird **unterdrückt**, solange für dieselbe Zone ein unbeantworteter L2-Komfortbasis-Vorschlag offen ist (und umgekehrt) — nie zwei konkurrierende Deutungen gleichzeitig. Zweitens dient die Override-Statistik als **Konsistenz-Check**: widerspricht das Override-Muster der Feedback-Richtung (Feedback „zu kalt", Overrides aber abwärts), wird kein Vorschlag erzeugt (`inconsistent_signals`, Diagnose-Reason).
+
+> **Nachtrag (2026-08-06, ADR-0060 §3 Saison-Gate):** Eine saison-gate-gefloorte L2-Lesung gilt hier als *nicht anstehend* — die clo-Familie kann dann den einzigen Emissions-Slot nehmen und behält ihn nach §4-Semantik („offene Familie hält ihren Slot") auch über eine spätere Hint-Klärung hinweg; das ist ein neuer, beabsichtigter Eintrittspfad in die bestehende Regel. Auch der Konsistenz-Check konsumiert die gefloorte Lesung: entwertete Mismatch-Ära-Overrides können ein legitimes clo-Feedback nicht mehr als `inconsistent_signals` vetoen.
 
 ### 5. Schwellen-Feld-Tuning vor Live
 
