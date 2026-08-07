@@ -9,6 +9,8 @@ from custom_components.poise.control.suggestion import (
     OverrideSuggestion,
     detect_override_pattern,
     resolve_suggestion_conflict,
+    season_gate_floor,
+    season_hint_t_rm,
     season_mode_hint,
     suggestion_suppressed,
 )
@@ -134,6 +136,61 @@ def test_suppression_is_per_pattern_key_for_30_days() -> None:
     assert suggestion_suppressed(key, key, old, NOW) is False
     # No rejection recorded.
     assert suggestion_suppressed(key, None, None, NOW) is False
+
+
+# --- ADR-0060 §3 season gate: mismatch-era events never count ----------------
+
+
+def test_since_ts_floor_excludes_mismatch_era_events() -> None:
+    # Events recorded while the zone was season-wrong are mode signals, not
+    # comfort evidence (the confirmed Badezimmer valve-test false positive).
+    stats = [_ev(10.0, 1.0), _ev(8.0, 1.0), _ev(6.0, 1.0)]
+    assert detect_override_pattern(stats, now_ts=NOW, since_ts=NOW - 6.0 * _DAY) is None
+    # Without a floor the baseline behavior is unchanged.
+    assert detect_override_pattern(stats, now_ts=NOW) is not None
+
+
+def test_since_ts_floor_is_per_event_not_all_or_nothing() -> None:
+    stats = [
+        _ev(12.0, 1.0),
+        _ev(11.0, 1.0),
+        _ev(5.0, 1.0),
+        _ev(3.0, 1.0),
+        _ev(1.0, 1.0),
+    ]
+    # Two mismatch-era + three fresh events: only the fresh ones qualify.
+    s = detect_override_pattern(stats, now_ts=NOW, since_ts=NOW - 10.0 * _DAY)
+    assert s is not None and s.evidence == 3
+    # Boundary: an event exactly AT the floor is excluded (<=) — the stamp is
+    # written in the very tick that saw the hint active.
+    assert detect_override_pattern(stats, now_ts=NOW, since_ts=NOW - 5.0 * _DAY) is None
+
+
+def test_season_gate_floor_rule() -> None:
+    # Active hint: everything up to now is mismatch-era.
+    assert season_gate_floor(hint_active=True, last_active_ts=None, now_ts=NOW) == NOW
+    assert (
+        season_gate_floor(hint_active=True, last_active_ts=NOW - _DAY, now_ts=NOW)
+        == NOW
+    )
+    # Cleared hint: the persisted stamp keeps flooring — mode switch, restart
+    # and sensor flicker all clear the HINT without clearing the contamination.
+    assert (
+        season_gate_floor(hint_active=False, last_active_ts=NOW - _DAY, now_ts=NOW)
+        == NOW - _DAY
+    )
+    # Never season-wrong: no gate.
+    assert season_gate_floor(hint_active=False, last_active_ts=None, now_ts=NOW) is None
+
+
+def test_season_hint_t_rm_guards_fabricated_fallback() -> None:
+    # No real T_rm source: the hint is unknowable, not "cleared" — a cool_only
+    # zone without outdoor data must not inherit a permanent fabricated hint
+    # from the pipeline's outdoor fallback constant (5 °C <= lockout).
+    assert season_hint_t_rm(5.0, None) is None
+    assert season_hint_t_rm(24.7, "sensor") == 24.7
+    assert season_hint_t_rm(21.9, "internal") == 21.9
+    assert season_hint_t_rm(18.0, "outdoor") == 18.0
 
 
 # --- ADR-0060 §2: advisory season-mode hint ---------------------------------

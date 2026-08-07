@@ -57,6 +57,7 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
             "suggestion_rejected_at",
             "clo_suggestion_rejected_key",
             "clo_suggestion_rejected_at",
+            "season_hint_last_active_ts",
         }
     ),
     ExternalOverrideRuntime: frozenset(

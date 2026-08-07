@@ -31,6 +31,21 @@ def test_build_diagnostics_handles_no_data() -> None:
     assert diag["data"] is None
 
 
+def test_build_diagnostics_lifts_season_gate_floor_stamp() -> None:
+    # ADR-0060 §3: the season-gate floor stamp is lifted out of the tick next
+    # to the statistics it floors — the replay instrument reads it from the
+    # dump to model the gate.
+    diag = build_diagnostics(
+        {"name": "Bath"},
+        {"target_temperature": 21.0, "season_hint_last_active_ts": 123.0},
+    )
+    assert diag["season_hint_last_active_ts"] == 123.0
+    assert "season_hint_last_active_ts" not in diag["data"]
+    # Pre-gate ticks (or no tick at all) dump None.
+    assert build_diagnostics({"name": "X"}, {})["season_hint_last_active_ts"] is None
+    assert build_diagnostics({"name": "X"}, None)["season_hint_last_active_ts"] is None
+
+
 def test_build_diagnostics_merges_options_options_win() -> None:
     # F19: the V2 migration moves tuning into entry.options — the dump must
     # merge data + options (options win) so the tuning is not lost.

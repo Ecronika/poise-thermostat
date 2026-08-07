@@ -292,9 +292,10 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         adopt_external_mode=True,
         operative_input=False,  # literal default
         room_profile="office",  # ADR-0054 V2: backward-compatible default
-        # ADR-0060 §3: opt-in until the golden-replay threshold tuning ran;
-        # the ADR's decided end state (default on) follows after that round.
-        override_suggestions=False,
+        # ADR-0060 §3 CLOSED (2026-08-07): both field edges reviewed (one true
+        # positive, one valve-test FP structurally removed by the season gate)
+        # -> the ADR's decided end state: suggestion emission on by default.
+        override_suggestions=True,
         clo_offset=0.0,  # ADR-0067: no learned household bias by default
     )
 

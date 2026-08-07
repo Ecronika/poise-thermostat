@@ -766,6 +766,8 @@ _OUTCOME_KEY_ORDER = [
     "ca_time_in_band",
     "ca_cycles_per_h",
     "ca_minutes",
+    "ca_ppd",
+    "ca_ppd_minutes",
     "ref_offset",
     "ref_offset_dev",
     "ref_offset_trusted",

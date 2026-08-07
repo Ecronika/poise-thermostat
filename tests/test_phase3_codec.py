@@ -99,6 +99,7 @@ EXPECTED_PAYLOAD_KEYS = (
     "suggestion_rejected_at",
     "clo_suggestion_rejected_key",
     "clo_suggestion_rejected_at",
+    "season_hint_last_active_ts",
     "override_reason",
     "last_written_sp",
     "prev_device_sp",
@@ -216,6 +217,7 @@ def _rich_state() -> codec.PersistedZoneState:
         suggestion_rejected_at=NOW_WALL - 86400.0,
         clo_suggestion_rejected_key="clo_offset:-1",
         clo_suggestion_rejected_at=NOW_WALL - 43200.0,
+        season_hint_last_active_ts=NOW_WALL - 21600.0,
         override_reason="device_adopt_setpoint",
         last_written_sp=20.0,
         prev_device_sp=20.5,
@@ -237,7 +239,7 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 38  # +0066 +0067-F1/F2 +0060-L2
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 39  # +0066 +0067 +0060-L2/§3-Gate
 
 
 def test_encode_values_match_save_payload_transforms() -> None:
@@ -276,6 +278,7 @@ def test_encode_values_match_save_payload_transforms() -> None:
     assert payload["suggestion_rejected_at"] == NOW_WALL - 86400.0
     assert payload["clo_suggestion_rejected_key"] == "clo_offset:-1"
     assert payload["clo_suggestion_rejected_at"] == NOW_WALL - 43200.0
+    assert payload["season_hint_last_active_ts"] == NOW_WALL - 21600.0
     assert payload["override_reason"] == "device_adopt_setpoint"
     assert payload["last_written_sp"] == 20.0
     assert payload["prev_device_sp"] == 20.5
@@ -349,6 +352,7 @@ def test_roundtrip_decode_encode_semantic_identity() -> None:
     assert ovr.suggestion_rejected_at == NOW_WALL - 86400.0
     assert ovr.clo_suggestion_rejected_key == "clo_offset:-1"  # ADR-0067 F2
     assert ovr.clo_suggestion_rejected_at == NOW_WALL - 43200.0
+    assert ovr.season_hint_last_active_ts == NOW_WALL - 21600.0  # §3 gate
     assert ovr.override_policy == "switchpoint"  # decoded, config-owned
 
     base = decoded.adoption_baselines
@@ -399,12 +403,17 @@ def test_minimal_v1_payload_decodes_to_defaults() -> None:
     assert ovr.suggestion_rejected_at is None
     assert ovr.clo_suggestion_rejected_key is None
     assert ovr.clo_suggestion_rejected_at is None
+    assert ovr.season_hint_last_active_ts is None
 
 
 def test_suggestion_rejection_decode_is_type_guarded() -> None:
     """ADR-0060 L2: garbage types decode to None (never raise)."""
     decoded = codec.decode(
-        _v1(suggestion_rejected_key=42, suggestion_rejected_at="soon"),
+        _v1(
+            suggestion_rejected_key=42,
+            suggestion_rejected_at="soon",
+            season_hint_last_active_ts="yesterday",
+        ),
         now_wall=NOW_WALL,
     )
     ovr = decoded.override_lifecycle
@@ -412,6 +421,7 @@ def test_suggestion_rejection_decode_is_type_guarded() -> None:
     assert ovr.suggestion_rejected_at is None
     assert ovr.clo_suggestion_rejected_key is None
     assert ovr.clo_suggestion_rejected_at is None
+    assert ovr.season_hint_last_active_ts is None
     assert decoded.adoption_baselines == codec.AdoptionBaselinesSection()
     learn = decoded.learning
     assert isinstance(learn.ekf, ThermalEKF) and learn.ekf.n_updates == 0

@@ -195,6 +195,13 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # remembered L2 rejection (two independent suggestion families).
     ("user", "clo_suggestion_rejected_key"): "ADR-0067 F2 rejected pattern key",
     ("user", "clo_suggestion_rejected_at"): "ADR-0067 F2 rejection wall stamp",
+    # ADR-0060 §3 season gate: last tick the season-mode hint stood — floors
+    # the L2 emission detection (mismatch-era events are mode signals, not
+    # comfort evidence) and must survive mode switches and restarts.
+    ("user", "season_hint_last_active_ts"): "ADR-0060 §3 season-gate floor stamp",
+    # ADR-0055 N1: own elapsed anchor for the time-weighted PPD fold — PMV
+    # validity and the CA fairness mask diverge, so the PPD clock is separate.
+    ("diagnostics", "ppd_last_mono"): "ADR-0055 N1 PPD-fold elapsed anchor",
 }
 
 
