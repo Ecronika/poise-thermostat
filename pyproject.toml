@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poise"
-version = "0.182.0"
+version = "0.183.0"
 description = "Self-learning, norm-based thermostat for Home Assistant"
 requires-python = ">=3.12"
 
@@ -53,6 +53,11 @@ omit = [
     "custom_components/poise/climate.py",
     "custom_components/poise/storage.py",
     "custom_components/poise/sensor.py",
+    # ADR-0067 F1/F2 glue: the feedback buttons and the repairs fix flow are
+    # HA-runtime platforms (CI glue suite); the pure sandbox never imports
+    # them, so measuring them here would only report a misleading 0%.
+    "custom_components/poise/button.py",
+    "custom_components/poise/repairs.py",
     # diagnostics/ is PURE (shadows/collector + package __init__); only the
     # relocated HA platform hook stays glue-measured (was diagnostics.py).
     "custom_components/poise/diagnostics/entry.py",
