@@ -131,6 +131,8 @@ from ..control.scoring_expectation import model_expected_minutes
 from ..control.suggestion import (
     detect_override_pattern,
     resolve_suggestion_conflict,
+    season_gate_floor,
+    season_hint_t_rm,
     season_mode_hint,
     suggestion_suppressed,
 )
@@ -2725,6 +2727,29 @@ class TickOrchestrator:
                     mode=mode,
                     dt_min=_ca_dt,
                 )
+            # ADR-0055 N1: time-weighted PPD — the comfort-flip gate
+            # component. Same fairness mask as the CA fold above, additionally
+            # gated on a VALID PMV (ISO 7730 domain, ADR-0054 V3); own elapsed
+            # anchor because PMV validity and the CA mask diverge.
+            _ppd_val = ctx.climate_diag.get("ppd")
+            if (
+                self._runtime.user.enabled
+                and not window_open
+                and not frozen
+                and self._runtime.user.override is None
+                and sched.is_comfort
+                and ctx.climate_diag.get("pmv_valid") is True
+                and isinstance(_ppd_val, (int, float))
+            ):
+                _ppd_dt = capped_elapsed_min(
+                    self._runtime.diagnostics.ppd_last_mono, now, _tick_min
+                )
+                self._runtime.diagnostics.ppd_last_mono = now
+                self._runtime.diagnostics.regq = (
+                    self._runtime.diagnostics.regq.observe_ppd(
+                        ppd=float(_ppd_val), dt_min=_ppd_dt
+                    )
+                )
             # ADR-0056 SHADOW: actuator<->room reference-frame offset (no writes).
             # Fold in a sample only while the actuator is actually conditioning
             # — its internal sensor carries the placement bias only under
@@ -2829,13 +2854,40 @@ class TickOrchestrator:
         _cover_reason, shadow_objs = shadow.cover_reason, shadow.shadow_objs
         valve_health, closing_steps = valve.valve_health, valve.closing_steps
         idle_steps = valve.idle_steps
+        # ADR-0060 §2: advisory season-mode hint — the zone's own lockout
+        # thresholds define "season-wrong", T_rm's multi-day memory is the
+        # "persistently"; hysteresis anchor is transient runtime state.
+        # Computed BEFORE the L2 detection: its history floors that reading.
+        # ``season_hint_t_rm`` keeps the hint silent when only the fabricated
+        # outdoor fallback is available (t_rm_source None).
+        _sugg_now = dt_util.utcnow().timestamp()
+        _season_hint = season_mode_hint(
+            climate_mode=self._runtime.user.climate_mode,
+            t_rm=season_hint_t_rm(t_rm_eff, t_rm_source),
+            heat_max_outdoor=self._c._heat_max_outdoor,
+            cool_min_outdoor=self._c._cool_min_outdoor,
+            prev_hint=self._runtime.diagnostics.season_hint_prev,
+        )
+        self._runtime.diagnostics.season_hint_prev = _season_hint
+        # ADR-0060 §3 season gate: overrides recorded while the zone is
+        # season-wrong are mode signals, not comfort evidence.  The stamp is
+        # not dirty-marked — the periodic (30-tick) save picks it up, a crash
+        # loses minutes of it at most, and the hint usually re-raises anyway.
+        if _season_hint is not None:
+            self._runtime.user.season_hint_last_active_ts = _sugg_now
+        _l2_floor = season_gate_floor(
+            hint_active=_season_hint is not None,
+            last_active_ts=self._runtime.user.season_hint_last_active_ts,
+            now_ts=_sugg_now,
+        )
         # ADR-0060 L2 SHADOW: the suggestion the L1 statistic would raise —
         # always computed and published (the §3 field-tuning round needs the
         # would-be suggestions); the repair-issue EMISSION alone is opt-in
-        # gated inside _sync_suggestion_issue.
-        _sugg_now = dt_util.utcnow().timestamp()
+        # gated inside _sync_suggestion_issue.  The reading is season-gate
+        # floored (§3): the raw ungated view stays reconstructable from the
+        # dump (statistics + floor stamp) via the replay instrument.
         _sugg = detect_override_pattern(
-            self._runtime.user.override_stats, now_ts=_sugg_now
+            self._runtime.user.override_stats, now_ts=_sugg_now, since_ts=_l2_floor
         )
         _sugg_suppressed = _sugg is not None and suggestion_suppressed(
             _sugg.key,
@@ -2843,17 +2895,6 @@ class TickOrchestrator:
             self._runtime.user.suggestion_rejected_at,
             _sugg_now,
         )
-        # ADR-0060 §2: advisory season-mode hint — the zone's own lockout
-        # thresholds define "season-wrong", T_rm's multi-day memory is the
-        # "persistently"; hysteresis anchor is transient runtime state.
-        _season_hint = season_mode_hint(
-            climate_mode=self._runtime.user.climate_mode,
-            t_rm=t_rm_eff,
-            heat_max_outdoor=self._c._heat_max_outdoor,
-            cool_min_outdoor=self._c._cool_min_outdoor,
-            prev_hint=self._runtime.diagnostics.season_hint_prev,
-        )
-        self._runtime.diagnostics.season_hint_prev = _season_hint
         # ADR-0067 F2: the clo-family reading + the #4 conflict resolution
         # (never two competing readings; an open family keeps its slot).
         _fb_sugg = detect_feedback_pattern(
@@ -2981,6 +3022,11 @@ class TickOrchestrator:
             "suggestion_evidence": _sugg.evidence if _sugg else 0,
             "suggestion_suppressed": _sugg_suppressed,
             "season_hint": _season_hint,
+            # ADR-0060 §3: the gate floor stamp (shadow key, not _ATTRS) — the
+            # diagnostics dump lifts it next to the statistics it floors.
+            "season_hint_last_active_ts": (
+                self._runtime.user.season_hint_last_active_ts
+            ),
             # ADR-0067 F2: the clo-family reading ("" reason = emittable).
             "clo_suggestion_direction": _fb_sugg.direction if _fb_sugg else None,
             "clo_suggestion_evidence": _fb_sugg.evidence if _fb_sugg else 0,
