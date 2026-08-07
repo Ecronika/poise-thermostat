@@ -72,7 +72,7 @@ from ..multi import lifecycle as _lifecycle
 from ..multi.lifecycle import DeviceLifecycle
 
 # The v1 payload key set, in insertion order (the wire order of the dict).
-# 36 keys = the union of the ``PERSISTED_FIELDS`` constants in
+# 39 keys = the union of the ``PERSISTED_FIELDS`` constants in
 # ``runtime/state.py`` (three storage-key renames, see STORAGE_KEY_RENAMES)
 # plus the config-owned ``override_policy`` special case.
 PAYLOAD_KEYS: Final[tuple[str, ...]] = (
@@ -107,6 +107,7 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "suggestion_rejected_at",
     "clo_suggestion_rejected_key",
     "clo_suggestion_rejected_at",
+    "season_hint_last_active_ts",
     "override_reason",
     "last_written_sp",
     "prev_device_sp",
@@ -191,6 +192,8 @@ class PersistedZoneState:
     # ADR-0067 F2 rejection suppression (defaulted: additive)
     clo_suggestion_rejected_key: str | None = None
     clo_suggestion_rejected_at: float | None = None
+    # ADR-0060 §3 season-gate floor stamp (defaulted: additive)
+    season_hint_last_active_ts: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The v1 store dict (key set, transforms, values).
@@ -240,6 +243,7 @@ class PersistedZoneState:
             "suggestion_rejected_at": self.suggestion_rejected_at,
             "clo_suggestion_rejected_key": self.clo_suggestion_rejected_key,
             "clo_suggestion_rejected_at": self.clo_suggestion_rejected_at,
+            "season_hint_last_active_ts": self.season_hint_last_active_ts,
             "override_reason": self.override_reason,  # hold origin
             "last_written_sp": self.last_written_sp,
             "prev_device_sp": self.prev_device_sp,
@@ -305,6 +309,8 @@ class OverrideLifecycleSection:
     # ADR-0067 F2 rejection suppression — same semantics, own slot.
     clo_suggestion_rejected_key: str | None = None
     clo_suggestion_rejected_at: float | None = None
+    # ADR-0060 §3 season-gate floor stamp — type-guarded, not hold-gated.
+    season_hint_last_active_ts: float | None = None
     override_policy: str | None = None  # stored copy; NEVER apply (F13)
 
 
@@ -436,6 +442,7 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
     sra = data.get("suggestion_rejected_at")
     csrk = data.get("clo_suggestion_rejected_key")
     csra = data.get("clo_suggestion_rejected_at")
+    shla = data.get("season_hint_last_active_ts")
     opol = data.get("override_policy")
     return OverrideLifecycleSection(
         override=override,
@@ -475,6 +482,9 @@ def _decode_override_lifecycle(data: dict[Any, Any]) -> OverrideLifecycleSection
         clo_suggestion_rejected_key=csrk if isinstance(csrk, str) else None,
         clo_suggestion_rejected_at=(
             float(csra) if isinstance(csra, (int, float)) else None
+        ),
+        season_hint_last_active_ts=(
+            float(shla) if isinstance(shla, (int, float)) else None
         ),
         override_policy=opol if isinstance(opol, str) else None,
     )
