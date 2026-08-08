@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing, svg, type PropertyValues } from "lit";
 import type { HomeAssistant, LovelaceCard } from "./ha-types.ts";
 import { buildBand } from "./comfort.ts";
-import { buildMonitor, type Lamp } from "./monitoring.ts";
+import { buildMonitor, comfortMeasure, type Lamp } from "./monitoring.ts";
 import {
   type PoiseCardConfig,
   type ResolvedConfig,
@@ -228,8 +228,8 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         ${r.history.show
           ? this._chart(num(a["comfort_low"]), num(a["comfort_high"]))
           : nothing}
-        ${this._monitor(a, band, lang)} ${this._chips(a, lang)}
-        ${this._learn(a, lang)}
+        ${this._monitor(a, band, lang)} ${this._measurePill(a, lang)}
+        ${this._chips(a, lang)} ${this._learn(a, lang)}
       </div>
     </ha-card>`;
   }
@@ -615,6 +615,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         co2: num(a["co2"]) ?? num(a["carbon_dioxide"]),
         pmv: num(a["pmv"]),
         ppd: num(a["ppd"]),
+        pmvValid: typeof a["pmv_valid"] === "boolean" ? a["pmv_valid"] : null,
         ca: {
           deviationK: num(a["ca_deviation_k"]),
           timeInBand: num(a["ca_time_in_band"]),
@@ -649,17 +650,54 @@ export class PoiseCard extends LitElement implements LovelaceCard {
 
   private _lamp(l: Lamp, lang?: string) {
     const label = t(lang, l.key);
-    const lvl = t(lang, l.level === "unknown" ? "unknown" : "air_" + l.level);
+    // Field feedback: quality lamps (comfort, control accuracy) need their
+    // own level vocabulary — "Erhöht" (elevated) is air-quality language and
+    // reads backwards for a quality percentage.
+    const lvlKey =
+      l.level === "unknown"
+        ? "unknown"
+        : `${l.key === "pmv" || l.key === "ca" ? l.key : "air"}_${l.level}`;
+    const lvl = t(lang, lvlKey);
     let val = "—";
     if (l.value != null) {
       val =
         l.key === "temperature" ? l.value.toFixed(1) : String(Math.round(l.value));
     }
-    const desc = `${label}: ${val} ${l.unit} — ${lvl}${l.detail ? ` · ${l.detail}` : ""}`;
+    const extra = l.detailKey ? t(lang, l.detailKey) : l.detail;
+    const desc = `${label}: ${val} ${l.unit} — ${lvl}${extra ? ` · ${extra}` : ""}`;
     return html`<div class="lamp" title=${desc} aria-label=${desc}>
       <span class="dot" style="background:${l.color}"></span>
       <span class="lk">${label}</span>
       <span class="lv">${val}<small>${l.unit}</small></span>
+    </div>`;
+  }
+
+  // ADR-0069 E7: the active-comfort measure line — display only, gated on
+  // the real toggle attribute; shows fan-first / applied edge credit /
+  // applied PMV shift, or the maturing hint while a tier-2 latch dwells.
+  private _measurePill(a: Record<string, unknown>, lang?: string) {
+    const m = comfortMeasure({
+      active: a["active_comfort"] === true,
+      fanFirstPhase:
+        typeof a["fan_first_phase"] === "string" ? a["fan_first_phase"] : null,
+      tier2FanCe:
+        typeof a["tier2_fan_ce"] === "string" ? a["tier2_fan_ce"] : null,
+      tier2Pmv:
+        typeof a["tier2_pmv_offset"] === "string" ? a["tier2_pmv_offset"] : null,
+      ceCreditK: num(a["fan_ce_credit_k"]),
+      pmvOffsetK: num(a["pmv_offset_k"]),
+    });
+    if (!m) return nothing;
+    const parts: string[] = [];
+    if (m.fan) parts.push(t(lang, "ac_fan"));
+    if (m.ceK != null) parts.push(`${t(lang, "ac_ce")} +${m.ceK.toFixed(1)} K`);
+    if (m.offsetK != null)
+      parts.push(`PMV ${m.offsetK > 0 ? "+" : ""}${m.offsetK.toFixed(1)} K`);
+    const body = parts.length
+      ? parts.join(" · ")
+      : t(lang, m.maturing ? "ac_maturing" : "ac_none");
+    return html`<div class="learn">
+      <div class="pill">${t(lang, "ac_active")} · ${body}</div>
     </div>`;
   }
 

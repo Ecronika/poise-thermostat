@@ -213,6 +213,10 @@ export interface MonitorInput {
   absHumidityGm3?: number | null; // ADR-0066: drives the dry side of the lamp
   pmv?: number | null;
   ppd?: number | null;
+  // ADR-0054 V3: false = met/clo outside the ISO 7730 domain — the backend
+  // publishes pmv/ppd as null then; the lamp renders grey with a hint
+  // instead of silently disappearing.
+  pmvValid?: boolean | null;
   ca?: CaInput | null;
 }
 
@@ -233,6 +237,41 @@ export interface Lamp {
   level: Level;
   color: string;
   detail?: string; // extra context for title/aria (e.g. "14.3 g/m³")
+  detailKey?: string; // localizable detail (translated in the card renderer)
+}
+
+// --- "Aktive Behaglichkeit" measure line (ADR-0069 E7, display only) ---
+export interface ComfortMeasureInput {
+  active: boolean; // the real active_comfort toggle attribute
+  fanFirstPhase: string | null;
+  tier2FanCe: string | null;
+  tier2Pmv: string | null;
+  ceCreditK: number | null;
+  pmvOffsetK: number | null;
+}
+
+export interface ComfortMeasure {
+  fan: boolean; // the fan-first stage is engaged (fan_only sequence running)
+  ceK: number | null; // applied cooling-edge credit [K], null when 0/absent
+  offsetK: number | null; // applied PMV band shift [K], null when 0/absent
+  maturing: boolean; // nothing active yet, but a tier-2 latch is dwelling
+}
+
+export function comfortMeasure(input: ComfortMeasureInput): ComfortMeasure | null {
+  if (!input.active) return null;
+  const fan =
+    input.fanFirstPhase === "await_fan_only" ||
+    input.fanFirstPhase === "await_stage" ||
+    input.fanFirstPhase === "dwell";
+  const ceK = isNum(input.ceCreditK) && input.ceCreditK > 0 ? input.ceCreditK : null;
+  const offsetK =
+    isNum(input.pmvOffsetK) && input.pmvOffsetK !== 0 ? input.pmvOffsetK : null;
+  const maturing =
+    !fan &&
+    ceK == null &&
+    offsetK == null &&
+    (input.tier2FanCe === "eligible" || input.tier2Pmv === "eligible");
+  return { fan, ceK, offsetK, maturing };
 }
 
 export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[] {
@@ -280,11 +319,24 @@ export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[
       color: levelColor(c),
     });
   }
-  if (isNum(input.pmv) || isNum(input.ppd)) {
+  if (input.pmvValid === false) {
+    // ADR-0054 V3: outside the ISO domain the estimate is formally not
+    // validated — render the lamp grey with the hint (pmv/ppd are null).
+    lamps.push({
+      key: "pmv",
+      value: null,
+      unit: "%",
+      level: "unknown",
+      color: levelColor("unknown"),
+      detailKey: "pmv_not_validated",
+    });
+  } else if (isNum(input.pmv) || isNum(input.ppd)) {
     const p = pmvVerdict(input.pmv ?? null, input.ppd ?? null);
     lamps.push({
       key: "pmv",
-      value: isNum(input.ppd) ? input.ppd : null,
+      // Field feedback: "Behaglichkeit 5 %" read as the OPPOSITE of the
+      // best case — show satisfaction (100 - PPD); thresholds stay PPD.
+      value: isNum(input.ppd) ? 100 - input.ppd : null,
       unit: "%",
       level: p,
       color: levelColor(p),
