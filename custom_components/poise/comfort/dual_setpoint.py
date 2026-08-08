@@ -61,6 +61,12 @@ def decide(
     adaptive_cap: float = 26.0,  # ASR office ceiling for the adaptive cool edge
     eco_widen: float = 0.0,  # ADR-0058: presence Eco band-widening (both edges)
     cool_ceiling_override: float | None = None,  # ADR-0058: unoccupied cool ceiling
+    # ADR-0068 U7: live fan-CE credit [K] on the cooling edge (>= 0; the EN
+    # clamp/ceiling binds automatically — same pattern as eco_widen).
+    cool_edge_credit: float = 0.0,
+    # ADR-0054 Stufe 2 via ADR-0069 U8: capped PMV band shift (defensive
+    # +-1 K cap here; the caller computes it via pmv_setpoint_offset).
+    pmv_offset_k: float = 0.0,
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
     # The fixed design bands are anchored to the comfort centre (heat/cool edges
@@ -79,8 +85,15 @@ def decide(
     # setback is neutralised. The air-side frost/mould floor is re-applied below,
     # so protection is never weakened; only the comfort lower is waived.
     heat_lower = HEATING_LOWER[category] if occupied else frost_floor
+    # ADR-0069 U8: the PMV shift moves BOTH edges (a band shift, not a
+    # widening); defensively capped to the sanctioned +-1 K. ADR-0068 U7:
+    # the fan-CE credit raises ONLY the cooling edge, never below 0.
+    pmv_shift = _clamp(pmv_offset_k, -1.0, 1.0)
+    ce_credit = max(0.0, cool_edge_credit)
     heat_op = _clamp(
-        comfort_base - widen - eco_widen, heat_lower, HEATING_UPPER[category]
+        comfort_base - widen - eco_widen + pmv_shift,
+        heat_lower,
+        HEATING_UPPER[category],
     )
     # ADR-0058: presence Eco widens both edges symmetrically (heat down, cool up);
     # the unoccupied cool ceiling relaxes from COOLING_UPPER to the caller's
@@ -93,7 +106,7 @@ def decide(
         else COOLING_UPPER[category]
     )
     cool_op = _clamp(
-        comfort_base + _NEUTRAL_DEADBAND_K + widen + eco_widen,
+        comfort_base + _NEUTRAL_DEADBAND_K + widen + eco_widen + pmv_shift + ce_credit,
         COOLING_LOWER[category],
         cool_ceiling,
     )

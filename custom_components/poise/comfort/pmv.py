@@ -172,6 +172,29 @@ def clo_dynamic(clo: float, met: float) -> float:
     return clo * (0.6 + 0.4 / met)
 
 
+# ADR-0069 U8: revision tag of the PMV model configuration — part of the
+# tier-2 baseline validity signature. Bump on any change to the PMV/clo/met
+# computation that makes old PPD baselines incomparable.
+PMV_MODEL_REV = "pmv-v1"
+
+# PMV subtleties below +-0.3 carry no information (ADR-0054: pseudo-accuracy)
+# — the offset is zero inside the deadband and continuous beyond it.
+_PMV_OFFSET_DEADBAND = 0.3
+
+
+def pmv_setpoint_offset(pmv: float, *, cap_k: float = 1.0) -> float:
+    """ADR-0054 Stufe 2: the capped, conservative PMV inversion [K].
+
+    A warm feeling (positive PMV) lowers the band, a cold one raises it —
+    1 K per PMV unit beyond the +-0.3 deadband (deliberately far below the
+    full physical inversion), hard-capped at the sanctioned +-1 K. The
+    solver clamps (EN band, norm envelope) bind on top in ``decide()``.
+    """
+    magnitude = max(0.0, abs(pmv) - _PMV_OFFSET_DEADBAND)
+    offset = min(cap_k, magnitude)
+    return round(-offset if pmv > 0 else offset, 2)
+
+
 def pmv_validity(*, met: float, clo: float) -> bool:
     """Inside the ISO 7730 application domain (0.8-4.0 met, 0-2.0 clo)?
 
