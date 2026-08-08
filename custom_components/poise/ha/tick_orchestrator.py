@@ -3278,6 +3278,9 @@ class TickOrchestrator:
             # ADR-0068 U6: fan-first observability (shadow keys, not _ATTRS).
             "fan_first_phase": self._runtime.latches.fan_first.phase,
             "fan_first_reason": self._runtime.diagnostics.fan_first_reason,
+            # ADR-0069 E7 (Card): the mechanism toggle, published so the card
+            # can gate the active-measure display on the real config state.
+            "active_comfort": self._c._active_comfort,
             # ADR-0069 U7/U8: tier-2 latch states + the applied inputs.
             "tier2_fan_ce": (self._runtime.diagnostics.comfort_activation.fan_ce.state),
             "tier2_pmv_offset": (
