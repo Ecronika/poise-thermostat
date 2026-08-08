@@ -121,12 +121,14 @@
               "category": "EN 16798 comfort category",
               "climate_mode": "Climate mode",
               "comfort_weight": "Comfort vs efficiency",
-              "room_profile": "Room profile (comfort evaluation)"
+              "room_profile": "Room profile (comfort evaluation)",
+              "active_comfort": "Active comfort"
             },
             "data_description": {
               "comfort_base": "The centre of the comfort band; the category sets how wide the band is around it.",
               "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. Default 70.",
-              "room_profile": "Activity and clothing assumption for the comfort (PMV) diagnosis: office is the neutral default; living adds the sofa insulation, bedroom assumes resting, kitchen assumes housework. Affects the comfort lamp only, never the setpoint. With the bedroom profile no PMV is evaluated (sleeping is outside the ISO 7730 validity range) — the comfort lamp stays silent there."
+              "room_profile": "Activity and clothing assumption for the comfort (PMV) diagnosis: office is the neutral default; living adds the sofa insulation, bedroom assumes resting, kitchen assumes housework. Affects the comfort lamp only, never the setpoint. With the bedroom profile no PMV is evaluated (sleeping is outside the ISO 7730 validity range) — the comfort lamp stays silent there.",
+              "active_comfort": "Actively produce comfort: permits the fan-first cooling stage, the cooling-edge credit and the PMV offset for this zone. Each part only engages once its quality gate and readiness checks pass (ADR-0069)."
             }
           },
           "schedule": {

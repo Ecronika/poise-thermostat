@@ -33,6 +33,7 @@ from .const import (
     COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
     CONF_ABSENCE_AFTER_MIN,
+    CONF_ACTIVE_COMFORT,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ADOPT_EXTERNAL_MODE,
@@ -100,6 +101,7 @@ from .const import (
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
+    DEFAULT_ACTIVE_COMFORT,
     DEFAULT_ADAPTIVE_COOL,
     DEFAULT_ADOPT_EXTERNAL_MODE,
     DEFAULT_ADOPT_EXTERNAL_SETPOINT,
@@ -145,6 +147,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_CATEGORY,
         CONF_COMFORT_WEIGHT,
         CONF_ROOM_PROFILE,
+        CONF_ACTIVE_COMFORT,
     ),
     "schedule": (
         CONF_COMFORT_START,
@@ -546,6 +549,12 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
                                 translation_key="room_profile",
                             )
                         ),
+                        # ADR-0069: the "Aktive Behaglichkeit" mechanism
+                        # toggle — permits the comfort actuation blocks; the
+                        # ADR-0055-N1 tier gates release them piecewise.
+                        vol.Optional(
+                            CONF_ACTIVE_COMFORT, default=DEFAULT_ACTIVE_COMFORT
+                        ): selector.BooleanSelector(),
                     }
                 ),
                 {"collapsed": False},

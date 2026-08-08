@@ -183,6 +183,11 @@ CONF_OVERRIDE_MAX_H: Final = "override_max_h"
 CONF_OVERRIDE_END_ON_PRESENCE: Final = "override_end_on_presence_change"
 CONF_BOOST_DURATION_MIN: Final = "boost_duration_min"
 CONF_OVERRIDE_SUGGESTIONS: Final = "override_suggestions"  # ADR-0060 L2
+# ADR-0069 "Aktive Behaglichkeit": the standing zone MECHANISM toggle — it
+# permits the comfort actuation building blocks; the ADR-0055-N1 tier gates
+# release them piecewise. Default off: enabling is the user's decision.
+CONF_ACTIVE_COMFORT: Final = "active_comfort"
+DEFAULT_ACTIVE_COMFORT: Final = False
 OVERRIDE_POLICY_SCHEDULE: Final = "schedule"
 OVERRIDE_POLICY_TIMER: Final = "timer"
 OVERRIDE_POLICY_PERMANENT: Final = "permanent"

@@ -1081,6 +1081,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 tau_settle=self._zone_runtime.learning.tau_settle,
                 outcome_stats=self._zone_runtime.diagnostics.outcome_stats,
                 regq=self._zone_runtime.diagnostics.regq,
+                comfort_activation=(self._zone_runtime.diagnostics.comfort_activation),
                 hdh=self._zone_runtime.diagnostics.hdh,
                 dry_active=self._zone_runtime.humidity.dry_active,
                 vent_active=self._zone_runtime.humidity.vent_active,
@@ -1117,6 +1118,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 prev_device_sp=self._zone_runtime.external.prev_device_sp,
                 last_commanded_hvac=self._zone_runtime.external.last_commanded_hvac,
                 prev_device_mode=self._zone_runtime.external.prev_device_mode,
+                last_commanded_fan=self._zone_runtime.external.last_commanded_fan,
+                prev_device_fan=self._zone_runtime.external.prev_device_fan,
             )
         )
 
