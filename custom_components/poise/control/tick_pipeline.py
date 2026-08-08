@@ -895,6 +895,7 @@ def stage_mode_resolution(
     compressor_guard: str,
     comp_min_off_opt: float | None,
     comp_mode_hold_opt: float | None,
+    fan_first_requested: bool = False,
 ) -> ModeResolutionResult:
     """Mode arbitration + compressor-guard policy (ADR-0046 §8).
 
@@ -902,6 +903,11 @@ def stage_mode_resolution(
     resolved UNCONDITIONALLY -- also while the zone is disabled -- so the
     always-on shadow lifecycle tracking stays alive.  Pinned by
     test_frost_rescue_disabled.
+
+    ADR-0068 U5: ``fan_first_requested`` is the fan-first FSM's mode
+    candidate; it may intercept ONLY a NORMAL ``cool`` — the intent
+    provenance is derived here, at the one site that knows both manual
+    channels (setpoint hold AND mode hold) plus the safety signals.
     """
     frozen = ing.frozen
     t_out_eff = ing.t_out_eff
@@ -956,10 +962,21 @@ def stage_mode_resolution(
             cool_min_outdoor=(cool_min_outdoor if cool_lockout_enabled else None),
             heat_max_outdoor=(heat_max_outdoor if heat_lockout_enabled else None),
         )
+    # ADR-0068 U5 intent provenance: safety (window/frozen) beats manual
+    # beats normal. BOTH manual channels count — the setpoint hold and the
+    # adopted mode hold (the review's channel beyond the ADR text).
+    if window_open or frozen:
+        _origin = "safety"
+    elif rt.user.override is not None or rt.user.mode_override is not None:
+        _origin = "manual"
+    else:
+        _origin = "normal"
+    _fan_first = fan_first_requested and _origin == "normal"
     final_mode = mode_arbitration(
         base_mode=_base_mode,
         humidity_action=_hum_action,
         dry_ok="dry" in act_modes,
+        fan_first=_fan_first,
     )
     # ADR-0046 §8 (live): hold back a mode nudge that would short-cycle the
     # compressor — start it within min-off, or flip cool<->dry within
@@ -992,6 +1009,8 @@ def stage_mode_resolution(
         g_mode_hold=_g_mode_hold,
         guard_block=_guard_block,
         mode_nudge_blocked=_mode_nudge_blocked,
+        intent_origin=_origin,
+        fan_first_allowed=_fan_first and final_mode == "fan_only",
     )
 
 
@@ -1270,4 +1289,5 @@ def build_finalize_context(
         heat_source_suspect=ing.heat_source_suspect,
         ext_num=op.ext_num,
         operative_active=op.operative_active,
+        occupancy=sp.presence.occupancy,
     )

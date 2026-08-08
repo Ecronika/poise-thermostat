@@ -271,7 +271,9 @@ def resolve_desired_mode(
     idles in ``cool`` instead of ping-ponging cool<->heat at the compressor.
     ``manual`` and off/unknown fall back to the current mode or ``heat``.
     """
-    if final_mode in ("heat", "cool", "dry"):
+    if final_mode in ("heat", "cool", "dry", "fan_only"):
+        # fan_only: the ADR-0068 fan-first stage is a first-class nudge
+        # target; the capability gate is needs_mode_nudge's ``supported``.
         return final_mode
     if final_mode == "off":
         return "heat" if can_heat else "off"
