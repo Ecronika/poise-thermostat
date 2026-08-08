@@ -9,6 +9,7 @@ from custom_components.poise.control.regulation_quality import (
     PPD_TOL_PCT,
     WARMUP_MIN,
     RegulationQuality,
+    ca_tick_scorable,
     flip_metric_ok,
     meets_comfort_quality,
     meets_quality,
@@ -191,4 +192,50 @@ def test_flip_gate() -> None:
     )
     assert not meets_quality(
         RegulationQuality(**{**base, "minutes": 100.0}), identified=True
+    )
+
+
+# ------------------------------------------------- capability fairness mask --
+
+
+def test_ca_mask_uncoolable_overshoot_is_not_scored() -> None:
+    """Field finding 2026-08-08 (heat-only Bad zone, hot spell): time above the
+    cool edge that the zone CANNOT actuate against must not count against the
+    flip gate -- it measures the weather, not the controller."""
+    assert not ca_tick_scorable(
+        room=26.0, heat_sp=22.6, cool_sp=25.4, can_heat=True, can_cool=False
+    )
+    # The same overshoot IS scored when the zone can cool (Buero split AC).
+    assert ca_tick_scorable(
+        room=26.0, heat_sp=22.6, cool_sp=25.4, can_heat=True, can_cool=True
+    )
+
+
+def test_ca_mask_unheatable_undershoot_is_not_scored() -> None:
+    assert not ca_tick_scorable(
+        room=17.0, heat_sp=20.0, cool_sp=24.0, can_heat=False, can_cool=True
+    )
+    assert ca_tick_scorable(
+        room=17.0, heat_sp=20.0, cool_sp=24.0, can_heat=True, can_cool=True
+    )
+
+
+def test_ca_mask_in_band_always_scored() -> None:
+    # In-band ticks score regardless of capability (edges inclusive).
+    for ch, cc in ((False, False), (True, False), (False, True)):
+        assert ca_tick_scorable(
+            room=22.0, heat_sp=20.0, cool_sp=24.0, can_heat=ch, can_cool=cc
+        )
+        assert ca_tick_scorable(
+            room=24.0, heat_sp=20.0, cool_sp=24.0, can_heat=ch, can_cool=cc
+        )
+        assert ca_tick_scorable(
+            room=20.0, heat_sp=20.0, cool_sp=24.0, can_heat=ch, can_cool=cc
+        )
+
+
+def test_ca_mask_actuatable_violations_still_scored() -> None:
+    # A heat-only zone's UNDERSHOOT stays scored (it can heat against it).
+    assert ca_tick_scorable(
+        room=19.0, heat_sp=20.0, cool_sp=24.0, can_heat=True, can_cool=False
     )

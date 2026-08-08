@@ -751,6 +751,10 @@ def test_finalize_context_field_set_is_pinned() -> None:
         # ADR-0069 U1: the room-occupancy lane for the readiness predicates —
         # a deliberate contract extension (51st name).
         "occupancy",
+        # ADR-0055 field calibration: capability inputs for the CA fairness
+        # mask — deliberate contract extension (52nd/53rd name, defaulted).
+        "can_heat",
+        "can_cool",
     ]
 
 
