@@ -58,6 +58,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
+from ..control.comfort_activation import ComfortActivation
 from ..control.hdh_savings import HdhSavings
 from ..control.outcome_scoring import OutcomeStats
 from ..control.override import OverrideMode
@@ -83,6 +84,7 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "multi_lifecycle",
     "outcome_stats",
     "regulation_quality",
+    "comfort_activation",
     "ref_offset",
     "tau_settle",
     "hdh_savings",
@@ -113,6 +115,8 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "prev_device_sp",
     "last_commanded_hvac",
     "prev_device_mode",
+    "last_commanded_fan",
+    "prev_device_fan",
     "climate_mode",
     "has_actuated",
 )
@@ -156,6 +160,7 @@ class PersistedZoneState:
     # diagnostics (DiagnosticsRuntime + HumidityRuntime)
     outcome_stats: OutcomeStats
     regq: RegulationQuality  # storage key "regulation_quality"
+    comfort_activation: ComfortActivation  # ADR-0069 U2 tier-2 latches
     hdh: HdhSavings  # storage key "hdh_savings"
     dry_active: bool
     # user intent (UserControlState) + actuation latch (ActuatorRuntime)
@@ -184,6 +189,9 @@ class PersistedZoneState:
     # ADR-0066 humidity axis (defaulted: additive to the v1 store shape)
     vent_active: bool = False
     surface_rh_mean: float | None = None
+    # ADR-0068 U3 fan-stage echo baselines (defaulted: additive)
+    last_commanded_fan: str | None = None
+    prev_device_fan: str | None = None
     # ADR-0067 F1 comfort-feedback statistic (defaulted: additive, by reference)
     feedback_stats: list[dict[str, Any]] = field(default_factory=list)
     # ADR-0060 L2 rejection suppression (defaulted: additive)
@@ -211,6 +219,7 @@ class PersistedZoneState:
             "multi_lifecycle": _lifecycle.to_dict(self.multi_lifecycle),
             "outcome_stats": self.outcome_stats.to_dict(),
             "regulation_quality": self.regq.to_dict(),
+            "comfort_activation": self.comfort_activation.to_dict(),
             "ref_offset": (
                 self.ref_offset.to_dict() if self.ref_offset is not None else None
             ),
@@ -249,6 +258,8 @@ class PersistedZoneState:
             "prev_device_sp": self.prev_device_sp,
             "last_commanded_hvac": self.last_commanded_hvac,
             "prev_device_mode": self.prev_device_mode,
+            "last_commanded_fan": self.last_commanded_fan,  # ADR-0068 U3
+            "prev_device_fan": self.prev_device_fan,
             "climate_mode": self.climate_mode,
             "has_actuated": self.has_actuated,  # teardown-park gate
         }
@@ -328,6 +339,9 @@ class AdoptionBaselinesSection:
     prev_device_sp: float | None = None
     last_commanded_hvac: str | None = None
     prev_device_mode: str | None = None
+    # ADR-0068 U3 fan-stage baselines — same B5 semantics, type-guarded.
+    last_commanded_fan: str | None = None
+    prev_device_fan: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,6 +383,7 @@ class DiagnosticsSection:
 
     outcome_stats: OutcomeStats | None = None
     regq: RegulationQuality | None = None
+    comfort_activation: ComfortActivation | None = None  # ADR-0069 U2
     hdh: HdhSavings | None = None
     dry_active: bool | None = None
     vent_active: bool | None = None
@@ -495,11 +510,15 @@ def _decode_adoption_baselines(data: dict[Any, Any]) -> AdoptionBaselinesSection
     pds = data.get("prev_device_sp")
     lch = data.get("last_commanded_hvac")
     pdm = data.get("prev_device_mode")
+    lcf = data.get("last_commanded_fan")
+    pdf = data.get("prev_device_fan")
     return AdoptionBaselinesSection(
         last_written_sp=(float(lws) if isinstance(lws, (int, float)) else None),
         prev_device_sp=(float(pds) if isinstance(pds, (int, float)) else None),
         last_commanded_hvac=lch if isinstance(lch, str) else None,
         prev_device_mode=pdm if isinstance(pdm, str) else None,
+        last_commanded_fan=lcf if isinstance(lcf, str) else None,
+        prev_device_fan=pdf if isinstance(pdf, str) else None,
     )
 
 
@@ -541,6 +560,9 @@ def _decode_models(
         rq = data.get("regulation_quality")
         if isinstance(rq, dict):
             diag["regq"] = RegulationQuality.from_dict(rq)
+        ca = data.get("comfort_activation")
+        if isinstance(ca, dict):
+            diag["comfort_activation"] = ComfortActivation.from_dict(ca)
         ro = data.get("ref_offset")
         if isinstance(ro, dict):
             learn["ref_offset"] = OffsetEstimate.from_dict(ro)
