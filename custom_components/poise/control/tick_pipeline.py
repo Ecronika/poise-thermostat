@@ -841,6 +841,11 @@ def stage_comfort_solve(
         adaptive_cap=cool_hard_cap,
         eco_widen=_eco_widen,
         cool_ceiling_override=_cool_ceiling,
+        # ADR-0069 U7/U8: previous-tick tier-2 inputs from the activation
+        # step (0.0 unless the respective latch is LIVE and its per-tick
+        # conditions held — the outcome stage owns that decision).
+        cool_edge_credit=rt.latches.fan_ce_credit_k,
+        pmv_offset_k=rt.latches.pmv_offset_k,
     )
     return decision
 

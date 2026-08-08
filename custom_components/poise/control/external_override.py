@@ -567,3 +567,52 @@ def stage_setpoint_adopt(
         tracker.adopt_setpoint_baselines(adopted_sp=_adopted_sp, step=step, now=now)
         rt.dirty = True  # persist the adopted hold across restarts
     return _sp_adopt_reason
+
+
+# ---------------------------------------------------------------------------
+# ADR-0068 U6: fan-channel echo discipline (module-level, pure).
+# ---------------------------------------------------------------------------
+
+
+def observe_fan_foreign(
+    ext: ExternalOverrideRuntime,
+    *,
+    device_fan: str | None,
+    own_change: bool,
+    now: float,
+    echo_window_s: float = SETPOINT_ADOPT_ECHO_WINDOW_S,
+) -> bool:
+    """Is the observed fan stage a REAL foreign (user) change?
+
+    Guard order mirrors the mode channel: no signal, own context, own
+    command echo, no baseline (Poise never commanded a stage — nothing to
+    duel; the FSM entry guards own that case), open echo window, stable vs
+    the move-guard reference — only then foreign.  A foreign change exits
+    the fan-first FSM, never a write duel (ADR-0068 § 8).
+    """
+    if device_fan is None:
+        return False
+    if own_change:
+        return False
+    if device_fan == ext.last_commanded_fan:
+        return False
+    if ext.last_commanded_fan is None or ext.last_fan_cmd_ts is None:
+        return False
+    if (now - ext.last_fan_cmd_ts) < echo_window_s:
+        return False
+    return device_fan != ext.prev_device_fan
+
+
+def note_device_fan(
+    ext: ExternalOverrideRuntime,
+    *,
+    device_fan: str | None,
+    now: float,
+    echo_window_s: float = SETPOINT_ADOPT_ECHO_WINDOW_S,
+) -> None:
+    """Advance the fan move-guard reference — frozen while the echo window
+    is open (mirrors ``freeze_mode_reference``: an in-window observation
+    must never poison the guard)."""
+    if ext.last_fan_cmd_ts is not None and (now - ext.last_fan_cmd_ts) < echo_window_s:
+        return
+    ext.prev_device_fan = device_fan
