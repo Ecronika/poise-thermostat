@@ -22,6 +22,7 @@ from typing import Any, ClassVar, Final
 
 from ..control.comfort_activation import ComfortActivation
 from ..control.dynamics import DeviceDynamics
+from ..control.fan_first import FanFirstState
 from ..control.hdh_savings import HdhSavings
 from ..control.outcome_scoring import OutcomeSession, OutcomeStats
 from ..control.override import OverrideMode
@@ -358,6 +359,10 @@ class DiagnosticsRuntime:
     # ("override"/"clo") - transient; after a restart a fresh tie resolves to
     # the override family (documented edge).
     pending_suggestion_family: str | None = None
+    # ADR-0068 U6: last fan-first FSM reason (diagnosis key; transient).
+    fan_first_reason: str = "disabled"
+    # ADR-0069 U7/U8: elapsed anchor of the tier-2 activation step.
+    tier2_last_mono: float | None = None
 
 
 @dataclass(slots=True)
@@ -376,3 +381,11 @@ class PipelineLatches:
     was_preheating: bool = False
     was_coasting: bool = False
     cool_sp_eff_prev: float | None = None  # ADR-0051 rate-limit anchor
+    # ADR-0068 U6: the fan-first FSM state — transient multi-tick control
+    # memory (restart -> idle is safe and documented in the FSM).
+    fan_first: FanFirstState = field(default_factory=FanFirstState)
+    # ADR-0069 U7/U8: next-tick comfort-solver inputs, produced by the tier-2
+    # activation step in the outcome stage (previous-tick semantics like
+    # cool_sp_eff_prev; transient — a restart rebuilds them within one tick).
+    fan_ce_credit_k: float = 0.0
+    pmv_offset_k: float = 0.0
