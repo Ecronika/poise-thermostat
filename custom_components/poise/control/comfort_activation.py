@@ -137,6 +137,7 @@ def step_tier(
     next_generation: int,
     dwell_target_min: float = DWELL_TARGET_MIN,
     exit_tol: float = PPD_EXIT_TOL_PCT,
+    impossible: bool = False,
 ) -> TierActivation:
     """Advance one latch by one scored tick.
 
@@ -144,7 +145,17 @@ def step_tier(
     ``entry_ok`` the N1 metric gate (``flip_metric_ok``), ``allowed`` the
     serialization verdict (``may_dwell``).  ``signature`` is the CURRENT
     validity signature — a live latch whose stamp differs suspends.
+    ``impossible`` marks STRUCTURAL impossibility (e.g. no ``fan_only``
+    capability for fan_ce): the latch retires to shadow — it must neither
+    dwell nor block the serialization (P1 field finding: a mere
+    ``ready=False`` would freeze a stale persisted ``eligible`` in place and
+    deadlock the successor forever).  A live exit still cascades via the
+    caller's live→non-live detection.
     """
+    if impossible:
+        if act.state == STATE_SHADOW:
+            return act
+        return TierActivation(state=STATE_SHADOW, generation=act.generation)
     if act.state == STATE_LIVE:
         worsened = act.baseline_ppd is not None and ppd > act.baseline_ppd + exit_tol
         if not ready or act.baseline_signature != signature or worsened:
