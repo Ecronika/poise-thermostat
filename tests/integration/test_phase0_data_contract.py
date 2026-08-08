@@ -91,6 +91,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "abs_humidity_gm3",
     "abs_humidity_out_gm3",
     "abs_max_safe",
+    "active_comfort",
     "actuator_hvac_action",
     "adaptive_cool",
     "adaptive_cool_mode",
