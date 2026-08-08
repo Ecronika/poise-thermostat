@@ -1264,6 +1264,9 @@ def build_finalize_context(
         sched=state.sched,
         frozen=ing.frozen,
         window_open=obs.window_open,
+        # ADR-0055 CA fairness mask inputs (capability-aware scoring).
+        can_heat=obs.can_heat,
+        can_cool=obs.can_cool,
         decision=decision,
         eff_cool=wt.eff_cool,
         mode=wt.mode,

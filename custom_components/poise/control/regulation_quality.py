@@ -137,6 +137,31 @@ class RegulationQuality:
         )
 
 
+def ca_tick_scorable(
+    *,
+    room: float,
+    heat_sp: float,
+    cool_sp: float,
+    can_heat: bool,
+    can_cool: bool,
+) -> bool:
+    """Capability fairness mask for the CA fold (ADR-0055 field calibration).
+
+    A band violation the zone structurally CANNOT actuate against measures the
+    weather, not the controller — a heat-only TRV zone in a summer hot spell
+    would otherwise sit "out of band" for days and never clear ``band_min``
+    (field finding 2026-08-08: Bad 46 % above the cool edge with no cooling
+    capability).  Such ticks are not scored at all (same semantics as the
+    frozen/window mask: the elapsed-minute anchor keeps running and the gap is
+    capped by the caller).  In-band ticks and violations the zone CAN actuate
+    against always score; the PPD leg is deliberately untouched — it measures
+    experienced comfort, not controller capability.
+    """
+    if room > cool_sp and not can_cool:
+        return False
+    return not (room < heat_sp and not can_heat)
+
+
 def meets_quality(
     q: RegulationQuality,
     *,
