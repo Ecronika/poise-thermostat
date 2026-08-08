@@ -66,6 +66,8 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
             "prev_device_sp",
             "last_commanded_hvac",
             "prev_device_mode",
+            "last_commanded_fan",
+            "prev_device_fan",
         }
     ),
     ActuatorRuntime: frozenset({"has_actuated"}),
@@ -77,7 +79,9 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
     HumidityRuntime: frozenset({"dry_active", "vent_active", "surface_rh_mean"}),
     CompressorRuntime: frozenset({"multi_lifecycle"}),
     SafetyRuntime: frozenset(),
-    DiagnosticsRuntime: frozenset({"outcome_stats", "regq", "hdh"}),
+    DiagnosticsRuntime: frozenset(
+        {"outcome_stats", "regq", "hdh", "comfort_activation"}
+    ),
     PipelineLatches: frozenset(),
 }
 
@@ -114,18 +118,22 @@ def test_persisted_fields_exact_contract(cls: type[Any]) -> None:
 
 
 def test_external_override_split_exact() -> None:
-    """Finding 8: the four value baselines persist; stamps/context do not."""
+    """Finding 8 + ADR-0068 U3: the value baselines persist (B5 — the first
+    post-restart intervention needs a comparison), stamps/context do not."""
     assert {
         "last_written_sp",
         "prev_device_sp",
         "last_commanded_hvac",
         "prev_device_mode",
+        "last_commanded_fan",
+        "prev_device_fan",
     } == ExternalOverrideRuntime.PERSISTED_FIELDS
     field_names = {f.name for f in dataclasses.fields(ExternalOverrideRuntime)}
     transient = field_names - ExternalOverrideRuntime.PERSISTED_FIELDS
     assert transient == {
         "last_sp_write_ts",
         "last_hvac_cmd_ts",
+        "last_fan_cmd_ts",
         "pre_write_sp",
         "own_write_ctx_ids",
     }

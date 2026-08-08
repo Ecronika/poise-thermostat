@@ -33,6 +33,10 @@ from typing import Any
 
 import pytest
 
+from custom_components.poise.control.comfort_activation import (
+    ComfortActivation,
+    TierActivation,
+)
 from custom_components.poise.control.hdh_savings import HdhSavings
 from custom_components.poise.control.outcome_scoring import OutcomeStats
 from custom_components.poise.control.override import OverrideMode
@@ -75,6 +79,7 @@ EXPECTED_PAYLOAD_KEYS = (
     "multi_lifecycle",
     "outcome_stats",
     "regulation_quality",
+    "comfort_activation",
     "ref_offset",
     "tau_settle",
     "hdh_savings",
@@ -105,6 +110,8 @@ EXPECTED_PAYLOAD_KEYS = (
     "prev_device_sp",
     "last_commanded_hvac",
     "prev_device_mode",
+    "last_commanded_fan",
+    "prev_device_fan",
     "climate_mode",
     "has_actuated",
 )
@@ -193,6 +200,10 @@ def _rich_state() -> codec.PersistedZoneState:
                 "last_mode": "heat",
             }
         ),
+        comfort_activation=ComfortActivation(
+            fan_ce=TierActivation(state="live", baseline_ppd=7.5, generation=1),
+            generation=1,
+        ),
         hdh=HdhSavings.from_dict(
             {"saved_min": 120.0, "eligible_min": 480.0, "month": "2026-07"}
         ),
@@ -223,6 +234,8 @@ def _rich_state() -> codec.PersistedZoneState:
         prev_device_sp=20.5,
         last_commanded_hvac="heat",
         prev_device_mode="heat",
+        last_commanded_fan="low",
+        prev_device_fan="auto",
     )
 
 
@@ -239,7 +252,7 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 39  # +0066 +0067 +0060-L2/§3-Gate
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 42  # +0066 +0067 +0060 +0068/0069
 
 
 def test_encode_values_match_save_payload_transforms() -> None:
@@ -255,6 +268,7 @@ def test_encode_values_match_save_payload_transforms() -> None:
     assert payload["multi_lifecycle"] == _lifecycle.to_dict(state.multi_lifecycle)
     assert payload["outcome_stats"] == state.outcome_stats.to_dict()
     assert payload["regulation_quality"] == state.regq.to_dict()
+    assert payload["comfort_activation"] == state.comfort_activation.to_dict()
     assert state.ref_offset is not None and state.tau_settle is not None
     assert payload["ref_offset"] == state.ref_offset.to_dict()
     assert payload["tau_settle"] == state.tau_settle.to_dict()
@@ -284,6 +298,8 @@ def test_encode_values_match_save_payload_transforms() -> None:
     assert payload["prev_device_sp"] == 20.5
     assert payload["last_commanded_hvac"] == "heat"
     assert payload["prev_device_mode"] == "heat"
+    assert payload["last_commanded_fan"] == "low"  # ADR-0068 U3
+    assert payload["prev_device_fan"] == "auto"
     assert payload["climate_mode"] == "heat_only"
     assert payload["has_actuated"] is True
 
@@ -360,6 +376,8 @@ def test_roundtrip_decode_encode_semantic_identity() -> None:
     assert base.prev_device_sp == 20.5
     assert base.last_commanded_hvac == "heat"
     assert base.prev_device_mode == "heat"
+    assert base.last_commanded_fan == "low"  # ADR-0068 U3
+    assert base.prev_device_fan == "auto"
 
     learn = decoded.learning
     assert learn.ekf is not None and learn.ekf.to_dict() == state.ekf.to_dict()
@@ -382,6 +400,7 @@ def test_roundtrip_decode_encode_semantic_identity() -> None:
     assert diag.outcome_stats is not None
     assert diag.outcome_stats.to_dict() == state.outcome_stats.to_dict()
     assert diag.regq is not None and diag.regq.to_dict() == state.regq.to_dict()
+    assert diag.comfort_activation == state.comfort_activation  # ADR-0069 U2
     assert diag.hdh is not None and diag.hdh.to_dict() == state.hdh.to_dict()
     assert diag.dry_active is True
 

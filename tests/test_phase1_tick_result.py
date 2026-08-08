@@ -213,6 +213,7 @@ def _finalize_context() -> FinalizeContext:
         heat_source_suspect=False,
         ext_num=None,
         operative_active=False,
+        occupancy=(True,),
     )
 
 
@@ -483,6 +484,9 @@ def test_stage_result_field_sets_are_pinned() -> None:
             "g_mode_hold",
             "guard_block",
             "mode_nudge_blocked",
+            # ADR-0068 U5: intent provenance + the fan-first verdict.
+            "intent_origin",
+            "fan_first_allowed",
         ],
         HoldRoutingResult: [
             "own_change",
@@ -744,6 +748,9 @@ def test_finalize_context_field_set_is_pinned() -> None:
         "heat_source_suspect",
         "ext_num",
         "operative_active",
+        # ADR-0069 U1: the room-occupancy lane for the readiness predicates —
+        # a deliberate contract extension (51st name).
+        "occupancy",
     ]
 
 
@@ -829,6 +836,7 @@ def test_effect_execution_mode_fields_default() -> None:
     execution = _execution("ext_feed")
     assert execution.commanded_mode is None
     assert execution.mode_changed is False
+    assert execution.fan_changed is False  # ADR-0068 U3, additive
 
 
 def test_effect_execution_carries_mode_transport() -> None:

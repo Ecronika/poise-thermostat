@@ -33,3 +33,41 @@ def test_temperature_and_safety_modes_never_overridden() -> None:
         assert (
             mode_arbitration(base_mode=base, humidity_action="dry", dry_ok=True) == base
         )
+
+
+# --- ADR-0068 U5: the ONE deliberate invariant change ------------------------
+
+
+def test_fan_first_intercepts_exactly_a_normal_cool() -> None:
+    # The second, explicitly gated escape hatch (Rev. 4): a NORMAL cool may
+    # be intercepted to the compressor-free first stage.
+    assert (
+        mode_arbitration(
+            base_mode="cool", humidity_action="idle", dry_ok=True, fan_first=True
+        )
+        == "fan_only"
+    )
+    # Every other base mode is untouchable by fan_first — including the
+    # idle->dry hatch (dry keeps its own precedence over the fan stage).
+    for base in ("heat", "off", "manual", "idle"):
+        assert (
+            mode_arbitration(
+                base_mode=base, humidity_action="idle", dry_ok=True, fan_first=True
+            )
+            == base
+        )
+    assert (
+        mode_arbitration(
+            base_mode="idle", humidity_action="dry", dry_ok=True, fan_first=True
+        )
+        == "dry"
+    )
+
+
+def test_fan_first_defaults_off_and_changes_nothing() -> None:
+    # Safe migration shape: without the flag the seam is byte-identical.
+    for base in ("heat", "cool", "off", "manual", "idle"):
+        assert (
+            mode_arbitration(base_mode=base, humidity_action="idle", dry_ok=True)
+            == base
+        )

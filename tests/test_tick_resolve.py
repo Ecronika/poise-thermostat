@@ -376,6 +376,9 @@ def test_resolve_desired_mode() -> None:
         ("cool", "heat", True, True, "cool"),  # active modes pass through
         ("heat", "cool", True, True, "heat"),
         ("dry", "cool", True, True, "dry"),
+        # ADR-0068 U5: the fan-first stage is a first-class nudge target —
+        # without this arm the seam's decision silently falls to the fallback.
+        ("fan_only", "cool", True, True, "fan_only"),
         # V1: a window / safety "off" must never keep a cooling device in cool
         ("off", "cool", True, True, "heat"),  # reversible -> heat (frost, idles)
         ("off", "cool", True, False, "off"),  # cool-only -> off (never cool to floor)

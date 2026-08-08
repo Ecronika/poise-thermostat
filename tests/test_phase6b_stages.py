@@ -196,7 +196,13 @@ def _nudge(**over: Any) -> ModeNudgeResult:
     return ModeNudgeResult(**base)
 
 
-def _mode_res(rt: ZoneRuntime, ing: IngestResult, obs: ObservationResult, **over: Any):
+def _mode_res(
+    rt: ZoneRuntime,
+    ing: IngestResult,
+    obs: ObservationResult,
+    wt: WriteTargetResult | None = None,
+    **over: Any,
+):
     kwargs: dict[str, Any] = {
         "cool_min_outdoor": 18.0,
         "cool_lockout_enabled": True,
@@ -215,7 +221,9 @@ def _mode_res(rt: ZoneRuntime, ing: IngestResult, obs: ObservationResult, **over
         t_mrt_decide=None,
     )
     band = ClimateBandResult(climate_diag={}, hum_action="idle")
-    return rt.stage_mode_resolution(ing, obs, op, _wt(), band, **kwargs)
+    return rt.stage_mode_resolution(
+        ing, obs, op, wt if wt is not None else _wt(), band, **kwargs
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +606,60 @@ def test_stage_mode_resolution_resolves_while_disabled_f1() -> None:
     res = _mode_res(rt, ing, obs)
     assert res.final_mode == "heat"
     assert res.guard_pol is not None or res.guard_pol is None  # resolved
+
+
+def test_stage_mode_resolution_fan_first_needs_normal_origin() -> None:
+    # ADR-0068 U5: intent provenance at the seam. A NORMAL cool may be
+    # intercepted to the compressor-free first stage when requested...
+    rt = _runtime()
+    inputs = _inputs()
+    ing = _stage_ingest(rt, inputs)
+    obs = _stage_observe(rt, inputs, ing)
+    res = _mode_res(rt, ing, obs, wt=_wt(mode="cool"), fan_first_requested=True)
+    assert res.final_mode == "fan_only"
+    assert res.intent_origin == "normal"
+    assert res.fan_first_allowed is True
+    # ...a manual SETPOINT hold is MANUAL origin — never intercepted...
+    rt2 = _runtime()
+    ing2 = _stage_ingest(rt2, inputs)
+    obs2 = _stage_observe(rt2, inputs, ing2)
+    rt2.user.override = 23.0
+    res2 = _mode_res(rt2, ing2, obs2, wt=_wt(mode="cool"), fan_first_requested=True)
+    assert res2.intent_origin == "manual"
+    assert res2.fan_first_allowed is False
+    assert res2.final_mode != "fan_only"
+    # ...and the mode-hold channel (override None, mode_override set) is the
+    # SECOND manual channel — same verdict (third review, beyond the ADR text).
+    rt3 = _runtime()
+    ing3 = _stage_ingest(rt3, inputs)
+    obs3 = _stage_observe(rt3, inputs, ing3)
+    rt3.user.mode_override = "cool"
+    res3 = _mode_res(rt3, ing3, obs3, wt=_wt(mode="cool"), fan_first_requested=True)
+    assert res3.intent_origin == "manual"
+    assert res3.final_mode == "cool"
+
+
+def test_stage_mode_resolution_safety_origin_blocks_fan_first() -> None:
+    import dataclasses as _dc
+
+    rt = _runtime()
+    inputs = _inputs()
+    ing = _stage_ingest(rt, inputs)
+    obs = _dc.replace(_stage_observe(rt, inputs, ing), window_open=True)
+    res = _mode_res(rt, ing, obs, wt=_wt(mode="off"), fan_first_requested=True)
+    assert res.intent_origin == "safety"
+    assert res.final_mode == "off"
+
+
+def test_stage_mode_resolution_fan_first_defaults_off() -> None:
+    # Safe migration shape: without the request the stage is byte-identical.
+    rt = _runtime()
+    inputs = _inputs()
+    ing = _stage_ingest(rt, inputs)
+    obs = _stage_observe(rt, inputs, ing)
+    res = _mode_res(rt, ing, obs, wt=_wt(mode="cool"))
+    assert res.final_mode == "cool"
+    assert res.fan_first_allowed is False
 
 
 # ---------------------------------------------------------------------------
@@ -1040,6 +1102,9 @@ def test_commit_mode_nudge_without_change_skips_the_ts_stamp() -> None:
 
 def test_restore_full_model_payload_roundtrip() -> None:
     """encode -> decode -> restore applies every persisted model section."""
+    from custom_components.poise.control.comfort_activation import (
+        ComfortActivation,
+    )
     from custom_components.poise.control.hdh_savings import HdhSavings
     from custom_components.poise.control.outcome_scoring import OutcomeStats
     from custom_components.poise.control.override import OverrideMode
@@ -1069,6 +1134,7 @@ def test_restore_full_model_payload_roundtrip() -> None:
         tau_settle=None,
         outcome_stats=OutcomeStats(),
         regq=RegulationQuality(),
+        comfort_activation=ComfortActivation(),
         hdh=HdhSavings(),
         dry_active=False,
         enabled=True,

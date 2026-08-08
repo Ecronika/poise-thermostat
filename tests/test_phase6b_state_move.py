@@ -202,6 +202,15 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # ADR-0055 N1: own elapsed anchor for the time-weighted PPD fold — PMV
     # validity and the CA fairness mask diverge, so the PPD clock is separate.
     ("diagnostics", "ppd_last_mono"): "ADR-0055 N1 PPD-fold elapsed anchor",
+    # ADR-0069 U2: the persisted tier-2 activation lifecycle (latch, dwell,
+    # baseline + signature) — documented boundary: lives under DiagnosticsRuntime
+    # next to the quality metrics it consumes, never in PipelineLatches.
+    ("diagnostics", "comfort_activation"): "ADR-0069 tier-2 activation state",
+    # ADR-0068 U3: fan-stage echo baselines (B5-analog value baselines persist,
+    # the ts stamp is transient and restore-staled like the mode channel's).
+    ("external", "last_commanded_fan"): "ADR-0068 fan-command echo baseline",
+    ("external", "prev_device_fan"): "ADR-0068 fan move-guard baseline",
+    ("external", "last_fan_cmd_ts"): "ADR-0068 fan echo-window stamp (transient)",
 }
 
 

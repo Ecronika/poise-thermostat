@@ -100,6 +100,7 @@ def _options() -> dict[str, Any]:
         "room_profile": "bedroom",
         "override_suggestions": True,
         "clo_offset": -0.2,
+        "active_comfort": True,
         "annual_heating_kwh": 9000,
         "actuator_dynamics": "fast_air",
         "compressor_guard": "off",
@@ -223,6 +224,7 @@ def test_realistic_tuning_parse() -> None:
     assert tuning.room_profile == "bedroom"  # ADR-0054 V2
     assert tuning.override_suggestions is True  # ADR-0060 L2, explicit opt-in
     assert tuning.clo_offset == -0.2  # ADR-0067 household clo offset
+    assert tuning.active_comfort is True  # ADR-0069 mechanism toggle
 
 
 def test_realistic_hold_parse() -> None:
@@ -297,6 +299,9 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         # -> the ADR's decided end state: suggestion emission on by default.
         override_suggestions=True,
         clo_offset=0.0,  # ADR-0067: no learned household bias by default
+        # ADR-0069: the mechanism toggle default-off — enabling is the user's
+        # standing zone decision; the tier gates then release piecewise.
+        active_comfort=False,
     )
 
 

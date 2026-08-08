@@ -40,6 +40,7 @@ EFFECT_IDS = (
     "rescue_write",
     "safe_mode",
     "safe_setpoint",
+    "fan_write",  # ADR-0068 U3: the fan-stage write (stage string, F-gated ts)
 )
 
 
@@ -53,6 +54,7 @@ def _execution(
     commanded_value: float | None = None,
     commanded_mode: str | None = None,
     mode_changed: bool = False,
+    fan_changed: bool = False,
 ) -> EffectExecution:
     return EffectExecution(
         effect_id=effect_id,
@@ -63,6 +65,7 @@ def _execution(
         commanded_value=commanded_value,
         commanded_mode=commanded_mode,
         mode_changed=mode_changed,
+        fan_changed=fan_changed,
     )
 
 
@@ -80,6 +83,7 @@ def test_report_preserves_full_vocabulary_in_call_order() -> None:
         for effect_id in (
             "rescue_write",
             "mode_nudge",
+            "fan_write",
             "safe_setpoint",
             "ext_feed",
             "setpoint_write",
@@ -235,6 +239,81 @@ def test_post_actions_tuple_is_ordered() -> None:
 
 
 def test_effect_ids_are_distinct() -> None:
-    # Eight distinct commit rules — an id collision would silently merge two
+    # Nine distinct commit rules — an id collision would silently merge two
     # rules in the fold's dispatch.
-    assert len(set(EFFECT_IDS)) == 8
+    assert len(set(EFFECT_IDS)) == 9
+
+
+# ---------------------------------------------------------------------------
+# ADR-0068 U3: the fan_write commit rule (pure fold via ZoneRuntime).
+# ---------------------------------------------------------------------------
+
+
+def _runtime():  # type: ignore[no-untyped-def]
+    from custom_components.poise.clock import MonotonicClock
+    from custom_components.poise.runtime.zone_runtime import ZoneRuntime
+
+    return ZoneRuntime(MonotonicClock())
+
+
+def test_fan_write_commit_registers_ctx_on_attempt() -> None:
+    # Attempt state: the context id registers even when the dispatch threw —
+    # the fan echo must be recognised as our own next tick regardless.
+    rt = _runtime()
+    rt.commit_execution(
+        ExecutionReport(
+            executions=(_execution("fan_write", success=False, context_id="ctx-fan"),)
+        )
+    )
+    assert "ctx-fan" in rt.external.own_write_ctx_ids
+    assert rt.external.last_commanded_fan is None  # no success -> no baseline
+
+
+def test_fan_write_commit_stamps_baseline_and_gated_ts() -> None:
+    rt = _runtime()
+    rt.commit_execution(
+        ExecutionReport(
+            executions=(
+                _execution(
+                    "fan_write",
+                    context_id="ctx-1",
+                    commanded_mode="low",
+                    fan_changed=True,
+                ),
+            )
+        ),
+        now=1000.0,
+    )
+    assert rt.external.last_commanded_fan == "low"
+    assert rt.external.last_fan_cmd_ts == 1000.0
+    # A stage re-write without a CHANGE never re-arms the echo window.
+    rt.commit_execution(
+        ExecutionReport(
+            executions=(
+                _execution(
+                    "fan_write",
+                    context_id="ctx-2",
+                    commanded_mode="low",
+                    fan_changed=False,
+                ),
+            )
+        ),
+        now=2000.0,
+    )
+    assert rt.external.last_fan_cmd_ts == 1000.0
+    # A fan stage is not a thermal actuation: the teardown-park gate stays.
+    assert rt.actuator.has_actuated is False
+
+
+def test_fan_write_change_commit_requires_now() -> None:
+    import pytest
+
+    rt = _runtime()
+    with pytest.raises(ValueError, match="fan_write commit needs now="):
+        rt.commit_execution(
+            ExecutionReport(
+                executions=(
+                    _execution("fan_write", commanded_mode="low", fan_changed=True),
+                )
+            )
+        )
