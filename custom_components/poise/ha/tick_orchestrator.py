@@ -2921,6 +2921,10 @@ class TickOrchestrator:
                     _ca0, "fan_ce", predecessor_impossible=_pred_impossible
                 ),
                 next_generation=_t2_gen + 1,
+                # P1 field finding: a fan-less zone retires fan_ce to shadow
+                # (also a STALE persisted eligible), so the serialization's
+                # deadlock escape actually reaches pmv_offset.
+                impossible=_pred_impossible,
             )
             if _fan_next.state == "live" and _ca0.fan_ce.state != "live":
                 _t2_gen += 1
