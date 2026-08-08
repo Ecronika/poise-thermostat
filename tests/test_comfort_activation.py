@@ -29,6 +29,7 @@ def _step(act: TierActivation, **over: object) -> TierActivation:
         "dt_min": 60.0,
         "allowed": True,
         "next_generation": 1,
+        "impossible": False,
     }
     kw.update(over)
     return step_tier(act, **kw)  # type: ignore[arg-type]
@@ -92,6 +93,32 @@ def test_suspended_requires_full_re_dwell() -> None:
     a = _step(_live(), ready=False)  # -> suspended
     a = _step(a)  # allowed + ready -> eligible again, dwell reset
     assert a.state == STATE_ELIGIBLE and a.dwell_min == 0.0
+
+
+def test_structural_impossibility_retires_the_latch_to_shadow() -> None:
+    # P1 field finding (fan-less Bad zone): a structurally impossible feature
+    # must never dwell — and a STALE eligible/live latch (persisted before
+    # the fix, or after a hardware swap removed the capability) RETIRES to
+    # shadow instead of blocking the serialization forever. A live exit still
+    # cascades via the caller's live->non-live detection.
+    stale = TierActivation(state=STATE_ELIGIBLE, dwell_min=500.0, generation=1)
+    assert _step(stale, impossible=True).state == STATE_SHADOW
+    assert _step(_live(generation=2), impossible=True).state == STATE_SHADOW
+    fresh = TierActivation()
+    assert _step(fresh, impossible=True) == fresh  # shadow stays, no churn
+
+
+def test_fanless_zone_unblocks_the_pmv_offset_dwell() -> None:
+    # The review pin: zone without fan_only -> fan_ce stays shadow AND
+    # pmv_offset may dwell via the deadlock escape (the eligible-blocker in
+    # may_dwell never engages because the impossible latch retired).
+    c = ComfortActivation()
+    fan = _step(c.fan_ce, impossible=True)
+    assert fan.state == STATE_SHADOW
+    c2 = ComfortActivation(fan_ce=fan, pmv_offset=c.pmv_offset)
+    assert may_dwell(c2, "pmv_offset", predecessor_impossible=True) is True
+    pmv = _step(c2.pmv_offset)
+    assert pmv.state == STATE_ELIGIBLE
 
 
 def test_serialization_orders_and_deadlock_escape() -> None:
