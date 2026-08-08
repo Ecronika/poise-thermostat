@@ -102,6 +102,11 @@ from ..comfort.presence import (
     resolve_presence,
     step_room_absence,
 )
+from ..comfort.readiness import (
+    pmv_control_ready,
+    presence_control_ready,
+    room_present,
+)
 from ..comfort.schedule import ScheduleState
 from ..comfort.thermal_shock import adaptive_cool_setpoint, rate_limit
 from ..comfort.ventilation import advice_transition
@@ -3003,6 +3008,14 @@ class TickOrchestrator:
             "override_expires_at": _iso_utc(self._runtime.user.override_expires_at),
             "override_policy": self._c._override_policy,
             "override_requested": self._runtime.user.override_requested,
+            # ADR-0069 U1: control-readiness shadow keys — future tier wiring
+            # consumes these; the diagnostic signals (pmv_valid, occupied)
+            # keep their meaning untouched.
+            "pmv_control_ready": pmv_control_ready(
+                rh=ctx.rh, pmv_valid=ctx.climate_diag.get("pmv_valid") is True
+            ),
+            "presence_control_ready": presence_control_ready(ctx.occupancy),
+            "room_present": room_present(ctx.occupancy),
             # ADR-0059 §5: the persisted L1 nudge log (observe-only). A shadow key
             # (absent from _ATTRS) -> diagnostics-only, never a recorded attribute.
             "override_stats": list(self._runtime.user.override_stats),

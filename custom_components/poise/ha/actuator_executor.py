@@ -130,6 +130,24 @@ class ActuatorExecutor:
             context=context,
         )
 
+    async def set_fan_mode(
+        self, entity_id: str, fan_mode: str, *, context: Context | None = None
+    ) -> None:
+        """Dispatch one ``climate.set_fan_mode`` (fire-and-forget, ADR-0068).
+
+        The fan-stage write of the fan-first sequence — a third tagged site:
+        the sequence creates the ``Context`` before the dispatch so the id
+        reports even when the call throws (attempt state).  Character-exact
+        passthrough like every primitive; never ``blocking=True``.
+        """
+        await self._hass.services.async_call(
+            "climate",
+            "set_fan_mode",
+            {"entity_id": entity_id, "fan_mode": fan_mode},
+            blocking=False,
+            context=context,
+        )
+
     async def write_setpoint(
         self, command: ActuatorCommand, *, context: Context | None = None
     ) -> None:
@@ -216,6 +234,42 @@ class ActuatorExecutor:
                     commanded_value=None,
                     commanded_mode=desired_hvac,
                     mode_changed=mode_changed,
+                ),
+            )
+        )
+
+    async def run_fan_write(
+        self, entity_id: str, fan_stage: str, *, fan_changed: bool
+    ) -> ExecutionReport:
+        """Site — the ADR-0068 fan-stage write (own-context tagged).
+
+        ``fan_changed`` is the caller's dispatch-time evaluation
+        (``fan_stage != last_commanded_fan``) — the commit cannot recompute
+        it after the baseline moved.  One effect, one boundary; the stage
+        string travels in ``commanded_mode`` (the report's string carrier).
+        """
+        ctx = Context()  # tag our own fan change (attempt state)
+        success = False
+        try:
+            await self.set_fan_mode(entity_id, fan_stage, context=ctx)
+            success = True
+        except Exception:  # noqa: BLE001 - fan write is best-effort
+            self._log.exception(
+                "Poise: set_fan_mode(%s) failed for %s",
+                fan_stage,
+                entity_id,
+            )
+        return ExecutionReport(
+            executions=(
+                EffectExecution(
+                    effect_id="fan_write",
+                    attempted=True,
+                    success=success,
+                    context_id=ctx.id,
+                    pre_write_value=None,
+                    commanded_value=None,
+                    commanded_mode=fan_stage,
+                    fan_changed=fan_changed,
                 ),
             )
         )
