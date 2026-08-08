@@ -152,6 +152,14 @@ _ATTRS = (
     "met_used",
     "pmv_valid",
     "clo_offset",
+    # ADR-0069 E7 (Card): "Aktive Behaglichkeit" — toggle state, fan-first
+    # phase, tier-2 latch states and the applied measures (display only).
+    "active_comfort",
+    "fan_first_phase",
+    "tier2_fan_ce",
+    "tier2_pmv_offset",
+    "fan_ce_credit_k",
+    "pmv_offset_k",
     "ca_deviation_k",
     "ca_time_in_band",
     "ca_cycles_per_h",
