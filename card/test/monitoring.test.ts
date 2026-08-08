@@ -5,6 +5,7 @@ import {
   caVerdict,
   co2Thresholds,
   co2Verdict,
+  comfortMeasure,
   humidityVerdict,
   levelColor,
   pmvVerdict,
@@ -214,8 +215,99 @@ test("buildMonitor appends pmv and ca lamps only when present", () => {
     full.map((l) => l.key),
     ["temperature", "pmv", "ca"],
   );
-  assert.equal(full[1].value, 8); // PPD %
+  assert.equal(full[1].value, 92); // satisfaction % = 100 - PPD (never raw PPD)
   assert.equal(full[1].level, "ok");
   assert.equal(full[2].value, 92); // time-in-band normalised to %
   assert.equal(full[2].level, "ok");
+});
+
+test("pmv lamp shows satisfaction (100 - PPD), never the raw PPD", () => {
+  // Field feedback: "Behaglichkeit 5 %" read as the OPPOSITE of the best
+  // case — the lamp now shows 100 - PPD, thresholds stay PPD-internal.
+  const lamps = buildMonitor({
+    temperature: 22,
+    comfortVerdict: "in_band",
+    humidity: null,
+    co2: null,
+    pmv: 0,
+    ppd: 5,
+  });
+  const pmv = lamps.find((l) => l.key === "pmv");
+  assert.ok(pmv);
+  assert.equal(pmv.value, 95);
+  assert.equal(pmv.level, "ok");
+});
+
+test("pmv lamp renders as not-validated when pmv_valid is false", () => {
+  // ADR-0054 V3 card note: outside the ISO 7730 domain the integration
+  // publishes pmv/ppd as null — the lamp must still render, grey, with the
+  // "not validated" hint instead of silently disappearing.
+  const lamps = buildMonitor({
+    temperature: 22,
+    comfortVerdict: "in_band",
+    humidity: null,
+    co2: null,
+    pmv: null,
+    ppd: null,
+    pmvValid: false,
+  });
+  const pmv = lamps.find((l) => l.key === "pmv");
+  assert.ok(pmv, "lamp must render although pmv/ppd are null");
+  assert.equal(pmv.level, "unknown");
+  assert.equal(pmv.value, null);
+  assert.equal(pmv.detailKey, "pmv_not_validated");
+  // valid / undefined without numbers -> unchanged: no pmv lamp at all.
+  const none = buildMonitor({
+    temperature: 22,
+    comfortVerdict: "in_band",
+    humidity: null,
+    co2: null,
+    pmvValid: true,
+  });
+  assert.equal(
+    none.find((l) => l.key === "pmv"),
+    undefined,
+  );
+});
+
+test("comfortMeasure composes active measures and the maturing hint", () => {
+  // ADR-0069 E7: display only, gated on the real toggle attribute.
+  assert.equal(
+    comfortMeasure({
+      active: false,
+      fanFirstPhase: "dwell",
+      tier2FanCe: "live",
+      tier2Pmv: "live",
+      ceCreditK: 1,
+      pmvOffsetK: 1,
+    }),
+    null,
+  );
+  const idle = comfortMeasure({
+    active: true,
+    fanFirstPhase: "idle",
+    tier2FanCe: "shadow",
+    tier2Pmv: "shadow",
+    ceCreditK: 0,
+    pmvOffsetK: 0,
+  });
+  assert.deepEqual(idle, { fan: false, ceK: null, offsetK: null, maturing: false });
+  const maturing = comfortMeasure({
+    active: true,
+    fanFirstPhase: "idle",
+    tier2FanCe: "shadow",
+    tier2Pmv: "eligible",
+    ceCreditK: 0,
+    pmvOffsetK: 0,
+  });
+  assert.equal(maturing?.maturing, true);
+  const busy = comfortMeasure({
+    active: true,
+    fanFirstPhase: "dwell",
+    tier2FanCe: "live",
+    tier2Pmv: "live",
+    ceCreditK: 0.4,
+    pmvOffsetK: -0.3,
+  });
+  assert.deepEqual(busy, { fan: true, ceK: 0.4, offsetK: -0.3, maturing: false });
 });
