@@ -85,6 +85,18 @@ _FAN_SPEED_MS: dict[str, float] = {
     "auto": 0.35,
 }
 _FAN_SPEED_RUNNING_DEFAULT = 0.30  # running, but an unrecognised stage label
+
+
+def known_stage_velocity(stage: str) -> float | None:
+    """The stage→velocity estimate for KNOWN labels only (ADR-0068 U4).
+
+    ``None`` for unrecognised labels — the fan-first stage selection must
+    never guess (discovery doctrine); the running-default estimate stays a
+    DIAGNOSTIC fallback and is deliberately not offered here.
+    """
+    return _FAN_SPEED_MS.get(stage.lower())
+
+
 # hvac_action values in which the indoor fan is actually moving air.
 _MOVING_ACTIONS = frozenset({"cooling", "drying", "dry", "fan", "fan_only", "heating"})
 
