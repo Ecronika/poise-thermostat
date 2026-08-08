@@ -146,7 +146,11 @@ from ..control.outcome_scoring import observe_session
 from ..control.override import OverrideMode, hold_ends_at_preheat, mode_comfort_base
 from ..control.pi_shadow import evaluate_pi_shadow
 from ..control.reference_offset import update_offset
-from ..control.regulation_quality import FLIP_TIER_COMFORT, flip_metric_ok
+from ..control.regulation_quality import (
+    FLIP_TIER_COMFORT,
+    ca_tick_scorable,
+    flip_metric_ok,
+)
 from ..control.scoring_expectation import model_expected_minutes
 from ..control.suggestion import (
     detect_override_pattern,
@@ -2835,15 +2839,25 @@ class TickOrchestrator:
                         _fin.score, _fin.controller
                     )
                 )
-            # ADR-0055 regulation-quality metric (EN 15500-1 CA), SHADOW:
-            # score only unmasked comfort ticks (room_decide vs the effective
-            # band); the metric gates nothing yet — it must earn trust first.
+            # ADR-0055 regulation-quality metric (EN 15500-1 CA): score only
+            # unmasked comfort ticks (room_decide vs the effective band).
+            # Field calibration 2026-08-08: additionally mask violations the
+            # zone structurally cannot actuate against (heat-only zone above
+            # the cool edge in a hot spell measures the weather, not the
+            # controller) — ``ca_tick_scorable``, capability fairness.
             if (
                 self._runtime.user.enabled
                 and not window_open
                 and not frozen
                 and self._runtime.user.override is None
                 and sched.is_comfort
+                and ca_tick_scorable(
+                    room=room_decide,
+                    heat_sp=decision.heat_sp,
+                    cool_sp=eff_cool,
+                    can_heat=ctx.can_heat,
+                    can_cool=ctx.can_cool,
+                )
             ):
                 # Real elapsed (event-driven refreshes book < 60 s, not a flat
                 # tick), capped so a masked gap adds ~2 ticks.
