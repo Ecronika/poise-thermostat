@@ -45,6 +45,7 @@ from ..const import (
     CLO_OFFSET_MAX,
     COMPRESSOR_GUARD_AUTO,
     CONF_ABSENCE_AFTER_MIN,
+    CONF_ACTIVE_COMFORT,
     CONF_ACTUATOR,
     CONF_ADAPTIVE_COOL,
     CONF_ADOPT_EXTERNAL_MODE,
@@ -94,6 +95,7 @@ from ..const import (
     CONF_WEATHER,
     CONF_WINDOW_SENSOR,
     DEFAULT_ABSENCE_AFTER_MIN,
+    DEFAULT_ACTIVE_COMFORT,
     DEFAULT_ADAPTIVE_COOL,
     DEFAULT_ADOPT_EXTERNAL_MODE,
     DEFAULT_ADOPT_EXTERNAL_SETPOINT,
@@ -305,6 +307,7 @@ class ZoneTuning:
     room_profile: str  # ADR-0054 V2 met/clo profile (office/living/bedroom/kitchen)
     override_suggestions: bool  # ADR-0060 L2 suggestion emission (opt-in, §3)
     clo_offset: float  # ADR-0067 learned household clo bias, clamped +-0.3
+    active_comfort: bool  # ADR-0069 mechanism toggle (tier gates release)
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneTuning:
@@ -418,6 +421,9 @@ class ZoneTuning:
             room_profile=str(merged.get(CONF_ROOM_PROFILE, DEFAULT_ROOM_PROFILE)),
             override_suggestions=bool(
                 merged.get(CONF_OVERRIDE_SUGGESTIONS, DEFAULT_OVERRIDE_SUGGESTIONS)
+            ),
+            active_comfort=bool(
+                merged.get(CONF_ACTIVE_COMFORT, DEFAULT_ACTIVE_COMFORT)
             ),
             # Defensive clamp: the fix flow writes inside +-0.3 already, but a
             # hand-edited entry must not exceed the ADR-0067 bounds either.

@@ -278,6 +278,20 @@ class ZoneRuntime:
                     # Never re-read our own safe floor as a user hold.
                     self.external.last_written_sp = None
                     self.mark_actuated()  # persist the first-actuation flip
+            elif effect_id == "fan_write":
+                # ADR-0068 U3: attempt state — the context id registers even
+                # when the dispatch threw, so the fan echo reads as our own.
+                if execution.attempted and execution.context_id is not None:
+                    self.external.own_write_ctx_ids.append(execution.context_id)
+                if execution.success:
+                    # Re-arm the fan echo window only on a real stage CHANGE
+                    # (dispatch-time evaluation, mirrors the mode nudge). A
+                    # fan stage is not a thermal actuation: no mark_actuated.
+                    if execution.fan_changed:
+                        if now is None:
+                            raise ValueError("fan_write commit needs now=")
+                        self.external.last_fan_cmd_ts = now
+                    self.external.last_commanded_fan = execution.commanded_mode
             else:
                 raise ValueError(f"commit_execution: unknown effect_id {effect_id!r}")
         events: list[OverrideEnded] = []
@@ -345,6 +359,8 @@ class ZoneRuntime:
         self.external.prev_device_sp = base.prev_device_sp
         self.external.last_commanded_hvac = base.last_commanded_hvac
         self.external.prev_device_mode = base.prev_device_mode
+        self.external.last_commanded_fan = base.last_commanded_fan  # ADR-0068
+        self.external.prev_device_fan = base.prev_device_fan
         # INVARIANT (B5, ADR-0059 §9): monotonic echo windows are process-local
         # — stamp them stale on restore (only where a baseline exists) so no
         # echo reads as in-flight and the ADR-0052 §4 throttle input stays
@@ -354,6 +370,8 @@ class ZoneRuntime:
             self.external.last_sp_write_ts = _stale
         if self.external.last_commanded_hvac is not None:
             self.external.last_hvac_cmd_ts = _stale
+        if self.external.last_commanded_fan is not None:  # ADR-0068 U3
+            self.external.last_fan_cmd_ts = _stale
         # The wall-clock hold + Boost lifecycle (ADR-0059; hold-gated in the
         # codec; ``override_requested`` carries the stricter setpoint-hold-only
         # gate there).
@@ -420,6 +438,8 @@ class ZoneRuntime:
             self.diagnostics.outcome_stats = diag.outcome_stats
         if diag.regq is not None:
             self.diagnostics.regq = diag.regq
+        if diag.comfort_activation is not None:  # ADR-0069 U2
+            self.diagnostics.comfort_activation = diag.comfort_activation
         if learn.ref_offset is not None:
             self.learning.ref_offset = learn.ref_offset
         if learn.tau_settle is not None:
@@ -625,6 +645,7 @@ class ZoneRuntime:
         compressor_guard: str,
         comp_min_off_opt: float | None,
         comp_mode_hold_opt: float | None,
+        fan_first_requested: bool = False,
     ) -> ModeResolutionResult:
         """Mode arbitration + compressor-guard policy."""
         return _pipeline.stage_mode_resolution(
@@ -641,6 +662,7 @@ class ZoneRuntime:
             compressor_guard=compressor_guard,
             comp_min_off_opt=comp_min_off_opt,
             comp_mode_hold_opt=comp_mode_hold_opt,
+            fan_first_requested=fan_first_requested,
         )
 
     def stage_setpoint_observe(

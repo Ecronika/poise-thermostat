@@ -20,6 +20,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Final
 
+from ..control.comfort_activation import ComfortActivation
 from ..control.dynamics import DeviceDynamics
 from ..control.hdh_savings import HdhSavings
 from ..control.outcome_scoring import OutcomeSession, OutcomeStats
@@ -139,6 +140,8 @@ class ExternalOverrideRuntime:
             "prev_device_sp",
             "last_commanded_hvac",
             "prev_device_mode",
+            "last_commanded_fan",
+            "prev_device_fan",
         }
     )
 
@@ -148,8 +151,12 @@ class ExternalOverrideRuntime:
     prev_device_sp: float | None = None
     last_commanded_hvac: str | None = None  # mode echo baseline
     prev_device_mode: str | None = None  # mode move-guard
+    # ADR-0068 U3: fan-stage echo baselines (B5-analog value baselines).
+    last_commanded_fan: str | None = None
+    prev_device_fan: str | None = None
     last_sp_write_ts: float | None = None  # ADR-0052 §4 nudge throttle
     last_hvac_cmd_ts: float | None = None
+    last_fan_cmd_ts: float | None = None  # ADR-0068 fan echo window (transient)
     # Attempt-state: device setpoint captured immediately before our last
     # write — updated even when the write call fails.
     pre_write_sp: float | None = None
@@ -314,11 +321,17 @@ class DiagnosticsRuntime:
     """
 
     PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"outcome_stats", "regq", "hdh"}
+        {"outcome_stats", "regq", "hdh", "comfort_activation"}
     )
 
     outcome_stats: OutcomeStats = field(default_factory=OutcomeStats)
     regq: RegulationQuality = field(default_factory=RegulationQuality)
+    # ADR-0069 U2: persisted tier-2 activation lifecycle (latch, qualified
+    # dwell, baseline + signature). Documented ownership boundary: it lives
+    # HERE next to the quality metrics it consumes (regq) — long-lived
+    # release state, neither a diagnostic accumulator nor an anti-chatter
+    # latch; PipelineLatches is explicitly forbidden (ADR-0069 Rev. 4).
+    comfort_activation: ComfortActivation = field(default_factory=ComfortActivation)
     ca_last_mono: float | None = None  # real dt for the CA metric
     # ADR-0055 N1: own elapsed anchor for the time-weighted PPD fold — PMV
     # validity and the CA fairness mask diverge, so the PPD clock is separate.

@@ -411,6 +411,11 @@ class ModeResolutionResult:
     g_mode_hold: float
     guard_block: str | None
     mode_nudge_blocked: str
+    # ADR-0068 U5 intent provenance: where the mode decision came from
+    # ("normal" | "manual" | "safety") and whether a fan-first interception
+    # actually happened this tick. Defaults keep every construction valid.
+    intent_origin: str = "normal"
+    fan_first_allowed: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -634,6 +639,9 @@ class FinalizeContext:
     heat_source_suspect: bool
     ext_num: str | None
     operative_active: bool
+    # ADR-0069 U1: the room-occupancy lane for the readiness predicates — a
+    # deliberate contract extension (51st name; pinned).
+    occupancy: tuple[bool | None, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -754,6 +762,9 @@ class EffectExecution:
     commanded_value: float | None
     commanded_mode: str | None = None
     mode_changed: bool = False
+    # ADR-0068 U3: the fan_write change gate (mirrors mode_changed for the
+    # fan channel — the tick mode nudge's flag stays mode-nudge-only).
+    fan_changed: bool = False
 
 
 @dataclass(frozen=True, slots=True)
