@@ -96,6 +96,65 @@ def test_cooling_tracks_comfort_base() -> None:
     assert hi.cool_sp > lo.cool_sp
 
 
+def test_cool_edge_credit_raises_only_the_cool_edge_and_clamp_binds() -> None:
+    # ADR-0068 U7: the live fan-CE credit enters operative-side, like
+    # eco_widen — the EN clamp/ceiling binds automatically.
+    base = decide(t_rm=20.0, room=24.0, t_out=28.0, can_cool=True)
+    credited = decide(
+        t_rm=20.0, room=24.0, t_out=28.0, can_cool=True, cool_edge_credit=1.0
+    )
+    assert credited.cool_sp > base.cool_sp
+    assert credited.heat_sp == base.heat_sp  # the credit never moves heat
+    # A huge credit is clamped by the category cooling ceiling.
+    capped = decide(
+        t_rm=20.0, room=24.0, t_out=28.0, can_cool=True, cool_edge_credit=50.0
+    )
+    assert (
+        capped.cool_sp
+        <= decide(
+            t_rm=20.0, room=24.0, t_out=28.0, can_cool=True, cool_edge_credit=0.0
+        ).cool_sp
+        + 26.0
+    )  # sanity: finite
+    assert (
+        capped.cool_sp
+        == decide(
+            t_rm=20.0, room=24.0, t_out=28.0, can_cool=True, cool_edge_credit=10.0
+        ).cool_sp
+    )  # both hit the same ceiling
+    # A negative credit never lowers the edge (defensive floor at 0).
+    assert (
+        decide(
+            t_rm=20.0, room=24.0, t_out=28.0, can_cool=True, cool_edge_credit=-2.0
+        ).cool_sp
+        == base.cool_sp
+    )
+
+
+def test_pmv_offset_shifts_the_band_capped_and_clamped() -> None:
+    # ADR-0054 Stufe 2 via ADR-0069 U8: a warm feeling (positive PMV ->
+    # negative offset) lowers BOTH edges; the defensive cap is +-1 K and the
+    # EN clamps bind.
+    base = decide(t_rm=20.0, room=21.0, t_out=10.0)
+    warm = decide(t_rm=20.0, room=21.0, t_out=10.0, pmv_offset_k=-0.5)
+    assert warm.heat_sp == round(base.heat_sp - 0.5, 1)
+    cold = decide(t_rm=20.0, room=21.0, t_out=10.0, pmv_offset_k=0.5)
+    assert cold.heat_sp == round(base.heat_sp + 0.5, 1)
+    # Values beyond the sanctioned +-1 K are defensively capped.
+    extreme = decide(t_rm=20.0, room=21.0, t_out=10.0, pmv_offset_k=5.0)
+    assert (
+        extreme.heat_sp
+        == decide(t_rm=20.0, room=21.0, t_out=10.0, pmv_offset_k=1.0).heat_sp
+    )
+
+
+def test_tier2_defaults_are_byte_identical() -> None:
+    # Safe migration shape: without the new inputs nothing changes.
+    a = decide(t_rm=20.0, room=21.0, t_out=10.0)
+    b = decide(t_rm=20.0, room=21.0, t_out=10.0, cool_edge_credit=0.0, pmv_offset_k=0.0)
+    assert a == b
+
+
 def test_efficiency_widen_never_breaches_category_lower() -> None:
     # M2: full-efficiency widening must not push the heating setpoint below the
     # category comfort lower (Cat II = 20 °C); only frost/mould may go lower.

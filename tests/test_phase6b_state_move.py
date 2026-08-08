@@ -211,6 +211,14 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     ("external", "last_commanded_fan"): "ADR-0068 fan-command echo baseline",
     ("external", "prev_device_fan"): "ADR-0068 fan move-guard baseline",
     ("external", "last_fan_cmd_ts"): "ADR-0068 fan echo-window stamp (transient)",
+    # ADR-0068 U6: the fan-first FSM state — transient control-flow memory
+    # (restart -> idle is safe and documented); carried tick-to-tick.
+    ("latches", "fan_first"): "ADR-0068 fan-first FSM state (transient)",
+    ("diagnostics", "fan_first_reason"): "ADR-0068 fan-first reason (diagnosis)",
+    # ADR-0069 U7/U8: tier-2 stepping anchor + next-tick solver inputs.
+    ("diagnostics", "tier2_last_mono"): "ADR-0069 tier-2 step elapsed anchor",
+    ("latches", "fan_ce_credit_k"): "ADR-0068 U7 next-tick fan-CE credit",
+    ("latches", "pmv_offset_k"): "ADR-0069 U8 next-tick PMV band shift",
 }
 
 

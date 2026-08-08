@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from custom_components.poise.comfort.pmv import (
+    PMV_MODEL_REV,
     ROOM_PROFILES,
     RoomProfile,
     clo_dynamic,
     pmv_ppd,
+    pmv_setpoint_offset,
     pmv_validity,
     predictive_clo,
     resolve_room_profile,
@@ -158,6 +160,22 @@ def test_pmv_validity_iso_bounds() -> None:
     assert not pmv_validity(met=0.7, clo=0.5)  # sleeping - below the floor
     assert not pmv_validity(met=4.5, clo=0.5)
     assert not pmv_validity(met=1.2, clo=2.5)
+
+
+def test_pmv_setpoint_offset_inverts_with_deadband_and_cap() -> None:
+    # ADR-0054 Stufe 2 (via ADR-0069 U8): the capped, conservative inversion.
+    # PMV subtleties below +-0.3 carry no information -> zero, continuously.
+    assert pmv_setpoint_offset(0.0) == 0.0
+    assert pmv_setpoint_offset(0.29) == 0.0
+    assert pmv_setpoint_offset(-0.29) == 0.0
+    # Warm feeling -> lower the band; cold -> raise. Continuous past 0.3.
+    assert pmv_setpoint_offset(0.5) == -0.2
+    assert pmv_setpoint_offset(-0.5) == 0.2
+    # The sanctioned +-1 K cap.
+    assert pmv_setpoint_offset(2.0) == -1.0
+    assert pmv_setpoint_offset(-3.0) == 1.0
+    # The model revision string exists for the baseline signature.
+    assert isinstance(PMV_MODEL_REV, str) and PMV_MODEL_REV
 
 
 def test_bedroom_is_the_only_profile_outside_iso_validity() -> None:

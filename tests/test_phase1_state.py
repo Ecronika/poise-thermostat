@@ -151,7 +151,17 @@ def test_user_control_persists_climate_mode_but_not_adopt_log() -> None:
 def test_pipeline_latches_have_no_tick_budget() -> None:
     """Plan rev. 5: the tick budget is a coordinator metric, not a latch."""
     field_names = {f.name for f in dataclasses.fields(PipelineLatches)}
-    assert field_names == {"was_preheating", "was_coasting", "cool_sp_eff_prev"}
+    assert field_names == {
+        "was_preheating",
+        "was_coasting",
+        "cool_sp_eff_prev",
+        # ADR-0068 U6: transient fan-first FSM state (restart -> idle).
+        "fan_first",
+        # ADR-0069 U7/U8: next-tick comfort-solver inputs (previous-tick
+        # semantics like cool_sp_eff_prev).
+        "fan_ce_credit_k",
+        "pmv_offset_k",
+    }
 
 
 def test_default_values_match_coordinator_init() -> None:
