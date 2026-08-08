@@ -425,6 +425,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._override_suggestions = tuning.override_suggestions
         # ADR-0067: learned household clo bias (config-owned, fix-flow-written).
         self._clo_offset = tuning.clo_offset
+        # ADR-0069: the "Aktive Behaglichkeit" mechanism toggle (hot-applied);
+        # the tier gates release the individual building blocks.
+        self._active_comfort = tuning.active_comfort
         self._trace_enabled = tuning.trace_enabled
         # ADR-0066 B.5: opt-in ventilation-advice notification (hot-applied).
         self._vent_notify = tuning.vent_notify
