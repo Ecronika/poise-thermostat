@@ -642,6 +642,12 @@ class FinalizeContext:
     # ADR-0069 U1: the room-occupancy lane for the readiness predicates — a
     # deliberate contract extension (51st name; pinned).
     occupancy: tuple[bool | None, ...]
+    # ADR-0055 field calibration: device capability for the CA fairness mask
+    # (``ca_tick_scorable``) — a violation the zone cannot actuate against is
+    # not scored. Deliberate contract extension (52nd/53rd name; pinned).
+    # Defaults keep every existing construction site behavior-identical.
+    can_heat: bool = True
+    can_cool: bool = True
 
 
 @dataclass(frozen=True, slots=True)
