@@ -96,6 +96,7 @@ from ..comfort.dual_setpoint import ComfortDecision
 from ..comfort.en16798 import HEATING_LOWER, HEATING_UPPER
 from ..comfort.humidity import HumidityDecision
 from ..comfort.operative import operative_temperature
+from ..comfort.pmv import PMV_MODEL_REV, pmv_setpoint_offset
 from ..comfort.presence import (
     PresenceLevel,
     any_present,
@@ -122,7 +123,20 @@ from ..const import (
     WRITE_DEADBAND_C,
 )
 from ..contracts import ActuatorCommand, ActuatorPath
+from ..control.comfort_activation import (
+    ComfortActivation,
+    activation_signature,
+    cascade_after_invalidation,
+    may_dwell,
+    step_tier,
+)
 from ..control.dynamics import PROFILES
+from ..control.external_override import note_device_fan, observe_fan_foreign
+from ..control.fan_first import (
+    FanFirstDecision,
+    FanFirstState,
+    fan_first_decision,
+)
 from ..control.feedback import clo_suggestion_reason, detect_feedback_pattern
 from ..control.hub_aggregate import zone_heat_demand
 from ..control.lifecycle import resolve_safe_state
@@ -132,6 +146,7 @@ from ..control.outcome_scoring import observe_session
 from ..control.override import OverrideMode, hold_ends_at_preheat, mode_comfort_base
 from ..control.pi_shadow import evaluate_pi_shadow
 from ..control.reference_offset import update_offset
+from ..control.regulation_quality import FLIP_TIER_COMFORT, flip_metric_ok
 from ..control.scoring_expectation import model_expected_minutes
 from ..control.suggestion import (
     detect_override_pattern,
@@ -950,7 +965,88 @@ class TickOrchestrator:
         # without yielding to the loop), so the plain call is
         # scheduling-identical at this position.
         failed = self._stage_failure_detect(ing, wt, intents)
-        res = self._stage_mode_resolution(ing, obs, op, wt, band)
+        # ADR-0068 U6: the fan-first FSM — computed BEFORE the mode
+        # resolution so its candidate can intercept a NORMAL cool at the
+        # seam (the seam re-derives the provenance and stays the single mode
+        # authority). Defensive: comfort glue must never break the tick.
+        _ff = FanFirstDecision(state=FanFirstState(), command="none", reason="disabled")
+        _ff_requested = False
+        _act_ff = wt.act_state
+        _fan_modes_ff: tuple[str, ...] = ()
+        _device_fan_ff: str | None = None
+        _foreign_fan_ff = False
+        _presence_ok_ff = False
+        try:
+            _fan_modes_ff = (
+                tuple(_act_ff.attributes.get("fan_modes") or ())
+                if _act_ff is not None
+                else ()
+            )
+            _device_fan_ff = (
+                _act_ff.attributes.get("fan_mode") if _act_ff is not None else None
+            )
+            _own_fan_ff = (
+                _act_ff is not None
+                and _act_ff.context is not None
+                and _act_ff.context.id in self._runtime.external.own_write_ctx_ids
+            )
+            _foreign_fan_ff = observe_fan_foreign(
+                self._runtime.external,
+                device_fan=_device_fan_ff,
+                own_change=_own_fan_ff,
+                now=ing.now,
+            )
+            note_device_fan(
+                self._runtime.external, device_fan=_device_fan_ff, now=ing.now
+            )
+            _occ_ff = sp.presence.occupancy
+            _presence_ok_ff = presence_control_ready(_occ_ff) and room_present(_occ_ff)
+            if self._c._active_comfort:
+                _ff = fan_first_decision(
+                    self._runtime.latches.fan_first,
+                    now=ing.now,
+                    cool_requested=wt.mode == "cool",
+                    fan_first_allowed=(
+                        not obs.window_open
+                        and not ing.frozen
+                        and self._runtime.user.override is None
+                        and self._runtime.user.mode_override is None
+                    ),
+                    fan_only_capable=(
+                        "fan_only"
+                        in (
+                            (_act_ff.attributes.get("hvac_modes") or [])
+                            if _act_ff is not None
+                            else []
+                        )
+                    ),
+                    observed_hvac_mode=_act_ff.state if _act_ff is not None else None,
+                    observed_hvac_action=(
+                        _act_ff.attributes.get("hvac_action")
+                        if _act_ff is not None
+                        else None
+                    ),
+                    observed_fan_mode=_device_fan_ff,
+                    advertised_modes=_fan_modes_ff,
+                    operative_c=op.room_decide,
+                    room_c=ing.room,
+                    presence_ok=_presence_ok_ff,
+                    window_open=obs.window_open,
+                    in_comfort_window=sched.is_comfort,
+                    foreign_fan_change=_foreign_fan_ff,
+                )
+            self._runtime.latches.fan_first = _ff.state
+            self._runtime.diagnostics.fan_first_reason = _ff.reason
+            _ff_requested = _ff.command == "fan_only" or _ff.state.phase in (
+                "await_fan_only",
+                "await_stage",
+                "dwell",
+            )
+        except Exception:  # noqa: BLE001 - fan glue must never break the tick
+            self._log.debug("Poise fan-first evaluation failed", exc_info=True)
+        res = self._stage_mode_resolution(
+            ing, obs, op, wt, band, fan_first_requested=_ff_requested
+        )
         routing = self._stage_hold_routing(wt)
         # Branch-dependent values: the defaults from the resolution and
         # routing stages hold on the disabled / off-held path; the enabled
@@ -969,6 +1065,33 @@ class TickOrchestrator:
             )
             guard_block = nudge.guard_block
             mode_nudge_blocked = nudge.mode_nudge_blocked
+            # ADR-0068 U6: the fan-stage write of the fan-first sequence
+            # (echo-gated by the FSM: only after fan_only was OBSERVED) and
+            # the ADR-0053 idle circulation over the SAME single path —
+            # exactly one live path moves the fan.
+            _fan_cmd: str | None = None
+            if _ff.command == "stage" and _ff.state.stage is not None:
+                _fan_cmd = _ff.state.stage
+            elif (
+                self._c._active_comfort
+                and _ff.state.phase == "idle"
+                and _act_ff is not None
+                and _act_ff.state == "fan_only"
+                and not _foreign_fan_ff
+                and _presence_ok_ff
+                and band.climate_diag.get("fan_circ_shadow") == "fan_low"
+                and "low" in {m.lower() for m in _fan_modes_ff}
+                and (_device_fan_ff or "").lower() != "low"
+                and self._runtime.external.last_commanded_fan != "low"
+            ):
+                _fan_cmd = "low"
+            if _fan_cmd is not None:
+                fan_report = await self._executor.run_fan_write(
+                    self._c._actuator,
+                    _fan_cmd,
+                    fan_changed=(_fan_cmd != self._runtime.external.last_commanded_fan),
+                )
+                self._c.commit_execution(fan_report, now=ing.now)
             spo = self._stage_setpoint_observe(ing, obs, wt, res, routing, nudge)
             sp_adopt_reason = self._stage_setpoint_adopt(
                 ing, obs, routing, spo, mode_adopt_reason=mode_adopt_reason
@@ -1725,6 +1848,8 @@ class TickOrchestrator:
         op: OperativeResult,
         wt: WriteTargetResult,
         band: ClimateBandResult,
+        *,
+        fan_first_requested: bool = False,
     ) -> ModeResolutionResult:
         """Mode arbitration + compressor-guard policy (ADR-0046 paragraph 8).
 
@@ -1744,6 +1869,7 @@ class TickOrchestrator:
             compressor_guard=self._c._compressor_guard,
             comp_min_off_opt=self._c._comp_min_off_opt,
             comp_mode_hold_opt=self._c._comp_mode_hold_opt,
+            fan_first_requested=fan_first_requested,
         )
 
     def _stage_hold_routing(self, wt: WriteTargetResult) -> HoldRoutingResult:
@@ -2755,6 +2881,97 @@ class TickOrchestrator:
                         ppd=float(_ppd_val), dt_min=_ppd_dt
                     )
                 )
+            # ADR-0069 U7/U8: tier-2 activation stepping (persisted latch) +
+            # the NEXT-tick solver inputs. Runs after the PPD fold so the
+            # entry gate reads this tick's matured figures; the solver reads
+            # the previous tick's latch (persisted state, never a per-tick
+            # predicate) — same semantics as cool_sp_eff_prev.
+            _t2_dt = capped_elapsed_min(
+                self._runtime.diagnostics.tier2_last_mono, now, _tick_min
+            )
+            self._runtime.diagnostics.tier2_last_mono = now
+            _ca0 = self._runtime.diagnostics.comfort_activation
+            _t2_identified = self._runtime.learning.ekf.identified
+            _t2_entry = flip_metric_ok(
+                FLIP_TIER_COMFORT,
+                self._runtime.diagnostics.regq,
+                identified=_t2_identified,
+            )
+            _t2_ppd = self._runtime.diagnostics.regq.ppd
+            _pmv_ready = pmv_control_ready(
+                rh=ctx.rh, pmv_valid=ctx.climate_diag.get("pmv_valid") is True
+            )
+            _pred_impossible = (
+                ctx.climate_diag.get("fan_circ_reason") == "no_fan_capability"
+            )
+            _t2_gen = _ca0.generation
+            _fan_next = step_tier(
+                _ca0.fan_ce,
+                ready=self._c._active_comfort,
+                entry_ok=_t2_entry,
+                ppd=_t2_ppd,
+                signature=activation_signature(
+                    room_profile=self._c._room_profile,
+                    clo_offset=self._c._clo_offset,
+                    model_rev=PMV_MODEL_REV,
+                    predecessors=(),
+                ),
+                dt_min=_t2_dt,
+                allowed=may_dwell(
+                    _ca0, "fan_ce", predecessor_impossible=_pred_impossible
+                ),
+                next_generation=_t2_gen + 1,
+            )
+            if _fan_next.state == "live" and _ca0.fan_ce.state != "live":
+                _t2_gen += 1
+            _ca1 = ComfortActivation(
+                fan_ce=_fan_next, pmv_offset=_ca0.pmv_offset, generation=_t2_gen
+            )
+            if _ca0.fan_ce.state == "live" and _fan_next.state != "live":
+                # The ADR-0069 cascade: dependents re-baseline.
+                _ca1 = cascade_after_invalidation(
+                    _ca1, invalidated_generation=_ca0.fan_ce.generation
+                )
+            _pmv_next = step_tier(
+                _ca1.pmv_offset,
+                ready=self._c._active_comfort and _pmv_ready,
+                entry_ok=_t2_entry,
+                ppd=_t2_ppd,
+                signature=activation_signature(
+                    room_profile=self._c._room_profile,
+                    clo_offset=self._c._clo_offset,
+                    model_rev=PMV_MODEL_REV,
+                    predecessors=(("fan_ce",) if _ca1.fan_ce.state == "live" else ()),
+                ),
+                dt_min=_t2_dt,
+                allowed=may_dwell(
+                    _ca1, "pmv_offset", predecessor_impossible=_pred_impossible
+                ),
+                next_generation=_t2_gen + 1,
+            )
+            if _pmv_next.state == "live" and _ca1.pmv_offset.state != "live":
+                _t2_gen += 1
+            self._runtime.diagnostics.comfort_activation = ComfortActivation(
+                fan_ce=_ca1.fan_ce, pmv_offset=_pmv_next, generation=_t2_gen
+            )
+            # NEXT-tick solver inputs: the CE credit only against a CONFIRMED
+            # fan run (the shadow's velocity is hvac_action-gated, ADR-0068
+            # §6 — a still room yields 0.0), the PMV shift only with real
+            # control readiness (ADR-0069 §4).
+            _ce_val = ctx.climate_diag.get("fan_ce_k")
+            self._runtime.latches.fan_ce_credit_k = (
+                float(_ce_val)
+                if _ca1.fan_ce.state == "live" and isinstance(_ce_val, (int, float))
+                else 0.0
+            )
+            _pmv_val = ctx.climate_diag.get("pmv")
+            self._runtime.latches.pmv_offset_k = (
+                pmv_setpoint_offset(float(_pmv_val))
+                if _pmv_next.state == "live"
+                and _pmv_ready
+                and isinstance(_pmv_val, (int, float))
+                else 0.0
+            )
             # ADR-0056 SHADOW: actuator<->room reference-frame offset (no writes).
             # Fold in a sample only while the actuator is actually conditioning
             # — its internal sensor carries the placement bias only under
@@ -3040,6 +3257,16 @@ class TickOrchestrator:
             "season_hint_last_active_ts": (
                 self._runtime.user.season_hint_last_active_ts
             ),
+            # ADR-0068 U6: fan-first observability (shadow keys, not _ATTRS).
+            "fan_first_phase": self._runtime.latches.fan_first.phase,
+            "fan_first_reason": self._runtime.diagnostics.fan_first_reason,
+            # ADR-0069 U7/U8: tier-2 latch states + the applied inputs.
+            "tier2_fan_ce": (self._runtime.diagnostics.comfort_activation.fan_ce.state),
+            "tier2_pmv_offset": (
+                self._runtime.diagnostics.comfort_activation.pmv_offset.state
+            ),
+            "fan_ce_credit_k": self._runtime.latches.fan_ce_credit_k,
+            "pmv_offset_k": self._runtime.latches.pmv_offset_k,
             # ADR-0067 F2: the clo-family reading ("" reason = emittable).
             "clo_suggestion_direction": _fb_sugg.direction if _fb_sugg else None,
             "clo_suggestion_evidence": _fb_sugg.evidence if _fb_sugg else 0,
