@@ -130,6 +130,7 @@ def _snapshot_from_attributes(coord: Any) -> codec.PersistedZoneState:
         tau_settle=coord.runtime.learning.tau_settle,
         outcome_stats=coord.runtime.diagnostics.outcome_stats,
         regq=coord.runtime.diagnostics.regq,
+        comfort_activation=coord.runtime.diagnostics.comfort_activation,
         hdh=coord.runtime.diagnostics.hdh,
         dry_active=coord.runtime.humidity.dry_active,
         enabled=coord.runtime.user.enabled,
@@ -147,11 +148,19 @@ def _snapshot_from_attributes(coord: Any) -> codec.PersistedZoneState:
         boost_expires_at=coord.runtime.user.boost_expires_at,
         boost_prev_preset=coord.runtime.user.boost_prev_preset,
         override_stats=coord.runtime.user.override_stats,
+        feedback_stats=coord.runtime.user.feedback_stats,
+        suggestion_rejected_key=coord.runtime.user.suggestion_rejected_key,
+        suggestion_rejected_at=coord.runtime.user.suggestion_rejected_at,
+        clo_suggestion_rejected_key=coord.runtime.user.clo_suggestion_rejected_key,
+        clo_suggestion_rejected_at=coord.runtime.user.clo_suggestion_rejected_at,
+        season_hint_last_active_ts=coord.runtime.user.season_hint_last_active_ts,
         override_reason=coord.runtime.user.override_reason,
         last_written_sp=coord.runtime.external.last_written_sp,
         prev_device_sp=coord.runtime.external.prev_device_sp,
         last_commanded_hvac=coord.runtime.external.last_commanded_hvac,
         prev_device_mode=coord.runtime.external.prev_device_mode,
+        last_commanded_fan=coord.runtime.external.last_commanded_fan,
+        prev_device_fan=coord.runtime.external.prev_device_fan,
     )
 
 
