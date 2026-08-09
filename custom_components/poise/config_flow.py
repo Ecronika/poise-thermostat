@@ -171,7 +171,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_ADOPT_EXTERNAL_SETPOINT,
         CONF_ADOPT_EXTERNAL_MODE,
         CONF_BOOST_DURATION_MIN,
-        CONF_OVERRIDE_SUGGESTIONS,  # ADR-0060 L2 (opt-in until the tuning round)
+        CONF_OVERRIDE_SUGGESTIONS,  # ADR-0060 L2
     ),
     "advanced": (
         CONF_COOL_HARD_CAP,
@@ -327,8 +327,8 @@ def _reconfigure_schema(
 def _setup_schema(hass: HomeAssistant) -> vol.Schema:
     """Slim room onboarding (ADR-0008): only the room sensor + actuator up front
     (the name is derived from the actuator), with the accuracy-improving optional
-    inputs behind a collapsed section. All tuning has good defaults and is edited
-    later in the options flow."""
+    inputs behind a collapsed section. Beyond comfort base + category, tuning
+    has good defaults and is edited later in the options flow."""
     # Don't offer Poise's own entities (its zone climate + diagnostic sensors) in
     # the pickers — selecting one would wire a zone to itself.
     reg = er.async_get(hass)
@@ -929,6 +929,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
+            # The flattened sections land in entry.data, tuning fields
+            # (comfort_base/category) included: a new entry is created at
+            # VERSION 2, so migrate_room_entry never splits it —
+            # reconcile_reconfigure carries them into options on the first
+            # reconfigure.
             data = flatten_sections(user_input, ("accuracy",))
             act = data[CONF_ACTUATOR]
             reg = er.async_get(self.hass)
@@ -1120,7 +1125,7 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
 
 
 class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
-    """Edit volatile tuning in place — no reload, so learning is preserved (A10)."""
+    """Edit volatile tuning in place — no reload, so learning is preserved."""
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None

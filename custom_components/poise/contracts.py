@@ -24,7 +24,7 @@ class Source(Enum):
 
 
 class Precedence(IntEnum):
-    """Hard conflict ordering (charter). Lower value = higher priority."""
+    """Hard conflict ordering (ADR-0035). Lower value = higher priority."""
 
     SAFETY = 0
     HEALTH = 1
@@ -35,7 +35,7 @@ class Precedence(IntEnum):
 
 
 class Maturity(IntEnum):
-    """Learning maturity phase (ADR-0009 cold-start staging)."""
+    """Learning maturity phase (ADR-0028 learning-phase thresholds)."""
 
     COLD = 0  # < 5 observations
     EARLY = 1  # < 50
@@ -178,12 +178,15 @@ class ZoneRequest:
     frost_active: bool
     controls_boiler: bool
     mono_ts: float
-    declared_power: float | None = None  # weighting unit, free choice (charter)
+    # Weighting unit is the user's choice; must match the hub's power
+    # threshold (see const.py).
+    declared_power: float | None = None
     flow_temp_request: float | None = None
-    source_pref: str | None = None  # energy-aware source policy (Deliverable 4)
+    # Energy-aware source policy; resolved by hub_aggregate.resolve_source_policy.
+    source_pref: str | None = None
     compressor_group: str | None = None
     health_active: bool = False  # mould/health floor binding (excluded from shed)
-    frozen: bool = False  # room sensor stale — call-for-heat not trusted (V9)
+    frozen: bool = False  # room sensor stale — call-for-heat not trusted
 
 
 @dataclass(frozen=True, slots=True)

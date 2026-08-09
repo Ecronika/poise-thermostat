@@ -1,9 +1,11 @@
 """Arbitration choke-point (ADR-0013).
 
-Phase 0 resolves a *single* control request against the binding comfort
-corridor and emits exactly one command per actuator — the "one writer"
-guarantee. The full multi-request constraint solver with hard precedence
-arrives in Phase 4; the seam (requests in, one command out) is fixed now.
+Resolves a *single* control request against the binding comfort corridor and
+emits exactly one command per actuator — the "one writer" guarantee. The
+precedence solver (``constraints.py``, ADR-0035) is already used; what is
+still single is the input — one request per actuator, not a set. Harness /
+pure-core-test scope, same as ``pipeline.py``: the live write path arbitrates
+in the coordinator tick.
 """
 
 from __future__ import annotations
@@ -25,6 +27,9 @@ def resolve(
         if request.target_setpoint is not None
         else corridor.target
     )
+    # Fail toward warmth: every lower bound enters at HEALTH and every upper
+    # bound at COMFORT, so on an inverted corridor the floor wins. Only the
+    # device's physical max outranks both (SAFETY).
     constraints = [
         *(
             Constraint(b.value, b.cause, ConstraintKind.FLOOR, Precedence.HEALTH)

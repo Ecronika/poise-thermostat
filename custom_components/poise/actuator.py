@@ -1,8 +1,8 @@
 """Actuator choke-point — the single writer per device (ADR-0013).
 
 Every ``ActuatorCommand`` produced by arbitration is written here and nowhere
-else. Phase 0 implements only the setpoint path; the capability-matrix paths
-(tpi_valve / calibration / pi_setpoint) land in Phase 3 (ADR-0015).
+else. The setpoint and direct-valve (tpi_valve) paths are wired; calibration
+and pi_setpoint still raise (ADR-0015/0036).
 """
 
 from __future__ import annotations
@@ -16,11 +16,7 @@ if TYPE_CHECKING:
 
 
 def service_call_for(command: ActuatorCommand) -> tuple[str, str, dict[str, Any]]:
-    """The (domain, service, data) for one command — pure, HA-free, testable.
-
-    Phase 0 implements only the setpoint path; other capability-matrix paths
-    (tpi_valve / calibration / pi_setpoint) are not wired yet (ADR-0015).
-    """
+    """The (domain, service, data) for one command — pure, HA-free, testable."""
     if command.path is ActuatorPath.SETPOINT:
         return (
             "climate",
@@ -46,7 +42,7 @@ async def write(
     """Translate one arbitrated command into exactly one HA service call.
 
     ``context`` tags the call so the resulting state change carries a Context the
-    coordinator recognises as its own (V2, analysis 2026-07-14): the next tick can
+    coordinator recognises as its own: the next tick can
     then tell our own write's echo -- including a device re-quantise / min-max clamp
     a push integration reports under this same context -- from a genuine external
     setpoint change, without guessing from the value alone.

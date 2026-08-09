@@ -111,7 +111,9 @@ def run_tick(
     no hidden randomness, and the only time source is the injected ``clock``.
     Isolation (ADR-0012): a failure in one zone never aborts the tick.
     """
-    _ = clock  # reserved for Phase 1+ (timing-dependent comfort/learning)
+    # Unused: kept in the signature so the harness drives the same clock seam
+    # as the live tick (ADR-0014 determinism).
+    _ = clock
     commands: dict[str, ActuatorCommand] = {}
     for zone_id in sorted(zones):
         zone = zones[zone_id]

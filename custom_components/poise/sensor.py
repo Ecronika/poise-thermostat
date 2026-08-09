@@ -182,10 +182,10 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=_scaled("mpc_weight", 100.0, 0),
     ),
-    # ADR-0055 M1 (Phase-3 baseline): the EN-15500-1 control-accuracy signals as
-    # measurement sensors so long-term statistics capture the pre-flip distribution
-    # the winter threshold calibration (Phase 4) needs — the climate attributes
-    # alone only live in the recorder's short-term history (~10 days).
+    # ADR-0055: the EN-15500-1 control-accuracy signals as measurement sensors
+    # so long-term statistics capture the pre-flip distribution the winter
+    # threshold calibration needs — the climate attributes alone only live in
+    # the recorder's short-term history (~10 days).
     PoiseSensorDescription(
         key="ca_deviation_k",
         translation_key="ca_deviation_k",
@@ -250,7 +250,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=1,
         value_fn=_scaled("tick_ms_ewma", digits=1),
     ),
-    # P1-4b: the manual-hold expiry as a first-class TIMESTAMP entity, so the
+    # ADR-0059: the manual-hold expiry as a first-class TIMESTAMP entity, so the
     # override end-time is visible (and lands in history) without the Poise card.
     # Enabled by default -- unlike the estimator diagnostics, this is user-facing.
     PoiseSensorDescription(
@@ -263,8 +263,7 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
 )
 
 
-# Coordinator-driven: entities read shared data and writes go through the
-# single actuator choke-point, so updates need no per-entity throttling.
+# Coordinator-driven read-only entities: nothing to throttle per entity.
 PARALLEL_UPDATES = 0
 
 

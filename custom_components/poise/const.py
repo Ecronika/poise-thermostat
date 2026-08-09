@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.185.0"
+VERSION: Final = "0.186.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -15,10 +15,9 @@ TICK_INTERVAL_S: Final = 60.0
 HUB_ZONE_STALE_AFTER_S: Final = 180.0
 
 # Comfort / safety defaults (ADR-0008). Each value is derivable & on the safe side.
-DEFAULT_TARGET_C: Final = 21.0
 FROST_FLOOR_C: Final = 7.0
 DEVICE_MAX_C: Final = 30.0
-# P2-1: while a window is open, suppress the mould floor (heating toward ~24 °C
+# While a window is open, suppress the mould floor (heating toward ~24 °C
 # fights the ventilation) for this many seconds — the frost floor always remains.
 # DIN 4108-2 is a steady-state criterion, not a minute-scale window event.
 WINDOW_MOULD_SUPPRESS_S: Final = 1800.0
@@ -27,19 +26,19 @@ BANGBANG_HYSTERESIS_C: Final = 0.3
 # mode change — spares battery/Zigbee TRVs from per-tick traffic (ADR-0012).
 WRITE_DEADBAND_C: Final = 0.2
 
-# P2-2: re-push the room temperature to a TRV external-temperature input at least
+# Re-push the room temperature to a TRV external-temperature input at least
 # this often, even when the value is unchanged. Some TRVs time out an external
 # input and silently fall back to their own (mounted) sensor, so a stable room
 # would otherwise let the feed go stale. 0 disables the time-based re-push.
 EXTERNAL_FEED_KEEPALIVE_S: Final = 600.0
 
-# P1-4a: adopt a device-side setpoint change (TRV wheel / vendor app) as a manual
+# ADR-0059 §8: adopt a device-side setpoint change (TRV wheel / vendor app) as a manual
 # hold instead of overwriting it. ``ECHO_WINDOW`` suppresses adoption right after
 # Poise's own write, while the device may still report its pre-write value (lag).
 CONF_ADOPT_EXTERNAL_SETPOINT: Final = "adopt_external_setpoint"
 DEFAULT_ADOPT_EXTERNAL_SETPOINT: Final = True
 SETPOINT_ADOPT_ECHO_WINDOW_S: Final = 120.0
-# K2: adopt a device-side hvac_mode change (the IR remote / vendor app) as a manual
+# Adopt a device-side hvac_mode change (the IR remote / vendor app) as a manual
 # mode-hold with the same lifecycle as the setpoint hold, instead of nudging it
 # straight back. Off by opt-out for self-switching devices (Daikin-class); the mode
 # echo window reuses ``SETPOINT_ADOPT_ECHO_WINDOW_S``.
@@ -57,7 +56,7 @@ SENSOR_FREEZE_AFTER_S: Final = (
     7200.0  # 2 h: last_changed-based (F1), avoids false alarms on stable rooms
 )
 # After this long fully unavailable (not just frozen), degrade to the frost/mould
-# floor like a frozen sensor -- fail toward warmth (review #7). Longer than a tick
+# floor like a frozen sensor -- fail toward warmth. Longer than a tick
 # so brief drop-outs / restarts just hold the last state.
 UNAVAILABLE_SAFE_AFTER_S: Final = 1800.0  # 30 min
 LOW_BATTERY_PCT: Final = 15.0
@@ -147,7 +146,7 @@ DEFAULT_COMPRESSOR_MODE_HOLD_S: Final = 300.0
 
 # Field-trace recorder (ADR-0011 golden-file replay); opt-in, default off.
 CONF_TRACE_RECORDING: Final = "trace_recording"
-DEFAULT_TRACE_MAX_BYTES: Final = 20 * 1024 * 1024
+DEFAULT_TRACE_MAX_BYTES: Final = 20 * 1024 * 1024  # 20 MiB
 
 # ADR-0066 B.5: opt-in self-clearing persistent notification for the
 # ventilation advice (the bus event `poise_ventilation_advice` always fires).
@@ -198,11 +197,8 @@ DEFAULT_OVERRIDE_TIMER_H: Final = 2.0
 DEFAULT_OVERRIDE_MAX_H: Final = 8.0
 DEFAULT_OVERRIDE_END_ON_PRESENCE: Final = True
 DEFAULT_BOOST_DURATION_MIN: Final = 60.0
-# ADR-0060 §3 tuning round CLOSED (2026-08-07): two field zones replayed, both
-# rise edges human-reviewed — one true positive (wanted), one valve-test false
-# positive that the season gate now removes structurally (0 FP after gate).
-# Hence the ADR's decided end state: emission ON by default; the toggle stays
-# the per-zone opt-out, detection/diagnostics run regardless.
+# ADR-0060 §3: emission on by default; the toggle is the per-zone opt-out.
+# Detection and diagnostics run regardless of the toggle.
 DEFAULT_OVERRIDE_SUGGESTIONS: Final = True
 
 # Persistence (ADR-0007)
@@ -215,6 +211,9 @@ FORECAST_TTL_S: Final = 900.0
 CONF_ENTRY_TYPE: Final = "entry_type"
 ENTRY_TYPE_SYSTEM: Final = "system"
 CONF_BOILER_COUNT_THRESHOLD: Final = "boiler_count_threshold"
+# The weighted power sum is compared RAW against this threshold, so it must be
+# entered in the same unit as the zones' ``declared_power`` values (HA power
+# sensors report W by default).
 CONF_BOILER_POWER_THRESHOLD: Final = "boiler_power_threshold"
 CONF_CONTROLS_BOILER: Final = "controls_boiler"
 DEFAULT_BOILER_COUNT_THRESHOLD: Final = 1
@@ -227,10 +226,10 @@ CONF_BOILER_KEEPALIVE: Final = "boiler_keepalive_s"
 CONF_BOILER_MIN_ON: Final = "boiler_min_on_s"
 CONF_BOILER_MIN_OFF: Final = "boiler_min_off_s"
 DEFAULT_BOILER_ACTIVATION_DELAY_S: Final = 0.0
-DEFAULT_BOILER_KEEPALIVE_S: Final = 300.0  # review V2c: self-healing on by default
+DEFAULT_BOILER_KEEPALIVE_S: Final = 300.0  # self-healing on by default
 DEFAULT_BOILER_MIN_ON_S: Final = 300.0
 DEFAULT_BOILER_MIN_OFF_S: Final = 300.0
-# F9/review 2026-07-10: min-on/min-off are a physical anti-short-cycle dwell —
+# Min-on/min-off are a physical anti-short-cycle dwell —
 # 0 has no valid "off" meaning (unlike keepalive=0 or activation_delay=0). The
 # read path clamps both up to this floor so a stored/typed 0 cannot switch the
 # boiler every tick. 120 s = 2 ticks, the smallest dwell that actually binds

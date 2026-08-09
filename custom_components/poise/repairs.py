@@ -2,11 +2,12 @@
 
 The coordinator mirrors a detected override pattern into a fixable issue
 (``_sync_suggestion_issue``); this flow is the visible decision point the ADR
-mandates: **apply** performs the config write over the Reconfigure path
-(``async_update_entry`` — never a silent store mutation), **dismiss** stamps
-the 30-day suppression for exactly this pattern key. Both paths also stamp the
-cool-down after an APPLY, because the old evidence stays in the L1 statistic
-and would otherwise immediately re-raise the just-applied pattern.
+mandates: **apply** performs the config write over the options path
+(``async_update_entry(entry, options=…)``, hot-applied by the options-update
+listener — never a silent store mutation), **dismiss** stamps the 30-day
+suppression for exactly this pattern key. The cool-down is stamped on BOTH
+paths — after an apply too, because the old evidence stays in the L1
+statistic and would otherwise immediately re-raise the just-applied pattern.
 """
 
 from __future__ import annotations

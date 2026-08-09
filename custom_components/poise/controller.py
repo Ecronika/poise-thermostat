@@ -1,8 +1,11 @@
-"""Controllers (ADR-0001 defines the eventual MPC; Phase 0 ships bang-bang).
+"""Controllers behind the stable :class:`Controller` protocol.
 
-The :class:`Controller` protocol is the stable seam: a controller consumes a
-:class:`ThermalState` + :class:`ComfortCorridor` and returns a
-:class:`ControlRequest` — it never writes to an actuator (ADR-0005/0013).
+A controller consumes a :class:`ThermalState` + :class:`ComfortCorridor` and
+returns a :class:`ControlRequest` — it never writes to an actuator
+(ADR-0005/0013).
+
+Like ``pipeline.py``, this module is harness/test-only: the live path runs
+the coordinator's own tick, never ``Controller.evaluate`` (ADR-0011).
 """
 
 from __future__ import annotations
@@ -28,11 +31,12 @@ class Controller(Protocol):
 
 
 class BangBangController:
-    """Trivial Phase-0 controller for the vertical slice.
+    """Trivial reference controller for the harness vertical slice.
 
     Heats toward the corridor target via the setpoint path with hysteresis.
-    Real model-predictive control replaces this in Phase 4 (ADR-0001) behind
-    the same protocol, so nothing downstream changes.
+    ``control/mpc_controller.MpcController`` implements the same protocol; it
+    blends against a bang-bang reference rather than replacing it
+    (ADR-0001/0009).
     """
 
     def __init__(self, hysteresis: float = BANGBANG_HYSTERESIS_C) -> None:

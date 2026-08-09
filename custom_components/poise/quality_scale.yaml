@@ -26,14 +26,14 @@ rules:
   action-setup:
     status: done
     comment: >-
-      poise.resume_schedule is registered in async_setup (clears a manual hold and
-      resumes the schedule, per ADR-0059); all other control uses standard
-      climate/number services.
+      Both domain services (poise.resume_schedule per ADR-0059 §6 and
+      poise.comfort_feedback per ADR-0067 F1) are registered in async_setup;
+      all other control uses standard climate/number services.
   docs-actions:
     status: done
     comment: >-
-      poise.resume_schedule is documented via services.yaml (name/description +
-      target selector).
+      poise.resume_schedule and poise.comfort_feedback are documented via
+      services.yaml (name/description + selectors).
   test-before-configure:
     status: exempt
     comment: >-
@@ -58,15 +58,16 @@ rules:
   action-exceptions:
     status: exempt
     comment: >-
-      The sole custom action (poise.resume_schedule) takes no free-form input and
-      skips non-applicable zones defensively, so it raises no user-facing
+      poise.resume_schedule takes no free-form input and skips non-applicable
+      zones defensively; poise.comfort_feedback validates its single enum
+      field via the service schema (vol.In). Neither raises user-facing
       exceptions.
   reauthentication-flow:
     status: exempt
     comment: No authentication; fully local, no credentials.
   parallel-updates: done  # PARALLEL_UPDATES = 0 in every platform module
   log-when-unavailable: done  # room-sensor loss logged once (WARNING) + recovery once (INFO)
-  test-coverage: done  # HA-glue 95.1% (98 integration tests, gate 95); pure core ~98.6% (unit gate 85)
+  test-coverage: done  # two gated suites: pure core (coverage gate 85) + HA-glue integration (gate 95)
 
   # ---------------- Gold ----------------
   devices: done  # DeviceInfo per zone + hub; via_device hub<->zone link wired (climate/sensor/switch -> coordinator.via_device_id) (review M9)
@@ -89,8 +90,14 @@ rules:
     status: exempt
     comment: One device per config entry; removed on unload.
   entity-disabled-by-default:
-    status: todo
-    comment: Disable the noisy shadow diagnostics (mpc_*/tpi_*/pi_*/beta_s) by default.
+    status: done
+    comment: >-
+      14 of the 18 diagnostic sensors (mpc_*, beta_s, q_solar, ca_*, t_rm,
+      mrt, tau_hours, vent_advice, tick_duration_ms, ...) ship
+      entity_registry_enabled_default False; only the lean user-facing set
+      (operative_temperature, confidence, learning_phase,
+      override_expires_at) is enabled. tpi_*/pi_* are climate attributes,
+      not entities.
   exception-translations:
     status: todo
     comment: Make the ConfigEntryNotReady / error messages translatable.

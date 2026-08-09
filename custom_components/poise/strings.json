@@ -279,7 +279,8 @@
         "office": "Office / neutral (default)",
         "living": "Living room (sofa, relaxed)",
         "bedroom": "Bedroom (resting)",
-        "kitchen": "Kitchen (housework)"
+        "kitchen": "Kitchen (housework)",
+        "bathroom": "Bathroom (personal care, light clothing)"
       }
     },
     "feedback_direction": {

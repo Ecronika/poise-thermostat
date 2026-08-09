@@ -1,16 +1,18 @@
 """Multi-zone hub coordinator — shared-resource aggregation (ADR-0038/0039).
 
-Phase 2 of the two-phase tick — note it is **not synchronous**: hub and zones
-tick independently (60 s each), so the hub reads each zone's *last published*
-snapshot, up to ~60 s old (review #6). For boiler aggregation with activation
-delay + min-cycle this staleness is immaterial.
+Phase 2 of the two-phase tick (ADR-0038) — note it is **not synchronous**:
+hub and zones tick independently (60 s each), so the hub reads each zone's
+*last published* snapshot, up to ~60 s old. For boiler aggregation with
+activation delay + min-cycle this staleness is immaterial.
 
-All control decisions — including the tick-crossing boiler/compressor state
-machines — live in the pure, unit-tested ``hub_aggregate`` helpers
-(``step_boiler``/``step_min_cycle``); this module only reads HA state and
-performs the single service call. With no boiler actions configured it stays
-shadow-only. Load shedding (S3) and compressor grouping (S4) are computed as
-diagnostics; zone-side enforcement is a later stage.
+The step functions are pure and unit-tested in ``hub_aggregate``
+(``step_boiler``/``step_min_cycle``/``resolve_*``); this module reads HA
+state, issues the boiler service calls and holds the tick-crossing
+group/flow state. The post-restart reconcile stamp (``_actuate``) is decided
+here because it needs the live actuator read. With no boiler actions
+configured the hub stays shadow-only. Load shedding, compressor grouping,
+flow target and source grants are computed as diagnostics; zone-side
+enforcement is a later stage (ADR-0013).
 """
 
 from __future__ import annotations
@@ -109,7 +111,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         )
         pw = d.get(CONF_BOILER_POWER_THRESHOLD)
         self._power_threshold = float(pw) if pw else None
-        # actuation (Stufe 2) — only active when BOTH actions parse (opt-in)
+        # Actuation is opt-in: only active when BOTH the ON and OFF actions parse.
         self._action_on = parse_service_action(d.get(CONF_BOILER_ON_ACTION))
         self._action_off = parse_service_action(d.get(CONF_BOILER_OFF_ACTION))
         self._actuation = self._action_on is not None and self._action_off is not None
@@ -147,7 +149,9 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._flow_current: float | None = None
         self._default_source = str(d.get(CONF_DEFAULT_SOURCE, DEFAULT_HEAT_SOURCE))
         self._active_issues: set[str] = set()
-        self._tick_unsub: CALLBACK_TYPE | None = None  # AR-02: hub tick timer unsub
+        # Held here (not via ``entry.async_on_unload``) so the unload can
+        # cancel the tick BEFORE the blocking boiler OFF (see __init__.py).
+        self._tick_unsub: CALLBACK_TYPE | None = None
         # AR-08: persist the boiler state (on + wall-clock switch time) + the
         # has_actuated dead-man flag so a restart rebuilds the min-cycle dwell and
         # the entry-removal gate (AR-15) can tell Poise ever commanded the boiler.
@@ -230,7 +234,12 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
     def _shared_resource_shadow(
         self, requests: list[ZoneRequest], now: float
     ) -> dict[str, Any]:
-        """S3 load-shedding + S4 compressor-group shadow (computed, not enforced)."""
+        """Shared-resource shadow: load shedding, compressor-group min-cycle,
+        flow-temperature target and source-policy grants — published as
+        diagnostics, zone-side enforcement not wired (ADR-0013). NOT
+        side-effect free: advances the per-group min-cycle state and the flow
+        hysteresis anchor.
+        """
         max_p = self._power(self._max_power_sensor)
         cur_p = self._power(self._current_power_sensor)
         available = (max_p - cur_p) if max_p is not None and cur_p is not None else None
@@ -395,7 +404,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         return entry.title if entry is not None else zone_id
 
     def _update_frost_issues(self, excluded: tuple[str, ...]) -> None:
-        """N-2 (ADR-0039 Korrektur #3): a freezing zone that does not control the
+        """ADR-0039 correction #3: a freezing zone that does not control the
         boiler silently loses shared-boiler frost protection. Surface it as a
         repair issue so the config error is visible; cleared when none remain.
         """
@@ -488,9 +497,9 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             "active_zones": demand.active_count,
             "weighted_demand": demand.weighted_demand,
             "frost_override": demand.frost_override,
-            "frost_zone": demand.frost_zone_id,  # which zone forced frost (P1/2.1)
-            "frost_excluded": list(demand.frost_excluded),  # N-2
-            # AR-05: boiler zones firing frost via the unavailable-safe fallback
+            "frost_zone": demand.frost_zone_id,  # which zone forced frost
+            "frost_excluded": list(demand.frost_excluded),
+            # Boiler zones firing frost via the unavailable-safe fallback.
             "frost_unavailable_zones": list(self._frost_unavailable_zones),
             "zone_count": len(requests),
             "controlling_zones": sum(1 for r in requests if r.controls_boiler),

@@ -25,15 +25,13 @@ REDACT_KEYS = frozenset(
         "weather_entity",
         "irradiance_sensor",
         "trv_external_temp_input",
-        # Presence/occupancy inputs (R2, 2026-07 competitor code audit): these carry
-        # person./device_tracker./group ids and motion/occupancy binary_sensor ids.
-        # Unredacted they are the ONE place Poise reproduced the RoomMind #… "person
-        # ids in the dump" class the opinion survey criticises — ADR-0022 makes id
-        # redaction mandatory. They reach the dump via the entry.options merge below.
+        # Presence/occupancy inputs carry person./device_tracker./group ids
+        # and motion/occupancy binary_sensor ids; ADR-0022 makes id redaction
+        # mandatory. They reach the dump via the entry.options merge below.
         "presence_home",
         "occupancy_sensor",
         # system-entry config: action specs + power-sensor ids + group label
-        # (review P4/1.3-1.4 — hygiene, not secrets, but should not leak setup)
+        # (hygiene, not secrets, but should not leak setup)
         "boiler_on_action",
         "boiler_off_action",
         "max_power_sensor",
@@ -42,8 +40,9 @@ REDACT_KEYS = frozenset(
     }
 )
 
-# Entity-id-bearing keys that surface in the live coordinator_data attributes
-# (the room name is deliberately kept — see module docstring).
+# Entity-id-bearing keys that surface in the live coordinator_data attributes.
+# The room name is deliberately kept: the dump is unreadable without it, and a
+# user-chosen room label is not an entity id.
 COORDINATOR_REDACT_KEYS = frozenset({"tpi_valve_entity"})
 
 

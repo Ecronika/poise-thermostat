@@ -1,4 +1,4 @@
-"""Pure config-entry reconcile helper for the reconfigure flow (review V7)."""
+"""Pure config-entry reconcile helper for the reconfigure flow."""
 
 from __future__ import annotations
 
@@ -50,9 +50,6 @@ def reconcile_reconfigure(
     A live option value wins over a carried data value (edited more recently).
     """
     new_data = dict(user_input)
-    # Structural data keys the shrunk form doesn't render would be lost on the full
-    # data replace. They are not tuning, so carry them back into data unchanged
-    # rather than letting them migrate to options.
     # AR-09: carry the structural installation keys back ONLY when the form did NOT
     # render them (no hub → the anlagen section is hidden). When the section IS
     # rendered, a key absent from user_input means the user CLEARED it and it must

@@ -6,6 +6,10 @@ optimal-start preheat (ADR-0025), and writes exactly one capability-correct
 command to the actuator (single writer). The EKF (ADR-0002/0024) learns in the
 background and is persisted per room (ADR-0007). Live safety: window-open pause
 and heating-failure notification (ADR-0012).
+
+The tick program itself lives in ``ha/tick_orchestrator.py``; this module
+keeps the HA coupling (config parsing, store, repair issues, bus events) and
+the instance-dispatched facades the tests patch.
 """
 
 from __future__ import annotations
@@ -122,7 +126,8 @@ def _utcnow_ts() -> float:
 
 def _local_minute_now() -> int:
     """Local minute-of-day (the ``dt_util.now()`` read of the switchpoint
-    lookup and the §5 stat's schedule phase), evaluated at call time."""
+    lookup and the ADR-0059 §5 stat's schedule phase), evaluated at call
+    time."""
     _lnow = dt_util.now()
     return int(_lnow.hour * 60 + _lnow.minute)
 
@@ -156,16 +161,18 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             config_entry=entry,
             name=DOMAIN,
             update_interval=timedelta(seconds=TICK_INTERVAL_S),
-            # The snapshot carries a per-tick monotonic heartbeat ("mono_ts",
-            # ADR-0038 hub staleness) that differs every tick, so the data is
-            # never equal tick-to-tick: always_update=False could never skip.
-            # (Refresh storms from input churn are cut by the _on_change filter.)
+            # Available snapshots carry a per-tick monotonic heartbeat
+            # ("mono_ts", ADR-0038 hub staleness), but the degraded payload is
+            # the pristine ``{"available": False}`` contract — identical tick
+            # to tick. always_update=True keeps listeners notified during a
+            # sustained outage too. (Refresh storms from input churn are cut
+            # by the _on_change filter.)
             always_update=True,
         )
         # One ZoneRuntime owns the long-lived domain-state groups
-        # (runtime/state.py) plus the injectable clock; every moved attribute
-        # keeps its ``self._*`` name as a property proxy (getter+setter)
-        # defined right after ``__init__``. ``climate_mode`` is Store-owned
+        # (runtime/state.py) plus the injectable clock; the moved fields are
+        # reached through the read-only container properties below
+        # (``coord.runtime.<group>.<field>``). ``climate_mode`` is Store-owned
         # user intent, deliberately OUTSIDE the shared parser: the
         # options/data value only seeds the very first start, async_bootstrap
         # restores the live selection, and async_apply_options never
@@ -179,10 +186,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # attribute); ``WindowRuntime.wa_open_threshold`` defaults to this
         # config's ``open_threshold``.
         self._window_auto_cfg = WindowAutoConfig()
-        # ``_dirty`` (override/enabled/mode changed -> persist next save) is
-        # proxied below onto ``ZoneRuntime.dirty``: the moved pure bodies
+        # The dirty flag (override/enabled/mode changed -> persist next save)
+        # is owned by ``ZoneRuntime.dirty``: the pure bodies
         # (commit/teardown/mark_actuated/observe) mutate it, so the runtime
-        # owns the flag and seeds it False.
+        # seeds it False and ``_maybe_save`` reads ``runtime.dirty``.
         self._store = PoiseStore(hass, entry.entry_id)
         self._save_counter = 0
         # Silver log-when-unavailable: log the loss/recovery of the room sensor
@@ -251,8 +258,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # plus the device-guard discovery state. Constructed BEFORE the
         # hot-tuning apply so the apply can sync the options-owned presence
         # lists into the reader unconditionally, and handed a live clock
-        # forwarder so a test-swapped ``_clock`` governs the snapshot
-        # instants too.
+        # forwarder so a test-swapped ``coord.runtime.clock`` governs the
+        # snapshot instants too.
         self._input_reader = InputReader(hass, structure, _ReaderClock(self))
         # The single WRITING HA adapter: owns the four bare call primitives
         # (exact payloads, blocking=False, context passthrough) and the run_*
@@ -263,7 +270,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._actuator_executor = ActuatorExecutor(hass, logger=_LOGGER)
         # Forecast fetch + TTL cache; the cache state lives in the provider.
         # Same live clock forwarder as the reader, so a test-swapped
-        # ``_clock`` keeps governing the TTL/backoff instants. This module's
+        # ``coord.runtime.clock`` keeps governing the TTL/backoff instants.
+        # This module's
         # ``_LOGGER`` is passed in so the failure-path debug record keeps the
         # logger name ``custom_components.poise.coordinator`` (channel
         # identity for per-module logger configs).
@@ -442,10 +450,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._input_reader.set_presence_entities(
             hot.presence_home_entities, hot.occupancy_entities
         )
-        # F-PRESENCE made those lists part of the WATCHED set, so an options
-        # submit that changes them must re-point the state-change listener too
-        # — otherwise the new sensor would only be seen by the scheduled tick,
-        # which is exactly the latency the fix removed. Guarded on a real
+        # The presence lists are part of the WATCHED set (ADR-0058), so an
+        # options submit that changes them must re-point the state-change
+        # listener too — otherwise the new sensor would only be seen by the
+        # scheduled tick. Guarded on a real
         # change so the common no-op apply does not churn the subscription;
         # ``__init__`` runs this before ``attach_listeners``, where
         # ``_watched`` is still empty and no subscription exists yet.
@@ -570,8 +578,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         expiry + reason derivation). The hold-end event arrives as
         ``CommandResult.events`` and fires RIGHT HERE at the in-stage
         position, after the dirty mark: teardown sets dirty BEFORE the fire,
-        and a synchronous bus listener observing ``_dirty`` at event time must
-        keep seeing ``True`` (pinned by the phase-0 frost matrix).
+        and a synchronous bus listener observing ``runtime.dirty`` at event
+        time must keep seeing ``True`` (pinned by the phase-0 frost matrix).
         """
         result = override_runtime.expire_timed_states(
             self._zone_runtime.user,
@@ -682,8 +690,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     def _sync_clo_suggestion_issue(self, suggestion: CloSuggestion | None) -> None:
         """ADR-0067 F2: mirror the emittable clo reading into a fixable issue.
 
-        Same trust rules as L2: gated on the ``override_suggestions`` opt-in;
-        the caller already resolved the #4 conflict, so ``None`` here also
+        Same trust rules as L2: gated on the ``override_suggestions`` toggle
+        (ADR-0060 §3: default on, the toggle is the per-zone opt-out); the
+        caller already resolved the #4 conflict, so ``None`` here also
         covers a blocked reading.
         """
         from homeassistant.helpers import issue_registry as ir
@@ -706,6 +715,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             translation_placeholders={
                 "name": self.zone_name,
                 "count": str(suggestion.evidence),
+                # Mirrors control.feedback.CLO_SUGGEST_STEP (display only).
                 "step": "0.1",
             },
             data={
@@ -721,10 +731,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     ) -> None:
         """Mirror the detected L2 pattern into a fixable repair issue.
 
-        Emission is gated on the ``override_suggestions`` opt-in (§3: default
-        off until the golden-replay tuning round); the issue disappears as
-        soon as the pattern does. ``async_create_issue`` is idempotent per
-        tick.
+        Emission is gated on the ``override_suggestions`` toggle (ADR-0060
+        §3: default on, the toggle is the per-zone opt-out); the issue
+        disappears as soon as the pattern does. ``async_create_issue`` is
+        idempotent per tick.
         """
         from homeassistant.helpers import issue_registry as ir
 
@@ -767,7 +777,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
         NON-fixable (purely advisory — the user switches the mode, never
         Poise); same trust rules as L2: gated on the ``override_suggestions``
-        opt-in, and the issue disappears as soon as the condition does.
+        toggle, and the issue disappears as soon as the condition does.
         """
         from homeassistant.helpers import issue_registry as ir
 
@@ -944,8 +954,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
         Subscribes to every ``Reaction.IMMEDIATE`` entity of the input registry
         (``runtime/input_registry.py``, the single source of truth): the room
-        sensor, the window sensors, the actuator and — since F-PRESENCE —
-        presence/occupancy. Any real change requests a refresh (coalesced by
+        sensor, the window sensors, the actuator and the presence/occupancy
+        entities. Any real change requests a refresh (coalesced by
         the coordinator's own debounce). The tick still owns learning/safety;
         this only cuts *reaction* latency (an open window, someone entering the
         room) from up to a tick to near-instant.
@@ -1018,8 +1028,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """Mean forecast outdoor temp over the preheat window (ADR-0025).
 
         The body lives in ``ForecastProvider.mean_outdoor`` (fetch payload,
-        TTL, backoff + last-good-cache fallback). Since F-FORECAST (phase 10)
-        it only awaits real I/O on a COLD cache; a stale-but-present cache is
+        TTL, backoff + last-good-cache fallback). It only awaits real I/O on
+        a COLD cache; a stale-but-present cache is
         served immediately and refreshed in the background. Kept as a method
         because integration tests drive it directly (test_forecast_backoff,
         test_glue_coverage4).
@@ -1161,7 +1171,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._save_failures = 0 if ok else self._save_failures + 1
         self._health.issue(
             f"persistence_failed_{self._entry_id}",
-            self._save_failures >= 5,  # after 5 consecutive failures
+            self._save_failures >= 5,
             translation_key="persistence_failed",
         )
 
@@ -1247,7 +1257,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 self._tick_failures += 1
                 self._health.issue(
                     f"tick_failing_{self._entry_id}",
-                    self._tick_failures >= 3,  # after 3 consecutive failures
+                    self._tick_failures >= 3,
                     translation_key="tick_failing",
                 )
                 raise
@@ -1256,11 +1266,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 f"tick_failing_{self._entry_id}", False, translation_key="tick_failing"
             )
             # ADR-0020: the tick's wall-time against the budget — an early
-            # scaling signal. Since F-TRACEIO/F-FORECAST (phase 10) this
-            # measures the CONTROL path only: the trace append is drained off
-            # the tick and the forecast refresh runs in the background, so a
-            # slow disk or a slow weather integration no longer inflates the
-            # number. A deliberate, documented change to this diagnostic.
+            # scaling signal. It measures the CONTROL path only (ADR-0063):
+            # the trace append is drained off the tick and the forecast
+            # refresh runs in the background, so a slow disk or a slow
+            # weather integration does not inflate the number.
             self._tick_budget.observe((time.perf_counter() - _t0) * 1000.0)
             # Attach the timing diagnostics to a normal payload only; the minimal
             # degraded/safe-state dicts ({"available": False, ...}) stay a pristine

@@ -30,10 +30,10 @@ class PoiseStore:
     survives a restart and still expires on real elapsed time (review C5):
     ``override_set_wall``/``override_requested``/``override_policy``/
     ``override_expires_at`` and ``boost_expires_at``/``boost_prev_preset``, plus
-    the observe-only ``override_stats`` (§5 L1) and the hold's origin
-    (``override_reason``, K3).
+    the observe-only ``override_stats`` (ADR-0059 §5 L1) and the hold's origin
+    (``override_reason``).
 
-    B5 (v0.174.0): it also carries the *adoption baseline* --
+    B5: it also carries the *adoption baseline* --
     ``last_written_sp``/``last_commanded_hvac`` (what Poise last commanded) and
     ``prev_device_sp``/``prev_device_mode`` (what the device last reported back).
     Both halves are needed: without the command there is no baseline and the

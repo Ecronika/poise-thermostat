@@ -1,7 +1,8 @@
 """Climate platform — one Poise thermostat per room (ADR-0016).
 
 A thin view over the coordinator (which runs the pure pipeline). The comfort
-attributes are the card contract; the entity never contains control logic.
+attributes are the card contract; the entity performs no thermal arbitration —
+it only routes user intent (enable, mode, preset, hold) into the coordinator.
 """
 
 from __future__ import annotations
@@ -101,14 +102,13 @@ _ATTRS = (
     "mpc_weight",
     "mpc_setpoint",
     "mpc_regime",
-    # ADR-0045 (R8): heating-degree-hour savings estimate -- makes the README's
-    # "published as savings_* climate attributes" claim true (diagnostic only).
+    # ADR-0045: heating-degree-hour savings estimate (diagnostic only).
     "savings_kwh_month",
     "savings_eur_month",
     "savings_pct",
     # climate-band shadow diagnostics (observe-only; not a control input):
     # ADR-0051 cool raise, ADR-0050 humidity/dry, ADR-0023 free-running,
-    # ADR-0053 fan circulation + roadmap M3 fan cooling-effect.
+    # ADR-0053 fan circulation + ADR-0054/0068 fan cooling-effect.
     "cool_sp_eff",
     "cool_sp_active",
     "cool_raised",
@@ -167,9 +167,9 @@ _ATTRS = (
     "override_clamped",
     # ADR-0059 manual-hold + timed-Boost lifecycle (card contract).
     "override_active",
-    "mode_override",  # K2: the held device mode (off/dry/fan_only/…) or None
-    "override_reason",  # K3: hold origin (ui_setpoint / device_adopt_* / frost…)
-    # R12 (P3): why THIS tick did / did not adopt a manual device change ("" when
+    "mode_override",  # the held device mode (off/dry/fan_only/…) or None
+    "override_reason",  # hold origin (ui_setpoint / device_adopt_* / frost…)
+    # Why THIS tick did / did not adopt a manual device change ("" when
     # nothing seen; e.g. own_echo / safety_window / stable_offset / hold_resumed).
     "mode_adopt_reason",
     "sp_adopt_reason",
@@ -185,7 +185,7 @@ _ATTRS = (
     "tau_confidence",
     "tau_settled",
     "cool_sp_compensated",
-    # R13 (P3): this zone's boiler heat-demand fraction (0..1) -- the value the
+    # This zone's boiler heat-demand fraction (0..1) -- the value the
     # multi-zone hub aggregates for the shared boiler (diagnostic, observe-only).
     "heat_demand",
 )
@@ -206,6 +206,16 @@ async def async_setup_entry(
 
 
 class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type: ignore[misc]
+    """The room thermostat.
+
+    Exposes a SINGLE target temperature — a set writes a manual hold
+    (ADR-0059) — plus HA preset modes. The dual-setpoint band itself
+    (``heat_sp``/``cool_sp``, ``comfort_low``/``comfort_high``) travels as
+    read-only attributes, deliberately NOT as ``TARGET_TEMPERATURE_RANGE``:
+    the band is arbitrated by the coordinator, not set by the user
+    (ADR-0016/0023).
+    """
+
     _attr_has_entity_name = True
     _attr_name = None
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -279,10 +289,10 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
 
     @property
     def hvac_action(self) -> HVACAction:
-        # Display contract (review 2026-07-13, D2/D3): report what the zone is
-        # *doing now*. Prefer the actuator's own reported action; fall back to the
-        # arbitrated direction (final_mode) -- never the raw "manual" override tag,
-        # which used to collapse an active cooling/heating override to IDLE.
+        # Display contract: report what the zone is *doing now*. Prefer the
+        # actuator's own reported action; fall back to the arbitrated
+        # direction (final_mode) -- never the raw "manual" override tag,
+        # which is an origin, not a direction.
         value = resolve_hvac_action(
             enabled=self.coordinator.enabled,
             final_mode=self._d.get("final_mode") or "idle",

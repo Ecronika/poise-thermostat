@@ -35,7 +35,7 @@ def _is_system(entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Apply changed tuning options in place — no reload, so learning survives (A10)."""
+    """Apply changed tuning options in place — no reload, so learning survives."""
     if _is_system(entry):
         return
     coordinator = entry.runtime_data
@@ -48,10 +48,14 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
-    """Serve + auto-register the bundled Lovelace card once (ADR-0040).
+    """Integration-level setup: card, websocket command and domain services.
 
-    HA imports stay local so the pure core remains importable without a HA
-    runtime. The card is frontend-only and never touches control state.
+    Serves + auto-registers the bundled Lovelace card (ADR-0040) and the
+    ``poise/card_version`` websocket command, and registers the two domain
+    services ``poise.resume_schedule`` (ADR-0059 §6) and
+    ``poise.comfort_feedback`` (ADR-0067 F1). HA imports stay local so the
+    pure core remains importable without a HA runtime. The card is
+    frontend-only and never touches control state.
     """
     import voluptuous as vol
     from homeassistant.components import websocket_api
@@ -242,7 +246,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # entry if async_forward_entry_setups raised.
     from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 
-    # A6: react promptly to room/window/actuator changes, not only on the tick.
+    # React promptly to room/window/actuator changes, not only on the tick.
     coordinator.attach_listeners(entry)
     # F7/ADR-0007: flush the learned model on HA shutdown. HA does NOT call
     # async_unload_entry on a normal stop, so the counter-based save would otherwise
@@ -252,13 +256,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             EVENT_HOMEASSISTANT_STOP, coordinator.async_flush_on_stop
         )
     )
-    # A10: hot-apply tuning-option changes in place (no reload -> learning kept).
+    # Hot-apply tuning-option changes in place (no reload -> learning kept).
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """V1 -> V2 config-entry store migration (ADR-0007).
+    """V1 -> V2 config-entry schema migration (ADR-0007/0008).
 
     Split ``entry.data`` into structural inputs (kept in ``data``) + hot-applyable
     tuning (moved to ``options``) and normalize the multi-entity pickers
@@ -362,7 +366,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
     )
     if unloaded:
-        # final save + repair-issue/notification cleanup (no learning loss)
+        # Final save + repair-issue cleanup; a failed save keeps the
+        # persistence_failed issue (see async_persist_and_cleanup).
         await entry.runtime_data.async_persist_and_cleanup()
         # AR-03: a DISABLE (entry kept but inactive) must also hand the actuator
         # back to a safe autonomous state — the same capability-appropriate park as
