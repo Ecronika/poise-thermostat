@@ -92,7 +92,7 @@ def override_mode(
 
 
 def cooling_intent(*, enabled: bool, window_open: bool, mode: str) -> bool:
-    """True when Poise actively intends to cool this tick (R10).
+    """True when Poise actively intends to cool this tick.
 
     Cooling is neutralised while a window is open -- don't chase a cool target
     against the outside air -- and is only asserted when the zone is enabled and

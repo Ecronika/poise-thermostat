@@ -357,11 +357,6 @@ def stage_hold_routing(
     off-hold escape's ``poise_override_ended`` fires at its in-stage position.
     """
     act_state = wt.act_state
-    # INVARIANT (K2b, ADR-0046 §9): observe() folds LATE, after the guard —
-    # folding early lets compressor_running's intent-fallback and the
-    # first-tick mode_changed_wall stamp brake the guard against its own
-    # intent / self-armed hold.  Pinned by
-    # test_dry_actuation.py::test_dry_nudge_when_humid_and_idle.
     # Is the actuator's current state Poise's own write echo (our Context)?
     # Computed once, reused by the mode-adoption gate here and the setpoint
     # gate below (a change under our own context is never adopted, mode or
@@ -393,8 +388,8 @@ def stage_hold_routing(
         end_hold_fn("user_resume")
         _off_held = False
         _hold_resumed = True
-    # Why this tick did/did not adopt a device change, surfaced as diagnostics
-    # (stays "" on the disabled / off-held path that skips below).
+    # Diagnosis defaults; the adoption stages overwrite them on the enabled
+    # path.
     _mode_adopt_reason = ""
     _sp_adopt_reason = ""
     return HoldRoutingResult(
@@ -449,15 +444,9 @@ def stage_mode_adoption(
         can_heat=can_heat,
         idle_park_mode=_idle_park_mode,
     )
-    # Adopt a device-side hvac_mode change (the IR remote) as a manual
-    # mode-hold instead of nudging it straight back.  Behind the opt-out and
-    # the Context check (our own nudge echo is never adopted); off while a
-    # safety layer is active (window/frost beat a mode-hold -- it is comfort,
-    # not safety); only modes the device lists (``heat_cool`` excluded).
-    # Classify why the mode change was or was not adopted -- Layer-1 glue
-    # gates first, then the pure Layer-2 detector reason -- so a suppressed
-    # user mode change is explainable in diagnostics.  ONE call yields both
-    # decision and reason, so they can never disagree.
+    # Adopt a device-side hvac_mode change as a manual mode-hold (see
+    # ``observe_mode`` for the gate order).  ONE call yields both decision
+    # and reason, so they can never disagree.
     _cur_mode = act_state.state if act_state else None
     tracker = ExternalOverrideTracker(rt.external)
     observation = tracker.observe_mode(
@@ -475,9 +464,6 @@ def stage_mode_adoption(
     )
     _mode_adopt = observation.adopt_mode
     _mode_adopt_reason = observation.reason
-    # Freeze the mode move-guard reference while the echo window is open, so
-    # an in-window observation of the user's mode never poisons the guard
-    # (the mode analogue of the setpoint prev-freeze).
     tracker.freeze_mode_reference(
         _cur_mode, now=now, echo_window_s=SETPOINT_ADOPT_ECHO_WINDOW_S
     )

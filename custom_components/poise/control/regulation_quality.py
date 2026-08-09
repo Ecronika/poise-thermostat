@@ -45,6 +45,9 @@ FLIP_TIER_REVERSIBLE = "reversible"  # compressor-free fan writes: no metric
 class RegulationQuality:
     """EWMA accumulator of control quality (persist via to_dict/from_dict)."""
 
+    # Optimistic seed (0 K deviation, 100 % in band): inert as a flip gate
+    # only because ``meets_quality`` additionally requires
+    # ``minutes >= warmup_min``.
     deviation_k: float = 0.0
     in_band: float = 1.0
     cycles_per_hour: float = 0.0

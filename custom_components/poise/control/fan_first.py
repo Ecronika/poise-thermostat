@@ -11,7 +11,8 @@ KNOWN stage there is no active fan-first at all (a device default stage can
 be ``turbo``; a conservative CE computation bounds only the credit, never
 the real air speed).
 
-This module emits per-tick ACTIONS for the mode seam (U5/U6 wire them):
+This module emits per-tick ACTIONS for the mode seam (wired via
+``stage_mode_resolution``/the orchestrator FSM block, ADR-0069 U5/U6):
 ``fan_only`` (mode candidate), ``stage`` (fan-stage write), ``cool`` (yield
 to the compressor), ``release`` (disengage, normal logic resumes), ``none``
 (hold the current phase).  The seam stays the single mode authority.
@@ -83,6 +84,9 @@ class FanFirstState:
     phase_at: float | None = None  # current phase entry (echo timeouts, dwell)
     stage: str | None = None
     room_at_entry: float | None = None
+    # The fan stage observed at ENGAGE — restored on exit (field decision:
+    # previous value first, "auto" only as fallback; user intent is sacred).
+    entry_fan_mode: str | None = None
     blocked_until: float | None = None  # re-entry anti-flap
 
 
@@ -93,21 +97,61 @@ class FanFirstDecision:
     state: FanFirstState
     command: str  # none | fan_only | stage | cool | release
     reason: str
+    # Exit restore (field decision): the stage to write back on yield/release
+    # — the pre-sequence value, "auto" only as fallback; None = no write.
+    restore_stage: str | None = None
 
 
-def _released(state: FanFirstState, now: float, reason: str) -> FanFirstDecision:
+def _restore_target(
+    state: FanFirstState,
+    *,
+    observed_fan_mode: str | None,
+    advertised_modes: tuple[str, ...] | list[str],
+) -> str | None:
+    """The stage to write back on exit — never a guess, never a duel.
+
+    Restores only when WE commanded a stage and the device still shows it
+    (a foreign change is user intent and is excluded by the caller; an
+    unconfirmed stage would make the restore a blind write).  Target: the
+    ENGAGE-time value; unknown -> ``auto`` when advertised (post-yield the
+    firmware should modulate the fan under the compressor — the clamp
+    doctrine only governed the fan-first stage itself); else leave as-is.
+    """
+    if state.stage is None or observed_fan_mode != state.stage:
+        return None
+    target = state.entry_fan_mode
+    if target is None:
+        target = "auto" if any(m.lower() == "auto" for m in advertised_modes) else None
+    if target is None or target == observed_fan_mode:
+        return None
+    return target
+
+
+def _released(
+    state: FanFirstState,
+    now: float,
+    reason: str,
+    restore: str | None = None,
+) -> FanFirstDecision:
     return FanFirstDecision(
         state=FanFirstState(blocked_until=now + REENTRY_BLOCK_S),
         command="release",
         reason=reason,
+        restore_stage=restore,
     )
 
 
-def _yielded(state: FanFirstState, now: float, reason: str) -> FanFirstDecision:
+def _yielded(
+    state: FanFirstState,
+    now: float,
+    reason: str,
+    restore: str | None = None,
+) -> FanFirstDecision:
     return FanFirstDecision(
         state=replace(state, phase="yielded", phase_at=now),
         command="cool",
         reason=reason,
+        restore_stage=restore,
     )
 
 
@@ -137,26 +181,33 @@ def fan_first_decision(
     verdict (a real user fan change exits, never a write duel).
     """
     engaged = state.phase in ("await_fan_only", "await_stage", "dwell")
+    _restore: str | None = None
     if engaged:
         assert state.engaged_at is not None and state.phase_at is not None
         assert state.room_at_entry is not None
         if foreign_fan_change:
+            # User intent stands: exit WITHOUT any restore write.
             return _released(state, now, "foreign_fan_change")
+        _restore = _restore_target(
+            state,
+            observed_fan_mode=observed_fan_mode,
+            advertised_modes=advertised_modes,
+        )
         if not cool_requested:
-            return _released(state, now, "demand_ended")
+            return _released(state, now, "demand_ended", _restore)
         if window_open:
-            return _released(state, now, "window_open")
+            return _released(state, now, "window_open", _restore)
         if (
             not fan_first_allowed
             or not presence_ok
             or not in_comfort_window
             or room_c >= HEAT_LIMIT_C
         ):
-            return _yielded(state, now, "guard_lost")
+            return _yielded(state, now, "guard_lost", _restore)
         if now - state.engaged_at > FAN_FIRST_TIMEOUT_S:
-            return _yielded(state, now, "timeout")
+            return _yielded(state, now, "timeout", _restore)
         if room_c - state.room_at_entry > FAST_RISE_K:
-            return _yielded(state, now, "fast_rise")
+            return _yielded(state, now, "fast_rise", _restore)
 
     if state.phase == "idle":
         entry_ok = (
@@ -183,6 +234,7 @@ def fan_first_decision(
                 engaged_at=now,
                 phase_at=now,
                 room_at_entry=room_c,
+                entry_fan_mode=observed_fan_mode,
             ),
             command="fan_only",
             reason="engage",
@@ -192,7 +244,7 @@ def fan_first_decision(
         if observed_hvac_mode == "fan_only":
             stage = select_fan_stage(advertised_modes, max_stage_velocity(operative_c))
             if stage is None:
-                return _yielded(state, now, "stage_lost")
+                return _yielded(state, now, "stage_lost", _restore)
             if observed_fan_mode == stage:
                 return FanFirstDecision(
                     state=replace(state, phase="dwell", stage=stage, phase_at=now),
@@ -206,7 +258,7 @@ def fan_first_decision(
             )
         assert state.phase_at is not None
         if now - state.phase_at > FAN_ECHO_TIMEOUT_S:
-            return _yielded(state, now, "echo_timeout")
+            return _yielded(state, now, "echo_timeout", _restore)
         return FanFirstDecision(state=state, command="none", reason="await_echo")
 
     if state.phase == "await_stage":
@@ -218,13 +270,13 @@ def fan_first_decision(
             )
         assert state.phase_at is not None
         if now - state.phase_at > FAN_ECHO_TIMEOUT_S:
-            return _yielded(state, now, "stage_echo_timeout")
+            return _yielded(state, now, "stage_echo_timeout", _restore)
         return FanFirstDecision(state=state, command="none", reason="await_echo")
 
     if state.phase == "dwell":
         assert state.phase_at is not None and state.room_at_entry is not None
         if now - state.phase_at >= FAN_DWELL_MIN_S and room_c >= state.room_at_entry:
-            return _yielded(state, now, "no_progress")
+            return _yielded(state, now, "no_progress", _restore)
         return FanFirstDecision(state=state, command="none", reason="dwelling")
 
     # yielded: the compressor runs; disengage when the demand ends.

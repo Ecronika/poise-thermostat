@@ -430,6 +430,8 @@ def observe_window_auto(
     )
     if rt.window.wa_prev_mono is not None:
         dt_min = (now - rt.window.wa_prev_mono) / 60.0
+        # Reject a >1 h gap (restart/suspend): the slope detector must not
+        # integrate an interval it never observed.
         if 0.0 < dt_min < 60.0:
             # active cooling explains a drop -> neutralise the slope so it
             # cannot false-open (and still closes an earlier detection).
@@ -925,8 +927,9 @@ def stage_mode_resolution(
     target = wt.target
     _hum_action = band.hum_action
     _mode_nudge_blocked = ""  # ADR-0046 §8: compressor-guard suppression reason
-    # Default for the unconditional shadow block below (no live mode nudge is
-    # even considered while disabled, so "not blocked" is the honest value).
+    # Defaults only — the live guard block and the nudge-suppression reason
+    # are decided in the orchestrator's mode-nudge stage; a disabled zone
+    # keeps these defaults ("not blocked" is the honest value there).
     _guard_block: str | None = None
     # Keep a controllable actuator in the mode that matches our write — cool
     # when we cool, heat otherwise — so it follows our setpoint instead of its
@@ -959,7 +962,7 @@ def stage_mode_resolution(
         _base_mode = override_mode(
             room=room_decide,
             override=target,
-            hysteresis=0.5,
+            hysteresis=0.5,  # K band around the manual value (see override_mode)
             outdoor=t_out_eff,
             climate_mode=rt.user.climate_mode,
             can_heat=can_heat,
@@ -969,7 +972,7 @@ def stage_mode_resolution(
         )
     # ADR-0068 U5 intent provenance: safety (window/frozen) beats manual
     # beats normal. BOTH manual channels count — the setpoint hold and the
-    # adopted mode hold (the review's channel beyond the ADR text).
+    # adopted mode hold.
     if window_open or frozen:
         _origin = "safety"
     elif rt.user.override is not None or rt.user.mode_override is not None:
@@ -983,12 +986,11 @@ def stage_mode_resolution(
         dry_ok="dry" in act_modes,
         fan_first=_fan_first,
     )
-    # ADR-0046 §8 (live): hold back a mode nudge that would short-cycle the
-    # compressor — start it within min-off, or flip cool<->dry within
-    # mode-hold. Capability-gated (cool/dry only) + kill switch; never a
-    # stop and never a safety action. The comfort request stands and
-    # re-fires once the lock clears, so _mode_nudge_blocked reads as intent
-    # (a blocked dry entry keeps dry_active latched, surfaced on the card).
+    # ADR-0046 §8 (live): resolve the guard POLICY here so the write path can
+    # hold back a mode nudge that would short-cycle the compressor — start it
+    # within min-off, or flip cool<->dry within mode-hold. Capability-gated
+    # (cool/dry only) + kill switch; the block decision itself is made in the
+    # orchestrator's mode-nudge stage.
     _guard_prof = PROFILES[rt.compressor.dynamics]
     _g_min_off = (
         comp_min_off_opt
@@ -1067,14 +1069,17 @@ def stage_setpoint_observe(
     # that parsed device setpoint; ``step`` snaps our target to the device's
     # setpoint step so a coarse TRV's rounded echo doesn't trigger a write every
     # tick.
+    # A fan-first entry/exit flips ``final_mode`` too, so every FSM transition
+    # counts as a mode change here — it bypasses the §4 throttle and forces a
+    # setpoint write (ADR-0069 U5 note).
     mode_changed = final_mode != rt.actuator.last_written_mode
     # ADR-0052 §4: a self-regulating climate entity (its own thermostat)
     # is nudged at most once per its dynamics regulation period, so Poise
     # does not thrash it (and its compressor) with per-tick comfort
     # adjustments. Mode changes, an open window, an override and a frozen
-    # sensor bypass the throttle (safety/intent must be immediate). Dumb
-    # setpoint actuators (regulation_period_s == 0, e.g. TRVs) are never
-    # throttled -> heat-only test hardware is a no-op.
+    # sensor bypass the throttle (safety/intent must be immediate). Only
+    # self-regulating actuators throttle; a dumb setpoint actuator (TRV) is
+    # never throttled -> heat-only test hardware is a no-op.
     _wprof = PROFILES[rt.compressor.dynamics]
     _reg_throttled = (
         _wprof.self_regulating
@@ -1093,9 +1098,11 @@ def stage_setpoint_observe(
     # what Poise last commanded is adopted as a manual hold with the zone's
     # override policy, instead of being overwritten.  Off while the device runs
     # its own schedule (the schedule, not the user, moves the setpoint) and
-    # behind the opt-out; ``set_override`` clamps the adopted value to the norm
-    # envelope.  Skipping this tick's write avoids overwriting the just-adopted
-    # value -- next tick's target already reflects the new hold.
+    # behind the opt-out; ``set_override`` clamps the adopted value into the
+    # safe envelope [FROST_FLOOR_C, DEVICE_MAX_C] — the norm envelope (ASR cap
+    # / mould floor) binds the written target in ``resolve_write_target``, not
+    # the stored hold.  Skipping this tick's write avoids overwriting the
+    # just-adopted value -- next tick's target already reflects the new hold.
     # The reliable "is this our own write's echo?" signal.  If the actuator's
     # current state carries a Context Poise itself created (setpoint / mode
     # nudge), this reading is our write settling -- including a device
@@ -1104,8 +1111,9 @@ def stage_setpoint_observe(
     # never adopt it.  Only a change under a foreign/unknown context (a user via
     # IR/app, or an async echo a poll integration reports under a fresh context)
     # reaches the value/time detector below.
-    # ``_own_change`` is computed once above (shared with the mode-adoption
-    # gate); reuse it here for the setpoint echo re-baseline.
+    # ``_own_change`` comes from the hold-routing stage (one Context check per
+    # tick, shared with the mode-adoption gate); reuse it here for the
+    # setpoint echo re-baseline.
     tracker = ExternalOverrideTracker(rt.external)
     if _own_change and actual_sp is not None:
         # Accept the device's *actual* settled value (echo / clamp /

@@ -23,7 +23,7 @@ class TickBudget:
     """Rolling tick compute-time stats against a budget (ADR-0020)."""
 
     budget_ms: float = DEFAULT_TICK_BUDGET_MS
-    ewma_alpha: float = 0.1
+    ewma_alpha: float = 0.1  # ~10-tick smoothing; max/over-count carry the spikes
     last_ms: float = 0.0
     ewma_ms: float = 0.0
     max_ms: float = 0.0

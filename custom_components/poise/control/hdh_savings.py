@@ -93,7 +93,12 @@ class HdhSavings:
         )
 
     def report(self, cfg: HdhConfig = _DEFAULT) -> dict[str, float]:
-        """Estimated savings this month: kWh, €, and the saved percentage."""
+        """Estimated savings this month: kWh, €, and the saved percentage.
+
+        Assumes the configured annual energy is spread evenly over the 12
+        calendar months (no degree-day weighting) — a coarse estimate by
+        construction, not metered energy (ADR-0045).
+        """
         if self.eligible_min <= 0.0 or cfg.annual_kwh <= 0.0:
             return {"kwh": 0.0, "eur": 0.0, "pct": 0.0}
         frac = min(self.saved_min / self.eligible_min, 1.0)

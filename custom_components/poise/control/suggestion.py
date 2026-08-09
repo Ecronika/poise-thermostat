@@ -171,9 +171,8 @@ def season_gate_floor(
     """ADR-0060 §3 season gate: the floor for the L2 emission detection.
 
     Overrides recorded while the zone's fixed mode was season-wrong (§2 hint
-    standing) are MODE signals, not comfort evidence — the round's confirmed
-    field false positive was a stuck-valve test in a heat_only zone during
-    the cooling season.  While the hint stands, everything up to ``now`` is
+    standing) are MODE signals, not comfort evidence.
+    While the hint stands, everything up to ``now`` is
     mismatch-era; afterwards the PERSISTED stamp keeps flooring, because a
     mode switch (following the hint's own advice!), a restart inside the
     hysteresis band, or a T_rm sensor flicker all clear the HINT without

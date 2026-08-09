@@ -49,6 +49,8 @@ def evaluate_shadow(
 
     ``lower``/``upper`` are the live comfort band edges (dual-setpoint heat/cool),
     ``target`` the heating setpoint. The result is purely advisory.
+    ``model``'s betas are used as-is; its ``alpha`` is discarded —
+    ``MpcController`` re-derives ``alpha = 1/tau_hours``.
     """
     if not identified or tau_hours <= 0.0:
         return MpcShadow(active=False)

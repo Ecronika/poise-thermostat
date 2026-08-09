@@ -9,7 +9,9 @@ from __future__ import annotations
 
 COEF_INT_BOUNDS = (0.15, 1.2)
 COEF_EXT_BOUNDS = (0.002, 0.06)
-_MAX_RATIO = 1.5  # max +-50 % change per learning step
+# Rise-ratio clamp: one observation may pull the EMA *target* at most x1.5 /
+# /1.5; the 0.15 EMA below turns that into <= +7.5 % / -5 % per call.
+_MAX_RATIO = 1.5
 _PROPORTIONAL_RATIO = 50.0  # coef_int ~ 50x the steady-state coef_ext
 
 
@@ -44,9 +46,9 @@ class TpiLearner:
     update coefficients -> stateless per-cycle duty law consumes them).
     """
 
-    """Online nudging of ``coef_int`` from observed vs expected temperature rise."""
-
     def __init__(self, coef_int: float, coef_ext: float, alpha: float = 0.15) -> None:
+        # ``alpha`` is the EMA smoothing of the coefficient nudge — NOT the
+        # thermal alpha (1/tau) used elsewhere in this package.
         self.coef_int = _clamp(coef_int, *COEF_INT_BOUNDS)
         self.coef_ext = _clamp(coef_ext, *COEF_EXT_BOUNDS)
         self._alpha = alpha

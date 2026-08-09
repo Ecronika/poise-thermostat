@@ -23,14 +23,14 @@ class MpcParams:
     dt_h: float = 5.0 / 60.0  # 5-minute blocks
     w_comfort: float = 1.0
     w_energy: float = 0.02
-    overshoot_penalty: float = 8.0  # asymmetric: overshoot weighs ~9x
+    overshoot_penalty: float = 8.0  # an overshoot of e K costs 8x an undershoot of e K
     coarse_step: float = 0.1
 
 
 def _comfort_cost(
     t: float, lower: float, upper: float, overshoot_penalty: float
 ) -> float:
-    # Dead-zone band cost (best-of: RoomMind/EMHASS, review M4): zero inside the
+    # Dead-zone band cost (ADR-0001): zero inside the
     # comfort band, quadratic outside, with the overshoot (upper) side weighted
     # far more heavily. No point-tracking inside the band — that is over-
     # aggressive for a band controller and suppressed horizon overshoot.

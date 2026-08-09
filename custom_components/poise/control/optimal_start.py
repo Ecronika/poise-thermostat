@@ -34,7 +34,9 @@ class PreheatAdvice:
     """Optimal-start verdict for one tick."""
 
     reachable: bool  # target attainable within the planning horizon
-    lead_minutes: float  # estimated heating minutes needed to reach target
+    # Heating minutes needed; when ``reachable`` is False this is the horizon
+    # (``max_lead_h * 60``), not an estimate.
+    lead_minutes: float
     start_now: bool  # comfort deadline is within the lead time -> preheat
 
 

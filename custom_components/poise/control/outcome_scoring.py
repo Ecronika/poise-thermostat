@@ -75,7 +75,12 @@ def speed_score(
     rain: bool = False,
     cfg: ScoreConfig = _DEFAULT,
 ) -> float:
-    """Difficulty-adjusted time-to-target score (lenient in hard weather)."""
+    """Difficulty-adjusted time-to-target score (lenient in hard weather).
+
+    Piecewise over ``ratio = taken / (expected * difficulty)``: 1.0 up to the
+    expectation, then -0.7 per ratio unit down to 0.3 at 2x, then -0.1 per
+    unit, floored at 0.05.
+    """
     if expected_minutes <= cfg.min_expected:
         return cfg.neutral_speed
     difficulty = 1.0

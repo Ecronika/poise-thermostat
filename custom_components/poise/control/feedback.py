@@ -6,8 +6,9 @@ masked feedback is DISCARDED, never counted — a press during an open window,
 an active hold, a setback/absent phase, frozen sensors, an invalid PMV
 (bedroom profile, V3), an anticipation extreme day or far outside neutral
 says something about the *situation*, not about the household's clothing
-assumption.  Suggestions (F2) are a later, gated stage; this module has no
-behaviour and feeds nothing.
+assumption.  The F2 stage (pattern detection + emission gate) lives here as
+well; it only *proposes* — the repair fix flow (``repairs.py``) performs the
+config write.
 """
 
 from __future__ import annotations
@@ -24,7 +25,8 @@ CLO_SUGGEST_WINDOW_DAYS = 30.0
 CLO_SUGGEST_STEP = 0.1  # per-suggestion step; total config offset |x| <= 0.3
 
 _DAY_S = 86400.0
-# The anticipation-extreme-day mask (research 2026-08 §9): while the forecast
+# The anticipation-extreme-day mask
+# (docs/research/2026-08-Bekleidungsmodell-clo-met.md §9): while the forecast
 # blend is fighting a warned heat/cold episode, feedback reflects the episode.
 EXTREME_DAY_DELTA_K = 8.0
 # Outside roughly neutral PMV the *regulation* (band, actuator) is the story,

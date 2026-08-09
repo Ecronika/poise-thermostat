@@ -4,7 +4,9 @@ Modes are an **offset on the user's comfort base**, never a free temperature:
 the constraint solver therefore still clamps every mode to the norm floors/cap
 (frost/mould/ASR), so no preset can break the norm — the key difference from
 competitors that store free per-preset temperatures. A manual setpoint override
-auto-reverts after a window so it never sticks indefinitely (community VT#1875).
+auto-reverts by default (community VT#1875); since ADR-0059 the return rule is
+the zone's policy, and the opt-in ``permanent`` policy deliberately never
+expires on elapsed time.
 Pure and unit-tested; the coordinator owns the state and applies the result.
 """
 
@@ -54,11 +56,10 @@ def manual_override_expired(
 ) -> bool:
     """True once a manual setpoint override has outlived its auto-revert window.
 
-    Addresses the most-requested override behaviour (VT#1875): a manual change
-    must revert to the schedule/preset instead of holding the room high forever.
-    ``set_at``/``now`` must share one clock; the coordinator passes a persisted
-    *wall-clock* timestamp so a restored hold expires on real elapsed time and
-    cannot outlive a restart (review C5).
+    The ADR-0042 reference rule (VT#1875): a manual change must revert instead
+    of holding the room high forever. Superseded in production by the ADR-0059
+    lifecycle (``resolve_hold_expiry``/``hold_expired`` below) — no live
+    caller; kept as the reference formulation, pinned by ``test_override``.
     """
     return (now - set_at) >= cfg.manual_revert_h * 3600.0
 
@@ -194,7 +195,7 @@ def resolve_boost_expiry(*, set_at: float, boost_duration_min: float) -> float:
 
 
 # ---------------------------------------------------------------------------
-# P1-4a: adopt a device-side setpoint change as a manual hold.
+# ADR-0059 §8: adopt a device-side setpoint change as a manual hold.
 #
 # When the user turns the TRV wheel (or the vendor app), the actuator reports a
 # setpoint Poise did not command; the naive control loop overwrites it within one
@@ -217,7 +218,7 @@ def setpoint_adopt_reason(
     pre_write_sp: float | None = None,
     frost_floor: float | None = None,
 ) -> str:
-    """Why the setpoint-adoption fallback did or did not adopt ``device_sp`` (K3).
+    """Why the setpoint-adoption fallback did or did not adopt ``device_sp``.
 
     Single source of truth for the setpoint decision -- ``detect_external_setpoint``
     adopts iff this returns ``"adopt"``, so the coordinator can surface *why* a
@@ -229,7 +230,7 @@ def setpoint_adopt_reason(
         return "no_baseline"
     if round(abs(device_sp - last_written_sp), 3) < deadband:
         return "command_echo"
-    # R4 (2026-07 competitor code audit): a device value at/below the frost floor
+    # A device value at/below the frost floor
     # is never a plausible *user* comfort setpoint -- it is a TRV's own frost drop
     # (its internal open-window/away detection) that fired before Poise's slope or
     # window sensor did. Adopting it would pin a phantom "manual" hold at 7 °C
@@ -265,13 +266,16 @@ def detect_external_setpoint(
 ) -> float | None:
     """The device-side setpoint Poise should adopt as a manual hold, else ``None``.
 
-    This is the value/time *fallback* — the coordinator first uses HA ``Context`` to
-    identify a state change it caused itself (a write echo / device re-quantise /
-    clamp) and never calls this for those; it calls this only when the change came
-    from an unknown or foreign actor (a user, or an async device echo a poll-based
-    integration reports under a fresh context). A reported setpoint is a genuine
-    external change only when it differs from what Poise last commanded — an *echo*
-    of our own write matches ``last_written_sp``. The guards:
+    This is the value/time *fallback* behind the HA-``Context`` gate: a state
+    change Poise caused itself (a write echo / device re-quantise / clamp)
+    never reaches the value detector — only a change from an unknown or
+    foreign actor does (a user, or an async device echo a poll-based
+    integration reports under a fresh context). This thin wrapper is the
+    pure-suite entry point; the live path
+    (``ExternalOverrideTracker.observe_setpoint``) consumes
+    ``setpoint_adopt_reason`` directly. A reported setpoint is a genuine
+    external change only when it differs from what Poise last commanded — an
+    *echo* of our own write matches ``last_written_sp``. The guards:
 
     * **No baseline** (``last_written_sp`` / ``last_write_ts`` ``None``): Poise has
       not established control yet — return ``None`` and let the write path settle
@@ -283,22 +287,21 @@ def detect_external_setpoint(
       of our write the device may still report a stale value. A legit echo/lag can
       only be the commanded value (above) or the *pre-write* value (poll lag); a
       value differing from BOTH by ≥ ``deadband`` is provably a fresh user change and
-      is adopted even inside the window. This fixes the live bug where a change made
-      within 120 s of our write was swallowed and reverted minutes later (analysis
-      2026-07-14, B1). Without ``pre_write_sp`` we cannot prove it → stay
-      conservative and suppress inside the window.
+      is adopted even inside the window. Without ``pre_write_sp`` we cannot
+      prove it → stay conservative and suppress inside the window.
     * **Stable offset** (``prev_device_sp``, outside the window): a value that merely
       sits at a fixed offset (a clamp/re-quantise the context check did not catch, on
       a poll-based integration) is unchanged tick-over-tick; require an actual move
-      so a settled offset is never re-adopted (this was the card-X "springs back to
-      manual" regression guard).
+      so a settled offset is never re-adopted (else the hold would spring back
+      to "manual" on every tick).
 
     ``last_written_sp`` must be the value Poise actually commanded **after snapping
     to the device step**, and ``deadband`` at least one device step. ``now`` /
     ``last_write_ts`` share one monotonic clock; ``pre_write_sp`` is the device's
-    reported setpoint captured immediately before that last write. The returned value
-    is the raw reported setpoint (the caller snaps and clamps it to the norm
-    envelope before holding it).
+    reported setpoint captured immediately before that last write. The returned
+    value is the raw reported setpoint; the caller clamps it into
+    [FROST_FLOOR_C, DEVICE_MAX_C] before holding it and snaps it only for the
+    echo baseline.
     """
     return (
         device_sp
@@ -319,10 +322,11 @@ def detect_external_setpoint(
 
 
 # ---------------------------------------------------------------------------
-# K2: adopt a device-side hvac_mode change as a manual mode-hold.
+# ADR-0059 §8 (mode channel, ``adopt_external_mode``): adopt a device-side
+# hvac_mode change as a manual mode-hold.
 #
 # When the user changes the device's mode (the IR remote on a split AC, the
-# vendor app), Poise's mode nudge currently commands it straight back. This pure
+# vendor app), Poise's mode nudge would command it straight back. This pure
 # detector decides whether the *reported* mode is a genuine user change worth
 # adopting as a mode-hold, rather than an echo of Poise's own nudge. It is
 # categorical (modes are strings, not a continuum), so it has no deadband; the
@@ -343,7 +347,7 @@ def mode_adopt_reason(
     supported_modes: tuple[str, ...] | frozenset[str] = (),
     prev_mode: str | None = None,
 ) -> str:
-    """Why the mode-adoption fallback did or did not adopt ``device_mode`` (K3).
+    """Why the mode-adoption fallback did or did not adopt ``device_mode``.
 
     Single source of truth for the mode decision -- ``detect_external_mode`` adopts
     iff this returns ``"adopt"``. The coordinator surfaces the code as a diagnostic
@@ -382,16 +386,17 @@ def detect_external_mode(
 ) -> str | None:
     """The device hvac_mode Poise should adopt as a manual mode-hold, else ``None``.
 
-    Like ``detect_external_setpoint`` this is the value/time *fallback* — the
-    coordinator first uses HA ``Context`` to drop a mode change it caused itself (its
-    own nudge echo) and only calls this for a change from an unknown/foreign actor.
-    The guards, in order:
+    Like ``detect_external_setpoint`` this is the value/time *fallback* behind
+    the HA-``Context`` gate (a mode change Poise caused itself never reaches
+    it), and likewise the pure-suite entry point — the live path
+    (``ExternalOverrideTracker.observe_mode``) consumes ``mode_adopt_reason``
+    directly. The guards, in order:
 
     * **No usable reading** (``None`` / ``unknown`` / ``unavailable``): return ``None``.
     * **Already where Poise wants it** (``device_mode == desired_mode``): nothing
       external to adopt — the normal case.
     * **Not adoptable**: a mode the device does not list in ``supported_modes``,
-      or ``heat_cool`` (dual-setpoint is out of scope for v1, B7): return ``None``.
+      or ``heat_cool`` (dual-setpoint adoption is out of scope): return ``None``.
     * **No baseline** (``last_commanded_mode``/``last_cmd_ts`` ``None``): Poise has not
       commanded a mode yet — cannot tell an echo from a change.
     * **Echo of our command** (``device_mode == last_commanded_mode``): our own nudge
@@ -399,8 +404,8 @@ def detect_external_mode(
       never a user change.
     * **Echo window**: within ``echo_window_s`` of our last mode command a differing
       report may still be a lagging echo of an even earlier command; stay conservative
-      and suppress (the user change is adopted on the first tick past the window — the
-      in-window immediate path is deliberately out of scope, plan §7).
+      and suppress (the user change is adopted on the first tick past the
+      window; an in-window immediate path is deliberately out of scope).
     * **Stable mode** (``prev_mode``): a mode unchanged since the last reading is not
       a fresh user action; require an actual move (the mode-equivalent of the setpoint
       stable-offset guard).

@@ -79,13 +79,13 @@ def resolve_write_target(
     cooling) and the device max (ADR-0023/0027).
 
     ``override_clamped`` reports when a manual setpoint was silently limited by
-    the comfort band ``[heat_sp, cool_sp]`` (review V10) — true only when the
+    the comfort band ``[heat_sp, cool_sp]`` — true only when the
     override lies outside it. Inside the comfort window the band is tight so a
     far-off manual value is capped without feedback; the flag surfaces that.
 
     ``device_min`` (the actuator's own ``min_temp``, when known) is a physical
     SAFETY floor: a device silently holds its minimum, so writing below it makes
-    the echo-compare rewrite every tick (review P3-1). The floor is clamped up to
+    the echo-compare rewrite every tick. The floor is clamped up to
     it in both heating and cooling.
     """
     floor = max(frost_floor, mold_min if mold_min is not None else frost_floor)
@@ -102,7 +102,7 @@ def resolve_write_target(
     # Unified hard envelope (ADR-0035): device max + (unless cooling) the ASR
     # cap and frost/mould floor, composed with precedence. The device max is a
     # physical SAFETY cap, the norm floor HEALTH, the norm cap COMFORT.
-    # M2: a misreported device max *below* the active health floor would win the
+    # A misreported device max *below* the active health floor would win the
     # inversion (SAFETY > HEALTH) and silently defeat frost/mould protection.
     # When heating, clamp the cap up to the floor so health is never undercut —
     # the device still caps its own physical reach; we simply never command less.
@@ -119,7 +119,7 @@ def resolve_write_target(
             Constraint(floor, "norm_floor", ConstraintKind.FLOOR, Precedence.HEALTH)
         )
     if device_min is not None:
-        # P3-1: the actuator holds its own min_temp regardless — writing below it
+        # The actuator holds its own min_temp regardless — writing below it
         # just thrashes the echo-compare each tick. Clamp up to it as a physical
         # SAFETY floor, in both heating and cooling.
         floors.append(
@@ -169,7 +169,7 @@ def external_feed_due(
     keepalive_s: float,
     deadband: float = 0.1,
 ) -> bool:
-    """Whether to (re)push the room temperature to a TRV external-temp input (P2-2).
+    """Whether to (re)push the room temperature to a TRV external-temp input.
 
     Pushes when the fed value has moved by at least ``deadband`` K (the normal
     trigger, via :func:`should_write`) OR when ``keepalive_s`` has elapsed since
@@ -192,7 +192,7 @@ def snap_to_step(value: float, step: float) -> float:
     Comparing our 0.1-resolution target against a device that reports back in a
     coarser step (e.g. 0.5 K) would otherwise re-write every tick once the
     rounding gap reaches the deadband; snapping makes the comparison like-for-
-    like so the write-throttle keeps sparing battery/Zigbee TRVs (review R2).
+    like so the write-throttle keeps sparing battery/Zigbee TRVs.
     """
     if step <= 0.0:
         return value
@@ -230,7 +230,7 @@ def cool_drive_signal(hvac_action: str | None, *, fallback_cooling: bool) -> flo
 def needs_mode_nudge(
     current_mode: str | None, desired_mode: str, *, supported: bool
 ) -> bool:
-    """True if the actuator must be commanded into ``desired_mode`` (H1).
+    """True if the actuator must be commanded into ``desired_mode``.
 
     A TRV left in ``off`` ignores our setpoint, ``auto`` runs the device's own
     weekly schedule (Sonoff TRVZB ``system_mode=auto``), and a device sitting in a
@@ -242,7 +242,7 @@ def needs_mode_nudge(
     ``dry`` mode once we no longer want it (a stuck ``dry`` keeps dehumidifying).
     We only assert a mode the device *literally* offers (``supported`` from the
     actuator's real ``hvac_modes``); otherwise the call is rejected and spams the
-    log every tick (review V1). An ``unknown``/``unavailable`` current mode is
+    log every tick. An ``unknown``/``unavailable`` current mode is
     left alone (conservative — the device may be booting or briefly offline).
     """
     if not supported or current_mode in (None, "unknown", "unavailable"):
@@ -258,15 +258,16 @@ def resolve_desired_mode(
     can_heat: bool,
     idle_park_mode: str | None = None,
 ) -> str:
-    """The hvac_mode to command this tick — the nudge target (review Finding 1, V1).
+    """The hvac_mode to command this tick — the nudge target.
 
-    ``heat``/``cool``/``dry`` map to themselves. A window / safety ``off`` must
-    NOT leave a cooling device in ``cool`` — it would cool toward the frost floor
-    (review V1). So ``off`` maps to ``heat`` on a heat-capable device (it holds
+    ``heat``/``cool``/``dry``/``fan_only`` map to themselves. A window /
+    safety ``off`` must NOT leave a cooling device in ``cool`` — it would cool
+    toward the frost floor. So ``off`` maps to ``heat`` on a heat-capable device
+    (it holds
     the frost floor by heating minimally) and to a real ``off`` on a cool-only
     device (stop, never cool). On a passive ``idle`` tick we take the room-position
     park (``idle_park_mode``) so a warm reversible AC parks in ``cool`` at the cool
-    edge instead of ``heat`` at the low idle-hold (Finding 1 follow-up); when no
+    edge instead of ``heat`` at the low idle-hold; when no
     park is supplied we keep the device's current active mode so a cooling AC still
     idles in ``cool`` instead of ping-ponging cool<->heat at the compressor.
     ``manual`` and off/unknown fall back to the current mode or ``heat``.
@@ -295,22 +296,24 @@ def idle_park(
     current_mode: str | None = None,
     hysteresis: float = 0.5,
 ) -> tuple[str, float]:
-    """Where to park a device idling in the neutral dead-band (Finding 1 follow-up).
+    """Where to park a device idling in the neutral dead-band.
 
     An idle reversible AC must not sit in ``heat`` at the low heat edge through the
     cooling season — the room would have to fall many kelvin before anything happens
-    and a *warming* room triggers nothing. A **fan_only-capable** device circulates
-    in the dead-band instead of holding the cool edge (holding ``cool`` compressor-
-    cools against the device's own warmer sensor and dries the room — the office-AC
-    finding); the rules below are the legacy park for devices without a fan_only
-    mode (``can_fan_only`` False → byte-identical to the old behaviour). Rules:
+    and a *warming* room triggers nothing. A **fan_only-capable** device
+    circulates in the dead-band instead of compressor-cooling at the cool edge
+    (the cool-edge setpoint is still written; only the mode changes — holding
+    ``cool`` would cool against the device's own warmer sensor and dry the
+    room); the rules below are the edge park for devices without a fan_only
+    mode. Rules:
 
-    * a heat-only TRV always parks in ``heat`` (``can_cool`` False); a cool-only
-      device always parks in ``cool``;
+    * a heat-only TRV always parks in ``heat`` (``can_cool`` False); a
+      cool-only device parks in ``cool``, or in ``fan_only`` when it offers
+      one;
     * a device **already cooling** keeps cooling and idles at the cool edge. When
       the tick is idle the room is by definition at/above the heat setpoint (else
       the decision would be ``heat``), so there is no heat demand and flipping to
-      heat would only thrash the compressor (Finding 1). The warm-room flip below
+      heat would only thrash the compressor. The warm-room flip below
       is one-way and sticky — the next tick sees ``current_mode == "cool"`` — so it
       never ping-pongs;
     * otherwise (heat / off / auto / unknown) park toward the edge the room is
@@ -325,14 +328,13 @@ def idle_park(
     if not can_cool:
         return "heat", heat_sp
     mid = (heat_sp + cool_sp) / 2.0
-    # Over-dry fix (office-AC finding): a fan_only-capable device *circulates* in
+    # Over-dry fix: a fan_only-capable device *circulates* in
     # the dead-band instead of holding the cool edge. Holding ``cool`` makes the
     # device compressor-cool against its OWN (often warmer, ceiling/return-air)
     # sensor and dry the room out even while Poise reads it at or below the edge.
     # Only on the clearly cool side does a heat-capable device stay heat-ready (no
     # draft); the compressor re-engages the instant decide() calls for real
-    # cooling. A device WITHOUT a fan_only mode keeps the legacy Finding-1 park —
-    # ``can_fan_only`` defaults False, so the old behaviour is byte-identical.
+    # cooling. A device WITHOUT a fan_only mode uses the edge-park rules below.
     if can_fan_only and not (can_heat and room < mid - hysteresis):
         return "fan_only", cool_sp
     if not can_heat:
@@ -343,7 +345,7 @@ def idle_park(
 
 
 def sanitize_override(target: float | None, lo: float, hi: float) -> float | None:
-    """Validate a manual setpoint override at the boundary (review C2/Ü2).
+    """Validate a manual setpoint override at the boundary.
 
     Rejects a non-finite value (so NaN/Inf can never reach the actuator) and
     clamps a finite one into ``[lo, hi]`` (frost floor .. device max).
@@ -362,7 +364,7 @@ def frost_rescue_target(
     mold_min: float | None,
     deadband: float,
 ) -> float | None:
-    """The health floor to write when Poise is DISABLED for a zone (review V4).
+    """The health floor to write when Poise is DISABLED for a zone.
 
     Even disabled, the frost/mould floor is unconditional (README promise), but a
     disabled zone must not fight a reasonable manual setpoint. Rescue-only: return

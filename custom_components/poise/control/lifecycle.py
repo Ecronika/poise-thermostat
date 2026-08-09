@@ -1,4 +1,4 @@
-"""Pure lifecycle/teardown resolvers (2026-07-08 adversarial review: F1/F3/F4/F12).
+"""Pure lifecycle/teardown resolvers: safe state, park, hub hand-over.
 
 HA-free (ADR-0005/0011): the coordinator/glue reads device state and performs
 the service calls; every *decision* about which safe / park / off state to
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class SafeStatePlan:
-    """What to command after a sustained room-sensor loss (review F1)."""
+    """What to command after a sustained room-sensor loss."""
 
     hvac_mode: str  # "heat" | "off"
     setpoint: float | None  # None on the off path
@@ -29,7 +29,7 @@ def resolve_safe_state(
     device_min: float | None,
     floor: float,
 ) -> SafeStatePlan | None:
-    """The safe state after a sustained room-sensor loss (review F1).
+    """The safe state after a sustained room-sensor loss.
 
     A heat-capable actuator holds the frost/mould floor in heat (fail toward
     warmth), clamped up to the device ``min_temp`` so a high-min AC does not
@@ -75,7 +75,7 @@ def resolve_park_command(
     floor: float,
     device_min: float | None = None,
 ) -> ParkPlan | None:
-    """Capability-dependent park state on room-entry deletion (review F3).
+    """Capability-dependent park state on room-entry deletion.
 
     Never a blanket ``off``:
 
@@ -89,13 +89,13 @@ def resolve_park_command(
     * a cool-only / reversible device with no heating duty -> ``off`` (the risk
       here is unattended cooling).
 
-    Also flips a TRV sensor source back to internal at the call site (review F6).
+    Also flips a TRV sensor source back to internal at the call site.
     """
     if is_valve:
         return ParkPlan("valve", None, None, 0.0)
     if heats_for_zone and "heat" in hvac_modes:
         sp = floor if setback_setpoint is None else max(floor, setback_setpoint)
-        # AR-10: clamp up to the device min so a high-min heater (heat pump / split
+        # clamp up to the device min so a high-min heater (heat pump / split
         # AC) does not silently reject a sub-min setback and stay on the old comfort
         # setpoint — symmetric with resolve_safe_state.
         if device_min is not None:
@@ -111,7 +111,7 @@ def resolve_hub_unload_off(
     still_actuating: bool,
     target_changed: bool = False,
 ) -> bool:
-    """Fire the boiler OFF on hub unload only at a genuine hand-over (F4/F12/AR-01).
+    """Fire the boiler OFF on hub unload only at a genuine hand-over.
 
     True iff Poise was actuating the boiler AND control is being relinquished —
     the entry is being disabled, the reconfigured data no longer wires actuation

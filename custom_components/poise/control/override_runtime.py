@@ -3,8 +3,10 @@
 The hass-free implementations of the coordinator's out-of-tick command
 methods: set/clear a manual hold, adopt a device mode as a mode-hold,
 arm/expire the timed Boost, end a hold, expire timed states on a tick, plus
-the §5 override statistic and the set-time switchpoint lookup.  Every function
-mutates the passed state group directly and returns a ``CommandResult``: the
+the §5 override statistic and the set-time switchpoint lookup.  Every command
+function mutates the passed state group directly and returns a
+``CommandResult`` (the two helpers ``minutes_to_switchpoint`` and
+``record_override_stat`` are the exceptions): the
 HA adapter fires ``CommandResult.events`` immediately at the call position
 (the domain decides and mutates hold state; only the adapter fires bus events)
 and translates ``dirty`` into its store-dirty flag.
@@ -181,8 +183,10 @@ def set_mode_override(
     now_utc_fn: Callable[[], float],
     minutes_to_switchpoint_fn: Callable[[], float | None],
 ) -> CommandResult:
-    """Adopt (or clear) a device-side hvac_mode as a manual mode-hold.
+    """Adopt a device-side hvac_mode as a manual mode-hold.
 
+    ``mode=None`` drops only the mode pin; the announced-expiry lifecycle is
+    torn down exclusively by ``end_hold``.
     Shares the setpoint hold's lifecycle: if no hold is running yet it starts
     one (set-time expiry via ``resolve_hold_expiry`` + the zone policy). A
     setpoint hold already active this frame keeps its announced expiry -- the
@@ -330,10 +334,11 @@ def record_override_stat(
 ) -> None:
     """Append one L1 override observation (ADR-0059 §5; diagnostic only).
 
-    A capped rolling log of user setpoint nudges: direction/delta vs the
-    effective preset base, the schedule phase and the presence level at set
-    time.  AWAY / window-open nudges are skipped (not representative).  No
-    behaviour and no suggestions -- L2 (suggestions) is a v2 feature.
+    A capped rolling log (last 50) of user setpoint nudges: direction/delta
+    vs the effective preset base, the schedule phase and the presence level
+    at set time.  The AWAY preset, an AWAY presence level and window-open
+    nudges are skipped (not representative).  No behaviour here — the
+    ADR-0060 L2 suggestion learning consumes this log.
 
     Deliberately raises through: the broad swallow boundary (with its exact
     debug-log channel/text) stays in the coordinator adapter — the log channel
@@ -358,4 +363,4 @@ def record_override_stat(
             "presence_level": presence_level,
         }
     )
-    del user.override_stats[:-50]  # keep the last 50
+    del user.override_stats[:-50]

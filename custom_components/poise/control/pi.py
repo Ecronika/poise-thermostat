@@ -3,11 +3,9 @@
 Pushes a compensated setpoint to a slow setpoint-only TRV so it converges:
   offset = kp·err + ki·∫(err·dt) + k_ext·(room-external),  clamped to +-offset_max.
 
-The integral is time-aware (review F6): it accumulates ``error·dt_h`` and ``ki``
-is expressed per hour, so the behaviour is independent of the tick rate (the old
-``ki = 0.8/288`` silently assumed a 5-min tick; the real tick is 60 s). Mature
-integrators do the same (VTherm PI-offset ``error·time_delta``, HASmartThermostat
-PID ``error·dt``); the duty-style TPI law stays stateless and is unaffected.
+The integral is time-aware: it accumulates ``error·dt_h`` and ``ki`` is
+expressed per hour, so the behaviour is independent of the tick rate; the
+duty-style TPI law stays stateless and is unaffected.
 """
 
 from __future__ import annotations
@@ -24,6 +22,7 @@ class PiCompensator:
         self,
         kp: float = 0.2,
         ki: float = 0.1,  # per hour (integral time Ti = kp/ki = 2 h)
+        # [K per K of (room - outdoor)]: a 25 K spread adds +1 K feed-forward.
         k_ext: float = 1.0 / 25.0,
         offset_max: float = 2.0,
     ) -> None:
@@ -43,7 +42,7 @@ class PiCompensator:
         """Pure: return ``(compensated_setpoint, new_acc)`` WITHOUT mutating state.
 
         The integrator value is returned, not stored, so a *shadow* evaluation has
-        no side effect on the persisted integrator (review P6/F-1); the caller
+        no side effect on the persisted integrator; the caller
         persists ``new_acc`` once per tick. ``external`` is the **outdoor**
         temperature for the feed-forward term — passing ``room`` kills the
         ``k_ext`` term, which is its whole purpose.

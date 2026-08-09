@@ -7,8 +7,8 @@ regime pumping; hard data-gates remain a lower bound (handled by the caller).
 
 from __future__ import annotations
 
-MPC_THRESHOLD_STD: float = 0.5  # above this std -> pure bang-bang
-NOISE_FLOOR_STD: float = 0.2  # below this std -> full MPC
+MPC_THRESHOLD_STD: float = 0.5  # EKF prediction std [K]; above -> pure bang-bang
+NOISE_FLOOR_STD: float = 0.2  # EKF prediction std [K]; below -> full MPC
 
 
 def mpc_weight(

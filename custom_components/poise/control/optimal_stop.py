@@ -1,9 +1,12 @@
-"""Advisory residual-heat estimate for Optimal Stop / coasting (ADR-0003).
+"""Optimal-Stop coast-down advisory (ADR-0034) + residual heat (ADR-0003).
 
-Pure function: returns the fraction (0..1) of the learned heating rate still
-delivered by the thermal mass after the heater stops. The MPC consumes it as a
-disturbance term in its prediction (HVAC-off gated); it never commands the
-actuator itself, which avoids the re-entry bug class (K5).
+``CoastAdvice``/``coastdown_minutes``/``advise_stop`` decide when the room
+can coast down to the window-end target by passive cooling.
+``residual_fraction`` (the fraction of the learned heating rate still
+delivered by the thermal mass after the heater stops) is built and tested
+but has NO caller until the MPC actuates (ADR-0034 §Offen d).  Advisory
+only — nothing here commands the actuator, which avoids the re-entry bug
+class (K5, ADR-0003).
 """
 
 from __future__ import annotations
@@ -14,7 +17,8 @@ from dataclasses import dataclass
 from ..estimation.thermal_ekf import ThermalModel
 
 _MIN_ALPHA = 1e-4  # guard against div-by-zero on a degenerate model
-_T_EQ_MARGIN = 0.1  # equilibrium must clear the target by this margin [K]
+# Passive equilibrium must lie at least this far BELOW the target [K].
+_T_EQ_MARGIN = 0.1
 
 
 def residual_fraction(
@@ -54,7 +58,10 @@ def coastdown_minutes(
 
     Closed-form mirror of :func:`optimal_start.heatup_minutes`: with the heater
     off the room decays toward ``t_eq = t_out + beta_s*q_solar/alpha`` with time
-    constant ``1/alpha``. Returns ``None`` when passive cooling cannot reach the
+    constant ``1/alpha``. Unlike ``heatup_minutes`` there is no ``q_occ``
+    term: omitting the occupancy gain lowers ``t_eq``, so the predicted decay
+    is faster than reality and ``stop_now`` fires later, never earlier.
+    Returns ``None`` when passive cooling cannot reach the
     target (equilibrium too warm) or the coast exceeds the horizon.
     """
     if room <= target:

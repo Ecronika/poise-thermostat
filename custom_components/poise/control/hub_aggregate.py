@@ -1,10 +1,12 @@
 """Pure multi-zone resource aggregation for the hub (ADR-0038/0039).
 
 HA-free and fully testable: given the set of :class:`ZoneRequest`s, compute the
-shared-resource decisions. S0 ships the boiler-demand aggregate (ADR-0039); the
-hub glue (registry, coordinator, actuation) consumes these helpers and never
-re-decides. Frost safety wins over thresholds; min-cycle gating prevents
-short-cycling (ADR-0006 monotonic time, passed in by the caller).
+shared-resource decisions: the boiler-demand aggregate (ADR-0039) plus the
+ADR-0013 shared-resource helpers (load shedding, flow-temperature allocation,
+source routing, compressor grouping). The hub glue (registry, coordinator,
+actuation) consumes these helpers and never re-decides. Frost safety wins
+over thresholds; min-cycle gating prevents short-cycling (ADR-0006 monotonic
+time, passed in by the caller).
 """
 
 from __future__ import annotations
@@ -41,11 +43,11 @@ _FROST_PLAUSIBLE_MIN_C = -20.0
 
 
 def zone_heat_demand(*, heating: bool, tpi_duty: float | None, frozen: bool) -> float:
-    """A zone's boiler heat-demand fraction in ``[0, 1]`` (R13).
+    """A zone's boiler heat-demand fraction in ``[0, 1]``.
 
     Prefers the live TPI-duty shadow estimate when present, else a binary
     fall-back from ``heating``; forced to ``0.0`` when the room sensor is frozen
-    (V9 — a dead sensor must never pin the shared boiler). Shared by the hub's
+    (a dead sensor must never pin the shared boiler). Shared by the hub's
     :func:`zone_request_from_data` and the per-zone coordinator so the value the
     hub aggregates is exactly the value each zone publishes.
     """
@@ -138,7 +140,8 @@ def aggregate_boiler_demand(
     Only zones with ``controls_boiler`` participate. A zone calls for heat when
     ``heating`` is true; its weighted contribution is
     ``(declared_power or 0.0) * clamp01(heat_demand)`` — a zone with unknown
-    power contributes 0 to the kW threshold (consistent with load-shedding) but
+    power contributes 0 to the power threshold (consistent with load-shedding;
+    threshold and declared powers must share one unit, see const.py) but
     still counts toward ``count_threshold``. Demand is active when the
     count of calling zones reaches ``count_threshold`` OR (when configured) the
     weighted sum reaches ``power_threshold``. Any participating zone in frost

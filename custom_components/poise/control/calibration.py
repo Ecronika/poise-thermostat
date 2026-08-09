@@ -4,7 +4,7 @@ Two paths, chosen by device capability:
   * local     — accumulating offset for TRVs with a calibration register
   * setpoint  — fake a setpoint for TRVs without one
 
-Honesty note (R6): these helpers are **not yet wired into the coordinator** —
+Honesty note: these helpers are **not yet wired into the coordinator** —
 today the operative-mode path feeds the true room temperature to the TRV's own
 external-input ``number`` entity instead (see README "External-temperature
 input"). Without such an input Poise does **no** live TRV compensation; this

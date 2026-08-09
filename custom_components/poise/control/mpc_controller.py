@@ -1,8 +1,9 @@
 """MPC controller — drop-in for the Controller protocol (ADR-0001/0009).
 
 Builds a ThermalModel from the estimated state, optimizes the heating power,
-and blends it with the bang-bang reference by the confidence weight. Falls back
-to bang-bang when the model is immature/invalid (hard data-gate). Returns a
+and blends it with the bang-bang reference by the confidence weight. Falls
+back to bang-bang unless the EKF reports ``identified`` with a prediction std
+and a positive tau (hard data-gate, ADR-0009). Returns a
 ControlRequest; the actuator path (TPI duty vs setpoint) is resolved later.
 """
 
@@ -50,14 +51,17 @@ class MpcController:
         if model is not None and identified:
             # Never fall back to t_rm (an INDOOR running mean): using ~20 °C as
             # outdoor inverts the heat-loss physics and makes the MPC
-            # equilibrium far too warm (review M3). Use a conservative cold
+            # equilibrium far too warm. Use a conservative cold
             # default consistent with the coordinator's outdoor fallback.
             t_out = state.t_out if state.t_out is not None else _FALLBACK_T_OUT_C
             u_mpc = optimize_power(model, t0, target, lower, upper, t_out, self._params)
-            assert state.prediction_std is not None  # narrowed by `mature`
+            assert state.prediction_std is not None  # narrowed by ``identified``
             weight = mpc_weight(state.prediction_std)
 
         power = blend(u_mpc, u_bang, weight)
+        # 0.05: blended power below this is numerical residue -> report idle.
+        # 0.5: above half power write the full target, below it only the lower
+        # band edge (coast-in-band, see mpc.py).
         regime = "heat" if power > 0.05 else "idle"
         setpoint = target if power > 0.5 else lower
         return ControlRequest(
