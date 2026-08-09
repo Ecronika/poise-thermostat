@@ -6,9 +6,6 @@ produces a ``TickPlan`` (with a ``ForecastRequest`` handshake via
 ``ExecutionReport``, ``commit_execution`` folds that report plus the plan's
 ``post_actions`` into a ``CommitResult``, and ``finalize_tick`` yields the
 ``TickOutcome`` whose ``data`` is the only thing the presenter ever sees.
-
-The executor sequences (``ha/actuator_executor.py``) build ``EffectExecution``/
-``ExecutionReport`` and the coordinator's ``commit_execution`` folds them.
 """
 
 from __future__ import annotations
@@ -35,12 +32,11 @@ if TYPE_CHECKING:
 class PersistencePhase(Enum):
     """How this tick's persistence checkpoint is gated.
 
-    F-SAVEPOINT (phase 10) normalised the checkpoint to ONE position — the END
-    of the tick: after ``finalize_tick`` on the normal path, after the
-    safe-state write on the unavailable one. A save therefore contains the
-    state AND the metrics of the tick that triggered it, instead of the
-    previous tick's finalize-owned state. With the position no longer varying,
-    the directive selects only the gate:
+    The checkpoint sits at exactly ONE position — the END of the tick: after
+    ``finalize_tick`` on the normal path, after the safe-state write on the
+    unavailable one (ADR-0064). A save therefore contains the state AND the
+    metrics of the tick that triggered it. The directive selects only the
+    gate:
 
     * ``ALWAYS`` — normal tick: run ``_maybe_save``; its own dirty/cadence
       logic decides whether a write actually happens.
@@ -51,6 +47,7 @@ class PersistencePhase(Enum):
     the adapter's ``_maybe_save``.
     """
 
+    # Unused today: no plan selects NONE (every path is ALWAYS or DIRTY_ONLY).
     NONE = "none"
     ALWAYS = "always"
     DIRTY_ONLY = "dirty_only"
@@ -389,7 +386,8 @@ class ClimateBandResult:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IntentsResult:
-    """Heat/cool intent + EKF drive latches."""
+    """Heat/cool intent. The stage's EKF drive latches are side effects on
+    ``LearningRuntime``, not fields here."""
 
     heating: bool
     cooling: bool
@@ -487,8 +485,7 @@ class ShadowStageResult:
     (its ``shadow_objs`` deliberately lacks the two ``compressor_gate_*`` keys,
     which only the lifecycle fold produces) and once more by
     ``_stage_shadow_domain`` from the segment fragments, so each segment's keys
-    are present exactly when THAT segment succeeded (F-TPI/F-LIFECYCLE/
-    F-PIACC).
+    are present exactly when THAT segment succeeded (ADR-0065).
     """
 
     operative: float
@@ -503,8 +500,8 @@ class ShadowStageResult:
 class ClimateHumidityResult:
     """Live humidity/dry decision + the two inputs the shadow half reuses.
 
-    F-HUMSHADOW split the climate band into this LIVE segment and the pure
-    shadow composition. ``decision`` is the real ``HumidityDecision`` on
+    The climate band is split into this LIVE segment and the pure shadow
+    composition (ADR-0065). ``decision`` is the real ``HumidityDecision`` on
     success and a neutral "idle" one (carrying the UNCHANGED ``dry_active``
     latch) when the segment failed, so the shadow half can always compose and
     the three humidity keys never vanish. ``hvac_modes``/``abs_humidity_gkg``
@@ -567,18 +564,18 @@ class FinalizeContext:
     """Explicit prepare→finalize intermediate-value contract.
 
     ``finalize_tick(ctx)`` receives EXACTLY the tick locals the finalize
-    segment consumes — 50 free names, one of which (``reading``) is narrowed to
-    its only consumed attribute (``reading_source``, the ``"source"``
-    diagnostic key). No more, no less — an honest contract instead of 50
-    implicit locals.
+    segment consumes (field set pinned by ``tests/test_phase1_tick_result``);
+    one of them (``reading``) is narrowed to its only consumed attribute
+    (``reading_source``, the ``"source"`` diagnostic key). No more, no less —
+    an honest contract instead of implicit locals.
 
-    Deliberately NOT frozen here (live ``self._*`` reads that stay INSIDE
+    Deliberately NOT captured here (live reads that stay INSIDE
     ``finalize_tick``, where concurrency is observable — a ``set_override``
     service call arriving during an earlier await must be visible in the
-    published payload): ``_enabled``, ``_override``, ``_mode_override``,
-    ``_preset``, ``_override_reason``/``_expires``/``_requested``/``_stats``,
-    ``_boost_expires_at``, ``_window_bypass`` and every learning/diagnostics
-    runtime the finalize segment itself advances.
+    published payload): the ``runtime.user`` intent group (enabled, override,
+    mode_override, preset, override_reason/expires/requested/stats,
+    boost_expires_at, window_bypass) and every learning/diagnostics runtime
+    the finalize segment itself advances.
 
     ``act_state`` is the tick's ONE central positioned actuator read and
     ``climate_diag`` is the legacy climate-band domain's already-degraded
@@ -640,11 +637,11 @@ class FinalizeContext:
     ext_num: str | None
     operative_active: bool
     # ADR-0069 U1: the room-occupancy lane for the readiness predicates — a
-    # deliberate contract extension (51st name; pinned).
+    # deliberate contract extension (pinned).
     occupancy: tuple[bool | None, ...]
     # ADR-0055 field calibration: device capability for the CA fairness mask
     # (``ca_tick_scorable``) — a violation the zone cannot actuate against is
-    # not scored. Deliberate contract extension (52nd/53rd name; pinned).
+    # not scored. Deliberate contract extension (pinned).
     # Defaults keep every existing construction site behavior-identical.
     can_heat: bool = True
     can_cool: bool = True
@@ -728,10 +725,12 @@ class EffectExecution:
     (ADR-0029 settle tick).
 
     ``effect_id`` vocabulary (one id per commit rule): ``mode_nudge``,
-    ``setpoint_write``, ``ext_select``, ``ext_feed``, ``rescue_nudge``,
-    ``rescue_write``, ``safe_mode``, ``safe_setpoint``. The rescue nudge is
-    deliberately NOT the tick ``mode_nudge``: it stamps ``last_hvac_cmd_ts``
-    unconditionally, while the tick nudge is gated via ``mode_changed``.
+    ``fan_write``, ``setpoint_write``, ``ext_select``, ``ext_feed``,
+    ``rescue_nudge``, ``rescue_write``, ``safe_mode``, ``safe_setpoint``. The
+    rescue nudge is deliberately NOT the tick ``mode_nudge``: it stamps
+    ``last_hvac_cmd_ts`` unconditionally, while the tick nudge is gated via
+    ``mode_changed``. ``fan_write`` is not a thermal actuation: it stamps the
+    fan echo window but never ``has_actuated`` (ADR-0068 U3).
 
     ``commanded_value`` semantics per effect (the commit stamps THESE, so the
     executor must never store the raw wire value where a baseline is meant):

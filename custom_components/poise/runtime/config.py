@@ -518,14 +518,10 @@ class ZoneConfig:
         pinned by ``test_phase2_config_paths.py::
         test_corrupt_option_fails_hot_apply_atomically``.
 
-        Accepted marginal deviation: WITHIN one parse the order of throwing
-        coercions differs from the baseline — ``setback_delta`` coerces first
-        here (the schedule guard consumes it) while the baseline coerced it
-        after all other tuning floats. Observable only when >= 2 values are
-        corrupt at once, and then only in WHICH value the (identically typed
-        and handled) ``ValueError`` names. Unfixable exactly anyway: the
-        baseline ``__init__`` and ``async_apply_options`` orders differ from
-        each other, and one shared parser cannot reproduce both.
+        Accepted marginal deviation: WITHIN one parse ``setback_delta``
+        coerces first (the schedule guard consumes it), so with >= 2 corrupt
+        values at once only WHICH value the (identically typed and handled)
+        ``ValueError`` names can differ between call paths.
         """
         merged = _merged(data, options)
         return cls(
@@ -614,7 +610,7 @@ def structures_equal(a: ZoneStructure, b: ZoneStructure) -> bool:
 
     WARNING: this field-wise comparison is NOT a drop-in replacement for the
     predicate ``dict(entry.data) == self._data_snapshot``. Room ``entry.data``
-    carries keys outside these 13 fields (the installation keys
+    carries keys outside the ``ZoneStructure`` fields (the installation keys
     ``controls_boiler``/``compressor_group``/``declared_power``/
     ``design_flow_temp``/``source_policy``; on fresh v2.2 entries also
     ``comfort_base`` + ``category`` until their first reconfigure), whose

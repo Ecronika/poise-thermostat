@@ -14,7 +14,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import TypeAlias
 
 
 class Reaction(Enum):
@@ -38,8 +37,7 @@ class InputSpec:
 # The zone's complete input contract. A plain ordered tuple on purpose: order
 # IS contract (the IMMEDIATE entries appear in listener registration order) and
 # the registry is immutable once built.
-# noqa UP040: the `type` statement is 3.12-only; the pure CI gate runs on 3.10.
-InputRegistry: TypeAlias = tuple[InputSpec, ...]  # noqa: UP040
+type InputRegistry = tuple[InputSpec, ...]
 
 
 def build_input_registry(

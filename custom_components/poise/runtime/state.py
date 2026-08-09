@@ -128,11 +128,12 @@ class UserControlState:
 class ExternalOverrideRuntime:
     """Echo/adoption baselines for external-change detection.
 
-    All baselines live in ONE object.  The four value baselines persist (B5,
-    ADR-0059 §9) so the first device-side intervention after a restart has
-    something to compare against; the monotonic stamps and the attempt-state
-    context ring stay transient — they are process-local, so the restore path
-    stamps the echo windows stale instead of resurrecting them.
+    All baselines live in ONE object.  The six value baselines persist (B5,
+    ADR-0059 §9; the fan pair per ADR-0068 U3) so the first device-side
+    intervention after a restart has something to compare against; the
+    monotonic stamps and the attempt-state context ring stay transient — they
+    are process-local, so the restore path stamps the echo windows stale
+    instead of resurrecting them.
     """
 
     PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
@@ -232,6 +233,8 @@ class WindowRuntime:
     wa_ref_room: float | None = None  # last distinct-move reference
     wa_ref_mono: float | None = None
     wa_prev_mono: float | None = None  # last tick, for the minutes_open dt
+    # Adaptive open threshold [degC/h], re-derived each tick from the learned
+    # natural cooling rate (ADR-0041).
     wa_open_threshold: float = _DEFAULT_WA_OPEN_THRESHOLD
     last_window_open: bool = False  # cached for the stats snapshot
     # Monotonic stamp of the current open episode's rising edge; gates the
@@ -251,16 +254,19 @@ class PresenceRuntime:
 
     prev_home: bool | None = None  # house-gate flip tracking
     last_presence_level: str = "comfort"  # cached for the stats snapshot
-    room_absent_since: float | None = None  # transient; restart -> present
+    # WALL-clock epoch (``dt_util.utcnow()``), unlike the monotonic anchors
+    # elsewhere in this module; transient — a restart resumes as present.
+    room_absent_since: float | None = None
 
 
 @dataclass(slots=True)
 class HumidityRuntime:
     """Long-lived humidity state; the dry decision itself runs live per tick.
 
-    Persisted: ``dry_active`` — the hysteresis latch must survive a restart
-    between the RH thresholds or the room drops out of dry mode until RH
-    re-crosses the upper bound.
+    Persisted: ``dry_active``, ``vent_active`` and ``surface_rh_mean`` — the
+    two hysteresis latches must survive a restart between their thresholds,
+    and the ~48 h surface-RH mean is days of wall history a reboot would
+    otherwise discard.
     """
 
     PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
@@ -309,7 +315,7 @@ class SafetyRuntime:
     # Previous tick's failure verdict — latched so the learn gate can pause EKF
     # learning during a boiler-off/valve-open episode.
     prev_heating_failed: bool = False
-    unavailable_since: float | None = None  # sustained sensor loss anchor
+    unavailable_since: float | None = None  # sustained sensor-loss anchor [monotonic]
 
 
 @dataclass(slots=True)
@@ -317,8 +323,9 @@ class DiagnosticsRuntime:
     """Long-lived diagnostic accumulators (ADR-0044/0045/0055).
 
     Persisted: the stats objects ``outcome_stats``, ``regq`` (storage key
-    ``regulation_quality``) and ``hdh`` (storage key ``hdh_savings``).  The dt
-    anchors, the open scoring session and the warn-once latch are transient.
+    ``regulation_quality``), ``hdh`` (storage key ``hdh_savings``) and the
+    ADR-0069 U2 ``comfort_activation`` lifecycle.  The dt anchors, the open
+    scoring session and the warn-once latches are transient.
     """
 
     PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
@@ -341,7 +348,8 @@ class DiagnosticsRuntime:
     hdh_last_mono: float | None = None  # real dt for HDH/outcome obs
     hdh: HdhSavings = field(default_factory=HdhSavings)
     # Warn once per run, not per tick — one latch per climate-band boundary
-    # since F-HUMSHADOW split the live humidity decision from the pure shadows.
+    # (the live humidity decision and the pure shadow composition each own
+    # one, ADR-0065).
     hum_shadow_warned: bool = False
     climate_shadow_warned: bool = False
     # ADR-0054 Nachtrag V1: today's forecast daily mean for the clo blend,

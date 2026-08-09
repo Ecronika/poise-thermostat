@@ -2,9 +2,9 @@
 
 ``ZoneRuntime`` owns the eleven typed state groups of ``runtime.state`` plus
 the injectable monotonic clock. The coordinator constructs exactly one
-``ZoneRuntime`` per zone and keeps every pinned ``self._*``
-attribute as a property proxy onto these groups, so tests and internal readers
-see unchanged names while ownership is explicit.
+``ZoneRuntime`` per zone and exposes it read-only as ``coord.runtime``, so
+tests and internal readers reach every field as
+``coord.runtime.<group>.<field>`` while ownership stays explicit.
 
 The runtime also owns the PURE tick stages (delegating to their implementations
 in ``control/tick_pipeline.py``), ``commit_execution`` (incl. the ``EndHold``
@@ -14,20 +14,18 @@ re-stamping via the owned clock, hold-expiry normalisation with the schedule
 injected as a callable, and the EKF cold-start seeding as its own
 bootstrap-positioned hook). This class stays free of Home Assistant imports,
 reader/executor access and any I/O throughout; stages with positioned
-reads/awaits/logging remain coordinator methods and reach this state through
-the property proxies.
+reads/awaits/logging live in ``ha/tick_orchestrator.py`` and reach this state
+through the injected runtime.
 
 ``dirty`` is the documented exception: the persistence-meta flag is
 adapter-shaped, but ``commit_execution``/``teardown_hold``/``mark_actuated``
 and the observe stage mutate it as part of their pure bodies — so the flag
-lives here and the coordinator's ``_dirty`` becomes a property proxy, keeping
-``_maybe_save``'s decision logic unchanged in the adapter.
+lives here and the adapter's ``_maybe_save`` reads it as ``runtime.dirty``.
 
 The ``clock`` attribute is deliberately a plain, replaceable reference:
-integration tests swap ``coordinator._clock`` for a fake AFTER setup, and the
-coordinator's ``_clock`` property setter forwards that swap here so every
-reader (coordinator, ``InputReader``/``ForecastProvider`` via their live
-forwarders) follows the same instance.
+integration tests swap ``coord.runtime.clock`` for a fake AFTER setup, and
+the ``_ReaderClock`` forwarder hands ``InputReader``/``ForecastProvider`` a
+live view, so every reader follows the same instance.
 
 ``climate_mode`` is Store-owned user intent: the config entry's options/data
 value seeds only the very first start, so the coordinator injects that seed at
@@ -135,7 +133,7 @@ class ZoneRuntime:
         self.window = WindowRuntime()
         # Presence flip tracking + room-absence anchor (ADR-0058).
         self.presence = PresenceRuntime()
-        # Dry-active hysteresis latch.
+        # Dry/vent hysteresis latches + surface-RH mean (ADR-0050/0066).
         self.humidity = HumidityRuntime()
         # Compressor lifecycle fold + derived dynamics profile (ADR-0046).
         self.compressor = CompressorRuntime()
