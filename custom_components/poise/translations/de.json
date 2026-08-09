@@ -385,12 +385,27 @@
             "data": {
               "comfort_start": "Komfortfenster Beginn",
               "comfort_end": "Komfortfenster Ende",
+              "comfort_start_2": "Fenster 2 Beginn",
+              "comfort_end_2": "Fenster 2 Ende",
+              "comfort_start_3": "Fenster 3 Beginn",
+              "comfort_end_3": "Fenster 3 Ende",
+              "comfort_start_4": "Fenster 4 Beginn",
+              "comfort_end_4": "Fenster 4 Ende",
+              "comfort_start_5": "Fenster 5 Beginn",
+              "comfort_end_5": "Fenster 5 Ende",
+              "comfort_start_6": "Fenster 6 Beginn",
+              "comfort_end_6": "Fenster 6 Ende",
+              "comfort_start_7": "Fenster 7 Beginn",
+              "comfort_end_7": "Fenster 7 Ende",
+              "comfort_start_8": "Fenster 8 Beginn",
+              "comfort_end_8": "Fenster 8 Ende",
               "setback_delta": "Nachtabsenkung (K)",
               "optimal_start": "Optimal-Start (Vorheizen)"
             },
             "data_description": {
               "comfort_start": "Beginn und Ende beide setzen = tägliches Komfortfenster; beide leer = ganztägig.",
-              "setback_delta": "Wie weit das Band außerhalb des Komfortfensters gelockert wird."
+              "comfort_start_2": "Fenster ausfüllen und speichern — das Formular bietet dann das nächste an (bis 8). Beide Zeiten eines Fensters leeren entfernt es; überlappende Fenster werden zusammengeführt. Optimal-Start heizt für jedes Fenster vor.",
+              "setback_delta": "Wie weit das Band außerhalb der Komfortfenster gelockert wird."
             }
           },
           "heat_cool": {
