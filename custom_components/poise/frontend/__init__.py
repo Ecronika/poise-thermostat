@@ -5,8 +5,7 @@ serve it under a *version-stamped URL* and load it as a **frontend module URL**
 (``add_extra_js_url``) — the robust, widely-used way to ship an
 integration-owned card: it loads on every dashboard, so the card self-registers
 in the card picker without touching the (HA-version-fragile) Lovelace resource
-collection. This is HA glue (no HA runtime in the sandbox) — verified live. It
-never touches control state.
+collection. It never touches control state.
 """
 
 from __future__ import annotations
