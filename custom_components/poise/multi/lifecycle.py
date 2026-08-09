@@ -1,11 +1,13 @@
 """Per-device lifecycle: anti-short-cycle, health, override + wall-clock
-persistence (ADR-0046 §8/§9, Phase 2).
+persistence (ADR-0046 §8/§9).
 
 Pure + HA-free. Tracks each device's observed on/off transitions and mode changes
 on a **wall-clock** basis (never monotonic — ADR-0006/0007 — so it survives a HA
 restart) and derives the resolver's :class:`DeviceRuntime` (min-off / mode-hold /
-health / external-override gates). P2 is still shadow: this gates nothing live
-yet; it makes the seam observable and restart-safe for the P3 opt-in.
+health / external-override gates). The single-actuator compressor guard is
+LIVE: ``guard_block_reason`` really suppresses the compressor-cycling
+``set_hvac_mode`` nudge in the write path (ADR-0046 §8 Nachtrag). Only the
+multi-device P3 resolvers are still shadow.
 """
 
 from __future__ import annotations

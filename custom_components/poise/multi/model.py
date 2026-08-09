@@ -113,7 +113,10 @@ DEFAULT_STANDBY: Mapping[str, StandbyPolicy] = {
     "NumberValveAdapter": StandbyPolicy.HOLD_SAFE_SETPOINT,
 }
 
-# Conservative compressor anti-short-cycle defaults (ADR-0046 §8).
+# Conservative compressor anti-short-cycle defaults for the multi-device
+# ``ZoneDevice`` stage (ADR-0046 §8 draft values). The LIVE single-AC guard
+# does NOT read these — it resolves ``const.DEFAULT_COMPRESSOR_MIN_OFF_S``
+# (300 s, deliberately not this 600 s; ADR-0046 §8 Nachtrag).
 DEFAULT_MIN_OFF_S = 600.0
 DEFAULT_MIN_ON_S = 120.0
 DEFAULT_MIN_MODE_HOLD_S = 300.0
