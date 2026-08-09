@@ -33,6 +33,7 @@ drift.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -337,13 +338,33 @@ class ZoneTuning:
         except ValueError:
             category = Category("II")
         delta = float(merged.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA))
+        # ADR-0070: gather ALL comfort windows — the base pair plus numbered
+        # ``comfort_start_N``/``comfort_end_N`` pairs (N >= 2, unbounded,
+        # numeric order, numbering gaps tolerated: the options UI renumbers,
+        # but a suggestion writer or hand-edited store must not break the
+        # schedule). A half/invalid pair degrades to "that window absent";
+        # overlap merging stays in ``ComfortSchedule.from_windows``.
+        windows: list[ComfortWindow] = []
         start = parse_hhmm(merged.get(CONF_COMFORT_START))
         end = parse_hhmm(merged.get(CONF_COMFORT_END))
-        # An empty/invalid HH:MM parses to None -> always_comfort (guard
-        # identical on both paths, including the error path).
+        if start is not None and end is not None:
+            windows.append(ComfortWindow(start, end))
+        extra_ns = sorted(
+            int(m.group(1))
+            for key in merged
+            if (m := re.fullmatch(rf"{CONF_COMFORT_START}_(\d+)", str(key)))
+        )
+        for n in extra_ns:
+            s_n = parse_hhmm(merged.get(f"{CONF_COMFORT_START}_{n}"))
+            e_n = parse_hhmm(merged.get(f"{CONF_COMFORT_END}_{n}"))
+            if s_n is not None and e_n is not None:
+                windows.append(ComfortWindow(s_n, e_n))
+        # An empty/invalid HH:MM parses to None -> window absent; no windows at
+        # all (or zero depth) -> always_comfort (guard identical on both paths,
+        # including the error path).
         schedule = (
-            ComfortSchedule.from_windows([ComfortWindow(start, end)], delta)
-            if start is not None and end is not None and delta > 0.0
+            ComfortSchedule.from_windows(windows, delta)
+            if windows and delta > 0.0
             else ComfortSchedule.always_comfort()
         )
         optimal_start = bool(merged.get(CONF_OPTIMAL_START, True))
