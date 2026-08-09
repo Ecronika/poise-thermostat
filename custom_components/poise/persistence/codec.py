@@ -26,8 +26,8 @@ Deliberate non-restores / never-in-schema:
   ``test_override_policy_option_change_survives_restart``.
 * Monotonic timestamps are never in schema (B5, ADR-0059 §9 / ADR-0007): the
   restore side stamps echo windows stale — a coordinator DOMAIN hook, not
-  codec.  Covers ``_last_sp_write_ts`` / ``_last_hvac_cmd_ts`` and
-  ``_window_open_since``.
+  codec.  Covers ``_last_sp_write_ts`` / ``_last_hvac_cmd_ts`` /
+  ``_last_fan_cmd_ts`` and ``_window_open_since``.
 * ``_pi`` / ``_pi.acc`` has no schema key.
 * All presence/safety/latch/anchor attributes: their runtime groups declare
   ``PERSISTED_FIELDS = frozenset()``.
@@ -43,8 +43,9 @@ lifecycle, adoption baselines) use per-key defensive coercions and can never
 fail on JSON-typed input; the heavy model tail (learned models + diagnostic
 accumulators) is ONE sequential prefix parse in a fixed restore order —
 ``ekf`` -> ``trm`` -> ``seasonless`` -> ``window_auto`` -> ``multi_lifecycle``
--> ``outcome_stats`` -> ``regulation_quality`` -> ``ref_offset`` ->
-``tau_settle`` -> ``hdh_savings`` -> ``dry_active``.  The FIRST structural
+-> ``outcome_stats`` -> ``regulation_quality`` -> ``comfort_activation`` ->
+``ref_offset`` -> ``tau_settle`` -> ``hdh_savings`` -> ``dry_active`` ->
+``vent_active`` -> ``surface_rh_mean``.  The FIRST structural
 throw stops the parse: every model parsed before the throwing key is kept,
 every later field stays undecoded (``None``), and it can never cost the
 user-intent sections.  The original exception is surfaced as
@@ -72,10 +73,11 @@ from ..estimation.thermal_ekf import ThermalEKF
 from ..multi import lifecycle as _lifecycle
 from ..multi.lifecycle import DeviceLifecycle
 
-# The v1 payload key set, in insertion order (the wire order of the dict).
-# 39 keys = the union of the ``PERSISTED_FIELDS`` constants in
-# ``runtime/state.py`` (three storage-key renames, see STORAGE_KEY_RENAMES)
-# plus the config-owned ``override_policy`` special case.
+# The v1 payload key set, in insertion order (the wire order of the dict):
+# the union of the ``PERSISTED_FIELDS`` constants in ``runtime/state.py``
+# (three storage-key renames, see STORAGE_KEY_RENAMES) plus the config-owned
+# ``override_policy`` special case.  Key set and order are pinned by
+# ``tests/test_phase3_codec.py``.
 PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "ekf",
     "trm",
@@ -207,8 +209,9 @@ class PersistedZoneState:
         """The v1 store dict (key set, transforms, values).
 
         Timestamp keys are wall-clock only; the monotonic stamps
-        (``_last_sp_write_ts``/``_last_hvac_cmd_ts``, ``_window_open_since``)
-        are deliberately absent, as is any ``_pi`` state.
+        (``_last_sp_write_ts``/``_last_hvac_cmd_ts``/``_last_fan_cmd_ts``,
+        ``_window_open_since``) are deliberately absent, as is any ``_pi``
+        state.
         ``override_stats`` is passed by reference.
         """
         return {
