@@ -370,12 +370,14 @@
               "category": "EN-16798-Komfortkategorie",
               "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
               "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
-              "room_profile": "Raumprofil (Behaglichkeitsbewertung)"
+              "room_profile": "Raumprofil (Behaglichkeitsbewertung)",
+              "active_comfort": "Aktive Behaglichkeit"
             },
             "data_description": {
               "comfort_base": "Die Mitte des Komfortbands; die Kategorie legt die Bandbreite fest.",
               "comfort_weight": "0 = Energie sparen (breiteres Band), 100 = engster Komfort. Standard 70.",
-              "room_profile": "Aktivitäts- und Bekleidungsannahme für die Behaglichkeits-Diagnose (PMV): Büro ist der neutrale Standard; Wohnzimmer rechnet die Sofa-Isolation ein, Schlafzimmer ruhende Aktivität, Küche Hausarbeit. Wirkt nur auf die Behaglichkeits-Lampe, nie auf den Sollwert. Im Schlafzimmer-Profil wird kein PMV bewertet (Schlafen liegt außerhalb des ISO-7730-Gültigkeitsbereichs) — die Behaglichkeits-Lampe bleibt dort stumm."
+              "room_profile": "Aktivitäts- und Bekleidungsannahme für die Behaglichkeits-Diagnose (PMV): Büro ist der neutrale Standard; Wohnzimmer rechnet die Sofa-Isolation ein, Schlafzimmer ruhende Aktivität, Küche Hausarbeit. Wirkt nur auf die Behaglichkeits-Lampe, nie auf den Sollwert. Im Schlafzimmer-Profil wird kein PMV bewertet (Schlafen liegt außerhalb des ISO-7730-Gültigkeitsbereichs) — die Behaglichkeits-Lampe bleibt dort stumm.",
+              "active_comfort": "Behaglichkeit aktiv herstellen: erlaubt dieser Zone die Lüfter-zuerst-Kühlstufe, die Kühlkanten-Gutschrift und den PMV-Offset. Jeder Baustein wirkt erst, wenn sein Qualitäts-Gate und die Bereitschafts-Prüfungen bestehen (ADR-0069)."
             }
           },
           "schedule": {
@@ -526,7 +528,8 @@
         "office": "Büro / neutral (Standard)",
         "living": "Wohnzimmer (Sofa, entspannt)",
         "bedroom": "Schlafzimmer (ruhend)",
-        "kitchen": "Küche (Hausarbeit)"
+        "kitchen": "Küche (Hausarbeit)",
+        "bathroom": "Badezimmer (Körperpflege, leichte Bekleidung)"
       }
     },
     "feedback_direction": {
