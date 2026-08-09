@@ -3,10 +3,10 @@
 The assembly + redaction live in the HA-free ``diagnostics_data`` module so they
 are unit-tested directly; this thin wrapper only pulls the runtime objects.
 
-Phase 8 (S1): moved verbatim from the former top-level ``diagnostics.py`` —
-the ``diagnostics`` package shadows that module name, so the platform hook
-lives here and is re-exported by the package ``__init__`` (which is what HA
-imports as the ``diagnostics`` platform).
+The ``diagnostics`` package shadows the former top-level ``diagnostics.py``
+module name, so the platform hook lives here and is re-exported by the
+package ``__init__`` (which is what HA imports as the ``diagnostics``
+platform).
 """
 
 from __future__ import annotations

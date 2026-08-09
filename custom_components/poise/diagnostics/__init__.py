@@ -1,12 +1,12 @@
-"""Pure diagnostics package (refactoring plan, phase 8 — plan section 2).
+"""Pure diagnostics package.
 
 Home of the hass-free diagnostics building blocks: composition wrappers for
-the shadow evaluations (``shadows``) and the one broad error boundary for the
-pure outcome/savings diagnostics (``collector``).  The evaluation *kernels*
-(MPC/PI/TPI/thermal shadows, comfort indices, outcome scoring, …) stay in
-their established ``control``/``comfort``/``estimation``/``multi`` modules —
-this package only composes them; the two LEGACY error domains (plan finding
-11) remain marked ``try`` blocks in the coordinator until phase 10.
+the shadow evaluations (``shadows``), the one broad error boundary for the
+pure outcome/savings diagnostics (``collector``) and the trace-record
+composition (``trace``).  The evaluation *kernels* (MPC/PI/TPI/thermal
+shadows, comfort indices, outcome scoring, …) stay in their established
+``control``/``comfort``/``estimation``/``multi`` modules — this package only
+composes them.
 
 This package replaces the former ``diagnostics.py`` module: a regular package
 shadows a same-named sibling module, and Home Assistant resolves the

@@ -6,25 +6,26 @@ Every evaluation *kernel* is already a pure function in its established module
 ``evaluate_thermal_shadow`` in ``multi/shadow.py``, the comfort indices in
 ``comfort/*``, the outcome/savings folds in ``control``/``estimation``).  This
 module therefore holds only COMPOSITION: the argument preparation and dict
-assemblies the coordinator's finalize/climate segments performed inline.  The
-*call sites* stay in the coordinator, each inside its OWN narrow error
-boundary since phase 10 (F-TPI/F-LIFECYCLE/F-PIACC split the finalize domain
-into six independent segments, F-HUMSHADOW split the climate band into the
-live humidity decision plus the pure shadows).  That is why the ``objs``
-helpers below come in per-segment fragments instead of one 19-key assembly: a
-failing segment contributes nothing and every other segment still publishes
-its own keys.
+assemblies the tick orchestrator's finalize/climate segments performed
+inline.  The *call sites* stay in the tick orchestrator, each inside its OWN
+narrow error boundary (ADR-0065: the finalize domain is six independent
+segments, the climate band is the live humidity decision plus the pure
+shadows).  That is why the ``objs`` helpers below come in per-segment
+fragments instead of one flat assembly: a failing segment contributes nothing
+and every other segment still publishes its own keys.
 
 PATCH SURFACES: the finalize domain dispatches ``predict_peak_operative``,
-``evaluate_shadow``, ``evaluate_tpi_shadow``, ``evaluate_pi_shadow`` and the
-``_lifecycle`` module alias via COORDINATOR module globals — integration tests
-patch them there (``test_phase0_fault_shadow_domain`` patches
+``shading_target_position`` and the ``_lifecycle`` module alias via
+COORDINATOR module globals (``self._g``) — integration tests patch them there
+(``test_phase0_fault_shadow_domain`` patches
 ``coordinator.predict_peak_operative``).  Every composition that moved such a
-call therefore takes it as a ``*_fn`` parameter which the coordinator resolves
-from its own module globals at call time; nothing here binds those names at
-import time.  The kernels no test patches on the coordinator (comfort indices,
-``rh_high_for_category``, ``settle_confidence``, ``compensated_setpoint``) are
-imported directly.
+call therefore takes it as a ``*_fn`` parameter which the orchestrator
+resolves from the coordinator's module globals at call time; nothing here
+binds those names at import time.  The MPC/TPI/PI kernels
+(``evaluate_shadow``/``evaluate_tpi_shadow``/``evaluate_pi_shadow``) and the
+kernels no test patches (comfort indices, ``rh_high_for_category``,
+``settle_confidence``, ``compensated_setpoint``) are imported directly by the
+orchestrator and are not a patch surface.
 
 Error-path residual: ``evaluate_cover_shadow`` fuses the peak forecast +
 shading decision + binding classification into one call, so a raise in
@@ -364,10 +365,10 @@ def compose_climate_band(
     elevated-air-speed cool setpoint (ASHRAE 55) and PMV/PPD (ADR-0054,
     ISO 7730) shadows over the *effective* (raised) cool band, plus the
     assembled diagnostics dict.  The humidity decision itself (and the
-    ``_dry_active`` latch) stays LIVE in the coordinator's
-    ``_stage_climate_band``; this composition is called INSIDE that same single
-    ``try``, so a failure anywhere still degrades the whole ``climate_diag``
-    together (until F-HUMSHADOW).
+    ``dry_active`` latch) stays LIVE in ``TickOrchestrator._climate_humidity``
+    behind its own boundary; this composition runs in the SEPARATE
+    ``_climate_shadows`` boundary (ADR-0065), so a failing shadow costs only
+    the published ``climate_diag`` keys and never the dry nudge.
 
     ``fan_velocity`` estimates the occupied-zone air speed from the actuator's
     real fan state (still air unless the indoor fan actually moves air) — feeds
@@ -420,7 +421,10 @@ def compose_climate_band(
     # V3: outside the ISO 7730 domain (sleeping at 0.7 met) no PMV number is
     # published — the absent value silences the card lamp (ADR-0049 §6), the
     # flag says why, and clo/met stay visible for field plausibility.
-    valid = pmv_validity(met=prof.met, clo=clo_val)
+    # V5: the REAL RH (never the 50 % display fallback) adds the
+    # near-saturation domain edge — a just-used shower masks the PMV, and with
+    # it the PPD fold, the offset readiness and the tier-2 dwell.
+    valid = pmv_validity(met=prof.met, clo=clo_val, rh=rh)
     pmv_out: float | None = None
     ppd_out: float | None = None
     cat_out: str | None = None

@@ -8,27 +8,20 @@ hold structurally: an exception raised anywhere in ``build_tick_record``
 propagates to the coordinator's ``except`` and is swallowed with the identical
 DEBUG log ("Poise trace capture failed", coordinator channel).
 
-F-TRACEIO (phase 10) decoupled the WRITE, not the build: the tick enqueues the
+Only the WRITE is decoupled, not the build (ADR-0063): the tick enqueues the
 finished line and a background drain task appends it (``trace/recorder.py``),
-so the file I/O no longer counts into ``tick_ms``.  Keeping the build here,
+so the file I/O never counts into ``tick_ms``.  Keeping the build here,
 inside the boundary, is deliberate — hoisting it out (e.g. onto
 ``TickOutcome.trace_record``, which therefore stays ``None``) would move a
 swallowed build failure onto the tick's error path for no gain in tick time.
 
-The hass-bound pieces stay in the coordinator: the ``TraceRecorder`` lazy-init
-(``hass.config.path``), the enqueue, and the swallowing ``except`` + DEBUG log.
+The hass-bound pieces live in ``TickOrchestrator._maybe_record_trace``: the
+``TraceRecorder`` lazy-init (``hass.config.path``), the enqueue, and the
+swallowing ``except`` + DEBUG log.
 
 ``ModelSnapshot`` and ``build_record`` are already pure in ``trace/schema.py``,
-so this module reduces to the one composition the coordinator performed inline:
+so this module reduces to the one composition performed inline before:
 EKF state vector → ``ModelSnapshot`` → ``build_record``.
-
-Micro-reorder (unobservable): the coordinator now evaluates the
-``ts=dt_util.utcnow().timestamp()`` ARGUMENT before this helper builds the
-``ModelSnapshot``, whereas the inline code built the snapshot literal first and
-read the clock inside the ``build_record(...)`` call.  A wall-clock read has no
-side effects and no observer sits between the two positions — both orders
-produce the identical record on the success path (one ``utcnow`` call either
-way).
 
 Hass-free, mypy --strict, py310-clean; measured by the PURE coverage gate
 (``tests/test_phase8_trace.py``).
