@@ -3,25 +3,24 @@
 ``coordinator.py`` keeps only the HA coupling (``DataUpdateCoordinator``
 lifecycle, the tick lock, ``tick_ms``/``TickBudget``, persistence, health
 issues and the entity-facing command API).  Everything between "the lock is
-held" and "a payload is returned" lives here: the eight tick methods
+held" and "a payload is returned" lives here: the tick methods
 (``_run_once``, ``prepare_until_forecast``, ``resume_prepare``,
 ``finalize_tick``, ``_run_unavailable_tick``, ``_write_unavailable_safe_state``,
-``_build_finalize_context``, ``_maybe_record_trace``) and the 26 stage methods.
+``_build_finalize_context``, ``_maybe_record_trace``, ``flush_traces``) and
+the ``_stage_*`` methods.
 
-The bodies were moved VERBATIM (plan step 3, stage S1): the only edits are
-mechanical receiver substitutions — ``self.<collaborator>`` became the
-explicitly injected attribute, every other ``self.<x>`` became ``self._c.<x>``,
-``_LOGGER`` became the injected ``self._log`` (the logger CHANNEL is behaviour:
-records must keep the name ``custom_components.poise.coordinator``), and the
-patch-surface globals became ``self._g.<name>``.  Await positions, commit
-positions, event/emission positions and checkpoint positions are unchanged.
+Receiver rules (binding): collaborators are the injected attributes, every
+other coordinator read is ``self._c.<x>``, the logger is the injected
+``self._log`` (the logger CHANNEL is behaviour: records must keep the name
+``custom_components.poise.coordinator``), and the patch-surface globals are
+``self._g.<name>``.  Await positions, commit positions, event/emission
+positions and checkpoint positions are behaviour.
 
-Phase 10 then changed BEHAVIOUR on purpose, each fix isolated and pinned by a
-flipped fault-injection test: the two legacy error domains were cut into
-narrow boundaries (F-TPI/F-LIFECYCLE/F-PIACC in ``_stage_shadow_domain``,
-F-HUMSHADOW in ``_stage_climate_band``), the trace append left the tick lock
-(F-TRACEIO), the forecast fetch became a background refresh (F-FORECAST) and
-the persistence checkpoint moved behind ``finalize_tick`` (F-SAVEPOINT).
+Error boundaries are narrow by design (ADR-0065): one boundary per shadow
+segment in ``_stage_shadow_domain``, two independent boundaries in
+``_stage_climate_band``; the trace append is queued off the lock (ADR-0063),
+the forecast fetch is a background refresh (ADR-0063) and the persistence
+checkpoint sits behind ``finalize_tick`` (ADR-0064).
 
 PATCH SURFACE (binding).  Phase-0/6 fault-injection tests patch module globals
 of ``custom_components.poise.coordinator`` — e.g.
@@ -45,8 +44,7 @@ this module.  The ``if TYPE_CHECKING`` block below imports the same symbols a
 SECOND time for typing only: those imports are never executed, bind no runtime
 name in this module and therefore create no second (dead) patch target, but
 they let ``mypy --strict`` check every ``self._g.<name>(...)`` call site
-against the real signature — which the plain ``__getattr__ -> Any`` seam of
-step 3 S1 had silently given up.
+against the real signature.
 
 DISPATCH BACK THROUGH THE COORDINATOR (binding).  Every call that a test may
 replace on the coordinator INSTANCE is resolved through ``self._c`` at call
@@ -58,9 +56,9 @@ time, so the replacement is seen: ``self._c._write_unavailable_safe_state()``
 drives it directly) and is called through ``self._c``.  The two CHECKPOINT
 primitives obey the same rule instead of being snapshotted as bound methods in
 ``__init__``: the persistence checkpoint is ``self._c._maybe_save()`` and the
-health checkpoint is ``self._c._health.emit(...)``.  Historically both resolved
-through the coordinator instance on every single call (``self._maybe_save()``
-/ ``self._emit_health_updates(...)``), and nothing here may narrow that.
+health checkpoint is ``self._c._health.emit(...)``.  Both must stay resolved
+through the coordinator instance on every call; nothing here may snapshot
+them.
 
 TRANSITIONAL COORDINATOR BACKREFERENCE.  ``self._c`` is a documented transition
 form.  It carries (a) the coordinator's config/tuning attributes that the moved
@@ -70,15 +68,16 @@ bodies read verbatim (``_optimal_start``, ``_comfort_base``, ``_schedule``,
 (``_unavailable_logged``, ``_mpc_params`` via ``_set_mpc_params``), and (c) the
 coordinator methods listed above plus the override/hold commands
 (``set_override``, ``_set_mode_override``, ``_end_hold``,
-``_expire_timed_states``, ``_fire_override_ended``, ``_notify_failure``).
+``_expire_timed_states``, ``_fire_override_ended``, ``_notify_failure``) and
+the suggestion-issue facades (``_sync_suggestion_issue``,
+``_sync_clo_suggestion_issue``, ``_sync_season_hint_issue``).
 A later step narrows it; nothing here may rely on it growing.
 
-STATE THAT MOVED HERE.  ``_trace_recorder`` (the lazily built ADR-0011 trace
-writer) and ``_trace_slug`` (seeded from ``entry.entry_id``) were coordinator
-attributes before step 3 and are now owned by this class — the only reader,
-``_maybe_record_trace``, lives here.  Nothing outside reads them; the
-ownership change is pinned by ``tests/integration/test_phase6b_state_move.py``
-so it cannot happen a second time unnoticed.
+STATE OWNED HERE.  ``_trace_recorder`` (the lazily built ADR-0011 trace
+writer) and ``_trace_slug`` (seeded from ``entry.entry_id``) belong to this
+class — the only reader, ``_maybe_record_trace``, lives here.  Nothing
+outside may read them (pinned by
+``tests/integration/test_phase6b_state_move.py``).
 """
 
 from __future__ import annotations
@@ -290,8 +289,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, avoids the import cycle
 _THERMAL_DIR: dict[str, Direction] = {"heat": Direction.HEAT, "cool": Direction.COOL}
 
 # The published ``humidity_reason`` when the LIVE humidity segment failed
-# (F-HUMSHADOW). Before phase 10 the key simply vanished together with the rest
-# of the climate band; naming the failure is what replaced that silence.
+# (ADR-0065): the failure is named instead of the key silently vanishing.
 _HUM_FAILED_REASON = "humidity block failed"
 
 # ADR-0066 B.5: notification wording per reason token (English, concise —
@@ -403,8 +401,7 @@ class TickOrchestrator:
         # The health checkpoint (``self._c._health.emit``) and the
         # persistence checkpoint (``self._c._maybe_save``) are deliberately
         # NOT snapshotted here — they are resolved through the coordinator
-        # instance on every call, exactly as before the move (see the module
-        # docstring's dispatch rules).
+        # instance on every call (see the module docstring's dispatch rules).
         #
         # opt-in field-trace recorder (ADR-0011 golden-file replay); default
         # off, lazily constructed inside ``_maybe_record_trace``.
@@ -496,9 +493,8 @@ class TickOrchestrator:
         stamps. The actuator read below is await-relative behaviour, so the
         plan cannot be resolved in the prepare phase.
         """
-        # Positioned read: kept where it is inside the unavailable path. Since
-        # F-SAVEPOINT the dirty flush follows this write instead of preceding
-        # it, so this read now sees the device state at tick start.
+        # Positioned read: the dirty flush follows this write (F-SAVEPOINT,
+        # ADR-0064), so this read sees the device state at tick start.
         act = self._reader.actuator_state()
         modes = (
             [str(m) for m in (act.attributes.get("hvac_modes") or [])] if act else []
@@ -517,8 +513,9 @@ class TickOrchestrator:
         if plan is None:
             return  # already in the safe state -> no re-write (idempotent)
         # The executor sequence owns the ONE shared boundary (a mode dispatch
-        # error skips the setpoint write — F-SAFESEQ until phase 10), both
-        # payloads (untagged; F-CONTEXT is phase 10) and the boundary log; the
+        # error skips the setpoint write; splitting the boundary is the open
+        # F-SAFESEQ), both payloads (untagged; tagging is the open F-CONTEXT)
+        # and the boundary log; the
         # commit right here folds the stamps. Mode part: ``last_written_mode``
         # only after a real nudge (our own safe-state mode is never a user
         # change — mode echo). Setpoint part: ``last_target``; clear the
@@ -640,14 +637,13 @@ class TickOrchestrator:
         (that is why the short-circuit ``TickPlan.actuator_plan`` is None): its
         actuator read is await-relative and cannot move into the prepare phase.
 
-        F-SAVEPOINT (phase 10) moved the dirty flush from BEFORE the safe-state
-        write to the END of this path, so the same tick persists both the
-        pending user intent AND the ``has_actuated`` flip the safe-state write
-        produces. Two consequences of dropping the leading await, both
-        deliberate: the outage clock read and the safe-state actuator read now
-        happen a save-duration earlier (the safe state engages marginally
-        sooner on a saving tick, and the plan is resolved against a marginally
-        earlier device snapshot).
+        INVARIANT (F-SAVEPOINT, ADR-0064): the dirty flush runs at the END of
+        this path, so the same tick persists both the pending user intent AND
+        the ``has_actuated`` flip the safe-state write produces. Accepted
+        consequences: the outage clock read and the safe-state actuator read
+        happen a save-duration earlier than the flush (the safe state engages
+        marginally sooner on a saving tick, and the plan is resolved against
+        a marginally earlier device snapshot).
         """
         now_mono = self._runtime.clock.monotonic()
         if self._runtime.safety.unavailable_since is None:
@@ -906,24 +902,25 @@ class TickOrchestrator:
         boundary (all verified against the executed code):
 
         1. The §4 regulation throttle (``_stage_setpoint_observe``) reads
-           ``self._override`` AFTER the mode-nudge await, while the guard's
-           ``is_safety`` gate (``_stage_mode_nudge``) reads it BEFORE that
-           await. ``set_override`` is synchronous and lock-free — a user
+           ``runtime.user.override`` AFTER the mode-nudge await, while the
+           guard's ``is_safety`` gate (``_stage_mode_nudge``) reads it BEFORE
+           that await. ``set_override`` is synchronous and lock-free — a user
            service call landing during the nudge dispatch is seen by the
            throttle but not by the guard. Both read positions are
            load-bearing → the nudge exec cannot move behind the setpoint
            decision, nor the decision ahead of the nudge.
-        2. The setpoint write gate reads ``self._mode_override`` after the
-           nudge await (same concurrency window, plus this-tick mutations
+        2. The setpoint write gate reads ``runtime.user.mode_override`` after
+           the nudge await (same concurrency window, plus this-tick mutations
            by ``_stage_mode_adoption``'s ``_set_mode_override``/
            ``_end_hold``) → the gate stays after nudge + adoption.
         3. The adoption (``_stage_setpoint_adopt``) is a domain mutation
            BETWEEN the writes: ``set_override`` stamps the hold expiry with
            ``dt_util.utcnow()`` — wall time advanced by the nudge-dispatch
            duration is observable in ``override_expires_at`` — and moves
-           the echo baselines (``_pre_write_sp``/``_last_written_sp``/
-           ``_last_sp_write_ts``/``_prev_device_sp``) the write gate and
-           next tick consume (``_adopted_sp`` skips this tick's write).
+           the echo baselines (``runtime.external.pre_write_sp``/
+           ``last_written_sp``/``last_sp_write_ts``/``prev_device_sp``) the
+           write gate and next tick consume (the adopted setpoint skips this
+           tick's write).
         4. The ext-temp select state is a positioned FRESH read after the
            mode/setpoint awaits → the ext segment stays last.
 
@@ -1076,6 +1073,10 @@ class TickOrchestrator:
             _fan_cmd: str | None = None
             if _ff.command == "stage" and _ff.state.stage is not None:
                 _fan_cmd = _ff.state.stage
+            elif _ff.restore_stage is not None:
+                # Exit restore (field decision): put the stage back to the
+                # pre-sequence value ("auto" fallback) — once, never fighting.
+                _fan_cmd = _ff.restore_stage
             elif (
                 self._c._active_comfort
                 and _ff.state.phase == "idle"
@@ -1555,18 +1556,15 @@ class TickOrchestrator:
         decision: ComfortDecision,
         wt: WriteTargetResult,
     ) -> ClimateBandResult:
-        """Comfort stage, climate band — TWO independent boundaries since
-        phase 10 (F-HUMSHADOW).
+        """Comfort stage, climate band — TWO independent boundaries
+        (ADR-0065).
 
         ADR-0050/0051: a mostly-diagnostic block, but NOT "no writes" — the
         humidity action it computes drives the LIVE dry mode-nudge
-        (mode_arbitration). Until phase 10 that live decision and the pure
-        free-running/fan/PMV shadows shared ONE ``try``, so a humidity failure
-        also wiped every downstream diagnostic key from ``coordinator.data``.
-        Each half now owns its boundary: a failing humidity decision costs the
-        dry nudge and marks its own three keys, while the shadow fields keep
-        being published; a failing shadow composition leaves the live nudge
-        untouched. Warn-once per boundary (AR-32) is preserved.
+        (mode_arbitration). Each half owns its boundary: a failing humidity
+        decision costs the dry nudge and marks its own three keys, while the
+        shadow fields keep being published; a failing shadow composition
+        leaves the live nudge untouched. Warn-once per boundary is preserved.
         """
         live = self._climate_humidity(ing, lvl, op, decision, wt)
         climate_diag = self._climate_shadows(ing, obs, sp, lvl, op, decision, wt, live)
@@ -1647,10 +1645,10 @@ class TickOrchestrator:
         tick's hysteresis latch.
 
         On failure the nudge falls back to "idle" and the latch keeps its
-        previous value (both unchanged since phase 0); what F-HUMSHADOW adds is
-        that the shadow composition still runs — against the neutral decision
-        returned here, so the three humidity keys stay published and say what
-        happened instead of vanishing with the rest of the band.
+        previous value; the shadow composition still runs against the neutral
+        decision returned here (ADR-0065), so the three humidity keys stay
+        published and say what happened instead of vanishing with the rest of
+        the band.
         """
         act_state = wt.act_state
         # Seeded, then overwritten inside the boundary: the shadow segment
@@ -2183,8 +2181,8 @@ class TickOrchestrator:
             # this tick ("not due" — nothing dispatched, nothing stamped).
             # ``ext_select_state()`` returns non-None only when a sensor
             # select was discovered, so the proxied id is never None when the
-            # select is planned. Both calls stay untagged until F-CONTEXT
-            # (phase 10); the commit right here folds the feed stamps.
+            # select is planned. Both calls stay untagged (open F-CONTEXT);
+            # the commit right here folds the feed stamps.
             plan = ExternalTemperaturePlan(
                 select_external=_select_external,
                 feed_value=(
@@ -2342,7 +2340,7 @@ class TickOrchestrator:
         results (pure construction — no ``self`` reads, no I/O).
 
         Body in ``tick_pipeline.build_finalize_context`` via the runtime; the
-        field set (50 names, pinned by test_phase1_tick_result) is unchanged."""
+        field set is pinned by test_phase1_tick_result."""
         return self._runtime.build_finalize_context(
             state=state,
             sp=sp,
@@ -2378,9 +2376,6 @@ class TickOrchestrator:
         t_out_eff, t_rm_eff, act_state = ctx.t_out_eff, ctx.t_rm_eff, ctx.act_state
         heating, frozen = ctx.heating, ctx.frozen
         operative = operative_temperature(room, t_mrt)
-        # Predictive solar-shading shadow (ADR-0043): forecast the peak operative
-        # temperature (Tier-2 linear while the EKF is not identified, e.g. summer)
-        # and what a cover *would* do — diagnostic only, no cover is moved yet.
         # --- Diagnostics-only shadows ---------------------------------------
         # The setpoint is already written above. A failure in any predictive
         # shadow (e.g. a degenerate value from a not-yet-identified EKF) must
@@ -2401,22 +2396,11 @@ class TickOrchestrator:
                 self._runtime.compressor.multi_lifecycle.health
             ),
         )
-        # Six independent boundaries since phase 10 (F-TPI / F-LIFECYCLE /
-        # F-PIACC): peak forecast → MPC → TPI → PI(+acc) → lifecycle fold →
-        # thermal arbitration, in unchanged order. A failing segment degrades
-        # only its own keys; tpi_duty (and with it heat_demand), the lifecycle
-        # fold and the ``_pi.acc`` advance are no longer hostage to an
-        # unrelated diagnostic — pinned by test_phase0_fault_shadow_domain.
         shadow = self._stage_shadow_domain(ctx, neutral)
         valve = self._stage_valve_health()
-        # Valve checkpoint: kept at its EXACT position. Since F-TRACEIO and
-        # F-SAVEPOINT the finalize segment is await-free, so this emission no
-        # longer sits between two awaits — but its ORDER relative to the
-        # stages around it is still behaviour, and the reorder rule keeps it
-        # structurally where it was (the emission merely goes through the
-        # typed checkpoint primitive). No
-        # ``TickStageError`` wrap either: the emission is immediate, nothing
-        # can be stranded.
+        # Valve checkpoint: kept at its EXACT position — the ORDER relative
+        # to the stages around it is behaviour. No ``TickStageError`` wrap
+        # either: the emission is immediate, nothing can be stranded.
         self._c._health.emit(valve.health_updates)
         outcome_diag = self._stage_outcome_diag(ctx)
         _tick_data = self._stage_assemble_tick_data(
@@ -2430,15 +2414,17 @@ class TickOrchestrator:
         _tick_data["hvac_action"] = (
             (act_state.attributes.get("hvac_action") or "") if act_state else ""
         )
-        # INVARIANT: the trace append inside this call is the LAST observable
-        # statement of the tick under the lock — its I/O duration counts into
-        # ``tick_ms``. The record build stays fused with the append inside
-        # ``_maybe_record_trace``'s guarded boundary (``_trace_enabled`` gate
-        # + swallow-all): splitting the build out as a pure pre-step would
-        # move a swallowed build failure onto the tick's error path. Only the
-        # build INSTRUCTIONS live in the pure ``diagnostics/trace.py``; the
-        # call site stays inside that boundary and ``TickOutcome.trace_record``
-        # stays ``None`` until F-TRACEIO (phase 10).
+        # INVARIANT: the trace enqueue inside this call is the LAST observable
+        # statement of the tick under the lock. Only the queue append runs
+        # here (``TraceRecorder.enqueue`` is sync and touches no file), so
+        # trace I/O does not count into ``tick_ms`` (ADR-0063). The record
+        # build stays fused with the enqueue inside ``_maybe_record_trace``'s
+        # guarded boundary (``_trace_enabled`` gate + swallow-all): splitting
+        # the build out as a pure pre-step would move a swallowed build
+        # failure onto the tick's error path. Only the build INSTRUCTIONS
+        # live in the pure ``diagnostics/trace.py``; the call site stays
+        # inside that boundary and ``TickOutcome.trace_record`` stays
+        # ``None``.
         await self._c._maybe_record_trace(
             _tick_data, room=room, t_out=t_out_eff, rh=rh, t_rm=t_rm_eff, now=now
         )
@@ -2464,16 +2450,15 @@ class TickOrchestrator:
     def _stage_shadow_domain(
         self, ctx: FinalizeContext, neutral: ShadowStageResult
     ) -> ShadowStageResult:
-        """The finalize shadows as SIX INDEPENDENT segments (phase 10: F-TPI,
-        F-LIFECYCLE, F-PIACC).
+        """The finalize shadows as SIX INDEPENDENT segments (ADR-0065),
+        pinned by test_phase0_fault_shadow_domain.
 
-        Until phase 10 the whole chain — peak forecast → MPC → TPI → PI(+acc)
-        → lifecycle fold → thermal arbitration → ``shadow_objs`` — shared ONE
-        ``try``, so a failure in the earliest step degraded ``tpi_duty`` (and
-        with it ``heat_demand``), skipped the compressor-lifecycle fold and
-        froze ``_pi.acc``. Each step now owns its own boundary and contributes
-        its own ``shadow_objs`` fragment on top of the neutral seed, so a
-        failing segment costs exactly its own keys.
+        Order: peak forecast → MPC → TPI → PI(+acc) → lifecycle fold →
+        thermal arbitration → ``shadow_objs``. Each step owns its own
+        boundary and contributes its own ``shadow_objs`` fragment on top of
+        the neutral seed, so a failing segment costs exactly its own keys —
+        ``tpi_duty`` (and with it ``heat_demand``), the lifecycle fold and
+        the ``_pi.acc`` advance included.
 
         The execution ORDER is unchanged, and so is every side effect and its
         position. The ONE surviving cross-segment dependency is data-borne,
@@ -2500,9 +2485,9 @@ class TickOrchestrator:
         )
 
     def _shadow_failed(self, segment: str) -> None:
-        """One shadow segment failed. The message keeps its pre-phase-10
-        wording (log filters key on ``shadow evaluation failed``) and gains the
-        segment name, because the degradation is no longer all-or-nothing."""
+        """One shadow segment failed. The wording ``shadow evaluation failed``
+        is load-bearing (user log filters key on it); the segment name says
+        which fragment degraded."""
         self._log.exception(
             "Poise: shadow evaluation failed (%s); the written setpoint stands, "
             "diagnostics degraded this tick",
@@ -2573,9 +2558,9 @@ class TickOrchestrator:
     def _shadow_tpi(self, ctx: FinalizeContext) -> dict[str, Any]:
         """Shadow direct-valve TPI duty (ADR-0036): computed + reported only.
 
-        F-TPI: its own boundary since phase 10, so ``tpi_duty`` — and with it
-        the published ``heat_demand`` (R13: the live duty while it exists) —
-        survives a failure in any other shadow.
+        F-TPI: its own boundary, so ``tpi_duty`` — and with it the published
+        ``heat_demand`` (the live duty while it exists) — survives a failure
+        in any other shadow.
         """
         try:
             return tpi_shadow_objs(
@@ -2605,9 +2590,9 @@ class TickOrchestrator:
     def _shadow_pi(self, ctx: FinalizeContext) -> dict[str, Any]:
         """PI-compensated setpoint shadow (ADR-0037): setpoint-only devices.
 
-        F-PIACC: the integrator advance is the segment's own side effect and no
-        longer hangs off an unrelated shadow's boundary — only a failure of the
-        PI evaluation itself can freeze ``acc`` now.
+        F-PIACC: the integrator advance is the segment's own side effect
+        behind its own boundary — only a failure of the PI evaluation itself
+        freezes ``acc``.
         """
         try:
             pi = evaluate_pi_shadow(
@@ -2639,8 +2624,8 @@ class TickOrchestrator:
         """Compressor-lifecycle fold + its gate diagnostics (ADR-0046 §8).
 
         F-LIFECYCLE: the fold is LIVE state — it feeds the next tick's
-        compressor guard — and since phase 10 it runs independently of every
-        diagnostic shadow before it. ``None`` means the fold itself failed: the
+        compressor guard — and runs behind its own boundary, independent of
+        every diagnostic shadow before it. ``None`` means the fold itself failed: the
         pre-tick lifecycle survives, the two ``compressor_gate_*`` keys stay
         absent and the arbitration segment (which needs this runtime) is
         skipped.
@@ -2659,8 +2644,7 @@ class TickOrchestrator:
             # guard diagnosis; the pre-observe gate mirrors the write-path
             # guard. Pinned by test_dry_nudge_when_humid_and_idle. Folding
             # observe first would let the guard judge against its own intent
-            # and self-armed mode hold (see the note at
-            # ``_stage_hold_routing``).
+            # and self-armed mode hold.
             # ADR-0046 §8 compressor protection (LIVE): the same decision the
             # write path above already applied (_guard_block), surfaced here
             # as a diagnostic; the display policy uses the effective timers so
@@ -2765,10 +2749,10 @@ class TickOrchestrator:
         """ADR-0044/0045 outcome scoring + savings diagnostics behind the ONE
         collector boundary (``DiagnosticsCollector.safe_collect``). The
         returned mapping IS this stage's typed cross-stage value:
-        ``safe_collect``'s replace-on-success dict — the collected 19 keys, or
-        the 7-key defaults on failure (the second observable key-shrink
-        mechanism); a wrapper dataclass would only re-wrap the collector
-        contract's own typed return."""
+        ``safe_collect``'s replace-on-success dict — the full collected key
+        set, or the defaults below on failure (the second observable
+        key-shrink mechanism); a wrapper dataclass would only re-wrap the
+        collector contract's own typed return."""
         now, room, heating = ctx.now, ctx.room, ctx.heating
         decision, t_out_eff, q_solar = ctx.decision, ctx.t_out_eff, ctx.q_solar
         sched, window_open, frozen = ctx.sched, ctx.window_open, ctx.frozen
@@ -2790,10 +2774,10 @@ class TickOrchestrator:
         # closure below runs the five state folds + assembly in text order
         # INSIDE that one try, so an exception in fold N still leaves
         # ``outcome_diag`` on the defaults, skips folds N+1… and freezes the
-        # metrics until the next healthy tick (F-OUTFOLD, a documented
-        # phase-10 candidate, would change that). The LIVE reads
-        # (``self._enabled``, ``self._override``, ``dt_util.now().month``)
-        # stay at their in-boundary positions and are evaluated at call time.
+        # metrics until the next healthy tick (the open F-OUTFOLD would
+        # change that). The LIVE reads (``runtime.user.enabled``,
+        # ``runtime.user.override``, ``dt_util.now().month``) stay at their
+        # in-boundary positions and are evaluated at call time.
         def _collect_outcome_diag() -> dict[str, Any]:
             _tick_min = TICK_INTERVAL_S / 60.0
             # Real elapsed dt (event-driven refreshes book < 60 s, not a flat
@@ -3065,7 +3049,7 @@ class TickOrchestrator:
         attach in ``_async_update_data`` builds on the same dict).
 
         This stage deliberately exceeds the soft ~150-line stage bound — the
-        ~115-line dict literal is kept verbatim as the aliasing-contract proof
+        large dict literal is kept verbatim as the aliasing-contract proof
         body; a cosmetic split would weaken the verbatim evidence without
         shrinking the proof surface."""
         now, room, rh, target = ctx.now, ctx.room, ctx.rh, ctx.target

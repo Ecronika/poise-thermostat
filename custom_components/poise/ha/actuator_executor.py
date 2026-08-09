@@ -3,10 +3,11 @@
 ``ActuatorExecutor`` owns the effect-call PRIMITIVES of the coordinator tick
 (one named method per write-site class, each a character-exact passthrough of
 the dispatch — payload shape, ``blocking=False``, context handling; they make
-NO decisions, hold NO try boundaries and stamp NO state) and the five SEQUENCE
-methods (``run_mode_nudge``, ``run_setpoint_write``, ``run_ext_temp``,
-``run_frost_rescue``, ``run_unavailable_safe``) that own the per-effect TRY
-BOUNDARIES and return an ordered ``ExecutionReport``.  The sequences still make
+NO decisions, hold NO try boundaries and stamp NO state) and the six
+SEQUENCE methods (``run_mode_nudge``, ``run_fan_write``,
+``run_setpoint_write``, ``run_ext_temp``, ``run_frost_rescue``,
+``run_unavailable_safe``) that own the per-effect TRY BOUNDARIES and return
+an ordered ``ExecutionReport``.  The sequences still make
 no domain decisions and stamp no domain state — every gate (throttle, guard,
 deadband, off-hold, ``should_write``, ``external_feed_due``,
 ``resolve_safe_state``) is resolved by the caller BEFORE a sequence runs, and
@@ -28,9 +29,11 @@ all stamps are folded afterwards by the coordinator's ``commit_execution``.
   ``ServiceNotFound``).  These primitives re-raise them UNCHANGED (no try of
   their own) and must never switch to ``blocking=True``.  The only
   ``blocking=True`` service calls in the integration are the forecast READ
-  (``forecast_provider``, ``return_response`` — not an effect write) and the
+  (``forecast_provider``, ``return_response`` — not an effect write), the
   deliberate teardown writes in ``__init__.py`` (boiler OFF / actuator park /
-  TRV sensor-source restore) — documented exceptions outside this class.
+  TRV sensor-source restore) and the hub's boiler actions
+  (``hub_coordinator``, blocking so a failed action is observable
+  synchronously) — documented exceptions outside this class.
 
 * **Sequence semantics** — owned by the sequence methods, preserved exactly:
 
@@ -49,19 +52,19 @@ all stamps are folded afterwards by the coordinator's ``commit_execution``.
      The coupling is sequence-INTERNAL (``skip_feed_on_select_success``);
      it never surfaces as a commit stamp.
 
-* **Context matrix**: only the enabled-path mode nudge and the tick setpoint
-  write carry a context tag; the safe-state pair, the frost-rescue pair, the
-  select switch and the ext-temp feed are deliberately untagged (until
-  F-CONTEXT).  The tagged sequences CREATE the ``Context`` themselves (before
-  the dispatch, so a synchronously failing call still reports its id — attempt
-  state, pinned by test_phase0_attempt_success) and report the id via
-  ``EffectExecution.context_id``; REGISTERING the id in ``own_context_ids`` is
-  the commit's job.  The bare primitives still accept a ready-made ``Context``
-  purely as a parameter.
+* **Context matrix**: only the enabled-path mode nudge, the tick setpoint
+  write and the ADR-0068 fan-stage write carry a context tag; the safe-state
+  pair, the frost-rescue pair, the select switch and the ext-temp feed are
+  deliberately untagged (until F-CONTEXT).  The tagged sequences CREATE the
+  ``Context`` themselves (before the dispatch, so a synchronously failing
+  call still reports its id — attempt state, pinned by
+  test_phase0_attempt_success) and report the id via
+  ``EffectExecution.context_id``; REGISTERING the id in ``own_write_ctx_ids``
+  is the commit's job.  The bare primitives still accept a ready-made
+  ``Context`` purely as a parameter.
 
 * **Patch surface**: the setpoint path dispatches through the module attribute
-  ``actuator_mod.write`` (the same module object the coordinator aliases via
-  ``from . import actuator as actuator_mod``), resolved at call time — so
+  ``actuator_mod.write``, resolved at call time — so
   ``patch.object(actuator_mod, "write", ...)`` keeps intercepting the awaited
   write (test_phase0_attempt_success's injection point).
 
@@ -117,10 +120,10 @@ class ActuatorExecutor:
         """Dispatch one ``climate.set_hvac_mode`` (fire-and-forget).
 
         Covers all three mode-write sites: the unavailable-safe mode write (no
-        context), the enabled-path mode nudge (``context=_own_ctx()`` — one of
-        only two tagged sites) and the frost-rescue nudge (deliberately
-        untagged).  ``context=None`` is an omitted kwarg (HA then creates a
-        fresh, unregistered Context itself).
+        context), the enabled-path mode nudge (context created by the
+        sequence — a tagged site) and the frost-rescue nudge (deliberately
+        untagged).  ``context=None`` is passed through unchanged; HA then
+        creates a fresh, unregistered Context itself.
         """
         await self._hass.services.async_call(
             "climate",
@@ -155,8 +158,8 @@ class ActuatorExecutor:
 
         Covers the three ``climate.set_temperature`` sites: the
         unavailable-safe floor (reason ``unavailable_safe``, no context), the
-        tick setpoint write (reason ``tick``, ``context=_own_ctx()`` — the
-        second of the two tagged sites) and the frost-rescue floor (reason
+        tick setpoint write (reason ``tick``, context created by the
+        sequence — a tagged site) and the frost-rescue floor (reason
         ``frost_rescue``, no context).  ``command.value`` goes on the wire RAW
         (unsnapped); the module-level dispatch keeps the
         ``patch.object(actuator_mod, "write", ...)`` test injection surface

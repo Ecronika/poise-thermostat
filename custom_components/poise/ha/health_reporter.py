@@ -7,13 +7,9 @@ repair issues live here: the transition-only ``issue()`` primitive, the
 ``emit()`` checkpoint primitive the tick flow drives, the heating-failure
 ``notify_failure()`` and the setup-time ``validate_configured_ext_temp()``.
 
-The bodies were moved VERBATIM (plan step 3, stage S2): the only edits are
-mechanical receiver substitutions — ``self.hass`` became the injected
-``self._hass``, ``self._input_reader`` the injected ``self._reader``,
-``_LOGGER`` the injected ``self._log`` (the logger CHANNEL is behaviour:
-records must keep the name ``custom_components.poise.coordinator``),
-``self._issue``/``self._emit_health_updates`` became ``self.issue``/
-``self.emit``, and every remaining ``self.<x>`` became ``self._c.<x>``.
+The logger CHANNEL is behaviour: records must keep the name
+``custom_components.poise.coordinator``, so the coordinator injects its
+module logger as ``self._log``.
 
 EMISSION POSITIONS ARE BEHAVIOUR (binding).  Nothing here defers, batches or
 re-orders a create/delete.  ``issue()`` keeps its transition-only semantics

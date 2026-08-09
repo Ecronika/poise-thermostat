@@ -3,18 +3,17 @@
 ``ForecastProvider`` owns the forecast fetch and its cache state (``forecast``
 / ``forecast_at`` / ``fail_at``).
 
-**F-FORECAST (phase 10) — the chosen gate variant.** Until phase 10 every
-stale-cache tick awaited ``weather.get_forecasts`` under the coordinator lock,
-so a slow weather integration stretched the tick by up to
-``_WEATHER_CALL_TIMEOUT_S``.  The refresh now runs as a background task and the
-tick reads the cache.  The ONE exception is deliberate:
+The refresh runs as a background task and the tick reads the cache
+(ADR-0063), so a slow weather integration cannot stretch the tick by up to
+``_WEATHER_CALL_TIMEOUT_S``.  The ONE exception is deliberate:
 
 * **Cold start** (no cache at all — fresh restart, or every usable sample
-  expired) still AWAITS the fetch.  A cold predictive tick would otherwise fall
+  expired) AWAITS the fetch.  A cold predictive tick would otherwise fall
   back to the flat constant outdoor temperature, and that is exactly the tick
   that decides a preheat start edge after a nightly restart.  It is bounded by
   the same timeout, happens at most once per ``FORECAST_TTL_S`` (the failure
-  backoff covers the rest), and is the only await left in the tick.
+  backoff covers the rest), and is the only await left in the tick that can
+  block on a third-party integration.
 * **Warm cache** — a stale-but-present cache serves this tick and a background
   refresh is kicked off for the next one.  Worst case, optimal start uses a
   forecast that is one tick older than before; the samples are hourly, so that
@@ -30,9 +29,11 @@ Concurrency contract:
 * **Cancel** — ``async_close`` (called from the coordinator's unload path)
   cancels an in-flight refresh so no task outlives the config entry.
 
-This is the ONE ``blocking=True`` service call of the integration — and it is a
-READ (``return_response=True``), not an effect write; every effect write
-(``actuator_executor``) stays ``blocking=False``.
+This is the only ``blocking=True`` service call in the TICK path — and it is
+a READ (``return_response=True``), not an effect write; every effect write
+(``actuator_executor``) stays ``blocking=False``.  The remaining
+``blocking=True`` calls live outside the tick (``__init__.py`` teardown,
+``hub_coordinator`` boiler actions).
 
 Semantics (unchanged by the decoupling):
 

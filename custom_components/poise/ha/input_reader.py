@@ -22,9 +22,6 @@ must not:
   ``ext_select_state()`` (in the write path after the mode/setpoint awaits)
   and ``valve_steps()`` (after the save checkpoint).  Clock calls after awaits
   are untouched by this module.
-
-Full one-snapshot-per-tick consolidation is a later step (the prepare/resume
-structure).
 """
 
 from __future__ import annotations
@@ -195,6 +192,9 @@ class InputReader:
         no-op afterwards (``guards_resolved`` gate) — a manually pinned entity
         is never overwritten by a later re-resolution.  A discovery failure is
         swallowed (debug log): guard resolution must never break setup.
+        ``guards_resolved`` is set BEFORE the try on purpose: a registry error
+        must not turn into a per-tick retry storm, so a failed discovery stays
+        failed until reload (the neutral guard defaults are safe).
         """
         if self.guards_resolved:
             return
@@ -209,10 +209,10 @@ class InputReader:
             ):
                 eid = e.entity_id
                 # A device-internal adaptive/smart-temperature loop is
-                # orthogonal to the roles below and can be a switch. OR a
-                # select., so detect it independently of the elif chain (a
-                # select. would otherwise be consumed by the sensor-select
-                # branch first).
+                # orthogonal to the roles below and can be a ``switch.`` OR a
+                # ``select.`` entity, so detect it independently of the elif
+                # chain (a ``select.`` would otherwise be consumed by the
+                # sensor-select branch first).
                 if self.adaptive_mode_entity is None and (
                     looks_like_adaptive_mode_switch(eid)
                 ):
@@ -360,7 +360,7 @@ class InputReader:
         modes = act.attributes.get("hvac_modes") if act else None
         if modes:
             return climate_capability([str(m) for m in modes])
-        return True, False  # default: assume a heat-only TRV
+        return True, False
 
     def device_max(self) -> float:
         """The actuator's ``max_temp`` with the ``DEVICE_MAX_C`` fallback

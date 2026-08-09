@@ -25,9 +25,9 @@ return ≡ ``_run_once`` return ≡ ``coordinator.data``
 
 KEY SHRINK (pinned behaviour): the available key set is NOT schema-stable —
 three degradations shrink it silently, all three served through this same
-identity chain: (1) a shadow-domain failure falls back to the neutral
-``shadow_objs`` WITHOUT the two ``compressor_gate_*`` keys (156 → 154,
-``test_phase0_fault_shadow_domain``); (2) an outcome-collector failure leaves
+identity chain: (1) a failing lifecycle segment leaves the neutral
+``shadow_objs`` seed WITHOUT the two ``compressor_gate_*`` keys
+(``test_phase0_fault_shadow_domain``); (2) an outcome-collector failure leaves
 the 7 default keys instead of the full collector set (``ca_*``/``ref_offset*``/
 ``tau_*``/``cool_sp_compensated`` vanish); (3) a climate-band failure yields
 ``climate_diag == {}`` (all climate-band keys vanish,
