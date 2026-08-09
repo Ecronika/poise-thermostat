@@ -31,11 +31,11 @@ _N = 6
 # ---- tuning (ADR-0009) -----------------------------------------------------
 _R: float = 0.04  # measurement noise variance (~0.2 °C std)
 # process noise per *nominal* tick; predict() scales it by dt_h / _NOMINAL_DT_H so
-# a longer or shorter step injects proportionally more or less noise (review F7).
+# a longer or shorter step injects proportionally more or less noise.
 _Q = (0.01, 0.0005, 0.005, 0.005, 0.002, 0.002)
 _NOMINAL_DT_H: float = 1.0 / 60.0  # 60 s reference tick for the Q scaling above
-_ANOMALY_SIGMA: float = 4.0
-_ANOMALY_INFLATE: float = 100.0
+_ANOMALY_SIGMA: float = 4.0  # innovation gate [σ]; see the Mahalanobis clip in update()
+_ANOMALY_INFLATE: float = 100.0  # R-multiplier floor on a gated outlier update
 _PSD_FLOOR: float = 1e-10
 
 # Identifiability (ADR-0024)
@@ -44,13 +44,17 @@ _IDLE_GATE: int = 60  # idle observations before the model is trusted
 _ACTIVE_GATE: int = 20  # heating/cooling observations before trusted
 _RECOVERY_PEG_COUNT: int = 50  # consecutive pegged updates -> runtime reset
 
-# defaults & bounds
+# Priors & hard parameter bounds, state order (T, alpha, beta_h, beta_c,
+# beta_s, beta_o): [°C, 1/h, K/h per unit heat drive, K/h per unit cool
+# drive, K/h per normalised solar input, K/h per normalised occupancy].
+# The bounds are plausibility rails, not tuned values — alpha 0.005..2 /h
+# spans tau 0.5..200 h.
 _DEFAULTS = (21.0, 0.15, 3.0, 4.0, 0.5, 0.3)
 _LOWER = (-50.0, 0.005, 0.1, 0.1, 0.0, 0.0)
 _UPPER = (60.0, 2.0, 200.0, 300.0, 50.0, 20.0)
 
 _P0 = (1.0, 0.01, 1.0, 1.0, 0.5, 0.5)  # initial covariance diagonal
-_SEED_BH_VAR: float = 25.0  # M4: variance a cold-start beta_h seed is held at
+_SEED_BH_VAR: float = 25.0  # variance a cold-start beta_h seed is held at
 
 EKF_VERSION: int = 1
 
@@ -127,7 +131,7 @@ class ThermalEKF:
         self._last_mode: str = "idle"
         self._alpha_pegged_count: int = 0
         # ticks the cooling / occupancy inputs were actually excited; beta_c
-        # / beta_o are unobservable until these grow (review B1).
+        # / beta_o are unobservable until these grow.
         self._n_uc: int = 0
         self._n_qocc: int = 0
 
@@ -175,7 +179,7 @@ class ThermalEKF:
 
         # covariance: P = F P F^T + Q (Q mode-gated to observable params)
         self.p = _matmul(_matmul(f, self.p), _transpose(f))
-        # F7: scale process noise by step length so variable ticks (a late/missed
+        # Scale process noise by step length so variable ticks (a late/missed
         # tick, a restart) inject the right amount; == _Q at the nominal tick.
         q_scale = max(0.0, dt_h) / _NOMINAL_DT_H
         self.p[_T][_T] += _Q[_T] * q_scale
@@ -245,7 +249,7 @@ class ThermalEKF:
                 self.p[i][j] = self.p[j][i] = avg
             if self.p[i][i] < _PSD_FLOOR:
                 self.p[i][i] = _PSD_FLOOR
-        # M3: bound each off-diagonal so |corr| <= 1 (every 2x2 principal minor
+        # Bound each off-diagonal so |corr| <= 1 (every 2x2 principal minor
         # stays >= 0). A positive diagonal alone does not keep P positive
         # semi-definite; this repairs the cheap necessary condition every tick.
         for i in range(_N):
@@ -277,7 +281,7 @@ class ThermalEKF:
         with the filter (charter G6).
         """
         self.x[_BH] = min(max(value, _LOWER[_BH]), _UPPER[_BH])
-        # M4: a cold-start seed is an informed guess, not a measurement — hold it
+        # A cold-start seed is an informed guess, not a measurement — hold it
         # loosely (inflate its variance) so the filter moves off an arbitrary
         # beta_h quickly once real heating data arrives, instead of being biased.
         self.p[_BH][_BH] = max(self.p[_BH][_BH], _SEED_BH_VAR)
@@ -315,7 +319,9 @@ class ThermalEKF:
 
     @property
     def confidence(self) -> float:
-        # identifiability (data) blended with covariance accuracy (ADR-0024)
+        # 30 % of confidence is earned by identifiability alone, 70 % is
+        # additionally gated on covariance accuracy — a well-observed but
+        # still-uncertain model never reads above 0.3 (ADR-0024).
         data = self.data_factor
         return 0.3 * data + 0.7 * data * self.accuracy_factor
 
@@ -329,10 +335,10 @@ class ThermalEKF:
 
     @property
     def cooling_identified(self) -> bool:
-        """Whether beta_c (cooling responsivity) is trustworthy (review B1).
+        """Whether beta_c (cooling responsivity) is trustworthy.
 
         beta_c is only observable if the cooling input u_c is actually excited.
-        Since v0.133 the coordinator feeds u_c during the cooling season (ADR-0024,
+        The coordinator feeds u_c during the cooling season (ADR-0024,
         cool_drive_signal), so this becomes True once n_uc reaches the active gate;
         until then downstream (MPC / optimal-stop / TPI) must not trust beta_c --
         it stays at prior.
@@ -341,7 +347,7 @@ class ThermalEKF:
 
     @property
     def occupancy_identified(self) -> bool:
-        """Whether beta_o (occupancy gain) is trustworthy (review B1).
+        """Whether beta_o (occupancy gain) is trustworthy.
 
         beta_o is never excited in the live wiring (q_occ is not fed), so this
         is False and beta_o stays at its prior -- flagged so it is not trusted.
@@ -375,10 +381,10 @@ class ThermalEKF:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ThermalEKF:
-        # M8: validate matrix shapes; a malformed x/P recovers with a fresh
+        # Validate matrix shapes; a malformed x/P recovers with a fresh
         # model (documented corruption-recovery, ADR-0007) rather than loading a
         # P that crashes later in _matmul.
-        # F23: an ekf_version *mismatch* is a migration, not corruption. Keep the
+        # An ekf_version *mismatch* is a migration, not corruption. Keep the
         # temperature state and the maturity counters, and fall the RC params
         # back to priors with a re-widened covariance -- exactly as the pegged
         # recovery below does. Discarding the whole model there wiped the
@@ -409,7 +415,7 @@ class ThermalEKF:
         # recovery: a parameter pegged at its bound on load -- or a model loaded
         # across a version bump -- is unreliable, so reset the RC parameters to
         # defaults but keep the observation counters so the maturity gates stay
-        # satisfied while it re-learns (ADR-0007/0009, F23).
+        # satisfied while it re-learns (ADR-0007/0009).
         if (
             not version_ok
             or ekf.x[_A] >= _UPPER[_A] * 0.99

@@ -64,9 +64,11 @@ def humidity_ratio(t_c: float, rh_percent: float, pressure_pa: float = _P_ATM) -
     """Humidity ratio (mixing ratio) [g water vapour / kg dry air].
 
     ``w = 1000 · 0.621945 · p_v / (p_atm − p_v)`` with the vapour partial
-    pressure ``p_v`` from :func:`vapour_pressure`. This is the unit in which the
-    comfort layer checks the EN 16798-1 / ASHRAE-55 absolute-moisture ceiling
-    (12 g/kg). ``p_v`` is capped just below total pressure so the ratio stays
+    pressure ``p_v`` from :func:`vapour_pressure`. This is the unit in which
+    the comfort layer checks the EN 16798-1 absolute-moisture ceiling
+    (12 g/kg; ASHRAE 55 dropped its 0.012 kg/kg limit in 55-2020 — see
+    ``comfort/humidity.py``). ``p_v`` is capped just below total pressure so
+    the ratio stays
     finite at pathological inputs (100 % RH at high temperature).
     """
     p_v = min(vapour_pressure(t_c, rh_percent), pressure_pa - 1.0)

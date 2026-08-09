@@ -1,4 +1,4 @@
-"""Season-invariant heating-rate prior (ThermoSmart Feat 2; charter G12, ADR-0004/0009).
+"""Season-invariant heating-rate prior (ThermoSmart method; ADR-0028, ADR-0004/0009).
 
 Normalises the observed heat-up rate by the driving temperature difference
 (``heat_rate / (target - outdoor)``) so a mild-October and a cold-January
@@ -6,12 +6,13 @@ observation become comparable, then pools observations with a Gaussian
 outdoor-similarity kernel and a half-life forgetting weight (ThermoSmart:
 σ_temp ≈ 5 K, 180-day half-life). The result is used ONLY as an EKF
 cold-start prior / fallback — it never controls in parallel with the EKF
-(Programmstrukturplan; charter G6). Shadow estimator (ADR-0026): it always
+(ADR-0002 estimator/optimizer split). Shadow estimator (ADR-0026): it always
 accumulates and is persisted, even while the EKF owns the live model.
 
-Physics note: at the start of a heat-up the room rate dT/dt ≈ beta_h (the EKF
-heating responsivity), because the loss term alpha·(T−T_out) is still small.
-So the predicted heat-up rate doubles as a beta_h seed.
+Physics note: the normalised rate is ``beta_h·u_h − alpha·(T−T_out)`` per
+kelvin of drive, so the prior under-estimates ``beta_h`` by roughly the loss
+term. Acceptable as a cold-start seed only: ``ThermalEKF.seed_beta_h`` holds
+the seed at a wide variance so the filter leaves it quickly (ADR-0028).
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any
 
-HALF_LIFE_DAYS: float = 180.0  # ThermoSmart forgetting half-life (G12)
+HALF_LIFE_DAYS: float = 180.0  # ThermoSmart forgetting half-life
 TEMP_SIGMA: float = 5.0  # outdoor-temperature similarity kernel σ [K]
 MIN_DRIVE_K: float = 1.0  # ignore observations with a tiny driving ΔT
 HISTORY_CAP: int = 200

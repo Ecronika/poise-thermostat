@@ -3,7 +3,7 @@ has stopped moving, not merely because enough samples were counted.
 
 The counter-based ``identified`` gate (ADR-0024) trusts τ once n_heating/n_cooling
 reach a threshold; the covariance route was rejected (the α random-walk process
-noise floors ``p[α][α]`` so it never shrinks — the v0.144 closed-loop finding).
+noise floors ``p[α][α]`` so it never shrinks).
 This is the sound alternative: track α over a window of *learn-active* time (ticks
 with heating/cooling excitation, where α can actually move) and measure its
 relative spread. A converged α has a small spread → τ is settled/confident; an α

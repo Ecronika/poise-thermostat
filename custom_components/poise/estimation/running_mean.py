@@ -1,8 +1,9 @@
 """Running-mean outdoor temperature ``T_rm`` (EN 16798-1, Annex B).
 
 ``T_rm`` is the exponentially weighted mean of recent daily mean outdoor
-temperatures; it is the basis of the adaptive comfort band (ADR-0010, charter
-G2). The recommended decay constant is alpha = 0.8.
+temperatures; it is the basis of the EN 16798-1 adaptive comfort band
+(``comfort/en16798.py``; ADR-0023 §1, ADR-0051). The recommended decay
+constant is alpha = 0.8.
 """
 
 from __future__ import annotations
@@ -55,7 +56,9 @@ class RunningMeanTracker:
     day: int | None = None  # ordinal of the day currently being accumulated
     day_sum: float = 0.0
     day_count: int = 0
-    recent_days: list[float] = field(default_factory=list)  # most-recent-first
+    # Most-recent-first daily means, persisted for diagnostics / a potential
+    # ``running_mean_from_days`` re-seed; the recursion itself never reads it.
+    recent_days: list[float] = field(default_factory=list)
 
     def observe(self, t_out: float, day: int) -> None:
         """Feed one outdoor sample tagged with its calendar day (ordinal)."""
