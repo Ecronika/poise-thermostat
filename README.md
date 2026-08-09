@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.186.1-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.187.1-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.1%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -145,11 +145,11 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Comfort weight | yes | 70 % | Comfort-vs-energy priority used by preheat / band widening. |
 | Setback delta | yes | 3 K | Night / away setback below the comfort base. |
 | Optimal start | yes | on | Forecast-aware preheat to the comfort deadline. |
-| Comfort start / end | no | — | Daily comfort window (enables scheduled setback when set). |
+| Comfort start / end (+ windows 2–8) | no | — | Daily comfort window(s) (enables scheduled setback when set). The options form offers one additional empty window once the previous one is filled (n+1 pattern, up to 8; clear both times to remove one). Overlapping windows merge; optimal start preheats to **every** window start (ADR-0070). |
 | Outdoor / humidity / MRT / T_rm sensors | no | — | Improve accuracy (mould floor, operative temperature, running mean). |
 | Outdoor-humidity sensor | no | — | Dedicated outdoor-RH sensor for the ventilation advice (else the weather entity's `humidity` attribute is used, ADR-0066). |
-| Presence (home) · occupancy sensor · absence delay | no | — · — · 30 min | ADR-0058 presence coupling: person/tracker entities gate the house, a motion/occupancy sensor gates the room (Eco widening after the delay). |
-| Room profile | no | office | met/clo assumption for the PMV evaluation (`office` / `living` / `bedroom` / `kitchen`, ADR-0054). |
+| Presence (home) · occupancy sensor · absence delay | no | — · — · 30 min | ADR-0058 presence coupling: person/tracker entities gate the house, a motion/occupancy sensor gates the room. **Inside** a comfort window, occupancy extends comfort — the band only relaxes (Eco widening) after the room has been empty for the absence delay, and returning restores it immediately. Occupancy does **not** raise the band outside the window(s) (use Boost or another window for spontaneous use; ADR-0058 N2). A dead sensor fails safe to *present*. |
+| Room profile | no | office | met/clo assumption for the PMV evaluation (`office` / `living` / `bedroom` / `kitchen` / `bathroom`, ADR-0054). |
 | Aktive Behaglichkeit | no | off | Opt-in fan-first cooling + comfort actuation building blocks (ADR-0069). |
 | Ventilation notification | no | off | Opt-in self-clearing notification for the ventilation advice (the bus event always fires, ADR-0066). |
 | Suggestion learning | no | on | ADR-0060 override-pattern suggestions as fixable repair issues; the toggle is the per-zone opt-out. |
