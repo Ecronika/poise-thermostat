@@ -8,9 +8,8 @@ humidity-ratio backstop (12 g/kg, the **EN 16798-1** design ceiling) additionall
 triggers drying when a warm room's RH still looks acceptable but its absolute
 moisture is high. NB: ASHRAE 55 carried the same 0.012 kg/kg limit up to 55-2017
 but **removed it in 55-2020** (no humidity ceiling since; non-thermal effects are
-noted instead) — EN 16798-1 is the remaining source. At 20 °C the cap equals
-~82 % RH, so it only binds before the category ceiling above ~25 °C: it is a
-warm-room mugginess criterion, not winter mould protection (that is ADR-0062).
+noted instead) — EN 16798-1 is the remaining source (role note at
+``DEFAULT_ABS_HIGH_GKG``).
 Asymmetric hysteresis (exit = ceiling −
 hysteresis) mirrors HA-core ``generic_hygrostat``. A dry-guard blocks any
 dehumidifying action below ``rh_low`` and stays the TOP precedence, so the

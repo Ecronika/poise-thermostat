@@ -4,7 +4,7 @@ Mould risk is governed by the relative humidity at the *coldest surface*, not
 the room air. The surface temperature factor ``f_Rsi = (θ_si - θ_e)/(θ_i - θ_e)``
 links surface to air; the growth criterion is surface RH <= 80 %. We invert it
 to the minimum air temperature that keeps the surface below the limit
-(charter G4, ADR-0062).
+(ADR-0062).
 """
 
 from __future__ import annotations
@@ -15,10 +15,13 @@ from ..estimation.psychrometrics import (
     vapour_pressure,
 )
 
-DEFAULT_F_RSI: float = 0.7  # DIN 4108-2 minimum for existing construction
+# DIN 4108-2 minimum surface-temperature factor; 0.7 is deliberately the
+# conservative existing-building value (ADR-0062 — the safe assumption when
+# the construction is unknown).
+DEFAULT_F_RSI: float = 0.7
 SURFACE_RH_LIMIT: float = 0.80  # mould growth criterion (EN ISO 13788)
 _F_RSI_FLOOR: float = 0.1  # f_Rsi in (0,1]; guard div-by-zero / unphysical input
-_MOLD_MAX_C: float = 24.0  # sane ceiling: caps the singularity blow-up (review F4)
+_MOLD_MAX_C: float = 24.0  # sane ceiling: caps the singularity blow-up (ADR-0062 §3)
 
 
 def surface_temperature(

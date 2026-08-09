@@ -10,7 +10,8 @@ from __future__ import annotations
 
 
 def air_weight(velocity: float) -> float:
-    """Air-temperature weight ``a`` in operative temperature (EN ISO 7726)."""
+    """Air-temperature weight ``a`` in operative temperature (EN ISO 7726):
+    0.5 for v < 0.2 m/s, 0.6 for 0.2 <= v < 0.6, 0.7 above."""
     if velocity < 0.2:
         return 0.5
     if velocity < 0.6:

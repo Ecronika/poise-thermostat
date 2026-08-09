@@ -17,8 +17,9 @@ def pmv_control_ready(*, rh: float | None, pmv_valid: bool) -> bool:
     """All REAL inputs for an active PMV-based setpoint shift are present.
 
     ``rh`` must be an actual sensor value — the climate shadow substitutes
-    50 % when it is missing, and ``pmv_validity()`` only checks the met/clo
-    domain, so ``pmv_valid`` alone can be True without any humidity sensor.
+    50 % when it is missing, and ``pmv_validity()`` checks the met/clo domain
+    (plus, since Nachtrag V5, the near-saturation RH edge WHEN a real RH is
+    fed), so ``pmv_valid`` alone can be True without any humidity sensor.
     The live ±1-K offset (ADR-0054 Stufe 2) hangs exclusively on this
     predicate; ``pmv_valid`` stays the diagnostic criterion.
     """

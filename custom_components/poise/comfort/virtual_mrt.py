@@ -1,4 +1,4 @@
-"""Virtual mean-radiant temperature (EN ISO 7726 / DIN 4108-2, ADR-0010/0017/0026).
+"""Virtual mean-radiant temperature (EN ISO 7726; ADR-0010/0017/0026).
 
 When no globe/MRT sensor exists, estimate MRT from always-available signals:
 the exterior envelope (cold walls in winter, warm in summer) pulls MRT toward

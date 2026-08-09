@@ -1,8 +1,10 @@
-"""Norm-based hard temperature envelope (charter G1/G18; ASR A3.5).
+"""Norm-based hard temperature envelope (ADR-0027; ASR A3.5).
 
-The unconditional air-temperature limits that comfort and efficiency may never
-violate (precedence health/safety > comfort > efficiency, K4/K7). Comfort,
-virtual-MRT and efficiency math all feed through this final clamp:
+The unconditional air-temperature limits that comfort and efficiency may
+never violate (precedence health/safety > comfort > efficiency, ADR-0035).
+``ASR_MAX_ROOM_C`` is consumed by the live write path
+(``control/tick_resolve``); ``clamp_to_norm`` is the reference formulation
+of ADR-0027, exercised by the pure tests only:
 
 - floor: frost / mould-protection minimum (passed in by the caller — the hard
   health floor that the setback/efficiency path can never undercut).

@@ -69,11 +69,10 @@ def decide(
     pmv_offset_k: float = 0.0,
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
-    # The fixed design bands are anchored to the comfort centre (heat/cool edges
-    # from comfort_base +/- the neutral dead-band, widened by the efficiency
-    # priority — review M1). When ``adaptive_cool`` is enabled the cooling edge is
-    # then lifted to the EN 16798 adaptive upper for the running mean (ADR-0023
-    # §1), so a warm free-running summer is not over-cooled toward the fixed band.
+    # The fixed design bands are anchored to the comfort centre (heat/cool
+    # edges from comfort_base +/- the neutral dead-band, widened by the
+    # efficiency priority). The adaptive cooling lift is applied below, gated
+    # on occupancy (ADR-0061).
     widen = (1.0 - _clamp(priority, 0.0, 1.0)) * _EFFICIENCY_WIDEN_K
     # Clamp each edge into its EN-16798 category band AFTER widening, so a wide
     # efficiency band can never breach the comfort category lower/upper (review

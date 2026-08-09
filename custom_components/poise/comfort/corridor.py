@@ -1,9 +1,13 @@
-"""Comfort-corridor assembly (ADR-0013/0017).
+"""Comfort-corridor assembly (ADR-0017/0035).
 
 Builds the air-side :class:`ComfortCorridor` from the EN 16798 adaptive band
 (operative, transformed to air), the mould floor (DIN 4108-2), the frost floor
 and the device limit. Bounds are kept as lists with their causes; the *binding*
-bound is computed later by the corridor itself / arbitration (ADR-0013).
+bound is resolved later by the precedence solver (ADR-0035).
+
+Reference-pipeline scope only (``pipeline.run_tick``, harness + pure-core
+tests): the live coordinator assembles its envelope in
+``control/tick_resolve``.
 """
 
 from __future__ import annotations

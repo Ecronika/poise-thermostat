@@ -40,7 +40,8 @@ class ComfortBand:
 
 
 def comfort_temperature(t_rm: float) -> float:
-    """Neutral operative comfort temperature (EN 16798-1 Eq. B.x)."""
+    """Neutral operative comfort temperature, EN 16798-1:2019 Annex B:
+    ``Θ_comf = 0.33 · T_rm + 18.8`` [°C]."""
     return 0.33 * t_rm + 18.8
 
 
@@ -58,10 +59,13 @@ def adaptive_band(t_rm: float, category: Category = Category.II) -> ComfortBand:
 
 
 # Fixed design operative-temperature ranges for *mechanically conditioned*
-# buildings (EN 16798-1: heating = winter, cooling = summer). The adaptive band
-# above applies only to free-running buildings; when actively heating/cooling
-# these fixed category ranges govern. Values consistent with the Smart Setpoint
-# blueprint (Cat. II heating 20-24, cooling 23-26).
+# buildings (heating = winter, cooling = summer). The adaptive band above
+# applies only to free-running buildings; when actively heating/cooling these
+# fixed category ranges govern. Only the Cat II pair is source-anchored
+# (heating 20-24 / cooling 23-26, Smart Setpoint blueprint via ADR-0023);
+# the Cat I/III values extrapolate it by +-1 K per category step and are
+# project choices, NOT verbatim EN 16798-1 table values (the norm gives design
+# values per season, not these full ranges).
 HEATING_LOWER: dict[Category, float] = {
     Category.I: 21.0,
     Category.II: 20.0,

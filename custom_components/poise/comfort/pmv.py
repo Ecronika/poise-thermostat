@@ -18,13 +18,15 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import Final
 
 CLO_WINTER = 1.0
 CLO_SUMMER = 0.5
 MET_OFFICE = 1.2
 STILL_AIR_MS = 0.1  # EN ISO 7726 baseline velocity (matches operative.py)
 
-# EN 16798-1 comfort categories by |PMV|: I < 0.2, II < 0.5, III < 0.7.
+# EN 16798-1 comfort categories by |PMV|: I <= 0.2, II <= 0.5, III <= 0.7
+# (closed intervals, matching the ``<=`` below).
 _CATEGORY_EDGES: tuple[tuple[float, str], ...] = ((0.2, "I"), (0.5, "II"), (0.7, "III"))
 
 
@@ -94,9 +96,12 @@ def pmv_ppd(
 
 
 CLO_ANTICIPATION = 1.0 / 3.0  # forecast blend weight w (field-calibration start)
-_CLO_T_MIN = -27.2  # Schiavon & Lee (2013) model validity range [degC]
+# Schiavon & Lee (2013) model validity range [degC]. The lower clamp is
+# documentary only: any t < -5 takes the CLO_WINTER branch first.
+_CLO_T_MIN = -27.2
 _CLO_T_MAX = 26.0
-_CLO_MIN = 0.4  # composition bounds — headroom for the learned offset (V4)
+# Composition bounds — headroom for the learned ADR-0067 offset (|x| <= 0.3).
+_CLO_MIN = 0.4
 _CLO_MAX = 1.2
 
 
@@ -141,17 +146,25 @@ class RoomProfile:
     clo_add: float  # additive insulation surcharge (chair/sofa, ISO 9920)
 
 
-# ISO-8996-level-1 / ASHRAE-55-table values.  "office" is the backward-
-# compatible default — exactly the historical fixed assumption (met 1.2, no
-# surcharge).  "bedroom" is real sleeping metabolism (ASHRAE 55: 0.7 met) and
-# thereby OUTSIDE the ISO 7730 domain — ``pmv_validity`` flags it and the
-# shadow publishes no PMV number there (V3).  The sofa surcharge is ISO 9920
-# (+0.21); max total clo stays inside the ASHRAE ceiling: 1.2 + 0.21 < 1.5.
+# ISO-8996-level-1 / ASHRAE-55-table values.  "office" is the default
+# (met 1.2, no surcharge).  "bedroom" is real sleeping metabolism (ASHRAE 55:
+# 0.7 met) and thereby OUTSIDE the ISO 7730 domain — ``pmv_validity`` flags
+# it and the shadow publishes no PMV number there.  The sofa surcharge is
+# ISO 9920 (+0.21); max total clo stays inside the ASHRAE ceiling:
+# 1.2 + 0.21 < 1.5.
 ROOM_PROFILES: dict[str, RoomProfile] = {
     "office": RoomProfile(met=MET_OFFICE, clo_add=0.0),
     "living": RoomProfile(met=1.1, clo_add=0.21),
     "bedroom": RoomProfile(met=0.7, clo_add=0.0),
     "kitchen": RoomProfile(met=1.8, clo_add=0.0),
+    # Bathroom (Nachtrag V5): personal care sits in the ISO 8996
+    # washing/dressing band (~1.4-1.7 met; conservative end), and clothing is
+    # LIGHTER than the weather-predicted street ensemble — a deduction, the
+    # mirror image of the sofa surcharge. It may undershoot the predictive
+    # floor (0.4) on purpose: light bathroom clothing ~0.2-0.3 clo (ISO 9920)
+    # is the honest assumption; the wet-skin minutes themselves are handled by
+    # the RH validity domain below, not by the ensemble estimate.
+    "bathroom": RoomProfile(met=1.4, clo_add=-0.2),
 }
 
 
@@ -164,8 +177,8 @@ def clo_dynamic(clo: float, met: float) -> float:
     """ASHRAE 55 dynamic insulation: movement pumps the clothing.
 
     ``Icl,dyn = Icl * (0.6 + 0.4 / met)`` for met > 1.2; identity at or below
-    sedentary (Normative Appendix B) — which is why the correction only became
-    meaningful once met stopped being fixed at 1.2 (Nachtrag V2).
+    sedentary (ASHRAE 55 Normative Appendix B). The correction is specified
+    for 1.2 < met <= 2.0; the shipped room profiles stay <= 1.8.
     """
     if met <= 1.2:
         return clo
@@ -195,12 +208,27 @@ def pmv_setpoint_offset(pmv: float, *, cap_k: float = 1.0) -> float:
     return round(-offset if pmv > 0 else offset, 2)
 
 
-def pmv_validity(*, met: float, clo: float) -> bool:
+# Nachtrag V5: near-saturation indoor air leaves the PMV application domain.
+# Two reasons share one bound: at typical room temperatures RH >= ~85 % pushes
+# the vapour pressure toward the ISO 7730 limit (~2700 Pa), and such air marks
+# the evaporation/condensation regime of a just-used shower — wet skin is not
+# modelled by the ensemble equation at all. Below the bound humid air is a
+# perfectly VALID input (it enters the equation); this is a domain edge, not
+# a comfort judgement.
+PMV_RH_VALID_MAX: Final = 85.0
+
+
+def pmv_validity(*, met: float, clo: float, rh: float | None = None) -> bool:
     """Inside the ISO 7730 application domain (0.8-4.0 met, 0-2.0 clo)?
 
     Outside it — above all sleeping at 0.7 met, where bedding systems
     (0.9-4.9 clo, coverage-dominated) defeat any ensemble estimate — the PMV
     equation is formally not validated: the shadow publishes the flag instead
-    of a wrong number (ADR-0054 Nachtrag V3).
+    of a wrong number (ADR-0054 Nachtrag V3). ``rh`` (Nachtrag V5) adds the
+    near-saturation domain edge (``PMV_RH_VALID_MAX``) that masks shower
+    episodes; ``None`` (no real sensor) keeps the met/clo-only check — control
+    readiness separately demands a real RH (ADR-0069 §4).
     """
+    if rh is not None and rh >= PMV_RH_VALID_MAX:
+        return False
     return 0.8 <= met <= 4.0 and 0.0 <= clo <= 2.0

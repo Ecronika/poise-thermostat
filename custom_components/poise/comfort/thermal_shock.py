@@ -1,7 +1,8 @@
 """Heat-day cooling band: ΔT-shock floor under the EN adaptive upper (ADR-0051).
 
-On a hot day, cooling to a fixed 26 °C wastes energy and thermally shocks people
-at the door; health guidance is ~6-8 K under outdoor. This raises the cooling
+On a hot day, cooling to a fixed 26 °C wastes energy and thermally shocks
+people at the door; ~6-8 K under outdoor is a health/hygiene rule of thumb,
+explicitly NOT a building norm (ADR-0051). This raises the cooling
 setpoint toward ``outdoor - ΔT`` but never above the EN-16798-1 adaptive upper
 edge (the norm anchor) nor a hard cap (ASR A3.5 office ceiling 26 °C, raising it
 is an employer policy opt-in), and never below the EN cooling setpoint. Pure and

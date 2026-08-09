@@ -8,11 +8,13 @@ cooling edge toward the adaptive upper limit, saving energy. It NEVER raises the
 heating setpoint (the original live bug was the adaptive neutral ~24 °C becoming
 a warm heat target).
 
-Pure; wired shadow-first (diagnostic only). The regime gate must be validated
-against real data before it drives the live setpoint: an ungated adaptive raise
-would push the cooling edge to ~31 °C on a hot day (T_rm high) and suppress
-legitimate summer cooling — which is also why the active path keeps the fixed
-design bands (and ADR-0051 handles the heat-day cool target separately).
+Pure. ``free_running_widen`` is shadow-only (``diagnostics/shadows``): the
+regime gate must be validated against real data before it drives the live
+setpoint — an ungated adaptive raise would push the cooling edge to ~31 °C on
+a hot day (T_rm high) and suppress legitimate summer cooling, which is also
+why the active path keeps the fixed design bands (and ADR-0051 handles the
+heat-day cool target separately). ``adaptive_cool_edge`` however IS live in
+``dual_setpoint.decide`` — occupancy-gated per ADR-0061.
 """
 
 from __future__ import annotations

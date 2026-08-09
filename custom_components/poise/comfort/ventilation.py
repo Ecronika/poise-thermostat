@@ -9,8 +9,9 @@ this verdict must never reach ``humidity_decide``, ``dual_setpoint`` or the
 constraint solver, and never commands a device (ADR-0048; import-guard test).
 
 The precedence, hysteresis-latch and dataclass-in/out shape mirror
-``humidity_decide``. Heat-cost estimation (``vent_cost_*``) and the emission
-edge (notification/event/entity) are deliberately later increments.
+``humidity_decide``. Heat-cost estimation (``vent_cost_*``) is a deliberately
+later increment; the B.5 emission edge (``AdviceEmission`` /
+``advice_transition``) lives below — delivery stays in the glue.
 """
 
 from __future__ import annotations
