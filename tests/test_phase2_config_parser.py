@@ -459,6 +459,52 @@ def test_schedule_built_only_with_start_end_and_positive_delta() -> None:
         assert tuning.schedule == ComfortSchedule.always_comfort()
 
 
+def test_schedule_collects_numbered_extra_windows() -> None:
+    """ADR-0070: bimodal bathroom day — the parser gathers comfort_start_N/
+    comfort_end_N pairs (N >= 2, unbounded, numeric sort, gaps tolerated) on
+    top of the base pair; normalization/merging stays in ComfortSchedule."""
+    opts = {
+        "comfort_start": "05:00",
+        "comfort_end": "09:00",
+        "comfort_start_2": "17:00",
+        "comfort_end_2": "22:00",
+        # gap in numbering (window 3 deleted) must not stop collection
+        "comfort_start_4": "12:00",
+        "comfort_end_4": "13:00",
+        "setback_delta": 3.0,
+    }
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule == ComfortSchedule.from_windows(
+        [
+            ComfortWindow(5 * 60, 9 * 60),
+            ComfortWindow(17 * 60, 22 * 60),
+            ComfortWindow(12 * 60, 13 * 60),
+        ],
+        3.0,
+    )
+    st = tuning.schedule.state_at(18 * 60)  # 18:00 -> inside window 2
+    assert st.is_comfort
+    # 14:00 -> next start is window 2 at 17:00 (optimal-start deadline source)
+    assert tuning.schedule.state_at(14 * 60).minutes_to_comfort == 180
+
+
+def test_schedule_extra_window_invalid_pair_is_ignored() -> None:
+    """A half/invalid numbered pair degrades to 'that window absent', never to
+    always_comfort — the base window keeps the schedule alive."""
+    opts = {
+        "comfort_start": "05:00",
+        "comfort_end": "09:00",
+        "comfort_start_2": "17:00",  # end_2 missing -> pair ignored
+        "comfort_start_3": "26:00",  # invalid -> parse None -> ignored
+        "comfort_end_3": "23:00",
+        "setback_delta": 3.0,
+    }
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule == ComfortSchedule.from_windows(
+        [ComfortWindow(5 * 60, 9 * 60)], 3.0
+    )
+
+
 # ---------------------------------------------------------------------------
 # HDH price fallback (report_price_eur_kwh wiring)
 # ---------------------------------------------------------------------------
