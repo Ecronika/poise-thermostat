@@ -94,3 +94,20 @@ Präsenz- und Belegungs-Entities waren bis v0.178 **nicht abonniert**. Der Coord
 **Konsequenz:** Mehr Refresh-Anforderungen bei Zonen mit unruhiger PIR-Sensorik. Der bestehende Churn-Filter (`_on_change` verwirft reine Attribut-Änderungen bei gleichem State) und der Debounce des Coordinators greifen unverändert; die Tick-Arbeit selbst wurde in derselben Version durch ADR-0063 spürbar leichter.
 
 **Verifizierung:** `tests/integration/test_phase10_presence_listener.py` — der beobachtete Satz ist exakt `immediate_entities(registry)` in Registrierungsreihenfolge; Präsenz- und Belegungs-Flanke fordern je einen Refresh an, ein unbeteiligtes `person.*` nicht; ein Options-Submit verschiebt das Abo nachweislich (neue Entity löst aus, alte nicht mehr). `tests/test_phase1_tick_inputs.py` pinnt die Reaktionsklassen.
+
+## Nachtrag N2 (2026-08-09, mit ADR-0070): Verhaltensvertrag Extend/Nachlauf — und was Presence NICHT tut
+
+Die Recherche [2026-08 Komfortfenster/Anwesenheits-Boost](../research/2026-08-Komfortfenster-Anwesenheitsboost.md) ergab, dass das Presence-Verhalten nirgends als Nutzer-Feature beschrieben war — und ihre erste Fassung beschrieb es prompt falsch (§3-Korrektur dort). Dieser Nachtrag fixiert den **gegen Code und Recorder verifizierten** Vertrag; er ändert kein Verhalten.
+
+**Was die Occupancy-Schiene tut (nur INNERHALB eines Komfortfensters):**
+
+- **Extend / Komfort-Nachlauf:** Solange der Raum belegt ist, gilt das volle Komfortband. Verlässt ihn der letzte Nutzer, hält das Band noch `absence_after_min` (Default 30 min — der PIR-sichere Nachlauf), erst dann flacht ROOM_ECO um `eco_delta` (Default 2 K) ab, mit `cool_hard_cap` als Kühl-Decke. Rückkehr stellt den Komfort **im selben Tick** wieder her (`step_room_absence` reset sofort, Präsenz ist seit v0.179 ein SOFORT-Eingang) — kein erneuter 30-min-Anlauf.
+- **Preheat-Präzedenz:** Ein laufender Optimal-Start-Vorheizlauf überstimmt ROOM_ECO (ein leerer Raum kurz vor Fensterstart wird trotzdem vorgeheizt), nie aber das Haus-Gate.
+- **Fail-safe:** `None` (kein Sensor, unavailable, frischer Neustart) zählt als anwesend — ein toter Melder senkt nie ab.
+
+**Was sie NICHT tut (verifiziert 2026-08-09, Code `_stage_presence_level`: `occupied = sched.is_comfort or preheating`; Recorder Bad-Zone 2026-08-08 20:17–22:41: `heat_sp` konstant 20,6 trotz Belegung nach Fensterende 22:00):**
+
+- **Kein Komfort-Trigger außerhalb des Fensters.** Belegung außerhalb aller Komfortfenster hebt das Band NICHT an (das KNX-Standby→Komfort-Muster ist nicht gebaut); der Setback gilt dort unabhängig von Raum-Belegung, gehalten nur von Frost-/Schimmel-Floors bzw. im Sommer vom free-running-Band. Spontane Nutzung deckt der Boost/Override oder ein weiteres Komfortfenster (ADR-0070) ab. Ein reaktiver Trigger bliebe bei `very_slow`-Dynamik (FBH) ohnehin wirkungsarm — der Raum wird warm, wenn der Nutzer schon geht (Recherche P3).
+- **Kein Vorheizen auf Präsenz.** Optimal-Start braucht einen bekannten Termin; Präsenz ist per Definition nicht antizipierbar.
+
+**Dokumentierte, NICHT umgesetzte Option (Recherche §5.3):** RH-Spike als Belegungs-Co-Signal — eine laufende Duschepisode (die V5-Kante aus ADR-0054, RH > 85 %) könnte als „still belegt" den Nachlauf halten, wenn der PIR den reglosen Duschenden verliert. Bausteine existieren (ADR-0066-Feuchteachse, V5-Erkennung); bewusst nicht verdrahtet, bis der Bedarf im Feld belegt ist (der 30-min-Nachlauf deckt typische Duschdauern bereits).

@@ -103,6 +103,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0067](ADR-0067-Haushalts-clo-Offset-Feedback-Vorschlag.md) | Haushalts-clo-Offset — expliziter Komfort-Feedback-Kanal + Vorschlags-Lernen (ADR-0054 V4) | Implementiert (Emission default-an, §5-Feld-Validierung läuft) |
 | [0068](ADR-0068-Luefter-als-erste-Kuehlstufe.md) | Lüfter als erste Kühlstufe — dritte Rolle der `air_movement`-Achse (R2) | Implementiert (v1 Single-Aktor, P6/P7-Überführung offen) |
 | [0069](ADR-0069-Aktive-Behaglichkeit-Stufe-A.md) | „Aktive Behaglichkeit" — Stufe-A-Spezifikation (Bedienelement, Name, Verhaltensumfang) | Implementiert (alle 8 Schritte; Tier-2-Freigaben warten auf M1) |
+| [0070](ADR-0070-Mehrere-Komfortfenster.md) | Mehrere Komfortfenster pro Tag (n-Fenster-Datenmodell, n+1-Options-UI) | Implementiert (v0.187.0) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
