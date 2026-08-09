@@ -208,3 +208,35 @@ def test_household_offset_is_clamped_by_the_prior_bounds() -> None:
 
 def test_household_offset_ignored_without_running_mean() -> None:
     assert predictive_clo(None, household_offset=0.3) == 0.5  # fallback wins
+
+
+# --------------------------- bathroom profile + RH validity (Nachtrag V5) --
+
+
+def test_bathroom_profile_exists_with_care_met_and_light_clo() -> None:
+    """Bad zone reality: personal care met (ISO 8996 washing/dressing band,
+    conservative end) and a light-clothing deduction below the street-clothing
+    prediction — the deduction may undershoot the predictive floor on purpose."""
+    prof = resolve_room_profile("bathroom")
+    assert prof.met == 1.4
+    assert prof.clo_add == -0.2
+    # Summer plateau predicts 0.46; the bathroom deduction lands at 0.26 —
+    # BELOW the predictive floor (0.4) on purpose, and still inside the
+    # pmv_validity clo domain (0..2).
+    clo_val = predictive_clo(30.0) + prof.clo_add
+    assert abs(clo_val - 0.26) < 1e-9
+    assert clo_val < 0.4
+    assert pmv_validity(met=prof.met, clo=clo_val)
+
+
+def test_pmv_validity_rh_domain_masks_shower_episodes() -> None:
+    """Near-saturation air (post-shower) leaves the PMV application domain:
+    evaporation-dominated wet skin is not modelled and the vapour pressure
+    approaches the ISO 7730 limit. rh=None (no sensor) keeps the met/clo-only
+    check — control readiness separately demands a real RH."""
+    assert pmv_validity(met=1.2, clo=0.5, rh=None)
+    assert pmv_validity(met=1.2, clo=0.5, rh=84.9)
+    assert not pmv_validity(met=1.2, clo=0.5, rh=85.0)
+    assert not pmv_validity(met=1.2, clo=0.5, rh=100.0)
+    # The met/clo domain still binds regardless of RH.
+    assert not pmv_validity(met=0.7, clo=0.5, rh=50.0)

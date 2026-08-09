@@ -127,9 +127,14 @@ def test_stage_echo_timeout_yields_to_cool() -> None:
     assert (late.command, late.state.phase) == ("cool", "yielded")
 
 
-def _dwelling() -> FanFirstState:
-    d = _decide(FanFirstState())
-    d3 = _decide(d.state, now=T0 + 60.0, observed_hvac_mode="fan_only")
+def _dwelling(entry_fan: str | None = None) -> FanFirstState:
+    d = _decide(FanFirstState(), observed_fan_mode=entry_fan)
+    d3 = _decide(
+        d.state,
+        now=T0 + 60.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode=entry_fan,
+    )
     d4 = _decide(
         d3.state,
         now=T0 + 120.0,
@@ -196,6 +201,92 @@ def test_foreign_fan_change_exits_without_a_write_duel() -> None:
     )
     assert (foreign.command, foreign.state.phase) == ("release", "idle")
     assert foreign.reason == "foreign_fan_change"
+    # User intent stands: NEVER restored over (field review, yield restore).
+    assert foreign.restore_stage is None
+
+
+def test_engage_stamps_the_entry_fan_mode() -> None:
+    d = _decide(FanFirstState(), observed_fan_mode="quiet")
+    assert d.state.entry_fan_mode == "quiet"
+
+
+def test_exit_restores_previous_stage_with_auto_fallback() -> None:
+    # Field decision: on yield/release the commanded stage is restored to the
+    # PRE-sequence value (user intent), "auto" only as fallback when no
+    # previous value is known — and only while the device still shows OUR
+    # stage (never a write duel).
+    expired = _decide(
+        _dwelling(entry_fan="quiet"),
+        now=T0 + FAN_FIRST_TIMEOUT_S + 1.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="high",
+    )
+    assert expired.command == "cool"
+    assert expired.restore_stage == "quiet"
+    # Unknown entry value -> "auto" when the device advertises it...
+    expired2 = _decide(
+        _dwelling(entry_fan=None),
+        now=T0 + FAN_FIRST_TIMEOUT_S + 1.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="high",
+        advertised_modes=("low", "medium", "high", "Auto"),
+    )
+    assert expired2.restore_stage == "auto"
+    # ...and nothing at all when it does not (leave as-is beats guessing).
+    expired3 = _decide(
+        _dwelling(entry_fan=None),
+        now=T0 + FAN_FIRST_TIMEOUT_S + 1.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="high",
+    )
+    assert expired3.restore_stage is None
+    # A demand-end release restores too.
+    released = _decide(
+        _dwelling(entry_fan="quiet"),
+        now=T0 + 300.0,
+        cool_requested=False,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="high",
+    )
+    assert released.command == "release"
+    assert released.restore_stage == "quiet"
+
+
+def test_no_restore_without_a_confirmed_own_stage() -> None:
+    # Echo timeout in await_stage: we commanded but the device never showed
+    # our stage — restoring blind would be a guess, so nothing is written.
+    d = _decide(FanFirstState(), observed_fan_mode="quiet")
+    d3 = _decide(
+        d.state,
+        now=T0 + 60.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="quiet",
+    )
+    late = _decide(
+        d3.state,
+        now=T0 + 60.0 + FAN_ECHO_TIMEOUT_S + 1.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="quiet",
+    )
+    assert late.command == "cool"
+    assert late.restore_stage is None
+    # Entry value == our stage == observed: nothing to restore either.
+    already = _decide(FanFirstState(), observed_fan_mode="high")
+    confirmed = _decide(
+        already.state,
+        now=T0 + 60.0,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="high",
+    )
+    assert confirmed.state.phase == "dwell"  # stage matched, no write needed
+    done = _decide(
+        confirmed.state,
+        now=T0 + 300.0,
+        cool_requested=False,
+        observed_hvac_mode="fan_only",
+        observed_fan_mode="high",
+    )
+    assert done.restore_stage is None
 
 
 def test_yielded_returns_to_idle_when_demand_ends() -> None:
