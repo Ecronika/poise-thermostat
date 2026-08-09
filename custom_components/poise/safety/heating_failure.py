@@ -8,7 +8,7 @@ a persistent notification with auto-clear on recovery.
 
 from __future__ import annotations
 
-DEFAULT_DELAY_H: float = 35.0 / 60.0  # 35 minutes
+DEFAULT_DELAY_H: float = 35.0 / 60.0
 DEFAULT_CMD_DELTA: float = 2.0  # setpoint must exceed room by this to count
 DEFAULT_MIN_RISE: float = 0.2  # °C the room must gain over the delay
 
@@ -78,9 +78,9 @@ class HeatingFailureDetector:
             return self._failed
         start_h, room0 = self._start
         if (now_h - start_h) >= self._delay_h:
-            # Sliding (tumbling) window (review F5, VTherm pattern): evaluate the
-            # rise over the LAST window, then re-arm so a failure that begins
-            # mid-episode is caught. Set on no-rise; clear on a confirmed rise.
+            # Tumbling window (VTherm pattern): evaluate the rise over the
+            # LAST window, then re-arm so a failure that begins mid-episode
+            # is caught. Set on no-rise; clear on a confirmed rise.
             self._failed = (room - room0) < self._min_rise
             self._start = (now_h, room)
         return self._failed
