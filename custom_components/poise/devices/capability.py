@@ -1,4 +1,5 @@
-"""Exclusive actuator-path capability matrix (ADR-0015).
+"""Exclusive actuator-path capability matrix (ADR-0015; the
+``valve_opening_degree`` exclusion in its §1 is reversed by ADR-0036).
 
 Per device exactly one path is chosen, top-down, first match wins:
   1. direct valve  — a writable live-position number entity

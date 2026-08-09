@@ -1,9 +1,10 @@
-"""Capability-aware HVAC-mode mapping for the climate entity (ADR-0023, review P2).
+"""Capability-aware HVAC-mode mapping for the climate entity (ADR-0023).
 
-Pure, HA-free string mapping so the entity surfaces exactly the modes the device
-supports. We deliberately expose only HEAT/COOL/OFF (no HEAT_COOL) to avoid the
-dual-range-setpoint UI — internal "auto" dual-setpoint still works via config.
-A heat-only TRV keeps exactly ("heat", "off"), so its behaviour is unchanged.
+Pure, HA-free string mapping so the entity surfaces exactly the modes the
+device supports. HEAT_COOL is deliberately never exposed (it would force the
+dual-range-setpoint UI); a dual-capable device instead offers AUTO as the
+return-to-automatic mode, keeping the single-setpoint UI. A heat-only TRV
+keeps exactly ("heat", "off"), so its behaviour is unchanged.
 """
 
 from __future__ import annotations

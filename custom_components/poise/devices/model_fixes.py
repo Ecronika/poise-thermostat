@@ -2,17 +2,19 @@
 
 No model names: every guard keys off detected entities/attributes, so the same
 logic works for any thermostat that happens to expose these features (the Aqara
-E1 SRTS-A01 is merely one example). Four protective guards + one actuator
-extension:
+E1 SRTS-A01 is merely one example). Four protective guards, one actuator
+extension and one health-telemetry classifier:
 
   1. neutralise a device-internal weekly schedule that would fight the controller
   2. detect a device-internal adaptive/smart-temperature loop (doubled
-     regulation) and surface it as a repair issue (R1)
+     regulation) and surface it as a repair issue
   3. surface a device valve/fault alarm (and feed it into heating-failure)
   4. surface a low battery on the actuator/sensor device
   5. feed the fused room temperature to a TRV external-temperature input, so a
      thermostat calibratable to an external sensor regulates against the true
-     room temperature.
+     room temperature
+  6. classify a valve motor step-counter sensor, feeding
+     ``safety.sensor_watchdog.valve_stuck``.
 
 This module holds the *pure* classifiers/thresholds; the registry lookups,
 service calls and repair issues live in the coordinator (HA glue).
