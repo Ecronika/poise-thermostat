@@ -136,12 +136,27 @@
             "data": {
               "comfort_start": "Comfort window start",
               "comfort_end": "Comfort window end",
+              "comfort_start_2": "Window 2 start",
+              "comfort_end_2": "Window 2 end",
+              "comfort_start_3": "Window 3 start",
+              "comfort_end_3": "Window 3 end",
+              "comfort_start_4": "Window 4 start",
+              "comfort_end_4": "Window 4 end",
+              "comfort_start_5": "Window 5 start",
+              "comfort_end_5": "Window 5 end",
+              "comfort_start_6": "Window 6 start",
+              "comfort_end_6": "Window 6 end",
+              "comfort_start_7": "Window 7 start",
+              "comfort_end_7": "Window 7 end",
+              "comfort_start_8": "Window 8 start",
+              "comfort_end_8": "Window 8 end",
               "setback_delta": "Night setback (K)",
               "optimal_start": "Optimal start (pre-heat)"
             },
             "data_description": {
               "comfort_start": "Set both start and end to enable a daily comfort window; leave both empty for all-day comfort.",
-              "setback_delta": "How far to relax the band outside the comfort window."
+              "comfort_start_2": "Fill a window and save — the form then offers the next one (up to 8). Clear both times of a window to remove it; overlapping windows are merged. Optimal start pre-heats for every window.",
+              "setback_delta": "How far to relax the band outside the comfort windows."
             }
           },
           "heat_cool": {

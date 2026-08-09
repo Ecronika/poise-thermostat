@@ -7,6 +7,7 @@ be edited in place without removing the entry (so learning is preserved).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -30,6 +31,7 @@ from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from .config_reconcile import reconcile_reconfigure
 from .config_sections import flatten_sections, nest_by_section
 from .const import (
+    COMFORT_WINDOWS_UI_MAX,
     COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
     CONF_ABSENCE_AFTER_MIN,
@@ -149,6 +151,9 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_ROOM_PROFILE,
         CONF_ACTIVE_COMFORT,
     ),
+    # NOTE: the schedule section is extended dynamically with numbered extra
+    # window pairs (ADR-0070 n+1 pattern) — use ``_options_sections(current)``
+    # wherever the section map must match the rendered form.
     "schedule": (
         CONF_COMFORT_START,
         CONF_COMFORT_END,
@@ -186,6 +191,67 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
     ),
     "energy": (CONF_ANNUAL_KWH, CONF_PRICE_EUR_KWH),
 }
+
+
+def _extra_window_ns(current: Mapping[str, Any]) -> list[int]:
+    """Indices N >= 2 of configured extra comfort windows (either bound set)."""
+    ns = {
+        int(m.group(2))
+        for key, value in current.items()
+        if value
+        and (
+            m := re.fullmatch(
+                rf"({CONF_COMFORT_START}|{CONF_COMFORT_END})_(\d+)", str(key)
+            )
+        )
+    }
+    return sorted(n for n in ns if n >= 2)
+
+
+def _schedule_window_fields(current: Mapping[str, Any]) -> tuple[str, ...]:
+    """ADR-0070 n+1 pattern: the base pair, every CONFIGURED numbered pair,
+    plus exactly ONE empty pair (next free index) up to the UI cap — the form
+    never offers more than one unconfigured window at a time."""
+    fields: list[str] = [CONF_COMFORT_START, CONF_COMFORT_END]
+    ns = _extra_window_ns(current)
+    for n in ns:
+        fields += [f"{CONF_COMFORT_START}_{n}", f"{CONF_COMFORT_END}_{n}"]
+    nxt = (max(ns) + 1) if ns else 2
+    if nxt <= COMFORT_WINDOWS_UI_MAX:
+        fields += [f"{CONF_COMFORT_START}_{nxt}", f"{CONF_COMFORT_END}_{nxt}"]
+    return tuple(fields)
+
+
+def _options_sections(current: Mapping[str, Any]) -> dict[str, tuple[str, ...]]:
+    """The section map matching the RENDERED options form (dynamic schedule)."""
+    sections = dict(_OPTIONS_SECTIONS)
+    sections["schedule"] = _schedule_window_fields(current) + (
+        CONF_SETBACK_DELTA,
+        CONF_OPTIMAL_START,
+    )
+    return sections
+
+
+def _renumber_windows(flat: dict[str, Any]) -> str | None:
+    """Validate + compact the numbered window pairs in a submitted flat form.
+
+    Per pair both bounds or neither (one alone is ambiguous — same rule as the
+    base pair); valid extra pairs are renumbered gaplessly from 2 so deleting a
+    middle window never strands later ones. Returns an error key or None; the
+    submitted options replace the stored options wholesale, so dropped keys
+    vanish without explicit deletion."""
+    pairs: list[tuple[Any, Any]] = []
+    for n in _extra_window_ns(flat):
+        s_key, e_key = f"{CONF_COMFORT_START}_{n}", f"{CONF_COMFORT_END}_{n}"
+        s_val, e_val = flat.pop(s_key, None), flat.pop(e_key, None)
+        if bool(s_val) != bool(e_val):
+            return "comfort_window_pair"
+        if s_val and e_val:
+            pairs.append((s_val, e_val))
+    for i, (s_val, e_val) in enumerate(pairs, start=2):
+        flat[f"{CONF_COMFORT_START}_{i}"] = s_val
+        flat[f"{CONF_COMFORT_END}_{i}"] = e_val
+    return None
 
 
 _RECONFIGURE_SECTIONS: dict[str, tuple[str, ...]] = {
@@ -501,14 +567,19 @@ def _system_schema() -> vol.Schema:
     )
 
 
-def _options_schema(hass: HomeAssistant) -> vol.Schema:
+def _options_schema(hass: HomeAssistant, current: Mapping[str, Any]) -> vol.Schema:
     """Volatile tuning, hot-applied without a reload (A10), grouped into
     collapsible sections (ADR-0008). Only fields the coordinator can update in
     place live here; structural inputs stay in the reconfigure step. The sectioned
-    submit is flattened before storage (config_sections)."""
+    submit is flattened before storage (config_sections). The schedule section is
+    built per-open from ``current`` (ADR-0070 n+1 window pattern)."""
     box = selector.NumberSelectorMode.BOX
     reg = er.async_get(hass)
     own = [e.entity_id for e in reg.entities.values() if e.platform == DOMAIN]
+    window_fields: dict[Any, Any] = {
+        vol.Optional(field): selector.TimeSelector()
+        for field in _schedule_window_fields(current)
+    }
     return vol.Schema(
         {
             vol.Required("comfort"): section(
@@ -562,8 +633,7 @@ def _options_schema(hass: HomeAssistant) -> vol.Schema:
             vol.Required("schedule"): section(
                 vol.Schema(
                     {
-                        vol.Optional(CONF_COMFORT_START): selector.TimeSelector(),
-                        vol.Optional(CONF_COMFORT_END): selector.TimeSelector(),
+                        **window_fields,
                         vol.Required(
                             CONF_SETBACK_DELTA, default=DEFAULT_SETBACK_DELTA
                         ): selector.NumberSelector(
@@ -1010,8 +1080,13 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             )
         # Room reconfigure owns only structural + sensor + installation fields; tuning
         # stays in the options flow. reconcile_reconfigure carries any tuning still in
-        # data over to options so shrinking the form never drops a setting.
-        tuning = {f for fields in _OPTIONS_SECTIONS.values() for f in fields}
+        # data over to options so shrinking the form never drops a setting. Built from
+        # the dynamic section map so numbered comfort windows count as tuning too.
+        tuning = {
+            f
+            for fields in _options_sections({**entry.data, **entry.options}).values()
+            for f in fields
+        }
         if user_input is not None:
             flat = flatten_sections(user_input, _RECONFIGURE_SECTIONS)
             # 1.1/1.2: the actuator is a zone's unique_id — re-validate so a changed
@@ -1131,29 +1206,36 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
+        # Effective current config drives the dynamic schedule section (ADR-0070):
+        # the rendered form shows every configured window plus one empty pair.
+        current = {**self.config_entry.data, **self.config_entry.options}
+        # legacy bool -> canonical mode so the tri-state dropdown pre-fills
+        if CONF_ADAPTIVE_COOL in current:
+            current[CONF_ADAPTIVE_COOL] = adaptive_cool_mode(
+                current[CONF_ADAPTIVE_COOL]
+            )
+        sections = _options_sections(current)
         if user_input is not None:
             # Sections nest the submit one level; store it flat (config_sections)
             # so the coordinator/merge/reconfigure paths stay unchanged.
-            flat = flatten_sections(user_input, _OPTIONS_SECTIONS)
-            # (a) comfort window: both bounds or neither (one alone is ambiguous).
+            flat = flatten_sections(user_input, sections)
+            # (a) comfort windows: per pair both bounds or neither (one alone is
+            # ambiguous). Extra pairs are compacted gaplessly; the submit replaces
+            # the stored options wholesale, so cleared windows simply drop out.
             if bool(flat.get(CONF_COMFORT_START)) != bool(flat.get(CONF_COMFORT_END)):
                 errors["base"] = "comfort_window_pair"
+            elif (pair_error := _renumber_windows(flat)) is not None:
+                errors["base"] = pair_error
             else:
                 return self.async_create_entry(title="", data=flat)
             suggested = user_input
         else:
             # Pre-fill each section from the effective current config (data+options).
-            current = {**self.config_entry.data, **self.config_entry.options}
-            # legacy bool -> canonical mode so the tri-state dropdown pre-fills
-            if CONF_ADAPTIVE_COOL in current:
-                current[CONF_ADAPTIVE_COOL] = adaptive_cool_mode(
-                    current[CONF_ADAPTIVE_COOL]
-                )
-            suggested = nest_by_section(current, _OPTIONS_SECTIONS)
+            suggested = nest_by_section(current, sections)
         return self.async_show_form(
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
-                _options_schema(self.hass), suggested
+                _options_schema(self.hass, current), suggested
             ),
             errors=errors,
         )

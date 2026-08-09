@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.186.1"
+VERSION: Final = "0.187.1"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -91,6 +91,11 @@ CONF_HEAT_MAX_OUTDOOR: Final = "heat_max_outdoor"
 CONF_COMFORT_WEIGHT: Final = "comfort_weight"
 CONF_COMFORT_START: Final = "comfort_start"
 CONF_COMFORT_END: Final = "comfort_end"
+# ADR-0070: additional daily comfort windows live in numbered key pairs
+# ``comfort_start_N``/``comfort_end_N`` (N >= 2). The PARSER accepts unbounded
+# N (suggestion writers may exceed the UI); the options UI offers the n+1
+# progressive pattern up to this cap (i18n labels are static per index).
+COMFORT_WINDOWS_UI_MAX: Final = 8
 CONF_SETBACK_DELTA: Final = "setback_delta"
 CONF_OPTIMAL_START: Final = "optimal_start"
 CONF_WEATHER: Final = "weather_entity"
