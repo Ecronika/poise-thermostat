@@ -14,7 +14,11 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.poise.config_flow import _OPTIONS_SECTIONS, _options_schema
+from custom_components.poise.config_flow import (
+    _OPTIONS_SECTIONS,
+    _options_schema,
+    _options_sections,
+)
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_ADOPT_EXTERNAL_MODE,
@@ -525,15 +529,40 @@ async def test_options_prefills_stored_adopt_external_mode(
 
 
 async def test_options_sections_match_rendered_schema(hass: HomeAssistant) -> None:
-    """_OPTIONS_SECTIONS must list exactly the fields the options schema renders.
+    """The section map must list exactly the fields the options schema renders.
 
     nest_by_section can only pre-fill listed fields, so a rendered-but-unlisted
     field silently resets to its schema default on every options round-trip.
+    Since ADR-0070 both sides are built from the same ``current`` (the schedule
+    section is dynamic), so the parity is checked per state: empty config
+    (base pair + exactly ONE empty numbered pair) and a configured window 2
+    (base + _2 + the next empty _3 pair) — pinning the n+1 pattern too.
     """
-    rendered = {
-        key.schema: {marker.schema for marker in val.schema.schema}
-        for key, val in _options_schema(hass).schema.items()
-        if isinstance(val, section)
-    }
-    declared = {name: set(fields) for name, fields in _OPTIONS_SECTIONS.items()}
-    assert rendered == declared
+    for current in (
+        {},
+        {"comfort_start_2": "06:00:00", "comfort_end_2": "09:00:00"},
+    ):
+        rendered = {
+            key.schema: {marker.schema for marker in val.schema.schema}
+            for key, val in _options_schema(hass, current).schema.items()
+            if isinstance(val, section)
+        }
+        declared = {
+            name: set(fields) for name, fields in _options_sections(current).items()
+        }
+        assert rendered == declared
+    # n+1 pattern pins: empty -> exactly the _2 pair offered; window 2 set ->
+    # _2 kept and exactly the _3 pair offered next.
+    empty_sched = set(_options_sections({})["schedule"])
+    assert {"comfort_start_2", "comfort_end_2"} <= empty_sched
+    assert "comfort_start_3" not in empty_sched
+    with_two = set(
+        _options_sections({"comfort_start_2": "06:00:00", "comfort_end_2": "09:00:00"})[
+            "schedule"
+        ]
+    )
+    assert {"comfort_start_2", "comfort_end_2"} <= with_two
+    assert {"comfort_start_3", "comfort_end_3"} <= with_two
+    assert "comfort_start_4" not in with_two
+    # The static map stays the fallback contract for every non-schedule section.
+    assert set(_options_sections({})) == set(_OPTIONS_SECTIONS)
