@@ -536,9 +536,21 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         chips.push(
           this._chip("mdi:timer-sand", `${t(lang, "compressor_guard")}: ${a["mode_nudge_blocked"]}`),
         );
+      // Lower-edge binding cause: explain WHICH guard holds the heat edge
+      // (raw values from comfort/corridor.py: "mold" | "frost"; "en16798" is
+      // the normal norm band and stays silent). Localized with a raw-value
+      // fallback so an unknown future cause is still visible, never blank.
       const cause = a["binding_lower_cause"];
-      if (cause && cause !== "en16798")
-        chips.push(this._chip("mdi:shield-alert", String(cause)));
+      if (cause && cause !== "en16798") {
+        const key = `binding_${cause}`;
+        const label = t(lang, key);
+        chips.push(
+          this._chip(
+            cause === "frost" ? "mdi:snowflake-alert" : "mdi:water-alert",
+            label === key ? String(cause) : label,
+          ),
+        );
+      }
     }
     if (r.chips.has("window")) {
       if (a["window_open"])
