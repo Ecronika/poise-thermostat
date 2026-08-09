@@ -1,20 +1,21 @@
 """Best-effort JSONL field-trace writer (glue for ``trace.schema``; ADR-0011).
 
-Since F-TRACEIO (phase 10) the tick only ENQUEUES its line and returns; a
-background task drains the queue and appends on the executor.  The file I/O
-therefore no longer counts into ``tick_ms`` and a slow or hung disk can no
-longer stretch a tick that holds the coordinator lock.
+The tick only ENQUEUES its line and returns; a background task drains the
+queue and appends on the executor (ADR-0063).  File I/O therefore never
+counts into ``tick_ms`` and a slow or hung disk cannot stretch a tick that
+holds the coordinator lock.
 
-What the decoupling preserves:
+Invariants of the decoupling:
 
 * **Order** — exactly ONE drain task at a time over a FIFO queue, so the file
   keeps the tick order the golden-file replay depends on.
-* **File content and rotation** — the executor still appends line by line and
-  re-checks the size cap before each one, so on-disk bytes are identical to the
-  pre-phase-10 writer (two generations, ~2x the cap).
+* **File content and rotation** — the executor appends line by line and
+  re-checks the size cap before each one (two generations, ~2x the cap).
 * **Never disturb control** (ADR-0026) — every error is swallowed, and the
-  queue is BOUNDED: if the disk stalls, the oldest lines are dropped (with one
-  warning) instead of growing memory without bound.
+  queue is BOUNDED: if the disk stalls, the oldest lines are dropped (with a
+  warning armed once per recorder instance — ``_dropped`` never resets, so a
+  recovered-then-stalled disk drops silently; the trace file's own gap is the
+  evidence) instead of growing memory without bound.
 
 The unload path calls :meth:`flush_on_unload` so the last ticks of a session
 reach the file before the entry goes away.
@@ -98,8 +99,10 @@ class TraceRecorder:
         """Write out everything still queued — the unload checkpoint.
 
         Awaits the running drain (a cancelled one is not an error here) and
-        then writes any remainder inline, so no trace line is lost just because
-        the entry was unloaded between a tick and its drain.
+        then writes any remainder inline, so nothing still QUEUED is lost
+        because the entry was unloaded between a tick and its drain.  A batch
+        already handed to the executor is not recoverable — it left the queue
+        before the round-trip, and ``_write`` swallows ``OSError``.
         """
         task, self._drain = self._drain, None
         if task is not None and not task.done():
