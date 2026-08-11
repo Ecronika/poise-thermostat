@@ -184,6 +184,7 @@ from ..diagnostics.trace import build_tick_record
 from ..estimation.psychrometrics import humidity_ratio
 from ..estimation.tau_settle import update_settle
 from ..estimation.thermal_ekf import ThermalModel
+from ..ingestion import parse_finite
 from ..multi.model import DeviceHealth, Direction
 from ..runtime.tick_inputs import TickInputs
 from ..runtime.tick_result import (
@@ -2991,13 +2992,12 @@ class TickOrchestrator:
                 self._runtime.learning.ref_last_mono, now, _tick_min
             )
             self._runtime.learning.ref_last_mono = now
-            _act_raw = (
+            # parse_finite mirrors the actuator_snapshot contract (no
+            # availability gate, finite rejection — a NaN used to poison the
+            # deviation EWMA until restart, review B.5).
+            _act_f = parse_finite(
                 act_state.attributes.get("current_temperature") if act_state else None
             )
-            try:
-                _act_f = float(_act_raw) if _act_raw is not None else None
-            except (TypeError, ValueError):
-                _act_f = None
             _ref_conditioning = (
                 self._runtime.learning.last_u_h > 0.0
                 or self._runtime.learning.last_u_c > 0.0

@@ -27,16 +27,17 @@ must not:
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from ..clock import Clock
-from ..const import DEVICE_MAX_C
 from ..devices.capability import classify_number_entity, climate_capability
 from ..devices.model_fixes import (
     is_external_sensor_select,
@@ -88,17 +89,33 @@ def parse_attr_number(state: State | None, key: str) -> float | None:
     return parse_finite(state.attributes.get(key))
 
 
+def finite_attr_num(value: Any) -> float | None:
+    """Strict isinstance-numeric attribute capture, rejecting NaN/Inf (B.5).
+
+    Deliberately NOT :func:`parse_finite`: these raw capability reads keep
+    their strict numeric-type semantics (no numeric strings) — only non-finite
+    garbage is rejected on top, so a NaN device limit reads as "absent"
+    instead of silently fail-opening the SAFETY clamps downstream.
+    """
+    if isinstance(value, (int, float)) and math.isfinite(value):
+        return float(value)
+    return None
+
+
 def actuator_snapshot(state: State | None) -> ActuatorSnapshot:
     """Freeze one already-captured actuator State into an ActuatorSnapshot.
 
     One-object rule: every attribute access after the central actuator read
     reads the SAME immutable State object, never a fresh ``states.get``.
     Per-field parse semantics: ``actual_setpoint``/``target_temperature_step``
-    via the attribute-number rule; ``min_temp``/``max_temp`` via a raw
-    isinstance-numeric capture (the ``None``/``DEVICE_MAX_C`` fallback rules
-    stay with the consumer); ``current_temperature`` via a plain ``float()``
-    with ``TypeError``/``ValueError`` -> ``None`` and NO availability gate
-    (the finite parser is deliberately not applied there).
+    via the attribute-number rule; ``current_temperature`` via ``parse_finite``
+    directly on the attribute (keeps its NO-availability-gate contract, gains
+    the finite rejection — a NaN there used to poison the ADR-0056 deviation
+    EMA until restart, review B.5); ``min_temp``/``max_temp`` via the strict
+    isinstance-numeric capture with finite rejection (the ``None``/
+    ``DEVICE_MAX_C`` fallback rules stay with the consumer — a non-finite
+    limit must read as "absent", never fail-open the SAFETY clamps
+    downstream).
     """
     if state is None:
         return ActuatorSnapshot(
@@ -115,15 +132,12 @@ def actuator_snapshot(state: State | None) -> ActuatorSnapshot:
             current_temperature=None,
         )
     attrs = state.attributes
-    mn = attrs.get("min_temp")
-    mx = attrs.get("max_temp")
     hvac_action = attrs.get("hvac_action")
     fan_mode = attrs.get("fan_mode")
-    current_raw = attrs.get("current_temperature")
-    try:
-        current = float(current_raw) if current_raw is not None else None
-    except (TypeError, ValueError):
-        current = None
+    # parse_finite directly on the attribute: current_temperature keeps its
+    # NO-availability-gate contract (unlike parse_attr_number), gaining only
+    # the finite rejection (review B.5).
+    current = parse_finite(attrs.get("current_temperature"))
     return ActuatorSnapshot(
         state=state.state,
         hvac_modes=tuple(str(m) for m in (attrs.get("hvac_modes") or ())),
@@ -131,8 +145,8 @@ def actuator_snapshot(state: State | None) -> ActuatorSnapshot:
         # HA serialises ClimateEntity.target_temperature_step under the
         # ATTR_TARGET_TEMP_STEP key "target_temp_step", not the property name.
         target_temperature_step=parse_attr_number(state, "target_temp_step"),
-        min_temp=float(mn) if isinstance(mn, (int, float)) else None,
-        max_temp=float(mx) if isinstance(mx, (int, float)) else None,
+        min_temp=finite_attr_num(attrs.get("min_temp")),
+        max_temp=finite_attr_num(attrs.get("max_temp")),
         hvac_action=str(hvac_action) if hvac_action is not None else None,
         fan_mode=str(fan_mode) if fan_mode is not None else None,
         fan_modes=tuple(str(m) for m in (attrs.get("fan_modes") or ())),
@@ -370,28 +384,17 @@ class InputReader:
             return climate_capability([str(m) for m in modes])
         return True, False
 
-    def device_max(self) -> float:
-        """The actuator's ``max_temp`` with the ``DEVICE_MAX_C`` fallback
-        (fresh read)."""
-        act = self._hass.states.get(self._structure.actuator)
-        if act is not None:
-            mx = act.attributes.get("max_temp")
-            if isinstance(mx, (int, float)):
-                return float(mx)
-        return DEVICE_MAX_C
-
     def device_min(self) -> float | None:
         """The actuator's own ``min_temp`` (a physical write floor), if known.
 
-        Returns ``None`` when absent/non-numeric so resolve_write_target skips
-        the SAFETY floor clamp entirely (fresh read; its tick call site sits in
-        the same await-free window as the central actuator read).
+        Returns ``None`` when absent/non-numeric/non-finite so
+        resolve_write_target skips the SAFETY floor clamp entirely (fresh read;
+        its tick call site sits in the same await-free window as the central
+        actuator read).
         """
         act = self._hass.states.get(self._structure.actuator)
         if act is not None:
-            mn = act.attributes.get("min_temp")
-            if isinstance(mn, (int, float)):
-                return float(mn)
+            return finite_attr_num(act.attributes.get("min_temp"))
         return None
 
     def sun_elevation(self) -> float | None:
@@ -399,8 +402,7 @@ class InputReader:
         sun = self._hass.states.get("sun.sun")
         if sun is None:
             return None
-        elev = sun.attributes.get("elevation")
-        return float(elev) if isinstance(elev, (int, float)) else None
+        return finite_attr_num(sun.attributes.get("elevation"))
 
     def tristate(self, entity_id: str | None) -> bool | None:
         """Presence tristate resolution.
@@ -489,7 +491,7 @@ class InputReader:
                 if act is not None
                 else ()
             ),
-            max_temp=float(act_max) if isinstance(act_max, (int, float)) else None,
+            max_temp=finite_attr_num(act_max),
         )
 
         return TickInputs(
