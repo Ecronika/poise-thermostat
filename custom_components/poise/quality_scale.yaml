@@ -11,7 +11,7 @@
 rules:
   # ---------------- Bronze ----------------
   config-flow: done
-  config-flow-test-coverage: done  # tests/integration: create/dup-abort/system/reconfigure
+  config-flow-test-coverage: done  # 100% per-file gate in CI (E.12); create/dup-abort/system/reconfigure/options
   test-before-setup: done  # ConfigEntryNotReady when actuator/sensor missing (review A2)
   unique-config-entry: done  # unique_id = actuator; system hub is a singleton
   entity-unique-id: done

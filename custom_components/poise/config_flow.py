@@ -238,8 +238,9 @@ def _renumber_windows(flat: dict[str, Any]) -> str | None:
     Per pair both bounds or neither (one alone is ambiguous — same rule as the
     base pair); valid extra pairs are renumbered gaplessly from 2 so deleting a
     middle window never strands later ones. Returns an error key or None; the
-    submitted options replace the stored options wholesale, so dropped keys
-    vanish without explicit deletion."""
+    submitted options replace every form-owned key wholesale (window fields are
+    always form-owned), so dropped keys vanish without explicit deletion —
+    only non-form keys are carried over by the submit (review A.3)."""
     pairs: list[tuple[Any, Any]] = []
     for n in _extra_window_ns(flat):
         s_key, e_key = f"{CONF_COMFORT_START}_{n}", f"{CONF_COMFORT_END}_{n}"
@@ -1220,14 +1221,25 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
             # so the coordinator/merge/reconfigure paths stay unchanged.
             flat = flatten_sections(user_input, sections)
             # (a) comfort windows: per pair both bounds or neither (one alone is
-            # ambiguous). Extra pairs are compacted gaplessly; the submit replaces
-            # the stored options wholesale, so cleared windows simply drop out.
+            # ambiguous). Extra pairs are compacted gaplessly; the submit
+            # replaces every FORM-OWNED key wholesale, so cleared windows simply
+            # drop out (non-form keys are carried over below, review A.3).
             if bool(flat.get(CONF_COMFORT_START)) != bool(flat.get(CONF_COMFORT_END)):
                 errors["base"] = "comfort_window_pair"
             elif (pair_error := _renumber_windows(flat)) is not None:
                 errors["base"] = pair_error
             else:
-                return self.async_create_entry(title="", data=flat)
+                # Keys the rendered form does not own (e.g. the ADR-0067
+                # ``clo_offset`` the suggestion fix flow writes) must survive
+                # the wholesale replace; form-owned keys keep replace
+                # semantics, so cleared windows still drop out (review A.3).
+                form_keys = {f for fields in sections.values() for f in fields}
+                carried = {
+                    k: v
+                    for k, v in self.config_entry.options.items()
+                    if k not in form_keys
+                }
+                return self.async_create_entry(title="", data={**carried, **flat})
             suggested = user_input
         else:
             # Pre-fill each section from the effective current config (data+options).
