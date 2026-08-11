@@ -128,7 +128,9 @@ def actuator_snapshot(state: State | None) -> ActuatorSnapshot:
         state=state.state,
         hvac_modes=tuple(str(m) for m in (attrs.get("hvac_modes") or ())),
         actual_setpoint=parse_attr_number(state, "temperature"),
-        target_temperature_step=parse_attr_number(state, "target_temperature_step"),
+        # HA serialises ClimateEntity.target_temperature_step under the
+        # ATTR_TARGET_TEMP_STEP key "target_temp_step", not the property name.
+        target_temperature_step=parse_attr_number(state, "target_temp_step"),
         min_temp=float(mn) if isinstance(mn, (int, float)) else None,
         max_temp=float(mx) if isinstance(mx, (int, float)) else None,
         hvac_action=str(hvac_action) if hvac_action is not None else None,
@@ -243,9 +245,15 @@ class InputReader:
                     and classify_number_entity(eid) == "valve"
                 ):
                     self.valve_entity = eid
-                elif looks_like_valve_steps(eid) == "closing":
+                elif (
+                    self.valve_closing_steps is None
+                    and looks_like_valve_steps(eid) == "closing"
+                ):
                     self.valve_closing_steps = eid
-                elif looks_like_valve_steps(eid) == "idle":
+                elif (
+                    self.valve_idle_steps is None
+                    and looks_like_valve_steps(eid) == "idle"
+                ):
                     self.valve_idle_steps = eid
         except Exception:  # noqa: BLE001 - guard resolution must never break setup
             _LOGGER.debug("Poise: device-guard resolution failed", exc_info=True)

@@ -1771,6 +1771,7 @@ class TickOrchestrator:
                 surface_elapsed_min=1.0,
                 co2=None,  # ADR-0049 §1 backend not built yet -> rule 4 inert
                 prev_vent_active=self._runtime.humidity.vent_active,
+                prev_vent_reason=self._runtime.humidity.vent_reason,
                 t_forecast_day=diag_rt.clo_forecast_day,
                 room_profile=self._c._room_profile,
                 clo_offset=self._c._clo_offset,
@@ -1779,6 +1780,8 @@ class TickOrchestrator:
             self._runtime.humidity.vent_active = bool(
                 band.get("vent_advice_active", False)
             )
+            # Rule 3t dT hysteresis anchor (transient, restart -> dt_on again).
+            self._runtime.humidity.vent_reason = str(band.get("vent_reason") or "")
             mean = band.get("surface_rh_mean")
             if isinstance(mean, int | float):
                 self._runtime.humidity.surface_rh_mean = float(mean)
@@ -2032,7 +2035,9 @@ class TickOrchestrator:
             routing,
             nudge,
             actual_sp=parse_attr_number(wt.act_state, "temperature"),
-            step=parse_attr_number(wt.act_state, "target_temperature_step") or 0.1,
+            # ATTR_TARGET_TEMP_STEP: HA serialises the step as
+            # "target_temp_step", not under the property name.
+            step=parse_attr_number(wt.act_state, "target_temp_step") or 0.1,
             adopt_external_setpoint=self._c._adopt_external_setpoint,
             setpoint_adopt_reason_fn=self._g.setpoint_adopt_reason,
         )
