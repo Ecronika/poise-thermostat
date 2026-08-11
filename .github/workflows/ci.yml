@@ -41,19 +41,31 @@ jobs:
         run: pytest --cov=custom_components/poise --cov-fail-under=85
 
   integration:
-    name: Glue integration (HA runtime, py ${{ matrix.python-version }})
+    name: Glue integration (HA ${{ matrix.ha-target }}, py ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # E.11: two HA targets — MIN is the promised minimum (README badge /
+        # hacs.json), LATEST the current stable as API-drift early warning.
+        # LATEST runs on one Python only; MIN keeps the full Python matrix.
+        include:
+          - python-version: "3.12"
+            ha-target: min
+            requirements: requirements-test.txt
+          - python-version: "3.13"
+            ha-target: min
+            requirements: requirements-test.txt
+          - python-version: "3.13"
+            ha-target: latest
+            requirements: requirements-test-latest.txt
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install HA test harness (pulls Home Assistant)
-        run: pip install -r requirements-test.txt
+        run: pip install -r ${{ matrix.requirements }}
       - name: Guard — integration suite actually collected tests (no silent skip)
         run: |
           # match the real run's options so async tests are actually collected
@@ -72,6 +84,11 @@ jobs:
           -o asyncio_default_fixture_loop_scope=function
           --cov --cov-config=tests/integration/coverage_glue.ini
           --cov-report=term-missing --cov-fail-under=95
+      - name: Gate — config_flow.py at 100% (quality scale config-flow-test-coverage)
+        # E.12: the quality scale requires FULL coverage for the config flow;
+        # the collective 95% gate above cannot see a per-file regression.
+        # Reuses the .coverage data the previous step wrote.
+        run: coverage report --include='*config_flow.py' --fail-under=100
 
   card:
     name: Card (build + verify)
