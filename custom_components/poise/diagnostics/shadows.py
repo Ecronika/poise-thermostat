@@ -355,6 +355,7 @@ def compose_climate_band(
     surface_elapsed_min: float = 0.0,
     co2: float | None = None,
     prev_vent_active: bool = False,
+    prev_vent_reason: str = "",
     t_forecast_day: float | None = None,
     room_profile: str | None = None,
     clo_offset: float = 0.0,
@@ -482,6 +483,15 @@ def compose_climate_band(
         window_open=window_open,
         occupied=occupied,
         prev_advice_active=prev_vent_active,
+        # Rule 3t (free-cooling, v0.188.0): thermal inputs + capability gate.
+        # cool/fan capability from the device's advertised surfaces — the
+        # window-only zones this rule exists for have neither.
+        room_c=room,
+        cool_edge_c=eff_cool,
+        t_out_c=t_out_eff,
+        cool_capable="cool" in hvac_modes,
+        fan_capable=has_fan_modes,
+        prev_heat_out=prev_vent_reason == "heat_out",
     )
     return {
         "abs_humidity_gm3": round(w_in, 1) if w_in is not None else None,
