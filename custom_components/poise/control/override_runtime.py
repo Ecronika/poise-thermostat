@@ -162,14 +162,22 @@ def set_override(
         # record the hold's origin.
         user.override_reason = reason or "ui_setpoint"
     else:
-        # Clearing the hold: drop the whole lifecycle + announce the reason.
-        user.override_set_wall = None
-        user.override_expires_at = None
+        # Clearing the setpoint hold. The lifecycle (set_wall/expiry/origin) is
+        # SHARED with a mode-hold (``set_mode_override``: "shares the setpoint
+        # hold's lifecycle") — tear it down only when no mode-hold keeps the
+        # hold alive. Field bug 2026-08-10 (Schlafzimmer/BT): a device OFF was
+        # adopted as a mode-hold, then the setpoint channel's clear stripped
+        # its origin + countdown, leaving an origin-less, expiry-less "Manual"
+        # pill. While a mode-hold survives, only the setpoint half is dropped
+        # and NO OverrideEnded fires (the hold has not ended).
         user.override_requested = None
-        user.override_expiry_is_switchpoint = False
-        user.override_reason = None  # no hold -> no origin
-        if value is None and was_active:  # explicit clear of an active hold
-            events = (OverrideEnded(reason or "user_resume"),)
+        if user.mode_override is None:
+            user.override_set_wall = None
+            user.override_expires_at = None
+            user.override_expiry_is_switchpoint = False
+            user.override_reason = None  # no hold -> no origin
+            if value is None and was_active:  # explicit clear of an active hold
+                events = (OverrideEnded(reason or "user_resume"),)
     return CommandResult(events=events, dirty=True)
 
 
