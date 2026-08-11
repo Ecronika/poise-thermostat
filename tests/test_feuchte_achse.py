@@ -222,6 +222,75 @@ def test_advice_transition_cold_start() -> None:
 # --- guard: advice never reaches the control path (ADR-0048, design §10) ----
 
 
+# --- rule 3t: free-cooling advice (v0.188.0) --------------------------------
+
+
+def _free_cool(**kw: object) -> VentilationAdvice:
+    """Rule-3t base: window-only zone, room 26 over a 24.5 edge, 21 outside,
+    equal absolute humidity (delta 0) so no moisture rule interferes."""
+    base: dict[str, object] = {
+        "w_in_gm3": 10.0,
+        "w_out_gm3": 10.0,
+        "room_c": 26.0,
+        "cool_edge_c": 24.5,
+        "t_out_c": 21.0,
+        "cool_capable": False,
+        "fan_capable": False,
+        "occupied": False,
+    }
+    base.update(kw)
+    return _advise(**base)
+
+
+def test_rule3t_free_cooling_opens_for_window_only_zone() -> None:
+    a = _free_cool()
+    assert (a.action, a.reason, a.level) == ("open", "heat_out", "ok")
+    # NOT occupancy-gated: night purge is most valuable in an empty room.
+    assert _free_cool(occupied=True).reason == "heat_out"
+
+
+def test_rule3t_capability_gate_blocks_cool_or_fan_zones() -> None:
+    assert _free_cool(cool_capable=True).reason == "no_gain"
+    assert _free_cool(fan_capable=True).reason == "no_gain"
+
+
+def test_rule3t_needs_room_over_edge_and_cooler_outside() -> None:
+    # room inside the band -> no advice
+    assert _free_cool(room_c=24.0).reason == "no_gain"
+    # outside only 1 K cooler -> below the 2 K entry threshold
+    assert _free_cool(t_out_c=25.5).reason == "no_gain"
+    # ... but an ACTIVE episode holds down to the 1 K exit edge (hysteresis)
+    held = _free_cool(t_out_c=24.9, prev_heat_out=True, window_open=True)
+    assert held.reason == "heat_out"
+    # below the exit edge the open episode ends with a close advice
+    done = _free_cool(t_out_c=25.7, prev_heat_out=True, window_open=True)
+    assert (done.action, done.reason) == ("close", "cooled_off")
+
+
+def test_rule3t_muggy_outside_vetoes_free_cooling() -> None:
+    # outside 2 g/m3 MORE humid than inside -> never trade heat for mugginess
+    a = _free_cool(w_in_gm3=10.0, w_out_gm3=12.0)
+    assert a.reason == "no_gain"
+    # 1 g/m3 more humid is within the guard -> still advised
+    assert _free_cool(w_in_gm3=10.0, w_out_gm3=11.0).reason == "heat_out"
+
+
+def test_rule3t_precedence_yields_to_mold_dry_and_thermal_floor() -> None:
+    # mould (rule 1) outranks free-cooling
+    a = _free_cool(w_out_gm3=5.0, surface_rh_mean_pct=76.0)
+    assert a.reason == "mold_risk"
+    # a still-valid moisture reason keeps the window open over cooled_off
+    keep = _free_cool(
+        w_in_gm3=12.0,
+        w_out_gm3=5.0,
+        t_out_c=25.7,
+        prev_heat_out=True,
+        window_open=True,
+        occupied=True,
+    )
+    assert (keep.action, keep.reason) == ("open", "moisture_out")
+
+
 def test_ventilation_verdict_never_enters_the_control_path() -> None:
     pkg = Path(__file__).resolve().parents[1] / "custom_components" / "poise"
     for rel in (

@@ -174,6 +174,7 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     ("humidity", "vent_active"): "ADR-0066 ventilation-advice hysteresis latch",
     ("humidity", "surface_rh_mean"): "ADR-0066 surface-RH EWMA (tau=48 h)",
     ("humidity", "vent_last_action"): "ADR-0066 B.5 emission edge (transient)",
+    ("humidity", "vent_reason"): "ADR-0066 N1 rule-3t dT hysteresis anchor (transient)",
     # ADR-0054 Nachtrag V1: forecast daily mean for the clo blend, latched
     # once per local day — transient, recomputed on the first tick of a run.
     ("diagnostics", "clo_forecast_key"): "ADR-0054 V1 clo forecast day latch key",

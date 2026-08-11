@@ -254,6 +254,38 @@ def test_set_mode_override_starts_hold_lifecycle_when_none_active() -> None:
     assert result == CommandResult(events=(), dirty=True)
 
 
+def test_setpoint_clear_keeps_surviving_mode_hold_lifecycle() -> None:
+    """Field bug 2026-08-10 (Schlafzimmer/BT): a device OFF adopted as a
+    mode-hold must keep its origin + expiry when the setpoint channel clears
+    (``set_override(None)``) — previously the shared lifecycle was torn down,
+    leaving an origin-less, countdown-less "Manual" pill. No OverrideEnded
+    fires either: the hold is still alive. ``end_hold`` stays the one full
+    teardown."""
+    user = UserControlState()
+    clock = _Clock(2_000.0)
+    ovr.set_mode_override(
+        user,
+        "off",
+        policy="schedule",
+        timer_h=2.0,
+        max_h=8.0,
+        now_utc_fn=clock.now,
+        minutes_to_switchpoint_fn=lambda: None,
+    )
+    expires = user.override_expires_at
+    result = _set(user, None, now=2_100.0)
+    assert user.mode_override == "off"  # the mode-hold survives
+    assert user.override_reason == "device_adopt_mode"  # origin kept
+    assert user.override_set_wall == 2_000.0
+    assert user.override_expires_at == expires  # countdown kept
+    assert user.override_requested is None  # only the setpoint half dropped
+    assert result.events == ()  # the hold has NOT ended
+    ended = ovr.end_hold(user, "user_resume")
+    assert user.mode_override is None and user.override_reason is None
+    assert user.override_expires_at is None
+    assert ended.events[0].reason == "user_resume"
+
+
 def test_set_mode_override_keeps_expiry_of_same_frame_setpoint_hold() -> None:
     user = UserControlState()
     _set(user, 24.0, now=1_000.0, timer_h=2.0)
