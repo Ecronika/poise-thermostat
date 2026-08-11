@@ -1209,3 +1209,26 @@ def test_stage_observe_second_tick_steps_ekf_and_slope() -> None:
     assert rt.learning.prev_room == 20.8
     # observe_window_auto stepped over the real dt (anchor advanced).
     assert rt.window.wa_prev_mono == NOW + 60.0
+
+
+def test_plan_setpoint_write_never_writes_non_finite_target() -> None:
+    """B.5 final guard: a non-finite target must neither crash snap_to_step
+    (OverflowError -> permanent tick_failing loop) nor go on the wire."""
+    rt = _runtime()
+    spo = SetpointObservation(
+        actual_sp=18.0,
+        step=0.5,
+        mode_changed=True,
+        reg_throttled=False,
+        adopted_sp=None,
+    )
+    for bad in (float("inf"), float("-inf"), float("nan")):
+        plan = rt.plan_setpoint_write(
+            _wt(target=bad),
+            ModeAdoptionResult(desired_hvac="heat", mode_adopt_reason=""),
+            _nudge(),
+            spo,
+        )
+        assert plan.write_setpoint is False, f"wrote target={bad!r}"
+        assert plan.raw_setpoint is None
+        assert plan.snapped_setpoint is None

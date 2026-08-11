@@ -574,3 +574,15 @@ def test_frost_rescue_target() -> None:
     assert r(None, "off") == 7.0  # off / no setpoint -> rescue
     assert r(19.0, "heat") is None  # reasonable manual setpoint -> hands-off
     assert r(10.0, "heat", mold=14.0) == 14.0  # mould floor raises the target
+
+
+def test_snap_to_step_passes_non_finite_through() -> None:
+    """B.5: snap_to_step must be total — round(inf/step) raised OverflowError
+    (crashing the tick before the write gate); non-finite passes through
+    unchanged and the plan-level finite guard skips the write."""
+    import math
+
+    from custom_components.poise.control.tick_resolve import snap_to_step
+
+    assert math.isinf(snap_to_step(float("inf"), 0.5))
+    assert math.isnan(snap_to_step(float("nan"), 0.5))

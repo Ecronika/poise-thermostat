@@ -179,3 +179,25 @@ def test_latched_forecast_day_new_day_without_forecast_clears() -> None:
     # Yesterday's anticipation must not linger into a forecast-less day.
     key, val = latched_forecast_day("2026-08-02", 31.0, "2026-08-03", [])
     assert (key, val) == ("2026-08-03", None)
+
+
+def test_forecast_samples_drop_non_finite_temperatures() -> None:
+    """B.5: weather services are external data — NaN/Inf temps must be
+    skipped like unparseable ones, not folded into the forecast mean."""
+    from datetime import UTC, datetime
+
+    from custom_components.poise.control.optimal_start import (
+        forecast_samples_from_response,
+    )
+
+    base = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    entries = [
+        {"datetime": "2026-08-11T13:00:00+00:00", "temperature": 5.0},
+        {"datetime": "2026-08-11T14:00:00+00:00", "temperature": float("nan")},
+        {"datetime": "2026-08-11T15:00:00+00:00", "temperature": "inf"},
+        {"datetime": "2026-08-11T16:00:00+00:00", "temperature": 7.0},
+    ]
+    out = forecast_samples_from_response(
+        {"weather.home": {"forecast": entries}}, "weather.home", base
+    )
+    assert [t for _, t in out] == [5.0, 7.0]

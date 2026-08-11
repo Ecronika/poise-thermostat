@@ -837,3 +837,35 @@ def test_zero_min_off_switches_immediately_hence_read_point_clamp() -> None:
         )
         is False
     )
+
+
+def test_num_rejects_non_finite_values() -> None:
+    """B.5 boundary: the snapshot-value coercer must kill NaN/Inf, not pass it."""
+    from custom_components.poise.control.hub_aggregate import _num
+
+    assert _num(21.5) == 21.5
+    assert _num("21.5") == 21.5  # numeric strings stay accepted
+    assert _num("unavailable") is None
+    assert _num(None) is None
+    assert _num(float("nan")) is None
+    assert _num(float("inf")) is None
+    assert _num("nan") is None
+    assert _num("-inf") is None
+
+
+def test_load_shedding_ignores_non_finite_available_power() -> None:
+    """B.5: a NaN/Inf available power must shed NOTHING, not everything.
+
+    With NaN, ``available_power >= 0`` is False and ``freed >= deficit`` never
+    holds — every sheddable heating zone got marked shed. Non-finite input now
+    reads as "no data" (same as the None guard at the call site).
+    """
+    from custom_components.poise.control.hub_aggregate import resolve_load_shedding
+
+    zones = [
+        _zone("z1", heating=True, controls_boiler=True, declared_power=1000.0),
+        _zone("z2", heating=True, controls_boiler=True, declared_power=500.0),
+    ]
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        r = resolve_load_shedding(zones, available_power=bad)
+        assert r.shed == (), f"shed on available_power={bad!r}"
