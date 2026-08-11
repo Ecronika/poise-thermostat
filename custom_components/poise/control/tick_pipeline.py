@@ -31,6 +31,7 @@ by ``WriteTargetResult.act_state``) is imported under ``TYPE_CHECKING`` only.
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -1189,6 +1190,10 @@ def plan_setpoint_write(
     _adopted_sp = spo.adopted_sp
     write_setpoint = (
         _actuator_online
+        # B.5 final guard (defense-in-depth behind the read boundary): a
+        # non-finite target must never go on the wire — and must be rejected
+        # BEFORE snap_to_step/should_write see it.
+        and math.isfinite(target)
         and _adopted_sp is None  # adopted -> skip this tick's write
         # An ``off`` mode-hold writes no setpoint (the adopting tick still runs
         # this block; subsequent ticks take the frost-rescue branch).  A

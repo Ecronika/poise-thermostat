@@ -193,8 +193,12 @@ def snap_to_step(value: float, step: float) -> float:
     coarser step (e.g. 0.5 K) would otherwise re-write every tick once the
     rounding gap reaches the deadband; snapping makes the comparison like-for-
     like so the write-throttle keeps sparing battery/Zigbee TRVs.
+
+    Total for non-finite input (review B.5): ``round(inf/step)`` raised
+    OverflowError, crashing the tick before the write gate; the value passes
+    through unchanged and the plan-level finite guard skips the write.
     """
-    if step <= 0.0:
+    if step <= 0.0 or not math.isfinite(value):
         return value
     return round(round(value / step) * step, 2)
 

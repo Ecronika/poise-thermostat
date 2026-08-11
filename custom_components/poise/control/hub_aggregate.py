@@ -11,6 +11,7 @@ time, passed in by the caller).
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -24,14 +25,17 @@ def _clamp01(value: float) -> float:
 
 
 def _num(value: Any) -> float | None:
-    """Coerce to float; None on a non-numeric value (e.g. an ``"unavailable"``
-    string HA commonly publishes) — a bad reading must never abort the whole
-    ZoneRequest build / hub tick (review C-3ctrl).
+    """Coerce to float; None on a non-numeric OR non-finite value (e.g. an
+    ``"unavailable"`` string HA commonly publishes, or a ``nan`` a template
+    sensor can emit) — a bad reading must never abort the whole ZoneRequest
+    build / hub tick (review C-3ctrl), and NaN/Inf must die at this boundary
+    instead of poisoning comparisons downstream (review B.5).
     """
     try:
-        return float(value)
+        v = float(value)
     except (TypeError, ValueError):
         return None
+    return v if math.isfinite(v) else None
 
 
 # a room at or just above the frost floor is in the anti-freeze regime
@@ -288,8 +292,12 @@ def resolve_load_shedding(
     can best spare the heat) until the deficit is covered. A zone in frost
     protection is never shed (frost-safe). Zones without a declared power are
     not sheddable (unknown contribution). Pure: no actuation, no time.
+
+    A non-finite ``available_power`` reads as "no data" (nothing shed): with
+    NaN neither ``>= 0`` nor ``freed >= deficit`` ever holds, which used to
+    mark EVERY sheddable heating zone as shed (review B.5).
     """
-    if available_power >= 0:
+    if not math.isfinite(available_power) or available_power >= 0:
         return SheddingResult((), 0.0, 0.0)
     deficit = -available_power
     candidates = sorted(

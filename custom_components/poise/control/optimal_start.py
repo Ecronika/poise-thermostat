@@ -292,7 +292,11 @@ def forecast_samples_from_response(
         offset = (ts - base_utc).total_seconds() / 60.0
         if offset >= 0.0:
             try:
-                out.append((offset, float(temp)))
+                t = float(temp)
             except (TypeError, ValueError):
                 continue
+            # B.5: weather services are external data — NaN/Inf must be
+            # skipped like unparseable entries, not folded into the mean.
+            if math.isfinite(t):
+                out.append((offset, t))
     return out
