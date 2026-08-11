@@ -71,7 +71,7 @@ def _set_ac(
             "hvac_modes": ["off", "heat", "cool", "dry", "fan_only"],
             "temperature": 21.0,
             "current_temperature": room,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 16,
             "max_temp": 30,
         },

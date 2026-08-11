@@ -21,6 +21,7 @@ from custom_components.poise.config_flow import (
 )
 from custom_components.poise.const import (
     CONF_ACTUATOR,
+    CONF_ADAPTIVE_COOL,
     CONF_ADOPT_EXTERNAL_MODE,
     CONF_ADOPT_EXTERNAL_SETPOINT,
     CONF_BOILER_OFF_ACTION,
@@ -28,6 +29,7 @@ from custom_components.poise.const import (
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
@@ -494,6 +496,45 @@ async def test_reconfigure_new_actuator_parks_old(hass: HomeAssistant) -> None:
     assert old_temp and old_temp[-1].data["temperature"] == 18.0
 
 
+def _section_suggested(result: Any, section_key: str) -> dict[str, Any]:
+    """Suggested values of one options-form section, HA-version-agnostic.
+
+    HA <= 2025.x: add_suggested_values_to_schema puts the whole nested dict on
+    the SECTION marker's description; HA 2026.2+ recurses into the section
+    schema instead — each inner field marker carries its own suggested_value
+    (E.11 latest job).
+    """
+    schema = result["data_schema"].schema
+    marker = next(k for k in schema if k.schema == section_key)
+    if marker.description is not None:
+        return dict(marker.description["suggested_value"])
+    inner = schema[marker].schema
+    return {
+        k.schema: (k.description or {}).get("suggested_value") for k in inner.schema
+    }
+
+
+def _options_submit(**schedule_extra: Any) -> dict[str, Any]:
+    """A minimal valid sectioned options submit; extra schedule fields merge in."""
+    return {
+        "comfort": {
+            CONF_CATEGORY: ROOM_INPUT[CONF_CATEGORY],
+            CONF_COMFORT_BASE: ROOM_INPUT[CONF_COMFORT_BASE],
+            CONF_COMFORT_WEIGHT: ROOM_INPUT[CONF_COMFORT_WEIGHT],
+        },
+        "schedule": {
+            CONF_SETBACK_DELTA: ROOM_INPUT[CONF_SETBACK_DELTA],
+            CONF_OPTIMAL_START: ROOM_INPUT[CONF_OPTIMAL_START],
+            **schedule_extra,
+        },
+        "heat_cool": {},
+        "presence": {},
+        "manual_override": {},
+        "advanced": {CONF_OPERATIVE_INPUT: ROOM_INPUT[CONF_OPERATIVE_INPUT]},
+        "energy": {},
+    }
+
+
 async def test_options_prefills_stored_adopt_external_mode(
     hass: HomeAssistant,
 ) -> None:
@@ -519,13 +560,98 @@ async def test_options_prefills_stored_adopt_external_mode(
         result = await hass.config_entries.options.async_init(entry.entry_id)
 
     assert result["type"] is FlowResultType.FORM
-    marker = next(
-        k for k in result["data_schema"].schema if k.schema == "manual_override"
-    )
-    suggested = marker.description["suggested_value"]
+    suggested = _section_suggested(result, "manual_override")
     # control: the sibling flag has always round-tripped
     assert suggested.get(CONF_ADOPT_EXTERNAL_SETPOINT) is False
     assert suggested.get(CONF_ADOPT_EXTERNAL_MODE) is False
+
+
+async def test_options_prefills_legacy_adaptive_cool_bool(
+    hass: HomeAssistant,
+) -> None:
+    """A stored legacy adaptive_cool=True pre-fills as the canonical "on".
+
+    The tri-state dropdown only knows the mode strings, so the options flow
+    converts the legacy boolean before nest_by_section builds the prefill
+    (E.12 coverage: the conversion branch in async_step_init).
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={CONF_ADAPTIVE_COOL: True},
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.FORM
+    assert _section_suggested(result, "heat_cool").get(CONF_ADAPTIVE_COOL) == "on"
+
+
+async def test_options_extra_window_half_pair_errors(hass: HomeAssistant) -> None:
+    """An extra window with only one bound re-shows the form with the pair error.
+
+    Covers the _renumber_windows validation path plus its propagation into
+    errors["base"] (E.12 coverage).
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(**{f"{CONF_COMFORT_START}_2": "06:00:00"}),
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "comfort_window_pair"}
+
+
+async def test_options_extra_windows_renumber_gaplessly(hass: HomeAssistant) -> None:
+    """Clearing a middle window renumbers the later one down (no stranding).
+
+    Stored windows _2 and _3; the submit keeps only the _3 pair — it must be
+    stored as the new _2, and the old _3 keys must vanish (form-owned keys keep
+    replace semantics, review A.3 / E.12 coverage of the compaction loop).
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={
+            f"{CONF_COMFORT_START}_2": "06:00:00",
+            f"{CONF_COMFORT_END}_2": "08:00:00",
+            f"{CONF_COMFORT_START}_3": "17:00:00",
+            f"{CONF_COMFORT_END}_3": "21:00:00",
+        },
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(
+                **{
+                    f"{CONF_COMFORT_START}_3": "17:00:00",
+                    f"{CONF_COMFORT_END}_3": "21:00:00",
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[f"{CONF_COMFORT_START}_2"] == "17:00:00"
+    assert entry.options[f"{CONF_COMFORT_END}_2"] == "21:00:00"
+    assert f"{CONF_COMFORT_START}_3" not in entry.options
+    assert f"{CONF_COMFORT_END}_3" not in entry.options
 
 
 async def test_options_sections_match_rendered_schema(hass: HomeAssistant) -> None:

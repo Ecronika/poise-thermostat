@@ -75,7 +75,7 @@ def _set_actuator(hass: HomeAssistant, state: str = "heat", **extra: Any) -> Non
         "hvac_modes": ["heat", "off"],
         "temperature": 18.0,
         "current_temperature": 19.0,
-        "target_temperature_step": 0.5,
+        "target_temp_step": 0.5,
         "min_temp": 5,
         "max_temp": 30,
         "hvac_action": "heating",
@@ -322,7 +322,7 @@ async def test_tristate_f8_and_positioned_presence_read(hass: HomeAssistant) -> 
 # --- device-guard discovery ----------------------------------------------------
 
 
-def _register_trv_device(hass: HomeAssistant) -> str:
+def _register_trv_device(hass: HomeAssistant, *, extra_steps_pair: bool = False) -> str:
     """A mock TRV device owning the actuator + its sibling entities."""
     dev_entry = MockConfigEntry(domain="demo", title="TRV Device")
     dev_entry.add_to_hass(hass)
@@ -353,6 +353,9 @@ def _register_trv_device(hass: HomeAssistant) -> str:
     _reg("number", "trv_valve_opening_degree", "valve")
     _reg("sensor", "trv_closing_steps", "close")
     _reg("sensor", "trv_idle_steps", "idle")
+    if extra_steps_pair:
+        _reg("sensor", "trv_closing_steps_2", "close2")
+        _reg("sensor", "trv_idle_steps_2", "idle2")
     return act
 
 
@@ -394,6 +397,21 @@ async def test_guard_discovery_resolves_and_is_idempotent(
     assert inputs.device_guards.battery == 8.0
     assert inputs.device_guards.adaptive_mode == "on"
     assert inputs.device_guards.ext_temp_number == "number.trv_external_temperature"
+
+
+async def test_guard_discovery_valve_steps_first_match_wins(
+    hass: HomeAssistant,
+) -> None:
+    """A second matching steps sensor must not overwrite the first.
+
+    Parity with every other guard role: first-match-wins across the one
+    discovery pass (review plan A.2).
+    """
+    act = _register_trv_device(hass, extra_steps_pair=True)
+    reader = _reader(hass, actuator=act)
+    reader.resolve_device_guards()
+    assert reader.valve_closing_steps == "sensor.trv_closing_steps"
+    assert reader.valve_idle_steps == "sensor.trv_idle_steps"
 
 
 async def test_guard_discovery_failure_is_swallowed(hass: HomeAssistant) -> None:

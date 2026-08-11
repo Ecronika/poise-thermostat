@@ -66,7 +66,7 @@ async def test_self_regulating_ac_writes_first_setpoint(hass: HomeAssistant) -> 
             "hvac_modes": ["cool", "heat", "off"],
             "temperature": 24.0,
             "current_temperature": 27.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 16,
             "max_temp": 32,
         },

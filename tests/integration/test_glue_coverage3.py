@@ -24,6 +24,7 @@ from custom_components.poise.const import (
     CONF_BOILER_COUNT_THRESHOLD,
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
+    CONF_CLO_OFFSET,
     CONF_COMFORT_BASE,
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
@@ -119,7 +120,7 @@ async def test_device_guard_resolution_surfaces_diagnostics(
             "hvac_modes": ["heat", "off"],
             "temperature": 18.0,
             "current_temperature": 19.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },
@@ -170,7 +171,7 @@ async def test_poise_entity_set_temperature_sets_override(
             "hvac_modes": ["heat", "off"],
             "temperature": 19.0,
             "current_temperature": 20.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },
@@ -224,6 +225,51 @@ async def test_options_flow_creates_entry(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     # flatten_sections stored the tuning flat (not nested under section keys)
     assert entry.options[CONF_COMFORT_BASE] == ROOM[CONF_COMFORT_BASE]
+
+
+async def test_options_flow_preserves_non_form_keys(hass: HomeAssistant) -> None:
+    """A repairs-learned option (clo_offset) survives an options submit.
+
+    The submit replaces form-owned keys wholesale (cleared windows drop out),
+    but keys the rendered form does not own — e.g. the ADR-0067 clo_offset the
+    suggestion fix flow writes — must be carried over (review plan A.3).
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM,
+        options={CONF_CLO_OFFSET: 0.15},
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        assert result["type"] is FlowResultType.FORM
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                "comfort": {
+                    CONF_CATEGORY: ROOM[CONF_CATEGORY],
+                    CONF_COMFORT_BASE: 22.0,
+                    CONF_COMFORT_WEIGHT: ROOM[CONF_COMFORT_WEIGHT],
+                },
+                "schedule": {
+                    CONF_SETBACK_DELTA: ROOM[CONF_SETBACK_DELTA],
+                    CONF_OPTIMAL_START: ROOM[CONF_OPTIMAL_START],
+                },
+                "heat_cool": {},
+                "presence": {},
+                "manual_override": {},
+                "advanced": {CONF_OPERATIVE_INPUT: ROOM[CONF_OPERATIVE_INPUT]},
+                "energy": {},
+            },
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_CLO_OFFSET] == 0.15  # carried, not wiped
+    assert entry.options[CONF_COMFORT_BASE] == 22.0  # form key stored normally
 
 
 async def test_reconfigure_system_hub(hass: HomeAssistant) -> None:

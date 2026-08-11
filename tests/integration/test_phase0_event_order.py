@@ -100,7 +100,7 @@ def _actuator(
             "hvac_modes": modes,
             "temperature": sp,
             "current_temperature": room,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },

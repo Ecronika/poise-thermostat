@@ -64,7 +64,7 @@ def _actuator(hass: HomeAssistant, *, modes: list[str], state: str = "heat") -> 
             "hvac_modes": modes,
             "temperature": 15.0,
             "current_temperature": 19.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },

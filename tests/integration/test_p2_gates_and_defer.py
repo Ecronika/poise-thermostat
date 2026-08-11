@@ -231,7 +231,7 @@ def _hot_cool_ac(hass: HomeAssistant) -> None:
             "hvac_modes": ["heat", "cool", "off"],
             "temperature": 24.0,
             "current_temperature": 28.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 16,
             "max_temp": 30,
         },

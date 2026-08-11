@@ -88,7 +88,7 @@ def _set_room_and_actuator(hass: HomeAssistant, *, room: float, sp: float) -> No
             "hvac_modes": ["heat", "off"],
             "temperature": sp,
             "current_temperature": room,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },

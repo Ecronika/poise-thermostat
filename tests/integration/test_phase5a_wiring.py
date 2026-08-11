@@ -77,7 +77,7 @@ async def _setup(hass: HomeAssistant) -> Any:
             "hvac_modes": ["heat", "off"],
             "temperature": 20.0,
             "current_temperature": 20.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },

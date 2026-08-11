@@ -105,7 +105,7 @@ def _set_room(
             "hvac_modes": modes or ["heat", "off"],
             "temperature": setpoint,
             "current_temperature": room if isinstance(room, float) else None,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },

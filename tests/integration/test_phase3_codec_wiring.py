@@ -93,7 +93,7 @@ def _set_states(hass: HomeAssistant, *, room: float = 19.0, sp: float = 18.0) ->
             "hvac_modes": ["heat", "off"],
             "temperature": sp,
             "current_temperature": room,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 5,
             "max_temp": 30,
         },

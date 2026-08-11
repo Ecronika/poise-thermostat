@@ -51,7 +51,7 @@ async def test_cool_raise_writes_lifted_setpoint(hass: HomeAssistant) -> None:
             "hvac_modes": ["cool", "heat", "off"],
             "temperature": 20.0,
             "current_temperature": 29.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 16,
             "max_temp": 32,
         },

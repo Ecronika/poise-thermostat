@@ -85,7 +85,7 @@ def _states(
             "hvac_modes": ["heat", "off"],
             "temperature": sp,
             "current_temperature": room,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": min_temp,
             "max_temp": 30,
         },
@@ -214,7 +214,7 @@ async def test_p3_1_actuator_without_min_temp_writes_bare_floor(
             "hvac_modes": ["heat", "off"],
             "temperature": 20.0,
             "current_temperature": 19.0,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "max_temp": 30,
         },
     )

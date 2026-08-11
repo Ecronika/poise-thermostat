@@ -84,7 +84,7 @@ def _reversible_ac(hass: HomeAssistant, *, state: str) -> None:
             "hvac_modes": ["cool", "heat", "off"],
             "temperature": 24.0,
             "current_temperature": _ROOM,
-            "target_temperature_step": 0.5,
+            "target_temp_step": 0.5,
             "min_temp": 16,
             "max_temp": 32,
         },
