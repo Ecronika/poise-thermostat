@@ -234,10 +234,12 @@ async def test_coordinator_scalar_read_helpers(hass: HomeAssistant) -> None:
     reader = coord._input_reader
     # a missing sensor has no change-age
     assert reader.sensor_age("sensor.ghost") is None
-    # an actuator that reports no hvac_modes/max_temp -> heat-only + default max
+    # an actuator that reports no hvac_modes/max_temp -> heat-only; the
+    # DEVICE_MAX_C fallback is a consumer rule on the snapshot's max_temp
+    # (B.5 removed the dead device_max() reader)
     hass.states.async_set("climate.trv", "heat", {})
     assert coord.capability == (True, False)  # public property -> reader
-    assert isinstance(reader.device_max(), float)
+    assert reader.snapshot().actuator.max_temp is None
     # sun elevation attribute (present -> float, absent -> None)
     hass.states.async_set("sun.sun", "above_horizon", {"elevation": 30.0})
     assert reader.sun_elevation() == 30.0

@@ -33,7 +33,6 @@ from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.poise.clock import ManualClock
-from custom_components.poise.const import DEVICE_MAX_C
 from custom_components.poise.ha.input_reader import (
     InputReader,
     actuator_snapshot,
@@ -184,9 +183,10 @@ async def test_snapshot_missing_entities_read_as_none(hass: HomeAssistant) -> No
     assert inputs.actuator.max_temp is None
 
     # the primitive helpers carry today's read-time defaults (pinned by
-    # test_glue_coverage4 for the coordinator originals)
+    # test_glue_coverage4 for the coordinator originals); the DEVICE_MAX_C
+    # fallback is a consumer rule on the snapshot's max_temp (B.5 removed the
+    # dead device_max() reader).
     assert reader.capability() == (True, False)
-    assert reader.device_max() == DEVICE_MAX_C
     assert reader.device_min() is None
 
 
@@ -194,11 +194,12 @@ async def test_capability_and_limits_from_live_state(hass: HomeAssistant) -> Non
     _set_actuator(hass, hvac_modes=["heat", "cool", "off"])
     reader = _reader(hass)
     assert reader.capability() == (True, True)
-    assert reader.device_max() == 30.0
+    assert reader.snapshot().actuator.max_temp == 30.0
     assert reader.device_min() == 5.0
-    # non-numeric limits: max falls back, min skips the floor clamp (P3-1)
+    # non-numeric limits: max reads absent (consumer falls back), min skips
+    # the floor clamp (P3-1)
     _set_actuator(hass, min_temp="low", max_temp="high")
-    assert reader.device_max() == DEVICE_MAX_C
+    assert reader.snapshot().actuator.max_temp is None
     assert reader.device_min() is None
     # non-numeric sun elevation reads as None
     hass.states.async_set("sun.sun", "above_horizon", {"elevation": "high"})
@@ -397,6 +398,34 @@ async def test_guard_discovery_resolves_and_is_idempotent(
     assert inputs.device_guards.battery == 8.0
     assert inputs.device_guards.adaptive_mode == "on"
     assert inputs.device_guards.ext_temp_number == "number.trv_external_temperature"
+
+
+async def test_reads_reject_non_finite_values(hass: HomeAssistant) -> None:
+    """NaN/Inf from device attributes must die at the trust boundary (B.5).
+
+    A NaN ``max_temp``/``min_temp`` used to pass the isinstance capture and
+    silently fail-open the SAFETY clamps downstream (NaN never binds in the
+    constraint solver); a NaN ``current_temperature`` poisoned the ADR-0056
+    deviation EMA until restart. All must read as None now.
+    """
+    _set_actuator(
+        hass,
+        min_temp=float("nan"),
+        max_temp=float("inf"),
+        current_temperature=float("nan"),
+    )
+    hass.states.async_set("sun.sun", "above_horizon", {"elevation": float("-inf")})
+
+    reader = _reader(hass)
+    snap = reader.read_actuator()
+    assert snap.min_temp is None
+    assert snap.max_temp is None
+    assert snap.current_temperature is None
+    assert reader.device_min() is None
+    assert reader.sun_elevation() is None
+    # the pre-await capability view captures the same boundary
+    inputs = reader.snapshot()
+    assert inputs.actuator.max_temp is None
 
 
 async def test_guard_discovery_valve_steps_first_match_wins(

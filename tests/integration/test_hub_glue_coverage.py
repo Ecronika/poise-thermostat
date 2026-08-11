@@ -70,6 +70,39 @@ async def test_hub_power_reader_parses_sensor_states(hass: HomeAssistant) -> Non
     assert hub._power("sensor.p") == 1500.5
     hass.states.async_set("sensor.p", "not-a-number")
     assert hub._power("sensor.p") is None
+    # B.5: non-finite readings must die at the boundary — a NaN available
+    # power would otherwise mark EVERY sheddable zone as shed (NaN never
+    # satisfies the deficit comparison).
+    hass.states.async_set("sensor.p", "nan")
+    assert hub._power("sensor.p") is None
+    hass.states.async_set("sensor.p", "inf")
+    assert hub._power("sensor.p") is None
+
+
+async def test_hub_config_garbage_falls_back_to_defaults(
+    hass: HomeAssistant,
+) -> None:
+    """Corrupted numeric entry data must not crash hub setup (B.5).
+
+    float("garbage") used to raise straight out of __init__ → the system
+    entry never set up; NaN passed silently into the dwell/delay timers.
+    """
+    import math
+
+    from custom_components.poise.const import (
+        CONF_BOILER_MIN_ON,
+        DEFAULT_BOILER_ACTIVATION_DELAY_S,
+    )
+
+    hub = await _setup_hub(
+        hass,
+        **{
+            CONF_BOILER_ACTIVATION_DELAY: "garbage",
+            CONF_BOILER_MIN_ON: float("nan"),
+        },
+    )
+    assert hub._activation_delay == DEFAULT_BOILER_ACTIVATION_DELAY_S
+    assert math.isfinite(hub._min_on)
 
 
 async def test_hub_zone_name_resolves_entry_title(hass: HomeAssistant) -> None:

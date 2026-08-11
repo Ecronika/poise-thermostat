@@ -174,3 +174,42 @@ async def test_identified_boiler_zone_calls_for_heat(hass: HomeAssistant) -> Non
     assert d["identified"] is True
     # below comfort with a trusted model -> the heat setpoint sits above the room
     assert d["heat_sp"] > d["current_temperature"]
+
+
+async def test_reference_offset_survives_non_finite_actuator_temperature(
+    hass: HomeAssistant,
+) -> None:
+    """B.5: a NaN device ``current_temperature`` must not poison the ADR-0056
+    reference-offset state (the deviation EWMA stayed NaN until restart, so
+    the trust gate could never open again)."""
+    import math
+
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set("sensor.room_temp", "18.5", {"device_class": "temperature"})
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 17.0,
+            "current_temperature": float("nan"),  # firmware/template glitch
+            "target_temp_step": 0.5,
+            "min_temp": 5,
+            "max_temp": 30,
+            "hvac_action": "heating",  # conditioning -> the EWMA folds samples
+        },
+    )
+    entry = await _setup(hass, _base())
+    coord = entry.runtime_data
+    _make_identified(coord.runtime.learning.ekf)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+
+    est = coord.runtime.learning.ref_offset
+    if est is not None:  # a rejected read holds the prior (None) estimate
+        assert math.isfinite(est.offset)
+        assert math.isfinite(est.deviation)
+        assert math.isfinite(est.raw)
