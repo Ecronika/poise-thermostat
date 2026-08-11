@@ -1,12 +1,20 @@
 # HA-runtime integration-test harness (CI-only; needs Python >= 3.12).
-# Pinned to versions verified against our 2025.1 APIs.
+#
+# TWO pinned HA targets (review plan E.11):
+#   requirements-test.txt        — HA-MIN: exactly the promised minimum
+#                                  (README badge + hacs.json say 2025.1);
+#                                  pytest-hacc 0.13.205 pins
+#                                  homeassistant==2025.1.4.
+#   requirements-test-latest.txt — HA-LATEST: current stable, early warning
+#                                  against API drift.
+# Bump BOTH deliberately; a MIN bump must move the hacs.json minimum with it.
 #
 # pytest-homeassistant-custom-component installs a *slim* Home Assistant that
 # omits the (large) frontend wheel, but our manifest declares `frontend` as a
 # dependency (it serves the Lovelace card), so HA refuses to set the
-# integration up without `hass_frontend`. We therefore install it explicitly;
-# HA core does not pin it, so a recent build is used.
-pytest-homeassistant-custom-component==0.13.195
+# integration up without `hass_frontend`. We therefore install it explicitly,
+# pinned to the 2025.1-era build.
+pytest-homeassistant-custom-component==0.13.205
 home-assistant-frontend==20250109.2
 
 # coverage plugin for the glue gate (pinned-compatible with pytest-hacc)
