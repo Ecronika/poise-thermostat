@@ -11,6 +11,7 @@ import {
   minutesUntil,
   presetChip,
   resumeSchedule,
+  stepOf,
 } from "../src/override.ts";
 import { DIAL, setpointForKey } from "../src/dial.ts";
 import type { HomeAssistant } from "../src/ha-types.ts";
@@ -51,6 +52,19 @@ test("holdView: missing setpoint still labels the hold", () => {
   );
 });
 
+test("stepOf: reads HA's serialised target_temp_step wire key, 0.5 fallback", () => {
+  assert.equal(stepOf({ target_temp_step: 0.25 }), 0.25);
+  assert.equal(stepOf({ target_temp_step: "1" }), 1); // string state survives
+  assert.equal(stepOf({}), 0.5); // absent -> entity default
+  // the Python property name is NOT the wire key and must be ignored
+  // (review plan A.4: the old read always missed and fell back)
+  assert.equal(stepOf({ target_temperature_step: 0.1 }), 0.5);
+  // degenerate steps must not poison the dial's division/rounding
+  assert.equal(stepOf({ target_temp_step: 0 }), 0.5);
+  assert.equal(stepOf({ target_temp_step: -0.5 }), 0.5);
+  assert.equal(stepOf({ target_temp_step: "abc" }), 0.5);
+});
+
 test("holdDirection: maps hvac_action to a localized direction word (V4)", () => {
   assert.equal(holdDirection("de", "cooling"), "kühlt");
   assert.equal(holdDirection("de", "heating"), "heizt");
@@ -62,6 +76,43 @@ test("holdDirection: maps hvac_action to a localized direction word (V4)", () =>
   assert.equal(holdDirection("de", "off"), null);
   assert.equal(holdDirection("de", null), null);
   assert.equal(holdDirection("de", undefined), null);
+});
+
+test("holdView: mode-only hold shows the mode word, never a degree number", () => {
+  // Field bug 2026-08-10 (Schlafzimmer/BT): a device OFF adopted as a
+  // mode-hold rendered "Manuell 18.3°" — the entity temperature is just the
+  // live schedule edge there, not a held value.
+  const v = holdView(
+    "de",
+    18.3, // temperature IS present — must be ignored without a setpoint hold
+    "schedule",
+    "2026-07-11T22:00:00Z",
+    NOW,
+    "idle",
+    "device_adopt_mode",
+    "off",
+    false, // no override_requested published -> mode-only hold
+  );
+  assert.equal(v.label, "Manuell · Aus");
+  assert.equal(v.origin, "Gerät");
+  // A same-frame setpoint+mode hold (IR remote) keeps the number AND the mode.
+  const both = holdView(
+    "en",
+    21.5,
+    "schedule",
+    "2026-07-11T22:00:00Z",
+    NOW,
+    "heating",
+    "device_adopt_setpoint",
+    "heat",
+    true,
+  );
+  assert.equal(both.label, "Manual 21.5° · Heating");
+  // Unknown future mode stays visible raw instead of vanishing.
+  const raw = holdView("en", null, "schedule", null, NOW, null, null, "auto", false);
+  assert.equal(raw.label, "Manual · auto");
+  // Back-compat: the old call shape is unchanged.
+  assert.equal(holdView("de", 22, "schedule", null, NOW).label, "Manuell 22.0°");
 });
 
 test("holdView: exposes the direction from hvac_action (V4)", () => {
