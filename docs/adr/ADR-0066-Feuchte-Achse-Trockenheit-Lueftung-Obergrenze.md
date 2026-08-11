@@ -25,3 +25,14 @@ Drei additive, **nie regelnde** Fähigkeiten (alle Entwurfsentscheidungen des De
 ## Konsequenzen
 
 ADR-0048 §2 präzisiert: der sichtbare, begründete Lüftungs-Nudge ist der erlaubte Hinweis-Pfad; es entsteht kein Kommando (kein `fan`, kein `humidifier`, `Axis.VENTILATION` bleibt tot). Kein Luftwechselraten-Versprechen („N Minuten lüften" bleibt verboten). Degradation: ohne Sensoren still inaktiv, Anzeige zeigt im Zweifel nichts statt Falsches.
+
+## Nachtrag N1 (2026-08-10, v0.188.0): Regel 3t — Freikühl-Lüften (`heat_out`)
+
+**Anlass (Maintainer-Feldbedarf):** Im Sommer heizen sich Zonen passiv auf; wer weder kühlen noch Luft bewegen kann, hat nur das Fenster — der Rat existierte aber nur für Feuchte/CO₂. Die Tabelle B.2 erhält eine thermische Schwester-Regel **3t** mit vier Wächtern, damit sie nie falsch rät:
+
+1. **Fähigkeits-Gate:** nur Zonen ohne `cool` UND ohne Lüfterstufen (aus den beworbenen Geräte-Flächen `hvac_modes`/`fan_modes` an der Shadow-Naht) — eine AC-/Fan-Zone bekommt den Rat nie (Fenster offen + Verdichter wäre kontraproduktiv; die Fan-Zone hat Tier 3).
+2. **Thermischer Gewinn mit asymmetrischer Hysterese:** Raum über der effektiven Kühlkante UND außen ≥ `heat_out_dt_on_k` (2,0 K) kühler öffnet; die Episode hält (`prev_heat_out`-Anker, transient in `HumidityRuntime.vent_reason`) bis der Vorsprung unter `heat_out_dt_off_k` (1,0 K) fällt oder der Raum die Kante erreicht — dann rät `cooled_off` zum Schließen. Restart mitten in der Episode re-appliziert einmalig die Eintrittsschwelle (bewusst nicht persistiert).
+3. **Feuchte-Wächter:** Außenluft darf höchstens `heat_out_humid_guard_gm3` (1,0 g/m³) feuchter sein als innen — kein Tausch Wärme gegen Schwüle; sonst still `no_gain`.
+4. **Nicht belegungs-gebunden** (bewusster Unterschied zu Regel 3/4): Nachtauskühlung ist im leeren Raum am wertvollsten; Notification bleibt Opt-in, das `poise_ventilation_advice`-Event feuert wie bei jeder Ratänderung (Andockpunkt für Fensterantriebe/Rollos — Aktuierung bleibt außerhalb, ADR-0048).
+
+**Präzedenz:** Schimmel (1) und Trockenheits-Veto (2) und Winter-`thermal_floor` (5a) stehen über 3t; ein noch gültiger Feuchte-/CO₂-Grund hält das Fenster offen, bevor `cooled_off` schließt (3t-close sitzt NACH 3/4). Vokabular +2 (`heat_out`, `cooled_off`); Card-Chip „Lüften (draußen kühler)". Pure Tests: 5 neue Fälle (Gate, Hysterese/Close, Schwüle-Veto, Präzedenzen) in `tests/test_feuchte_achse.py`.
