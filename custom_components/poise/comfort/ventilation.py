@@ -32,6 +32,14 @@ DEFAULT_CO2_PPM: float = 1000.0  # UBA de-facto ventilation line (ADR-0049)
 # line) — a REACTIVITY compromise and calibration target, NOT normatively
 # derived from the Sedlbauer isopleths (design §12.2 warning).
 DEFAULT_SURFACE_TAU_MIN: float = 48.0 * 60.0
+# Free-cooling advice (rule 3t, v0.188.0): open when outside is at least
+# DT_ON cooler than the room, keep the episode until the edge shrinks below
+# DT_OFF (asymmetric anti-chatter, same pattern as the moisture deltas).
+DEFAULT_HEAT_OUT_DT_ON_K: float = 2.0
+DEFAULT_HEAT_OUT_DT_OFF_K: float = 1.0
+# Moisture guard for free-cooling: never trade heat for muggy air — outside
+# may be at most this much MORE humid than inside (delta = in - out >= -guard).
+DEFAULT_HEAT_OUT_HUMID_GUARD_GM3: float = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +52,9 @@ class VentConfig:
     surface_limit_pct: float = DEFAULT_SURFACE_LIMIT_PCT
     surface_margin_pp: float = DEFAULT_SURFACE_MARGIN_PP
     co2_ppm: float = DEFAULT_CO2_PPM
+    heat_out_dt_on_k: float = DEFAULT_HEAT_OUT_DT_ON_K
+    heat_out_dt_off_k: float = DEFAULT_HEAT_OUT_DT_OFF_K
+    heat_out_humid_guard_gm3: float = DEFAULT_HEAT_OUT_HUMID_GUARD_GM3
 
 
 _DEFAULT = VentConfig()
@@ -91,6 +102,12 @@ def ventilation_advise(
     occupied: bool,
     prev_advice_active: bool,
     cfg: VentConfig = _DEFAULT,
+    room_c: float | None = None,
+    cool_edge_c: float | None = None,
+    t_out_c: float | None = None,
+    cool_capable: bool = False,
+    fan_capable: bool = False,
+    prev_heat_out: bool = False,
 ) -> VentilationAdvice:
     """Decision table B.2 of the design, precedence top-down.
 
@@ -101,6 +118,15 @@ def ventilation_advise(
     requires OUTSIDE air to be drier than inside — venting against a more
     humid outdoors would import moisture, so without a plausible gain the
     advice degrades silently (``no_data``/``no_gain``), never wrongly.
+
+    Rule 3t (free-cooling, v0.188.0) is the thermal sibling for zones that
+    can neither cool nor move air (``cool_capable``/``fan_capable`` false —
+    the window is their only summer relief): room above the cool edge AND
+    outside at least ``heat_out_dt_on_k`` cooler opens; the episode holds
+    (``prev_heat_out``) until the edge shrinks below ``heat_out_dt_off_k`` or
+    the room reaches the band, then ``cooled_off`` advises closing. The
+    moisture guard vetoes muggy outside air (delta >= -humid_guard). NOT
+    occupancy-gated by design: night purge is most valuable in an empty room.
     """
     if w_in_gm3 is None or w_out_gm3 is None:
         # Design §9: no indoor value or no outdoor source -> feature silent.
@@ -126,12 +152,31 @@ def ventilation_advise(
     # over any comfort reason to keep venting.
     if window_open and room_at_thermal_floor:
         return VentilationAdvice("close", "thermal_floor", "warn", round(delta, 1))
+    # Rule 3t — free-cooling (heat_out): capability-gated (window-only zones),
+    # asymmetric dT hysteresis, muggy-outside veto. Not occupancy-gated.
+    free_cool_zone = not cool_capable and not fan_capable
+    if (
+        free_cool_zone
+        and room_c is not None
+        and cool_edge_c is not None
+        and t_out_c is not None
+        and room_c > cool_edge_c
+        and t_out_c
+        <= room_c - (cfg.heat_out_dt_off_k if prev_heat_out else cfg.heat_out_dt_on_k)
+        and delta >= -cfg.heat_out_humid_guard_gm3
+    ):
+        return VentilationAdvice("open", "heat_out", "ok", round(delta, 1))
     # Rules 3/4 — comfort, occupancy-gated. Asymmetric hysteresis on delta.
     threshold = cfg.delta_off_gm3 if prev_advice_active else cfg.delta_on_gm3
     if occupied and delta >= threshold and w_in_gm3 > cfg.moist_gm3:
         return VentilationAdvice("open", "moisture_out", "ok", round(delta, 1))
     if occupied and co2_ppm is not None and co2_ppm >= cfg.co2_ppm:
         return VentilationAdvice("open", "co2", "ok", round(delta, 1))
+    # Rule 3t close — the free-cooling episode ends (edge gone, room in band,
+    # or outside turned muggy) while the window is still open. AFTER rules
+    # 3/4 on purpose: a still-valid moisture/CO2 reason keeps the window open.
+    if window_open and prev_heat_out:
+        return VentilationAdvice("close", "cooled_off", "ok", round(delta, 1))
     # Rule 5b — close: the cause is gone (event-driven, not a timer).
     if window_open and delta < cfg.delta_off_gm3:
         return VentilationAdvice("close", "target_reached", "ok", round(delta, 1))
