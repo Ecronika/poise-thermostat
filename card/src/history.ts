@@ -18,6 +18,46 @@ export interface ChartGeom {
   vMax: number;
 }
 
+// --- refresh scheduling (review plan A.1) --------------------------------------
+// The card must not show an ageing chart on a dashboard that stays open: the
+// loaded series is identified by entity+hours (``histKey``) and re-fetched
+// periodically; a failed fetch re-arms on a much tighter backoff so a transient
+// recorder/WS error never silently freezes the chart until a page reload.
+
+export interface HistSync {
+  key: string; // histKey() identity of the loaded series
+  at: number; // epoch ms of the last (attempted) successful load
+  failedAt: number | null; // epoch ms of the last failed attempt; null when ok
+}
+
+export const HIST_REFRESH_MS = 5 * 60_000;
+export const HIST_RETRY_MS = 30_000;
+
+export function histKey(entity: string, hours: number): string {
+  return `${entity}|${hours}`;
+}
+
+export function shouldLoadHistory(
+  cur: HistSync | null,
+  key: string,
+  now: number,
+  refreshMs: number = HIST_REFRESH_MS,
+  retryMs: number = HIST_RETRY_MS,
+): boolean {
+  if (cur === null || cur.key !== key) return true; // first load / re-keyed
+  if (cur.failedAt != null) return now - cur.failedAt >= retryMs;
+  return now - cur.at >= refreshMs;
+}
+
+// A completed fetch may only commit its outcome (samples or failure stamp)
+// while the card still waits for exactly this series: a re-key while in
+// flight (entity or hours changed) invalidates the response — else a slow
+// old recorder query overwrites the new chart for up to HIST_REFRESH_MS, and
+// a late failure would destroy the new fetch's in-flight stamp (double load).
+export function histCurrent(cur: HistSync | null, key: string): boolean {
+  return cur?.key === key;
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(Math.max(v, lo), hi);
 }

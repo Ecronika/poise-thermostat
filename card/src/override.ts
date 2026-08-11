@@ -38,6 +38,18 @@ export function heldSetpoint(a: Record<string, unknown>): number | null {
   return typeof n === "number" && !Number.isNaN(n) ? n : null;
 }
 
+// The dial/keyboard nudge step. HA serialises
+// ClimateEntity.target_temperature_step under the ATTR_TARGET_TEMP_STEP wire
+// key "target_temp_step" — the Python property name never appears in a state
+// (review plan A.4: reading it always missed and silently fell back). 0.5
+// mirrors the Poise entity default; non-positive/unparseable steps fall back
+// too, so the dial's division/rounding never sees 0 or NaN.
+export function stepOf(a: Record<string, unknown>): number {
+  const v = a["target_temp_step"];
+  const n = typeof v === "string" ? parseFloat(v) : (v as number);
+  return typeof n === "number" && !Number.isNaN(n) && n > 0 ? n : 0.5;
+}
+
 export interface HoldView {
   label: string; // "Manuell 22.5°" or "Manuell (dauerhaft)"
   minutes: number | null; // remaining minutes; null when permanent/unknown
@@ -67,9 +79,22 @@ export function holdDirection(lang: string | undefined, action: unknown): string
   return null;
 }
 
+// Map a held hvac_mode to its localized word for the Hold pill (mode-holds,
+// K2). Known modes localize; an unknown future mode stays visible raw.
+export function modeHoldLabel(lang: string | undefined, mode: unknown): string | null {
+  if (typeof mode !== "string" || mode === "") return null;
+  const key = `mode_${mode}`;
+  const word = t(lang, key);
+  return word === key ? mode : word;
+}
+
 // Compose the Hold-pill text. A `permanent` policy drops the countdown and reads
 // "Manual (permanent)"; otherwise the remaining minutes come from expires_at. The
 // optional `action` (entity hvac_action) adds the current direction word (V4).
+// A mode-hold (`modeOverride`) appends its mode word; when it is the ONLY hold
+// (`hasSetpointHold` false — no `override_requested` published) the pill shows
+// "Manual · Off" WITHOUT a degree number: the entity `temperature` is then just
+// the live schedule edge, not a held value (field bug 2026-08-10).
 export function holdView(
   lang: string | undefined,
   setpoint: number | null,
@@ -78,20 +103,27 @@ export function holdView(
   now: number = Date.now(),
   action: unknown = null,
   reason: unknown = null,
+  modeOverride: unknown = null,
+  hasSetpointHold: boolean = true,
 ): HoldView {
   const manual = t(lang, "manual");
   const direction = holdDirection(lang, action);
   const origin = holdOrigin(lang, reason);
+  const modeWord = modeHoldLabel(lang, modeOverride);
+  const suffix = modeWord != null ? ` · ${modeWord}` : "";
   if (policy === "permanent") {
     return {
-      label: `${manual} (${t(lang, "permanent")})`,
+      label: `${manual} (${t(lang, "permanent")})${suffix}`,
       minutes: null,
       permanent: true,
       direction,
       origin,
     };
   }
-  const label = setpoint != null ? `${manual} ${setpoint.toFixed(1)}°` : manual;
+  const label =
+    hasSetpointHold && setpoint != null
+      ? `${manual} ${setpoint.toFixed(1)}°${suffix}`
+      : `${manual}${suffix}`;
   return {
     label,
     minutes: minutesUntil(expiresAt, now),

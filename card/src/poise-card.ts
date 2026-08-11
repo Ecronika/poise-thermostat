@@ -11,7 +11,14 @@ import {
 import { t } from "./localize.ts";
 import "./poise-card-editor.ts";
 import "./poise-system-card.ts";
-import { chartGeometry, type Sample } from "./history.ts";
+import {
+  chartGeometry,
+  histCurrent,
+  histKey,
+  shouldLoadHistory,
+  type HistSync,
+  type Sample,
+} from "./history.ts";
 import {
   DIAL,
   type DialConfig,
@@ -31,6 +38,7 @@ import {
   minutesUntil,
   presetChip,
   resumeSchedule,
+  stepOf,
 } from "./override.ts";
 
 function presetIcon(p: string): string {
@@ -53,7 +61,8 @@ export class PoiseCard extends LitElement implements LovelaceCard {
   hass!: HomeAssistant;
   private _config!: PoiseCardConfig;
   private _history: Sample[] = [];
-  private _histFor: string | null = null;
+  private _histSync: HistSync | null = null;
+  private _histTimer?: ReturnType<typeof setInterval>;
   private _dragging = false;
   private _pending: number | null = null;
   private _dialCfg: DialConfig = DIAL;
@@ -103,7 +112,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (!id || !this.hass) return; // M12: hass may be unset during early render
     const st = this.hass.states[id];
     if (!st) return; // entity removed between render and click (M10)
-    const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
+    const step = stepOf(st.attributes);
     // ADR-0059 Defekt 1: re-base the +/- nudge from the SAME value the dial
     // shows (`_pending ?? heldSetpoint(a) ?? …`, the held/commanded `temperature`),
     // NOT the `heat_sp` band edge — else a nudge on a 23° hold jumps to ~20.7.
@@ -114,16 +123,37 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     });
   }
 
-  protected updated(): void {
-    if (this.hass) void checkCardVersion(this, this.hass);
-    const id = this._config?.entity;
-    if (id && this.hass && this._r?.history.show && this._histFor !== id) {
-      this._histFor = id;
-      void this._loadHistory(id);
-    }
+  connectedCallback(): void {
+    super.connectedCallback();
+    // Review A.1: a dashboard left open must not show an ageing chart —
+    // re-check periodically even when no entity state change re-renders the
+    // card (shouldUpdate gates renders on the entity's State object).
+    this._histTimer = setInterval(() => this._syncHistory(), 60_000);
   }
 
-  private async _loadHistory(id: string): Promise<void> {
+  disconnectedCallback(): void {
+    clearInterval(this._histTimer);
+    this._histTimer = undefined;
+    super.disconnectedCallback();
+  }
+
+  protected updated(): void {
+    if (this.hass) void checkCardVersion(this, this.hass);
+    this._syncHistory();
+  }
+
+  private _syncHistory(): void {
+    const id = this._config?.entity;
+    if (!id || !this.hass || !this._r?.history.show) return;
+    const key = histKey(id, this._r.history.hours);
+    if (!shouldLoadHistory(this._histSync, key, Date.now())) return;
+    // Optimistic stamp doubles as the in-flight guard: a re-render during the
+    // fetch never double-loads; a failure re-arms via failedAt in the catch.
+    this._histSync = { key, at: Date.now(), failedAt: null };
+    void this._loadHistory(id, key);
+  }
+
+  private async _loadHistory(id: string, key: string): Promise<void> {
     if (!this.hass.connection) return;
     const hours = this._r?.history.hours ?? 24;
     const end = new Date();
@@ -153,10 +183,17 @@ export class PoiseCard extends LitElement implements LovelaceCard {
           sp: num(attrs["temperature"]),
         });
       }
+      // Staleness guard: a re-key while this fetch was in flight (entity or
+      // hours changed) invalidated the response — never commit it.
+      if (!histCurrent(this._histSync, key)) return;
       this._history = samples;
       this.requestUpdate();
     } catch {
-      /* graceful: no chart */
+      // Graceful: keep whatever chart is shown; re-arm the retry backoff so a
+      // transient recorder/WS error never freezes the chart until page reload.
+      // A stale failure must not clobber the newer fetch's in-flight stamp.
+      if (histCurrent(this._histSync, key))
+        this._histSync = { key, at: 0, failedAt: Date.now() };
     }
   }
 
@@ -346,12 +383,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (!rect.width || !this._config.entity) return;
     const vx = ((ev.clientX - rect.left) / rect.width) * 200 - 100;
     const vy = ((ev.clientY - rect.top) / rect.height) * 200 - 100;
-    const step =
-      num(
-        this.hass.states[this._config.entity]?.attributes[
-          "target_temperature_step"
-        ],
-      ) ?? 0.5;
+    const step = stepOf(
+      this.hass.states[this._config.entity]?.attributes ?? {},
+    );
     this._pending = Math.round(pointToValue(vx, vy, this._dialCfg) / step) * step;
     this.requestUpdate();
   }
@@ -388,7 +422,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (!id || this._r.controls !== "dial") return;
     const st = this.hass.states[id];
     if (!st) return;
-    const step = num(st.attributes["target_temperature_step"]) ?? 0.5;
+    const step = stepOf(st.attributes);
     // ADR-0059 Defekt 1: arrow keys re-base from the shown/held setpoint
     // (mirrors the dial's `_pending ?? heldSetpoint(a) ?? … min`), not the
     // `heat_sp` band edge — keeps the keyboard step consistent with the display.
@@ -484,6 +518,11 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       Date.now(),
       a["hvac_action"],
       a["override_reason"],
+      a["mode_override"],
+      // A setpoint hold always publishes its pre-clamp request; a mode-only
+      // hold does not — then `temperature` is just the live schedule edge and
+      // must not render as a held degree number (field bug 2026-08-10).
+      a["override_requested"] != null,
     );
     return html`<div class="hold">
       <div class="chip hold-chip">
@@ -570,7 +609,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     // attribute (v0.181.1 fix: the attribute read could never fire).
     if (r.chips.has("humidity") && a["vent_action"] === "open") {
       const reason = String(a["vent_reason"] ?? "");
-      const known = ["mold_risk", "moisture_out", "co2"].includes(reason);
+      const known = ["mold_risk", "moisture_out", "co2", "heat_out"].includes(reason);
       const label = known
         ? `${t(lang, "vent_open")} (${t(lang, "vent_" + reason)})`
         : t(lang, "vent_open");

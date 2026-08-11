@@ -72,6 +72,11 @@ const EN: Dict = {
   mould: "Mould limit",
   binding_mold: "Mould guard holds the minimum",
   binding_frost: "Frost guard holds the minimum",
+  mode_off: "Off",
+  mode_heat: "Heating",
+  mode_cool: "Cooling",
+  mode_dry: "Drying",
+  mode_fan_only: "Fan",
   presets: "Presets",
   air_quality: "Room condition",
   air_ok: "OK",
@@ -81,6 +86,7 @@ const EN: Dict = {
   vent_mold_risk: "mould risk",
   vent_moisture_out: "moisture",
   vent_co2: "CO₂",
+  vent_heat_out: "cooler outside",
 };
 const DE: Dict = {
   in_band: "Im Komfortband",
@@ -154,6 +160,11 @@ const DE: Dict = {
   mould: "Schimmelgrenze",
   binding_mold: "Schimmelschutz hält die Untergrenze",
   binding_frost: "Frostschutz hält die Untergrenze",
+  mode_off: "Aus",
+  mode_heat: "Heizen",
+  mode_cool: "Kühlen",
+  mode_dry: "Entfeuchten",
+  mode_fan_only: "Lüfter",
   presets: "Voreinstellungen",
   air_quality: "Raumzustand",
   air_ok: "OK",
@@ -163,6 +174,7 @@ const DE: Dict = {
   vent_mold_risk: "Schimmelrisiko",
   vent_moisture_out: "Feuchte",
   vent_co2: "CO₂",
+  vent_heat_out: "draußen kühler",
 };
 
 export function t(lang: string | undefined, key: string): string {
