@@ -284,6 +284,11 @@ class HumidityRuntime:
     # edge re-announce a still-open episode (the notification survives the
     # reboot) and stay silent when settling into idle.
     vent_last_action: str = ""
+    # Rule 3t (free-cooling, v0.188.0): previous advice REASON — the dT
+    # hysteresis anchor ("heat_out" holds the episode at the lower exit
+    # edge). Deliberately TRANSIENT: a restart mid-episode re-applies the
+    # entry threshold once, which at worst drops the advice briefly.
+    vent_reason: str = ""
 
 
 @dataclass(slots=True)
