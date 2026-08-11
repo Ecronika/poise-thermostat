@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -85,6 +86,31 @@ _LOGGER = logging.getLogger(__name__)
 _BOILER_CALL_TIMEOUT_S = 10.0  # a hung boiler service must not stall the hub (N-1)
 
 
+def _cfg_finite(value: Any, default: float) -> float:
+    """Config float with a finite guarantee (review B.5).
+
+    ``float("garbage")`` used to raise straight out of ``__init__`` (the
+    system entry never set up); NaN passed silently into dwell/delay timers.
+    Corrupted entry data falls back to the documented default instead.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return default
+    return v if math.isfinite(v) else default
+
+
+def _cfg_finite_opt(value: Any) -> float | None:
+    """Optional config float: falsy/garbage/non-finite reads as None (B.5)."""
+    if not value:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
 class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
     """Singleton hub: aggregates and (opt-in) actuates the shared boiler."""
 
@@ -109,28 +135,35 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._count_threshold = int(
             d.get(CONF_BOILER_COUNT_THRESHOLD, DEFAULT_BOILER_COUNT_THRESHOLD)
         )
-        pw = d.get(CONF_BOILER_POWER_THRESHOLD)
-        self._power_threshold = float(pw) if pw else None
+        self._power_threshold = _cfg_finite_opt(d.get(CONF_BOILER_POWER_THRESHOLD))
         # Actuation is opt-in: only active when BOTH the ON and OFF actions parse.
         self._action_on = parse_service_action(d.get(CONF_BOILER_ON_ACTION))
         self._action_off = parse_service_action(d.get(CONF_BOILER_OFF_ACTION))
         self._actuation = self._action_on is not None and self._action_off is not None
-        self._activation_delay = float(
-            d.get(CONF_BOILER_ACTIVATION_DELAY, DEFAULT_BOILER_ACTIVATION_DELAY_S)
+        self._activation_delay = _cfg_finite(
+            d.get(CONF_BOILER_ACTIVATION_DELAY, DEFAULT_BOILER_ACTIVATION_DELAY_S),
+            DEFAULT_BOILER_ACTIVATION_DELAY_S,
         )
-        self._keepalive = float(
-            d.get(CONF_BOILER_KEEPALIVE, DEFAULT_BOILER_KEEPALIVE_S)
+        self._keepalive = _cfg_finite(
+            d.get(CONF_BOILER_KEEPALIVE, DEFAULT_BOILER_KEEPALIVE_S),
+            DEFAULT_BOILER_KEEPALIVE_S,
         )
         # F9: clamp the min-cycle dwell UP to the hard floor so a mis-configured
         # (too-short) min_on/min_off can never short-cycle the boiler/compressor.
         # keepalive (0 = off) and activation_delay are intentionally not clamped.
         self._min_on = max(
             BOILER_MIN_DWELL_FLOOR_S,
-            float(d.get(CONF_BOILER_MIN_ON, DEFAULT_BOILER_MIN_ON_S)),
+            _cfg_finite(
+                d.get(CONF_BOILER_MIN_ON, DEFAULT_BOILER_MIN_ON_S),
+                DEFAULT_BOILER_MIN_ON_S,
+            ),
         )
         self._min_off = max(
             BOILER_MIN_DWELL_FLOOR_S,
-            float(d.get(CONF_BOILER_MIN_OFF, DEFAULT_BOILER_MIN_OFF_S)),
+            _cfg_finite(
+                d.get(CONF_BOILER_MIN_OFF, DEFAULT_BOILER_MIN_OFF_S),
+                DEFAULT_BOILER_MIN_OFF_S,
+            ),
         )
         self._boiler = BoilerState()
         self._reconciled = False  # review V2b: reconcile vs real boiler once
@@ -142,9 +175,12 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         # is wired (review #5).
         self._group_on: dict[str, bool] = {}
         self._group_switch: dict[str, float] = {}
-        self._max_flow = float(d.get(CONF_MAX_FLOW_TEMP, DEFAULT_MAX_FLOW_TEMP_C))
-        self._flow_hysteresis = float(
-            d.get(CONF_FLOW_HYSTERESIS, DEFAULT_FLOW_HYSTERESIS_C)
+        self._max_flow = _cfg_finite(
+            d.get(CONF_MAX_FLOW_TEMP, DEFAULT_MAX_FLOW_TEMP_C), DEFAULT_MAX_FLOW_TEMP_C
+        )
+        self._flow_hysteresis = _cfg_finite(
+            d.get(CONF_FLOW_HYSTERESIS, DEFAULT_FLOW_HYSTERESIS_C),
+            DEFAULT_FLOW_HYSTERESIS_C,
         )
         self._flow_current: float | None = None
         self._default_source = str(d.get(CONF_DEFAULT_SOURCE, DEFAULT_HEAT_SOURCE))
@@ -174,8 +210,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             if not isinstance(data, dict):
                 continue
             controls_boiler = bool(e.data.get(CONF_CONTROLS_BOILER, False))
-            dp = e.data.get(CONF_DECLARED_POWER)
-            declared_power = float(dp) if dp else None
+            declared_power = _cfg_finite_opt(e.data.get(CONF_DECLARED_POWER))
             if not data.get("available"):
                 # AR-05: an unavailable zone is normally dropped, but one that has
                 # locally degraded to unavailable-safe frost parking (its room
@@ -210,9 +245,7 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
                     controls_boiler=controls_boiler,
                     declared_power=declared_power,
                     compressor_group=e.data.get(CONF_COMPRESSOR_GROUP),
-                    flow_temp_request=(
-                        float(ft) if (ft := e.data.get(CONF_FLOW_TEMP)) else None
-                    ),
+                    flow_temp_request=_cfg_finite_opt(e.data.get(CONF_FLOW_TEMP)),
                     source_pref=e.data.get(CONF_SOURCE_POLICY),
                     mono_ts=float(zmono),  # guaranteed present by the guard above
                 )
@@ -227,9 +260,12 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         if st is None or st.state in ("unknown", "unavailable", ""):
             return None
         try:
-            return float(st.state)
+            v = float(st.state)
         except (ValueError, TypeError):
             return None
+        # B.5: a NaN reading would mark EVERY sheddable zone as shed (NaN
+        # never satisfies the deficit comparison) — die at the boundary.
+        return v if math.isfinite(v) else None
 
     def _shared_resource_shadow(
         self, requests: list[ZoneRequest], now: float
