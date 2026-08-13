@@ -340,3 +340,42 @@ def test_load_trace_drops_unsupported_versions() -> None:
     assert len(loaded) == 1 and loaded[0].v == TRACE_VERSION
     # opt out of the drop to inspect everything (e.g. for diagnostics)
     assert len(load_trace(good + "\n" + future, drop_unsupported=False)) == 2
+
+
+def test_shadow_outputs_round_trip_and_default() -> None:
+    """September-Instrumentierung: die Shadow-Outputs reiten als defaultete
+    In-Version-Felder im Trace mit (gleicher Kompat-Mechanismus wie die
+    v2-Feuchteachse, kein Version-Bump), damit die Winter-Gate-Evidenz
+    (ADR-0033b/0036/0037/0056) nicht an der ~10-Tage-Attribut-History haengt."""
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    data = {
+        "mpc_active": True,
+        "mpc_setpoint": 21.5,
+        "mpc_weight": 0.85,
+        "mpc_power": 0.4,
+        "tpi_duty": 0.63,
+        "pi_setpoint": 22.3,
+        "pi_offset": 1.3,
+        "ref_offset": -0.8,
+    }
+    rec = build_record(
+        data, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec.mpc_active is True and rec.mpc_setpoint == 21.5
+    assert rec.mpc_weight == 0.85 and rec.mpc_power == 0.4
+    assert rec.tpi_duty == 0.63
+    assert rec.pi_setpoint == 22.3 and rec.pi_offset == 1.3
+    assert rec.ref_offset == -0.8
+
+    back = TraceRecord.from_json_line(rec.to_json_line())
+    assert back.mpc_setpoint == 21.5 and back.tpi_duty == 0.63
+    assert back.ref_offset == -0.8 and back.mpc_active is True
+
+    # absent (alter Writer / Shadow inaktiv) -> Defaults, kein Version-Bump
+    rec2 = build_record(
+        {}, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec2.v == TRACE_VERSION
+    assert rec2.mpc_active is False and rec2.mpc_setpoint is None
+    assert rec2.tpi_duty is None and rec2.pi_setpoint is None
+    assert rec2.pi_offset is None and rec2.ref_offset is None
