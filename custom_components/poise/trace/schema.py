@@ -105,6 +105,19 @@ class TraceRecord:
     surface_rh_mean: float | None = None  # EWMA surface RH — rule-1 trigger
     vent_action: str = ""  # ventilation advice: idle|open|close|discourage
     vent_reason: str = ""  # stable reason token (mold_risk|moisture_out|...)
+    # --- September instrumentation (winter-gate evidence; added within v2,
+    # all defaulted — same compat mechanism as the ADR-0066 fields, no
+    # version bump needed): the shadow OUTPUTS (ADR-0033b/0036/0037/0056)
+    # ride along so cold-season flip evidence replays without the recorder's
+    # ~10-day attribute history. -------------------------------------------
+    mpc_active: bool = False
+    mpc_setpoint: float | None = None  # would-be MPC setpoint [°C]
+    mpc_weight: float | None = None  # confidence blend weight 0..1
+    mpc_power: float | None = None  # would-be heating power 0..1
+    tpi_duty: float | None = None  # would-be valve duty 0..1
+    pi_setpoint: float | None = None  # would-be compensated setpoint [°C]
+    pi_offset: float | None = None  # PI offset share [K]
+    ref_offset: float | None = None  # actuator<->room frame offset [K]
 
     def to_json_line(self) -> str:
         """One compact JSON line; floats rounded and ``None`` fields dropped."""
@@ -209,4 +222,12 @@ def build_record(
         surface_rh_mean=_maybe_f("surface_rh_mean"),
         vent_action=str(data.get("vent_action", "")),
         vent_reason=str(data.get("vent_reason", "")),
+        mpc_active=_b("mpc_active"),
+        mpc_setpoint=_maybe_f("mpc_setpoint"),
+        mpc_weight=_maybe_f("mpc_weight"),
+        mpc_power=_maybe_f("mpc_power"),
+        tpi_duty=_maybe_f("tpi_duty"),
+        pi_setpoint=_maybe_f("pi_setpoint"),
+        pi_offset=_maybe_f("pi_offset"),
+        ref_offset=_maybe_f("ref_offset"),
     )
