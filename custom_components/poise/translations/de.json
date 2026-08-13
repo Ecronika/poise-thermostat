@@ -158,6 +158,21 @@
       "mpc_weight": {
         "name": "MPC-Gewicht"
       },
+      "mpc_setpoint": {
+        "name": "MPC-Sollwert (Schatten)"
+      },
+      "tpi_valve_percent": {
+        "name": "TPI-Ventilöffnung (Schatten)"
+      },
+      "pi_setpoint": {
+        "name": "PI-kompensierter Sollwert (Schatten)"
+      },
+      "pi_offset": {
+        "name": "PI-Offset (Schatten)"
+      },
+      "ref_offset": {
+        "name": "Referenz-Offset (Aktor − Raum)"
+      },
       "ca_deviation_k": {
         "name": "Regelgüte — Abweichung (K)"
       },

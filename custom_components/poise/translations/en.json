@@ -371,6 +371,21 @@
       "mpc_weight": {
         "name": "MPC weight"
       },
+      "mpc_setpoint": {
+        "name": "MPC setpoint (shadow)"
+      },
+      "tpi_valve_percent": {
+        "name": "TPI valve opening (shadow)"
+      },
+      "pi_setpoint": {
+        "name": "PI compensated setpoint (shadow)"
+      },
+      "pi_offset": {
+        "name": "PI offset (shadow)"
+      },
+      "ref_offset": {
+        "name": "Reference offset (actuator − room)"
+      },
       "ca_deviation_k": {
         "name": "Control accuracy — deviation (K)"
       },
