@@ -182,6 +182,63 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=_scaled("mpc_weight", 100.0, 0),
     ),
+    # September instrumentation: the remaining winter-gate time series
+    # (ADR-0033b mpc_setpoint-vs-static, ADR-0036 valve duty, ADR-0037
+    # droop compensation, ADR-0056 frame offset) as measurement sensors —
+    # like the ca_* trio their long-term statistics carry the pre-flip
+    # evidence the climate attributes' ~10-day recorder history cannot.
+    PoiseSensorDescription(
+        key="mpc_setpoint",
+        translation_key="mpc_setpoint",
+        entity_registry_enabled_default=False,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=_TEMP,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=1,
+        value_fn=_scaled("mpc_setpoint", digits=1),
+    ),
+    PoiseSensorDescription(
+        key="tpi_valve_percent",
+        translation_key="tpi_valve_percent",
+        entity_registry_enabled_default=False,
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=0,
+        value_fn=_scaled("tpi_valve_percent", digits=1),
+    ),
+    PoiseSensorDescription(
+        key="pi_setpoint",
+        translation_key="pi_setpoint",
+        entity_registry_enabled_default=False,
+        native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+        device_class=_TEMP,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=1,
+        value_fn=_scaled("pi_setpoint", digits=1),
+    ),
+    PoiseSensorDescription(
+        key="pi_offset",
+        translation_key="pi_offset",
+        entity_registry_enabled_default=False,
+        native_unit_of_measurement=UnitOfTemperature.KELVIN,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=2,
+        value_fn=_scaled("pi_offset", digits=2),
+    ),
+    PoiseSensorDescription(
+        key="ref_offset",
+        translation_key="ref_offset",
+        entity_registry_enabled_default=False,
+        native_unit_of_measurement=UnitOfTemperature.KELVIN,
+        state_class=_MEAS,
+        entity_category=_DIAG,
+        suggested_display_precision=2,
+        value_fn=_scaled("ref_offset", digits=2),
+    ),
     # ADR-0055: the EN-15500-1 control-accuracy signals as measurement sensors
     # so long-term statistics capture the pre-flip distribution the winter
     # threshold calibration needs — the climate attributes alone only live in
