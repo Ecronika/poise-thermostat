@@ -154,3 +154,54 @@ async def test_override_expiry_sensor_renders_timestamp(hass: HomeAssistant) -> 
     coord.async_update_listeners()
     await hass.async_block_till_done()
     assert hass.states.get(eid).state == dt_util.utc_from_timestamp(expiry).isoformat()
+
+
+async def test_winter_evidence_sensors_registered_and_mapped(
+    hass: HomeAssistant,
+) -> None:
+    """September-Instrumentierung: die Winter-Gate-Zeitreihen (ADR-0033b/0036/
+    0037/0056) existieren als default-off LTS-Sensoren, damit die Kaltsaison-
+    Evidenz die ~10-Tage-Attribut-History des Recorders ueberlebt."""
+    from custom_components.poise.sensor import SENSORS
+
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_room_and_actuator(hass, room=19.5, sp=18.0)
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_DATA, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reg = er.async_get(hass)
+    entries = er.async_entries_for_config_entry(reg, entry.entry_id)
+    by_unique = {e.unique_id: e for e in entries}
+    new_keys = (
+        "mpc_setpoint",
+        "tpi_valve_percent",
+        "pi_setpoint",
+        "pi_offset",
+        "ref_offset",
+    )
+    for key in new_keys:
+        rep = by_unique[f"{entry.entry_id}_{key}"]
+        assert rep.disabled_by is RegistryEntryDisabler.INTEGRATION
+
+    # Wert-Mapping: Shadow-Werte gerundet durchgereicht; inaktiver Shadow -> None
+    descs = {d.key: d for d in SENSORS}
+    data = {
+        "mpc_setpoint": 21.44,
+        "tpi_valve_percent": 63.64,
+        "pi_setpoint": 22.31,
+        "pi_offset": 1.266,
+        "ref_offset": -0.834,
+    }
+    assert descs["mpc_setpoint"].value_fn(data) == 21.4
+    assert descs["tpi_valve_percent"].value_fn(data) == 63.6
+    assert descs["pi_setpoint"].value_fn(data) == 22.3
+    assert descs["pi_offset"].value_fn(data) == 1.27
+    assert descs["ref_offset"].value_fn(data) == -0.83
+    for key in new_keys:
+        assert descs[key].value_fn({}) is None
