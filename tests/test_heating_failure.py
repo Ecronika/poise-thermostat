@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from custom_components.poise.safety.heating_failure import (
+    CoolingFailureDetector,
     HeatingFailureDetector,
+    actuator_cooling,
     actuator_running,
     failure_notification_action,
 )
@@ -73,6 +75,57 @@ def test_actuator_running_prefers_real_state() -> None:
     assert actuator_running("idle", fallback=True) is False
     assert actuator_running(None, fallback=True) is True
     assert actuator_running(None, fallback=False) is False
+
+
+def test_cooling_no_failure_when_room_drops() -> None:
+    det = CoolingFailureDetector()
+    det.update(now_h=0.0, room=27.0, setpoint=24.0, running=True)
+    healthy = det.update(now_h=40.0 / 60.0, room=26.0, setpoint=24.0, running=True)
+    assert healthy is False
+
+
+def test_cooling_failure_when_room_stays_flat_under_demand() -> None:
+    # Cooling pendant (review C.8): commanded well BELOW the room, device
+    # reports cooling, yet the room does not drop -> failure.
+    det = CoolingFailureDetector()
+    det.update(now_h=0.0, room=27.0, setpoint=24.0, running=True)
+    assert det.update(now_h=40.0 / 60.0, room=27.0, setpoint=24.0, running=True) is True
+    assert det.failed
+
+
+def test_cooling_small_command_delta_is_not_a_demand() -> None:
+    # Room only 0.5 K above the setpoint: no cooling demand, never a failure.
+    det = CoolingFailureDetector()
+    assert det.update(now_h=0.0, room=24.5, setpoint=24.0, running=True) is False
+    assert det.update(now_h=1.0, room=24.5, setpoint=24.0, running=True) is False
+
+
+def test_cooling_no_failure_when_device_not_running() -> None:
+    det = CoolingFailureDetector()
+    det.update(now_h=0.0, room=27.0, setpoint=24.0, running=False)
+    assert (
+        det.update(now_h=40.0 / 60.0, room=27.0, setpoint=24.0, running=False) is False
+    )
+
+
+def test_cooling_failure_clears_after_no_demand_window() -> None:
+    det = CoolingFailureDetector()
+    det.update(now_h=0.0, room=27.0, setpoint=24.0, running=True)
+    assert det.update(now_h=40.0 / 60.0, room=27.0, setpoint=24.0, running=True) is True
+    assert det.update(now_h=0.75, room=27.0, setpoint=27.0, running=False) is True
+    cleared = det.update(
+        now_h=0.75 + 40.0 / 60.0, room=27.0, setpoint=27.0, running=False
+    )
+    assert cleared is False
+    assert not det.failed
+
+
+def test_actuator_cooling_prefers_real_state() -> None:
+    # Mirror of actuator_running for the cooling channel.
+    assert actuator_cooling("cooling", fallback=False) is True
+    assert actuator_cooling("idle", fallback=True) is False
+    assert actuator_cooling(None, fallback=True) is True
+    assert actuator_cooling(None, fallback=False) is False
 
 
 def test_failure_notification_edges() -> None:

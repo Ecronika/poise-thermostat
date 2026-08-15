@@ -136,6 +136,12 @@ def test_external_override_split_exact() -> None:
         "last_fan_cmd_ts",
         "pre_write_sp",
         "own_write_ctx_ids",
+        # C.8f: the newest setpoint write's context id + the command value
+        # it carried — process-local/echo-adjacent like the ring above, so
+        # both stay transient (a restored id could never match a live
+        # state's context; the watchdog re-arms from live evidence).
+        "last_sp_ctx_id",
+        "last_cmd_sp",
     }
 
 

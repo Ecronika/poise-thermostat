@@ -682,8 +682,9 @@ def _observe_setpoint(rt: ZoneRuntime, **over: Any) -> SetpointObservation:
         "setpoint_adopt_reason_fn": setpoint_adopt_reason,
     }
     routing = over.pop("routing", _routing())
+    wt = over.pop("wt", _wt())
     kwargs.update(over)
-    return rt.stage_setpoint_observe(ing, obs, _wt(), res, routing, _nudge(), **kwargs)
+    return rt.stage_setpoint_observe(ing, obs, wt, res, routing, _nudge(), **kwargs)
 
 
 def test_stage_setpoint_observe_first_write_mode_change() -> None:
@@ -704,6 +705,62 @@ def test_stage_setpoint_observe_own_echo_rebaselines() -> None:
     assert rt.external.last_written_sp == 21.8
     # ... and is never adopted.
     assert spo.adopted_sp is None
+
+
+class _Ctx:
+    """Minimal duck-typed HA ``Context`` (the stages only read ``.id``)."""
+
+    def __init__(self, ctx_id: str) -> None:
+        self.id = ctx_id
+
+
+class _State:
+    """Minimal duck-typed HA ``State`` carrying a context."""
+
+    def __init__(self, ctx_id: str) -> None:
+        self.context = _Ctx(ctx_id)
+
+
+def test_own_echo_rebaseline_keeps_the_watchdog_command_baseline() -> None:
+    """C.8f: the adoption re-baseline must not poison the convergence
+    judgement. ``last_written_sp`` follows the device's settle (echo
+    classification), but ``last_cmd_sp`` — the value we actually commanded —
+    stays put, so a throttled tick without a write still reads as divergent
+    instead of resetting the episode."""
+    rt = _runtime()
+    rt.external.last_written_sp = 22.0
+    rt.external.last_cmd_sp = 22.0
+    rt.external.last_sp_ctx_id = "ctx-1"
+    spo = _observe_setpoint(
+        rt,
+        routing=_routing(own_change=True),
+        actual_sp=18.0,  # device clamps far below the command
+    )
+    assert rt.external.last_written_sp == 18.0  # adoption baseline follows
+    assert rt.external.last_cmd_sp == 22.0  # watchdog baseline does NOT
+    assert spo.adopted_sp is None  # settle is never adopted
+
+
+def test_stale_own_echo_is_flagged_for_the_watchdog() -> None:
+    """A settle under one of OUR contexts that is NOT the newest setpoint
+    command's (the ring is shared with mode/fan writes) is a late echo of a
+    superseded command — flagged so the watchdog treats it as no evidence."""
+    rt = _runtime()
+    rt.external.last_sp_ctx_id = "ctx-new"
+    spo = _observe_setpoint(
+        rt,
+        routing=_routing(own_change=True),
+        actual_sp=18.0,
+        wt=_wt(act_state=_State("ctx-old")),
+    )
+    assert spo.stale_own_echo is True
+    fresh = _observe_setpoint(
+        rt,
+        routing=_routing(own_change=True),
+        actual_sp=18.0,
+        wt=_wt(act_state=_State("ctx-new")),
+    )
+    assert fresh.stale_own_echo is False
 
 
 def test_plan_setpoint_write_gates_and_snaps() -> None:

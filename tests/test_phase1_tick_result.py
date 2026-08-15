@@ -506,6 +506,9 @@ def test_stage_result_field_sets_are_pinned() -> None:
             # Phase 7 S2 (K3 unification): the reason travels with the
             # decision, computed by the ONE observe call.
             "sp_adopt_reason",
+            # C.8f: late-echo-of-a-superseded-command flag for the write
+            # stage's convergence-watchdog fold (defaulted).
+            "stale_own_echo",
         ],
         # Phase 8 (S2): finalize_tick's stage split along the plan-5.6 map.
         ShadowStageResult: [

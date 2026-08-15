@@ -379,3 +379,50 @@ def test_shadow_outputs_round_trip_and_default() -> None:
     assert rec2.mpc_active is False and rec2.mpc_setpoint is None
     assert rec2.tpi_duty is None and rec2.pi_setpoint is None
     assert rec2.pi_offset is None and rec2.ref_offset is None
+
+
+def test_convergence_telemetry_round_trip_and_default() -> None:
+    """Review C.8: die Write-Convergence-Zähler reiten als defaultete
+    In-Version-Felder im Trace mit (gleicher Kompat-Mechanismus, kein
+    Version-Bump), damit Nicht-Konvergenz-Episoden im Replay sichtbar sind."""
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    data = {"sp_diverged_writes": 3, "mode_diverged_nudges": 2}
+    rec = build_record(
+        data, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec.sp_diverged_writes == 3
+    assert rec.mode_diverged_nudges == 2
+
+    back = TraceRecord.from_json_line(rec.to_json_line())
+    assert back.sp_diverged_writes == 3 and back.mode_diverged_nudges == 2
+
+    # absent (alter Writer / konvergiert) -> Defaults, kein Version-Bump
+    rec2 = build_record(
+        {}, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec2.v == TRACE_VERSION
+    assert rec2.sp_diverged_writes == 0 and rec2.mode_diverged_nudges == 0
+
+
+def test_cooling_failure_round_trip_and_default() -> None:
+    """Review C.8: das Cooling-Failure-Verdikt reitet wie heating im Trace mit
+    (defaultet in-version, kein Bump)."""
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    rec = build_record(
+        {"cooling_failure": True},
+        model,
+        ts=1.0,
+        mono=60.0,
+        room=27.0,
+        t_out=30.0,
+        u_h=0.0,
+        u_c=1.0,
+    )
+    assert rec.cooling_failure is True
+    back = TraceRecord.from_json_line(rec.to_json_line())
+    assert back.cooling_failure is True
+
+    rec2 = build_record(
+        {}, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec2.v == TRACE_VERSION and rec2.cooling_failure is False

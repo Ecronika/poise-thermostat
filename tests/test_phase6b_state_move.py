@@ -222,6 +222,15 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     ("diagnostics", "tier2_dwelling"): "ADR-0069 N1 dwell-progress flag (transient)",
     ("latches", "fan_ce_credit_k"): "ADR-0068 U7 next-tick fan-CE credit",
     ("latches", "pmv_offset_k"): "ADR-0069 U8 next-tick PMV band shift",
+    # Review C.8: write-convergence watchdog + cooling-failure pendant — all
+    # transient (re-arm from live observations, like the heating detector).
+    ("safety", "convergence"): "C.8 write-convergence watchdog (transient)",
+    ("safety", "cooling_failure"): "C.8 cooling-failure detector (transient)",
+    ("safety", "prev_cooling_failed"): "C.8 cooling learn-gate latch (transient)",
+    # C.8f: context id of the newest setpoint write — binds the clamp
+    # classification to the command it judges (transient, process-local ids).
+    ("external", "last_sp_ctx_id"): "C.8f newest setpoint-write context id",
+    ("external", "last_cmd_sp"): "C.8f un-rebaselined command baseline",
 }
 
 

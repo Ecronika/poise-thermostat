@@ -78,6 +78,11 @@ def test_should_learn_gates_on_window_and_frozen() -> None:
     # keeps every existing two-argument call site behaviour-identical.
     assert should_learn(window_open=False, frozen=False, heating_failed=True) is False
     assert should_learn(window_open=False, frozen=False, heating_failed=False) is True
+    # C.8: the cooling pendant — a flat curve under u_c~1 (dead compressor,
+    # blocked airflow) would drive beta_c toward its bound the same way, so a
+    # latched cooling failure pauses learning too. Defaulted for old call sites.
+    assert should_learn(window_open=False, frozen=False, cooling_failed=True) is False
+    assert should_learn(window_open=False, frozen=False, cooling_failed=False) is True
 
 
 def test_frozen_safe_target_is_the_health_floor() -> None:
