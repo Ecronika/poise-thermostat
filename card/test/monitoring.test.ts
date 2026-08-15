@@ -291,7 +291,15 @@ test("comfortMeasure composes active measures and the maturing hint", () => {
     ceCreditK: 0,
     pmvOffsetK: 0,
   });
-  assert.deepEqual(idle, { fan: false, ceK: null, offsetK: null, maturing: false });
+  assert.deepEqual(idle, {
+    fan: false,
+    ceK: null,
+    offsetK: null,
+    maturing: false,
+    dwellMin: null,
+    dwellTargetMin: null,
+    dwellPaused: false,
+  });
   const maturing = comfortMeasure({
     active: true,
     fanFirstPhase: "idle",
@@ -309,5 +317,66 @@ test("comfortMeasure composes active measures and the maturing hint", () => {
     ceCreditK: 0.4,
     pmvOffsetK: -0.3,
   });
-  assert.deepEqual(busy, { fan: true, ceK: 0.4, offsetK: -0.3, maturing: false });
+  assert.deepEqual(busy, {
+    fan: true,
+    ceK: 0.4,
+    offsetK: -0.3,
+    maturing: false,
+    dwellMin: null,
+    dwellTargetMin: null,
+    dwellPaused: false,
+  });
+});
+
+test("comfortMeasure maturing progress: dwell figures, paused hint, fallback", () => {
+  // ADR-0069 N1: the maturing hint carries the eligible latch's dwell
+  // progress; a stalled dwell (dwelling flag empty) renders as paused.
+  const advancing = comfortMeasure({
+    active: true,
+    fanFirstPhase: "idle",
+    tier2FanCe: "shadow",
+    tier2Pmv: "eligible",
+    ceCreditK: 0,
+    pmvOffsetK: 0,
+    fanCeDwellMin: 0,
+    pmvDwellMin: 780,
+    dwellTargetMin: 1440,
+    dwelling: "pmv_offset",
+  });
+  assert.deepEqual(advancing, {
+    fan: false,
+    ceK: null,
+    offsetK: null,
+    maturing: true,
+    dwellMin: 780,
+    dwellTargetMin: 1440,
+    dwellPaused: false,
+  });
+  // fan_ce eligible wins the display slot (serialization order).
+  const fanEligible = comfortMeasure({
+    active: true,
+    fanFirstPhase: "idle",
+    tier2FanCe: "eligible",
+    tier2Pmv: "shadow",
+    ceCreditK: 0,
+    pmvOffsetK: 0,
+    fanCeDwellMin: 120,
+    pmvDwellMin: 0,
+    dwellTargetMin: 1440,
+    dwelling: "",
+  });
+  assert.equal(fanEligible?.dwellMin, 120);
+  assert.equal(fanEligible?.dwellPaused, true);
+  // Old backend without the N1 attributes: plain maturing, never "paused".
+  const legacy = comfortMeasure({
+    active: true,
+    fanFirstPhase: "idle",
+    tier2FanCe: "shadow",
+    tier2Pmv: "eligible",
+    ceCreditK: 0,
+    pmvOffsetK: 0,
+  });
+  assert.equal(legacy?.maturing, true);
+  assert.equal(legacy?.dwellMin, null);
+  assert.equal(legacy?.dwellPaused, false);
 });
