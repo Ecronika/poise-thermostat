@@ -631,6 +631,7 @@ def _stage_observe_guarded(
         window_open=window_open,
         frozen=frozen,
         heating_failed=rt.safety.prev_heating_failed,
+        cooling_failed=rt.safety.prev_cooling_failed,
     ):
         # Only ever teach the EKF from a genuinely MEASURED room reading -- a
         # DERIVED value (carried forward from ``last_good`` after a single
@@ -652,7 +653,8 @@ def _stage_observe_guarded(
     else:
         # While learning is paused (open window / frozen sensor, which now also
         # covers a DEFAULT-source reading -- see the ``frozen =`` assignment
-        # above -- and a latched heating failure) drop the time anchors, so the
+        # above -- and a latched heating or cooling failure) drop the time
+        # anchors, so the
         # first step after resumption re-anchors from that tick instead of
         # integrating the whole contaminated interval.  A brief airing would
         # otherwise poison the EKF with a real-looking sub-hour dt (the 0<dt<1h
@@ -1116,13 +1118,27 @@ def stage_setpoint_observe(
     # tick, shared with the mode-adoption gate); reuse it here for the
     # setpoint echo re-baseline.
     tracker = ExternalOverrideTracker(rt.external)
+    # C.8f: is this reading a late echo of a SUPERSEDED command? ``own_change``
+    # matches the shared 16-slot context ring (mode/fan writes included), so a
+    # sluggish push device confirming an older command still reads as "ours" —
+    # judging it against the newest command would count a healthy device as
+    # divergent. Such a reading is no convergence evidence in either direction.
+    _settle_ctx = (
+        wt.act_state.context.id
+        if wt.act_state is not None and wt.act_state.context is not None
+        else None
+    )
+    stale_own_echo = _own_change and _settle_ctx != rt.external.last_sp_ctx_id
     if _own_change and actual_sp is not None:
         # Accept the device's *actual* settled value (echo / clamp /
         # re-quantise) as the echo baseline so future reports of it are
-        # recognised as echoes. Deliberately does NOT touch
-        # last_sp_write_ts (see ``rebaseline_own_echo``): the echo window
-        # and the ADR-0052 §4 regulation throttle both key off the real
-        # last-*write* time.
+        # recognised as echoes (adoption stays suppressed either way). The
+        # convergence watchdog deliberately does NOT use this baseline — it
+        # judges against ``last_cmd_sp``, which the commit stamps and nothing
+        # re-baselines, so a clamped device cannot read as "converged".
+        # Deliberately does NOT touch last_sp_write_ts (see
+        # ``rebaseline_own_echo``): the echo window and the ADR-0052 §4
+        # regulation throttle both key off the real last-*write* time.
         tracker.rebaseline_own_echo(actual_sp)
     # Decision AND reason from ONE observation — the Layer-1 glue gates
     # (opt-out, device schedule, own echo and the safety gates: an open window
@@ -1160,6 +1176,7 @@ def stage_setpoint_observe(
         reg_throttled=_reg_throttled,
         adopted_sp=_adopted_sp,
         sp_adopt_reason=observation.reason,
+        stale_own_echo=stale_own_echo,
     )
 
 
