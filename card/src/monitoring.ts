@@ -248,6 +248,11 @@ export interface ComfortMeasureInput {
   tier2Pmv: string | null;
   ceCreditK: number | null;
   pmvOffsetK: number | null;
+  // ADR-0069 N1 maturing progress (optional: absent on older backends).
+  fanCeDwellMin?: number | null;
+  pmvDwellMin?: number | null;
+  dwellTargetMin?: number | null;
+  dwelling?: string | null; // which latch grew dwell this tick ("" = paused)
 }
 
 export interface ComfortMeasure {
@@ -255,6 +260,9 @@ export interface ComfortMeasure {
   ceK: number | null; // applied cooling-edge credit [K], null when 0/absent
   offsetK: number | null; // applied PMV band shift [K], null when 0/absent
   maturing: boolean; // nothing active yet, but a tier-2 latch is dwelling
+  dwellMin: number | null; // the eligible latch's qualified dwell [min]
+  dwellTargetMin: number | null; // flip target [min] (24 h)
+  dwellPaused: boolean; // dwell frozen this tick (non-qualifying conditions)
 }
 
 export function comfortMeasure(input: ComfortMeasureInput): ComfortMeasure | null {
@@ -266,12 +274,29 @@ export function comfortMeasure(input: ComfortMeasureInput): ComfortMeasure | nul
   const ceK = isNum(input.ceCreditK) && input.ceCreditK > 0 ? input.ceCreditK : null;
   const offsetK =
     isNum(input.pmvOffsetK) && input.pmvOffsetK !== 0 ? input.pmvOffsetK : null;
-  const maturing =
-    !fan &&
-    ceK == null &&
-    offsetK == null &&
-    (input.tier2FanCe === "eligible" || input.tier2Pmv === "eligible");
-  return { fan, ceK, offsetK, maturing };
+  // At most one latch dwells at a time (serialized); fan_ce comes first.
+  const eligible =
+    input.tier2FanCe === "eligible"
+      ? "fan_ce"
+      : input.tier2Pmv === "eligible"
+        ? "pmv_offset"
+        : null;
+  const maturing = !fan && ceK == null && offsetK == null && eligible != null;
+  let dwellMin: number | null = null;
+  let dwellTargetMin: number | null = null;
+  let dwellPaused = false;
+  if (maturing) {
+    const raw =
+      eligible === "fan_ce" ? input.fanCeDwellMin : input.pmvDwellMin;
+    dwellMin = isNum(raw) && raw >= 0 ? raw : null;
+    dwellTargetMin =
+      isNum(input.dwellTargetMin) && input.dwellTargetMin > 0
+        ? input.dwellTargetMin
+        : null;
+    // Unknown flag (older backend) must NOT read as paused.
+    dwellPaused = input.dwelling != null && input.dwelling !== eligible;
+  }
+  return { fan, ceK, offsetK, maturing, dwellMin, dwellTargetMin, dwellPaused };
 }
 
 export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[] {

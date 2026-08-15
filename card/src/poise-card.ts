@@ -737,6 +737,10 @@ export class PoiseCard extends LitElement implements LovelaceCard {
         typeof a["tier2_pmv_offset"] === "string" ? a["tier2_pmv_offset"] : null,
       ceCreditK: num(a["fan_ce_credit_k"]),
       pmvOffsetK: num(a["pmv_offset_k"]),
+      fanCeDwellMin: num(a["tier2_fan_ce_dwell_min"]),
+      pmvDwellMin: num(a["tier2_pmv_dwell_min"]),
+      dwellTargetMin: num(a["tier2_dwell_target_min"]),
+      dwelling: typeof a["tier2_dwelling"] === "string" ? a["tier2_dwelling"] : null,
     });
     if (!m) return nothing;
     const parts: string[] = [];
@@ -744,9 +748,17 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     if (m.ceK != null) parts.push(`${t(lang, "ac_ce")} +${m.ceK.toFixed(1)} K`);
     if (m.offsetK != null)
       parts.push(`PMV ${m.offsetK > 0 ? "+" : ""}${m.offsetK.toFixed(1)} K`);
-    const body = parts.length
-      ? parts.join(" · ")
-      : t(lang, m.maturing ? "ac_maturing" : "ac_none");
+    let body: string;
+    if (parts.length) {
+      body = parts.join(" · ");
+    } else if (m.maturing) {
+      // ADR-0069 N1: "reift · 13/24 h", "(pausiert)" while the dwell is frozen.
+      body = t(lang, m.dwellPaused ? "ac_maturing_paused" : "ac_maturing");
+      if (m.dwellMin != null && m.dwellTargetMin != null)
+        body += ` · ${Math.round(m.dwellMin / 60)}/${Math.round(m.dwellTargetMin / 60)} h`;
+    } else {
+      body = t(lang, "ac_none");
+    }
     return html`<div class="learn">
       <div class="pill">${t(lang, "ac_active")} · ${body}</div>
     </div>`;
