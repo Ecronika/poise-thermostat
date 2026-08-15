@@ -288,6 +288,14 @@
       "title": "Heizausfall — {zone}",
       "description": "{zone} wird trotz Heizanforderung nicht wärmer. Prüfe das TRV/Ventil, den Heizkörper oder den Kessel. Poise fordert weiter Wärme an; dieser Hinweis verschwindet automatisch, sobald der Raum wärmer wird."
     },
+    "cooling_failure": {
+      "title": "Kühlausfall — {zone}",
+      "description": "{zone} wird trotz Kühlanforderung nicht kühler. Prüfe die Klimaanlage/Wärmepumpe (Kompressor, Filter, Luftstrom) und ob Fenster geschlossen sind. Poise fordert weiter Kühlung an; dieser Hinweis verschwindet automatisch, sobald der Raum kühler wird."
+    },
+    "actuator_not_converging": {
+      "title": "Aktor übernimmt Befehle nicht — {zone}",
+      "description": "Der Aktor in {zone} meldet dauerhaft einen anderen Sollwert oder Modus als Poise befiehlt — die Schreibbefehle werden abgesetzt, aber nicht übernommen. Prüfe die Verbindung des Geräts (Zigbee/WLAN), die Kindersicherung oder einen internen Smart-Modus, der externe Befehle übersteuert. Dieser Hinweis verschwindet automatisch, sobald ein Befehl ankommt."
+    },
     "override_suggestion_base_up": {
       "title": "Poise: Komfortbasis anheben?",
       "fix_flow": {
