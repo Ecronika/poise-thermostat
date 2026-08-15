@@ -80,3 +80,11 @@ Pure test-first je Baustein-Freigabe (Toggle aus → exakt heutiges Verhalten, b
 ## Verknüpfungen
 
 Konsumiert ADR-0054 (Stufe 2), ADR-0068 (Sequenz + Guards), ADR-0053 (Umwälzung), ADR-0055 N1 (Gates), ADR-0067 (Lernsignal). Abgegrenzt von ADR-0042 (Presets) und ADR-0023 (Komfortregime). Stufe B/C: separate Entscheidungen (Konzept „Stufe-B-Aufwand" bzw. ADR-0046/0048-Nachträge).
+
+## Nachtrag N1 (2026-08-15, v0.190.0): Reife-Fortschritt sichtbar — „reift · X/24 h"
+
+**Kontext.** Feldbefund: Die Card-Zeile „Behaglichkeit aktiv – reift" nennt weder Fortschritt noch Bedingungen; die qualifizierte Verweilzeit (`dwell_min`, Ziel `DWELL_TARGET_MIN` = 24 h) existierte nur im persistierten Latch.
+
+**Entscheidung.** Anzeige-Transparenz ohne neue Steuerlogik: (a) pure `latch_dwelt(prev, nxt)` markiert display-only, ob der Tick qualifizierte Verweilzeit addiert hat; (b) der Orchestrator publiziert `tier2_fan_ce_dwell_min`/`tier2_pmv_dwell_min` (auf 10-min-Schritte gerundet — Recorder-Hygiene), `tier2_dwell_target_min` und `tier2_dwelling` (transientes Diagnosefeld); (c) die Card rendert „reift · X/24 h", bei eingefrorener Uhr „reift (pausiert) · X/24 h". Bewusst KEIN ETA-Countdown: Der Dwell ist qualifizierte Beobachtungszeit (friert ein, kann per Signatur/Verschlechterung zurückgesetzt werden) — eine Uhrzeit-Prognose wäre unehrlich. Ältere Backends ohne die Attribute rendern unverändert schlicht „reift" (nie fälschlich „pausiert").
+
+**Wirkung.** Nur Anzeige/Diagnose; Latch-Semantik, Gates und Writes unverändert.

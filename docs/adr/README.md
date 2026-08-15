@@ -69,7 +69,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0033](ADR-0033-MPC-Live-Verdrahtung-Shadow.md) | MPC Live-Verdrahtung — Stufe 1 (Shadow) | In Arbeit (70 %) |
 | [0034](ADR-0034-Optimal-Stop-Coast.md) | Optimal-Stop — vorausschauendes Ausrollen (Coast-down) | Implementiert |
 | [0035](ADR-0035-Praezedenz-Constraint-Solver.md) | Präzedenz-expliziter Constraint-Solver (ADR-0013 Stufe 1) | Implementiert |
-| [0036](ADR-0036-TPI-Direktventil-TRVZB.md) | TPI-Direktventilansteuerung (Sonoff TRVZB-Klasse) | In Arbeit (70 %) |
+| [0036](ADR-0036-TPI-Direktventil-TRVZB.md) | TPI-Direktventilansteuerung (Sonoff TRVZB-Klasse) | In Arbeit (80 %) |
 | [0037](ADR-0037-PI-Setpoint-Kompensator-Shadow.md) | PI-kompensierter Sollwert (Shadow) für setpoint-only-TRVs | In Arbeit (65 %) |
 | [0038](ADR-0038-Mehrzonen-Hub-und-Zwei-Phasen-Tick.md) | Mehrzonen-Hub & Zwei-Phasen-Tick | Implementiert |
 | [0039](ADR-0039-Kesselbedarf-Aggregat.md) | Kesselbedarf-Aggregat (Heizquellen-Synchronisation) | Implementiert |
