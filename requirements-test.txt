@@ -1,10 +1,18 @@
-# HA-runtime integration-test harness (CI-only; needs Python >= 3.13.2).
+# HA-runtime integration-test harness (CI-only; needs Python >= 3.13.2 AND a
+# POSIX host).
+#
+# WINDOWS CANNOT RUN THIS SUITE ANY MORE (measured 2026-08-15): from exactly
+# HA 2025.10 on, `homeassistant/runner.py` imports `fcntl` at module level, so
+# collection dies with ModuleNotFoundError before the first test — and 2025.10
+# is our minimum, i.e. no supported HA version runs on Windows. Use WSL (or CI)
+# for tests/integration; the pure core in tests/ stays fully cross-platform.
 #
 # TWO pinned HA targets (review plan E.11 / E.13):
-#   requirements-test.txt        — HA-MIN: exactly the promised minimum
-#                                  (README badge + hacs.json say 2025.10);
-#                                  pytest-hacc 0.13.286 pins
-#                                  homeassistant==2025.10.1.
+#   requirements-test.txt        — HA-MIN: the promised minimum RELEASE SERIES
+#                                  (README badge + hacs.json say 2025.10.0,
+#                                  i.e. "2025.10.x and newer"); pytest-hacc
+#                                  0.13.286 pins homeassistant==2025.10.1,
+#                                  the newest patch of that series.
 #   requirements-test-latest.txt — HA-LATEST: current stable, early warning
 #                                  against API drift.
 # Bump BOTH deliberately; a MIN bump must move the hacs.json minimum with it.
@@ -20,6 +28,18 @@
 # release itself, which would make the two-target matrix meaningless — and
 # both are cosmetic (identical value, no runtime warning, removal not before
 # 2027.8). See docs/reviews/2026-08-15-ha-drift-2026-02-bis-2026-08.md §5.1.
+#
+# WHY THE SERIES AND NOT THE EXACT .0 (asked in review, checked 2026-08-15):
+# hacs.json promises 2025.10.0 while this pin tests 2025.10.1, so the claim is
+# a series, not one build — the comments above say so instead of pretending
+# otherwise. The exact floor WAS verified once: pytest-hacc 0.13.285 pins
+# homeassistant==2025.10.0 and the full glue suite passes there (395 tests,
+# same frontend wheel). It is deliberately not the permanent CI pin: HA
+# 2025.10.0 depends on the PRE-RELEASE aiohasupervisor==0.3.3b0, which pip
+# accepts (exact pin) but uv refuses without --prerelease=allow. That would
+# split local verification from CI and leave a push-blocking gate hanging on a
+# beta wheel staying on PyPI. Patch releases inside a series do not change the
+# HA API surface, so the newest patch is the better permanent target.
 #
 # pytest-homeassistant-custom-component installs a *slim* Home Assistant that
 # omits the (large) frontend wheel, but our manifest declares `frontend` as a
