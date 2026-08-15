@@ -240,6 +240,13 @@ class ZoneRuntime:
                     self.external.last_sp_write_ts = now
                     # Echo baseline: the SNAPPED value, never raw wire.
                     self.external.last_written_sp = execution.commanded_value
+                    # C.8f: the watchdog's own baseline — the value we
+                    # COMMANDED (never re-baselined onto a device settle) plus
+                    # this write's context, so the clamp judgement can tell
+                    # this command's settle from a late echo of a superseded
+                    # one (the ctx ring is shared with mode/fan writes).
+                    self.external.last_cmd_sp = execution.commanded_value
+                    self.external.last_sp_ctx_id = execution.context_id
                     self.mark_actuated()  # persist the first-actuation flip
             elif effect_id == "ext_select":
                 # No domain stamp: the select's success only gates the feed
@@ -264,6 +271,11 @@ class ZoneRuntime:
                 if execution.success:
                     # The frost floor is our own value, not user intent.
                     self.external.last_written_sp = None
+                    # C.8f: the rescue path is not judged for convergence
+                    # (the orchestrator resets the episode there anyway) —
+                    # drop the command baseline with the echo baseline.
+                    self.external.last_cmd_sp = None
+                    self.external.last_sp_ctx_id = None
                     self.mark_actuated()  # persist the first-actuation flip
             elif effect_id == "safe_mode":
                 if execution.success:
@@ -275,6 +287,10 @@ class ZoneRuntime:
                     self.actuator.last_target = execution.commanded_value
                     # Never re-read our own safe floor as a user hold.
                     self.external.last_written_sp = None
+                    # C.8f: same reasoning as ``rescue_write`` — the safe
+                    # state is not a regulation command to judge.
+                    self.external.last_cmd_sp = None
+                    self.external.last_sp_ctx_id = None
                     self.mark_actuated()  # persist the first-actuation flip
             elif effect_id == "fan_write":
                 # ADR-0068 U3: attempt state — the context id registers even

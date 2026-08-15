@@ -36,7 +36,8 @@ from ..estimation.seasonless_rate import SeasonlessRate
 from ..estimation.tau_settle import TauSettle
 from ..estimation.thermal_ekf import ThermalEKF
 from ..multi.lifecycle import DeviceLifecycle
-from ..safety.heating_failure import HeatingFailureDetector
+from ..safety.heating_failure import CoolingFailureDetector, HeatingFailureDetector
+from ..safety.write_convergence import WriteConvergenceWatchdog
 
 # The own-write context ring is bounded so it can never grow without limit.
 _OWN_WRITE_CTX_CAPACITY: Final = 16
@@ -164,6 +165,20 @@ class ExternalOverrideRuntime:
     pre_write_sp: float | None = None
     # Attempt-state: HA Context ids of our own actuator service calls.
     own_write_ctx_ids: deque[str] = field(default_factory=_own_ctx_ring)
+    # C.8f: Context id of the NEWEST successful setpoint write. The ring above
+    # is shared with the mode/fan channels and holds 16 entries, so it cannot
+    # tell "the settle of the command we are judging" from "a late echo of a
+    # superseded one" — the clamp classification needs exactly that. Transient
+    # (process-local ids, like the echo stamps).
+    last_sp_ctx_id: str | None = None
+    # C.8f: the value we actually COMMANDED, for the convergence watchdog only.
+    # ``last_written_sp`` above is the ADOPTION baseline and deliberately
+    # follows the device's settle (``rebaseline_own_echo``) so an echo/clamp
+    # is never re-read as a manual hold — which makes it useless for judging
+    # convergence: a clamped device would read as "converged" the moment the
+    # baseline moved onto its clamp. This one is stamped ONLY by the commit,
+    # never re-baselined. Transient like the other write anchors.
+    last_cmd_sp: float | None = None
 
 
 @dataclass(slots=True)
@@ -321,6 +336,17 @@ class SafetyRuntime:
     # learning during a boiler-off/valve-open episode.
     prev_heating_failed: bool = False
     unavailable_since: float | None = None  # sustained sensor-loss anchor [monotonic]
+    # Review C.8: write-convergence watchdog (re-assert/re-nudge counters).
+    # Transient like the failure detector — re-arms from live observations.
+    convergence: WriteConvergenceWatchdog = field(
+        default_factory=WriteConvergenceWatchdog
+    )
+    # Review C.8: cooling pendant to ``failure``/``prev_heating_failed`` —
+    # same transiency, same previous-tick learn-gate latch (beta_c).
+    cooling_failure: CoolingFailureDetector = field(
+        default_factory=CoolingFailureDetector
+    )
+    prev_cooling_failed: bool = False
 
 
 @dataclass(slots=True)

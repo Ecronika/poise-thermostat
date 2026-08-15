@@ -465,6 +465,12 @@ class SetpointObservation:
     reg_throttled: bool
     adopted_sp: float | None
     sp_adopt_reason: str = ""
+    # C.8f: this reading is a late echo of a SUPERSEDED command (own context,
+    # but not the newest setpoint write's) — no convergence evidence in
+    # either direction. Classified in the observe stage, which owns the one
+    # context read; consumed by the write stage's watchdog fold. Defaulted
+    # like ``sp_adopt_reason`` so direct constructions stay valid.
+    stale_own_echo: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -757,6 +763,18 @@ class EffectExecution:
     unchanged), so the commit never needs the original exception. Reproducing
     the record at commit time instead would reorder the log stream at the
     multi-call sites (frost rescue, unavailable safe).
+
+    ``success`` is *dispatch accepted* — stage 1 of the write's life, "the
+    fire-and-forget call left without a synchronous exception" — never
+    handler completion and never device state (review C.7). Under the
+    executor's ``blocking=False`` contract a middle "service completed" stage
+    is unobservable (HA swallows handler exceptions and returns no task
+    handle), so the only later verdict is *state converged*, judged per tick
+    by the write-convergence watchdog (``safety/write_convergence.py``, C.8)
+    from the device's actually reported values. The field name stays
+    ``success`` because it is pinned across the Phase-0 fault-injection
+    surface and the persistence-adjacent tests (renaming is contract
+    territory of the coordinator-refactoring plan).
     """
 
     effect_id: str
