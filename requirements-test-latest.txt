@@ -1,14 +1,23 @@
-# HA-LATEST integration-test harness (review plan E.11): the newest RELEASED
-# pytest-homeassistant-custom-component as an early-warning target against HA
-# API drift. Same shape as requirements-test.txt (see there for the
+# HA-LATEST integration-test harness (review plan E.11 / E.11b): the newest
+# RELEASED pytest-homeassistant-custom-component as an early-warning target
+# against HA API drift. Same shape as requirements-test.txt (see there for the
 # frontend-wheel rationale); bump both files deliberately.
 #
-# pytest-hacc 0.13.316 pins homeassistant==2026.2.3 and runs on Python 3.13;
-# the frontend build is the one HA 2026.2.3's frontend manifest declares.
-# NOTE: pytest-hacc releases currently stop at HA 2026.2.3 (master tracks
-# 2026.8 unreleased). Newer HA needs Python >= 3.14 — when a newer harness
-# release appears, bump this file AND the latest-job python-version in ci.yml.
-pytest-homeassistant-custom-component==0.13.316
-home-assistant-frontend==20260128.6
+# pytest-hacc 0.13.356 pins homeassistant==2026.8.2 — the CURRENT HA stable —
+# and requires Python >= 3.14 (HA itself declares >=3.14.2), so the latest job
+# in ci.yml runs on 3.14. The MIN job runs on 3.13 only (since E.13: HA
+# 2025.10.1 requires >= 3.13.2); the 3.12 floor survives solely in the HA-free
+# quality job. The frontend build is the one HA 2026.8.2's manifest declares.
+#
+# KEEPING THIS HONEST (the E.11b lesson): a pin that is never bumped silently
+# degrades from "current stable" to "some old release" — this file sat on HA
+# 2026.2.3 while HA had moved to 2026.8. The scheduled `harness-freshness` job
+# in ci.yml now compares this pin against PyPI weekly and fails loudly when a
+# newer harness exists, so the drift is reported instead of assumed away.
+# When bumping: raise the pin, re-read the frontend requirement from
+# `homeassistant/components/frontend/manifest.json` of the new HA, and check
+# whether the harness needs a newer Python than the latest job requests.
+pytest-homeassistant-custom-component==0.13.356
+home-assistant-frontend==20260729.7
 
 pytest-cov

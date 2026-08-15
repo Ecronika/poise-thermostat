@@ -1,21 +1,39 @@
-# HA-runtime integration-test harness (CI-only; needs Python >= 3.12).
+# HA-runtime integration-test harness (CI-only; needs Python >= 3.13.2).
 #
-# TWO pinned HA targets (review plan E.11):
+# TWO pinned HA targets (review plan E.11 / E.13):
 #   requirements-test.txt        — HA-MIN: exactly the promised minimum
-#                                  (README badge + hacs.json say 2025.1);
-#                                  pytest-hacc 0.13.205 pins
-#                                  homeassistant==2025.1.4.
+#                                  (README badge + hacs.json say 2025.10);
+#                                  pytest-hacc 0.13.286 pins
+#                                  homeassistant==2025.10.1.
 #   requirements-test-latest.txt — HA-LATEST: current stable, early warning
 #                                  against API drift.
 # Bump BOTH deliberately; a MIN bump must move the hacs.json minimum with it.
+#
+# E.13 (2026-08-15): MIN raised 2025.1.4 -> 2025.10.1. Reason: the two HA
+# deprecations with a hard deadline — the hass-less
+# `async_extract_config_entry_ids` (breaks in HA 2026.10) and the
+# update-listener/reloading-flow-method combination (error from HA 2026.12) —
+# can only be resolved WITHOUT compatibility shims from 2025.10 resp. 2025.3
+# onwards. HA 2025.10 requires Python >= 3.13.2, hence the MIN CI job dropped
+# 3.12. Deliberately NOT raised further: `UnitOfRatio` (2026.7) and
+# `DeviceInfo["via_device_id"]` (2026.8) would push MIN onto the LATEST
+# release itself, which would make the two-target matrix meaningless — and
+# both are cosmetic (identical value, no runtime warning, removal not before
+# 2027.8). See docs/reviews/2026-08-15-ha-drift-2026-02-bis-2026-08.md §5.1.
 #
 # pytest-homeassistant-custom-component installs a *slim* Home Assistant that
 # omits the (large) frontend wheel, but our manifest declares `frontend` as a
 # dependency (it serves the Lovelace card), so HA refuses to set the
 # integration up without `hass_frontend`. We therefore install it explicitly,
-# pinned to the 2025.1-era build.
-pytest-homeassistant-custom-component==0.13.205
-home-assistant-frontend==20250109.2
+# pinned to the build HA 2025.10.1's frontend manifest declares.
+pytest-homeassistant-custom-component==0.13.286
+home-assistant-frontend==20251001.0
+
+# aiodns 3.5.0 (pulled by this HA) calls `pycares.ares_query_a_result`, which
+# pycares 5.x removed — an unpinned resolve installs 5.x and every HA import
+# dies with AttributeError before a single test runs. HA's own constraints
+# cap it; the slim harness does not, so pin it here.
+pycares<5
 
 # coverage plugin for the glue gate (pinned-compatible with pytest-hacc)
 pytest-cov
