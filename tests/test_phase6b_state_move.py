@@ -218,6 +218,8 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     ("diagnostics", "fan_first_reason"): "ADR-0068 fan-first reason (diagnosis)",
     # ADR-0069 U7/U8: tier-2 stepping anchor + next-tick solver inputs.
     ("diagnostics", "tier2_last_mono"): "ADR-0069 tier-2 step elapsed anchor",
+    # ADR-0069 N1: maturing-progress display flag (transient, card-only).
+    ("diagnostics", "tier2_dwelling"): "ADR-0069 N1 dwell-progress flag (transient)",
     ("latches", "fan_ce_credit_k"): "ADR-0068 U7 next-tick fan-CE credit",
     ("latches", "pmv_offset_k"): "ADR-0069 U8 next-tick PMV band shift",
 }

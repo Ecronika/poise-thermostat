@@ -13,6 +13,7 @@ from custom_components.poise.control.comfort_activation import (
     TierActivation,
     activation_signature,
     cascade_after_invalidation,
+    latch_dwelt,
     may_dwell,
     step_tier,
 )
@@ -189,3 +190,22 @@ def test_persistence_roundtrip_and_garbage_tolerance() -> None:
     restored = ComfortActivation.from_dict(garbage)
     assert restored.fan_ce.state == STATE_SHADOW
     assert restored.generation == 0
+
+
+def test_latch_dwelt_flags_only_a_grown_eligible_dwell() -> None:
+    # Display-only helper for the card's maturing progress: True exactly when
+    # this tick added qualified dwell time to an eligible latch.
+    prev = TierActivation(state=STATE_ELIGIBLE, dwell_min=100.0)
+    grown = _step(prev, dt_min=30.0)
+    assert grown.state == STATE_ELIGIBLE and grown.dwell_min == 130.0
+    assert latch_dwelt(prev, grown) is True
+    # Frozen dwell (a non-qualifying tick) is NOT advancing.
+    frozen = _step(prev, entry_ok=False)
+    assert frozen == prev
+    assert latch_dwelt(prev, frozen) is False
+    # A flip to live is no longer "maturing" — the pill switches anyway.
+    flipped = _step(prev, dt_min=DWELL_TARGET_MIN)
+    assert flipped.state == STATE_LIVE
+    assert latch_dwelt(prev, flipped) is False
+    # Shadow/suspended never report progress.
+    assert latch_dwelt(TierActivation(), TierActivation()) is False
