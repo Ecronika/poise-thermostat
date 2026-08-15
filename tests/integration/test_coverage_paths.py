@@ -242,3 +242,33 @@ async def test_frozen_sensor_writes_health_floor(hass: HomeAssistant) -> None:
     assert set_temp, "no actuator write under frozen sensor"
     # degraded to the frost/health floor, not the ~21 comfort target
     assert set_temp[-1].data["temperature"] <= 10.0
+
+
+async def test_frozen_sensor_floor_respects_device_min(hass: HomeAssistant) -> None:
+    """The frozen-sensor floor must be clamped up to the actuator's announced
+    ``min_temp`` — exactly like the sustained-loss safe state
+    (``resolve_safe_state``: "so a high-min AC does not thrash on the echo it
+    cannot honour"). Without the clamp Poise writes 7 C every tick to a device
+    that can only honour 16 C: permanent write traffic, and since C.8 the
+    convergence watchdog blames the (healthy) device for it."""
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off"],
+            "temperature": 20.0,
+            "current_temperature": 19.0,
+            "target_temp_step": 0.5,
+            "min_temp": 16.0,  # high-min AC / heat pump
+            "max_temp": 30,
+        },
+    )
+    with patch("custom_components.poise.coordinator.is_frozen", return_value=True):
+        entry = await _setup(hass, _base())
+        await entry.runtime_data.async_refresh()
+        await hass.async_block_till_done()
+
+    assert set_temp, "no actuator write under frozen sensor"
+    assert set_temp[-1].data["temperature"] >= 16.0

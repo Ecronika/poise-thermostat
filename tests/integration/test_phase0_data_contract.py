@@ -126,6 +126,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "cool_sp_compensated",
     "cool_sp_eff",
     "cooling",
+    "cooling_failure",  # C.8 cooling pendant to heating_failure
     "cover_predicted_peak",
     "cover_shade_position",
     "cover_shade_reason",
@@ -172,6 +173,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "minutes_to_setback",
     "mode",
     "mode_adopt_reason",
+    "mode_diverged_nudges",  # C.8 write-convergence telemetry
     "mode_nudge_blocked",
     "mode_override",
     "mold_capped",
@@ -244,6 +246,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "sensor_placement_suspect",
     "source",
     "sp_adopt_reason",
+    "sp_diverged_writes",  # C.8 write-convergence telemetry
     "suggestion_direction",
     "suggestion_evidence",
     "suggestion_kind",
