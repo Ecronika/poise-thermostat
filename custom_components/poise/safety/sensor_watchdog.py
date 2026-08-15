@@ -90,7 +90,11 @@ def frozen_safe_target(frost_floor: float, mold_min: float | None) -> float:
 
 
 def should_learn(
-    *, window_open: bool, frozen: bool, heating_failed: bool = False
+    *,
+    window_open: bool,
+    frozen: bool,
+    heating_failed: bool = False,
+    cooling_failed: bool = False,
 ) -> bool:
     """Learn only when the room signal is trustworthy and heat actually works.
 
@@ -99,8 +103,10 @@ def should_learn(
     failure -- the actuator reports running but the room will not warm, e.g. a
     boiler that is off while the TRV valve is open (VTherm #1428) -- must also
     pause it: integrating a flat room curve under u_h~1 would drive ``beta_h``
-    toward its lower bound (R3). Extracted from the coordinator tick so the gate
-    itself is tested (review M13); ``heating_failed`` is fed from the PREVIOUS
-    tick's latch because the failure verdict is only known later in the tick.
+    toward its lower bound (R3). ``cooling_failed`` is the C.8 pendant: a flat
+    curve under u_c~1 (dead compressor, blocked airflow) would corrupt
+    ``beta_c`` the same way. Extracted from the coordinator tick so the gate
+    itself is tested (review M13); both failure flags are fed from the
+    PREVIOUS tick's latch because the verdicts are only known later in the tick.
     """
-    return not window_open and not frozen and not heating_failed
+    return not window_open and not frozen and not heating_failed and not cooling_failed

@@ -86,6 +86,51 @@ class HeatingFailureDetector:
         return self._failed
 
 
+def actuator_cooling(hvac_action: str | None, *, fallback: bool) -> bool:
+    """The actuator's *real* cooling state (review C.8, mirror of
+    :func:`actuator_running`): prefer a reported ``hvac_action``, fall back to
+    our cool intent when the device does not report one."""
+    if hvac_action is None:
+        return fallback
+    return str(hvac_action) == "cooling"
+
+
+class CoolingFailureDetector:
+    """Cooling pendant to :class:`HeatingFailureDetector` (review C.8).
+
+    Commanded well BELOW the room while the device reports cooling, yet the
+    room does not drop -> failure (dead compressor, blocked airflow, open
+    window masking as load). Sign-mirrored delegation: negating room and
+    setpoint maps the cooling demand (``room - setpoint >= cmd_delta``) and
+    the required *drop* onto the heating detector's demand/rise checks, so
+    the tumbling window, the latch and the F22 clock guard are shared, not
+    duplicated.
+    """
+
+    def __init__(
+        self,
+        *,
+        delay_h: float = DEFAULT_DELAY_H,
+        cmd_delta: float = DEFAULT_CMD_DELTA,
+        min_drop: float = DEFAULT_MIN_RISE,
+    ) -> None:
+        self._inner = HeatingFailureDetector(
+            delay_h=delay_h, cmd_delta=cmd_delta, min_rise=min_drop
+        )
+
+    @property
+    def failed(self) -> bool:
+        return self._inner.failed
+
+    def update(
+        self, *, now_h: float, room: float, setpoint: float, running: bool
+    ) -> bool:
+        """Return True while a cooling failure is active (latched, see inner)."""
+        return self._inner.update(
+            now_h=now_h, room=-room, setpoint=-setpoint, running=running
+        )
+
+
 def failure_notification_action(failed: bool, already_notified: bool) -> str | None:
     """Edge-triggered notification action for a heating failure.
 
