@@ -152,6 +152,40 @@ class HealthReporter:
             )
         )
 
+    def notify_cooling_failure(self, failed: bool) -> None:
+        """Cooling pendant to :meth:`notify_failure` (review C.8) — same
+        transition-only semantics, synchronous checkpoint emission inside the
+        failure-detect stage."""
+        self.emit(
+            (
+                HealthUpdate(
+                    issue_id=f"cooling_failure_{self._c._entry_id}",
+                    active=failed,
+                    translation_key="cooling_failure",
+                    placeholders={"zone": self._c.zone_name},
+                ),
+            )
+        )
+
+    def notify_convergence(self, active: bool) -> None:
+        """Surface persistent write non-convergence as a repair issue (C.8).
+
+        Raised while the watchdog escalates (the actuator keeps ignoring our
+        setpoint/mode commands), cleared when a command finally lands —
+        transition-only like every other issue. Runs as a synchronous
+        checkpoint emission right after the setpoint segment.
+        """
+        self.emit(
+            (
+                HealthUpdate(
+                    issue_id=f"actuator_not_converging_{self._c._entry_id}",
+                    active=active,
+                    translation_key="actuator_not_converging",
+                    placeholders={"zone": self._c.zone_name},
+                ),
+            )
+        )
+
     async def validate_configured_ext_temp(self) -> None:
         """Vet the *configured* external-temp number once (not per tick).
 

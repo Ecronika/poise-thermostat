@@ -88,6 +88,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components import persistent_notification
+from homeassistant.core import State
 from homeassistant.util import dt as dt_util
 
 from ..adaptive_cool import adaptive_cool_mode
@@ -224,12 +225,13 @@ from ..runtime.tick_result import (
     WriteTargetResult,
 )
 from ..runtime.zone_runtime import ZoneRuntime
-from ..safety.heating_failure import actuator_running
+from ..safety.heating_failure import actuator_cooling, actuator_running
 from ..safety.sensor_watchdog import (
     frozen_safe_target,
     unavailable_safe_engaged,
     valve_stuck,
 )
+from ..safety.write_convergence import convergence_tolerance
 from ..trace.recorder import TraceRecorder
 from .actuator_executor import ActuatorExecutor
 from .input_reader import InputReader, parse_attr_number
@@ -1107,8 +1109,23 @@ class TickOrchestrator:
             actuator_plan = await self._stage_setpoint_write(
                 ing, wt, res, adoption, nudge, spo
             )
+            # C.8: convergence checkpoint emission — synchronous, directly
+            # after the setpoint segment folded this tick's evidence (same
+            # in-flow emission style as ``_notify_failure``).
+            self._c._notify_convergence(
+                self._runtime.safety.convergence.escalated(now=ing.now)
+            )
             ext_plan = await self._stage_ext_temp_feed(ing, op)
         else:
+            # C.8: the disabled/off-hold/rescue path regulates nothing — the
+            # rescue writes are safety floors, never folded as convergence
+            # evidence — so no convergence claim survives here: end both
+            # episodes and CLEAR the issue (transition-only would otherwise
+            # hold it forever on this path, including one re-adopted from
+            # the store after a restart). Re-arms from fresh evidence within
+            # ~CONV_FAIL_WRITES ticks + CONV_FAIL_MIN_S after re-enable.
+            self._runtime.safety.convergence.reset()
+            self._c._notify_convergence(False)
             actuator_plan = await self._stage_frost_rescue(
                 ing, obs, floors, wt, routing
             )
@@ -1505,6 +1522,10 @@ class TickOrchestrator:
             )
             else mold_min
         )
+        # Fresh read — same await-free window as the central actuator read
+        # above; hoisted into a local so the frozen floor below binds the
+        # SAME value (one read, two uses, unobservable reorder).
+        _device_min = self._reader.device_min()
         wt = self._g.resolve_write_target(
             window_open=window_open,
             override=self._runtime.user.override,
@@ -1515,9 +1536,7 @@ class TickOrchestrator:
             frost_floor=FROST_FLOOR_C,
             mold_min=mold_min_write,
             device_max=device_max,
-            # Fresh read — same await-free window as the central actuator
-            # read above.
-            device_min=self._reader.device_min(),
+            device_min=_device_min,
         )
         target, mode, norm_binding = wt.target, wt.mode, wt.norm_binding
         binding_precedence = wt.binding_precedence
@@ -1531,7 +1550,15 @@ class TickOrchestrator:
             # fail toward warmth); a cool-only device must NOT be pinned to
             # the floor in cool (it would cool the room to ~7 C) -> command off.
             if can_heat:
-                target = frozen_safe_target(FROST_FLOOR_C, mold_min)
+                _floor = frozen_safe_target(FROST_FLOOR_C, mold_min)
+                # Clamp up to the device's announced min_temp, exactly like
+                # the sustained-loss safe state (``resolve_safe_state``: "so
+                # a high-min AC does not thrash on the echo it cannot
+                # honour"). The bare floor would otherwise be re-written
+                # every tick to a device that can never report it back —
+                # permanent write traffic which the C.8 watchdog then reads
+                # as the device ignoring us.
+                target = _floor if _device_min is None else max(_floor, _device_min)
                 mode = "heat"
             else:
                 mode = "off"
@@ -1847,6 +1874,21 @@ class TickOrchestrator:
         self._c._notify_failure(failed)
         # Latch for the NEXT tick's learn gate (this tick's gate already ran).
         self._runtime.safety.prev_heating_failed = failed
+        # C.8 cooling pendant: same stage, own detector/issue/latch. Pure
+        # detector verdict only — ``fault_active`` stays a heating-side OR
+        # (the generic device alarm historically rides there).
+        cooling_running = actuator_cooling(
+            act_state.attributes.get("hvac_action") if act_state else None,
+            fallback=intents.cooling,
+        )
+        cool_failed = self._runtime.safety.cooling_failure.update(
+            now_h=now / 3600.0,
+            room=room,
+            setpoint=target,
+            running=cooling_running,
+        )
+        self._c._notify_cooling_failure(cool_failed)
+        self._runtime.safety.prev_cooling_failed = cool_failed
         return failed
 
     def _stage_mode_resolution(
@@ -1980,6 +2022,24 @@ class TickOrchestrator:
         if _mode_nudge and _guard_block:
             _mode_nudge = False  # compressor protection: hold this tick's nudge
             _mode_nudge_blocked = _guard_block
+        # C.8 watchdog fold (pure, pre-commit): an identical re-nudge
+        # (``desired == last_commanded_hvac`` — the inverse of the commit's
+        # ``mode_changed``) against an unmoved device is divergence evidence;
+        # a guard-blocked tick is not (``nudged=False``), and a state the
+        # integration has not refreshed since our last mode command is no
+        # evidence in either direction (poll latency / frozen echo). Must
+        # read the baseline BEFORE the commit below moves it.
+        self._runtime.safety.convergence.observe_mode(
+            nudged=_mode_nudge,
+            re_nudge=desired_hvac == self._runtime.external.last_commanded_hvac,
+            current_matches_desired=(
+                act_state is not None and act_state.state == desired_hvac
+            ),
+            evidence_fresh=self._convergence_evidence_fresh(
+                act_state, self._runtime.external.last_hvac_cmd_ts, now
+            ),
+            now=now,
+        )
         if _mode_nudge:
             # The executor sequence owns the boundary, the own-context
             # creation (tag our own mode change; the id reports even when the
@@ -2004,6 +2064,27 @@ class TickOrchestrator:
             guard_block=_guard_block,
             mode_nudge_blocked=_mode_nudge_blocked,
         )
+
+    @staticmethod
+    def _convergence_evidence_fresh(
+        act_state: State | None, last_cmd_mono: float | None, now_mono: float
+    ) -> bool:
+        """C.8: did the actuator state update AFTER our last command?
+
+        A state the integration has not refreshed since the command can
+        neither prove the device ignored it (poll latency) nor that it
+        applied it (frozen own-context echo) — the watchdog holds on stale.
+        ``last_updated`` is wall clock, the command stamps are monotonic; the
+        comparison translates via "state age vs. elapsed since command",
+        which needs no epoch alignment. No command this run -> trivially
+        fresh (the state cannot be staler than a write that never happened).
+        """
+        if act_state is None:
+            return False
+        if last_cmd_mono is None:
+            return True
+        age_s = (dt_util.utcnow() - act_state.last_updated).total_seconds()
+        return bool(age_s <= (now_mono - last_cmd_mono))
 
     def _stage_setpoint_observe(
         self,
@@ -2112,6 +2193,27 @@ class TickOrchestrator:
         final_mode = res.final_mode
         actual_sp = spo.actual_sp
         plan = self._plan_setpoint_write(wt, adoption, nudge, spo)
+        # C.8 watchdog fold (pure, pre-commit): judged against ``last_cmd_sp``
+        # — the value we COMMANDED, stamped by the commit and never
+        # re-baselined (C.8f). Using the adoption baseline instead would let a
+        # clamping device read as "converged" the moment the re-baseline moved
+        # onto its clamp. Tolerance is the floored re-quantise distance, so a
+        # device settling one step away still counts as converged. No evidence
+        # from a state the integration has not refreshed since our last write
+        # (poll latency) or from a late echo of a superseded command.
+        self._runtime.safety.convergence.observe_setpoint(
+            actual_sp=actual_sp,
+            last_written_sp=self._runtime.external.last_cmd_sp,
+            tolerance=convergence_tolerance(spo.step),
+            wrote=plan.write_setpoint,
+            evidence_fresh=(
+                not spo.stale_own_echo
+                and self._convergence_evidence_fresh(
+                    wt.act_state, self._runtime.external.last_sp_write_ts, now
+                )
+            ),
+            now=now,
+        )
         if plan.write_setpoint:
             # By construction: values + the intended device mode
             # (``adoption.desired_hvac``, always a str) are set whenever
@@ -3319,6 +3421,15 @@ class TickOrchestrator:
             "cover_shade_reason": _cover_reason,
             "window_auto_slope": self._runtime.window.window_auto.ema_slope,
             "heating_failure": failed,
+            # C.8: pure cooling-detector latch (updated earlier this tick in
+            # the failure-detect stage; no fault_active OR — see the stage).
+            "cooling_failure": self._runtime.safety.cooling_failure.failed,
+            # C.8 write-convergence telemetry: consecutive unconverged
+            # re-asserts/re-nudges (0 = converging normally).
+            "sp_diverged_writes": self._runtime.safety.convergence.sp_diverged_writes,
+            "mode_diverged_nudges": (
+                self._runtime.safety.convergence.mode_diverged_nudges
+            ),
             "mold_capped": mold_capped,  # mould floor clipped at 24 °C
             # ADR-0057: publish the mould-protection floor + dewpoint so the card
             # can draw the "Schimmel" tick on the dial (display only, no control).
