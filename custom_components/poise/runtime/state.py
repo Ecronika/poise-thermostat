@@ -376,6 +376,11 @@ class DiagnosticsRuntime:
     fan_first_reason: str = "disabled"
     # ADR-0069 U7/U8: elapsed anchor of the tier-2 activation step.
     tier2_last_mono: float | None = None
+    # ADR-0069 Nachtrag N1: which tier-2 feature grew qualified dwell this
+    # tick ("fan_ce"/"pmv_offset"/"") — display-only maturing progress for
+    # the card; transient (recomputed every tick, worst case one tick of
+    # "paused" after a restart).
+    tier2_dwelling: str = ""
 
 
 @dataclass(slots=True)
