@@ -3,6 +3,11 @@ name: CI
 on:
   push:
   pull_request:
+  # E.11b: the harness-freshness guard needs a heartbeat — the LATEST pin can
+  # only go stale between commits, so a push-only CI can never notice.
+  schedule:
+    - cron: "17 6 * * 1" # Mondays, 06:17 UTC
+  workflow_dispatch:
 
 jobs:
   validate:
@@ -23,7 +28,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # 3.12 = declared minimum (pyproject requires-python), 3.13 = HA-min
+        # runtime, 3.14 = the runtime CURRENT HA requires (>=3.14.2) — E.11b:
+        # testing against current HA is only honest if the pure core, the lint
+        # and the type gate also run on the interpreter that HA runs on.
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,6 +45,14 @@ jobs:
       - name: Format check (ruff)
         run: ruff format --check .
       - name: Type-check (mypy --strict, all modules)
+        # E.11b: skipped on 3.14 ON PURPOSE. mypy 1.13.0 ships no cp314 wheel,
+        # so pip would compile it from sdist (mypyc) on every run — minutes of
+        # CI time for zero extra signal: mypy analyses against
+        # `python_version = "3.12"` from pyproject, so the verdict does not
+        # depend on the interpreter executing it. Lint and the pure core DO run
+        # on 3.14 (ruff is a universal wheel, and the core must actually
+        # execute on the interpreter current HA requires).
+        if: matrix.python-version != '3.14'
         run: mypy
       - name: Pure-core tests + coverage
         run: pytest --cov=custom_components/poise --cov-fail-under=85
@@ -48,15 +65,17 @@ jobs:
       matrix:
         # E.11: two HA targets — MIN is the promised minimum (README badge /
         # hacs.json), LATEST the current stable as API-drift early warning.
-        # LATEST runs on one Python only; MIN keeps the full Python matrix.
+        # E.11b: LATEST is HA 2026.8.2 (current stable) via pytest-hacc
+        # 0.13.356, which needs Python 3.14.
+        # E.13: MIN is HA 2025.10.1, which requires Python >= 3.13.2 — the
+        # former 3.12 MIN entry is therefore gone (no HA we support runs on
+        # 3.12 any more). The pure core keeps its own 3.12 entry in the
+        # quality job: it is HA-free, so the wider floor costs nothing there.
         include:
-          - python-version: "3.12"
-            ha-target: min
-            requirements: requirements-test.txt
           - python-version: "3.13"
             ha-target: min
             requirements: requirements-test.txt
-          - python-version: "3.13"
+          - python-version: "3.14"
             ha-target: latest
             requirements: requirements-test-latest.txt
     steps:
@@ -89,6 +108,115 @@ jobs:
         # the collective 95% gate above cannot see a per-file regression.
         # Reuses the .coverage data the previous step wrote.
         run: coverage report --include='*config_flow.py' --fail-under=100
+
+  min-consistency:
+    # E.13: the promised minimum lives in THREE places — hacs.json (what HACS
+    # enforces), the README badge (what users read) and requirements-test.txt
+    # (what CI actually proves). They drifted apart once already; this gate
+    # keeps them in lockstep on every push, not just weekly.
+    name: MIN consistency (hacs.json / README / test pin)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: hacs.json, README badge and the MIN pin must agree
+        run: |
+          python - <<'PY'
+          import json, re, sys, urllib.request
+
+          PKG = "pytest-homeassistant-custom-component"
+          pin = re.search(
+              rf"^{re.escape(PKG)}==(\S+)$", open("requirements-test.txt").read(), re.M
+          ).group(1)
+          url = f"https://pypi.org/pypi/{PKG}/{pin}/json"
+          with urllib.request.urlopen(url) as r:
+              info = json.load(r)["info"]
+          tested = next(
+              req.split("==", 1)[1].split(";")[0].strip()
+              for req in info["requires_dist"]
+              if req.lower().startswith("homeassistant==")
+          )
+          hacs = json.load(open("hacs.json"))["homeassistant"]
+          badge = re.search(
+              r"Home%20Assistant-([0-9.]+)%2B", open("README.md", encoding="utf-8").read()
+          ).group(1)
+
+          def minor(v: str) -> tuple[int, int]:
+              p = v.split(".")
+              return int(p[0]), int(p[1])
+
+          print(f"CI tests HA {tested} | hacs.json {hacs} | README badge {badge}")
+          bad = []
+          if minor(tested) != minor(hacs):
+              bad.append(f"hacs.json says {hacs}, CI proves {tested}")
+          if minor(tested) != minor(badge):
+              bad.append(f"README badge says {badge}, CI proves {tested}")
+          if bad:
+              print("::error::MIN claim and tested version disagree — " + "; ".join(bad))
+              sys.exit(1)
+          print("MIN claim matches the version CI actually tests.")
+          PY
+
+  harness-freshness:
+    # E.11b: "LATEST" must MEAN latest. The pin sat on HA 2026.2.3 while HA
+    # had moved to 2026.8 — nothing failed, because a pinned file cannot
+    # notice the world moving. This job compares the pin against PyPI and
+    # fails loudly when a newer harness (i.e. a newer HA) is available.
+    # Deliberately NOT in the `gate` needs list and not run on push/PR: a new
+    # upstream release must never turn an unrelated PR red, it must show up as
+    # a red scheduled run that says "bump the pin".
+    name: Harness freshness (LATEST pin vs. PyPI)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Compare requirements-test-latest.txt against the newest release
+        run: |
+          python - <<'PY'
+          import json, re, sys, urllib.request
+
+          PIN_FILE = "requirements-test-latest.txt"
+          PKG = "pytest-homeassistant-custom-component"
+
+          pinned = re.search(
+              rf"^{re.escape(PKG)}==(\S+)$", open(PIN_FILE).read(), re.M
+          ).group(1)
+          with urllib.request.urlopen(f"https://pypi.org/pypi/{PKG}/json") as r:
+              data = json.load(r)
+
+          def key(v: str) -> tuple[int, ...]:
+              m = re.match(r"^(\d+)\.(\d+)\.(\d+)$", v)
+              return tuple(int(x) for x in m.groups()) if m else ()
+
+          releases = sorted((v for v in data["releases"] if key(v)), key=key)
+          newest = releases[-1]
+
+          def ha_of(version: str) -> str:
+              url = f"https://pypi.org/pypi/{PKG}/{version}/json"
+              with urllib.request.urlopen(url) as r:
+                  info = json.load(r)["info"]
+              for req in info.get("requires_dist") or []:
+                  if req.lower().startswith("homeassistant=="):
+                      return req.split("==", 1)[1].split(";")[0].strip()
+              return "unknown"
+
+          print(f"pinned : {pinned} (HA {ha_of(pinned)})")
+          print(f"newest : {newest} (HA {ha_of(newest)})")
+          if key(pinned) < key(newest):
+              print(
+                  f"::error::LATEST harness is stale — pinned {pinned} "
+                  f"(HA {ha_of(pinned)}), newest {newest} (HA {ha_of(newest)}). "
+                  "Bump requirements-test-latest.txt (frontend pin + the "
+                  "latest job's python-version too) and re-run the suite."
+              )
+              sys.exit(1)
+          print("LATEST pin is the newest released harness.")
+          PY
 
   card:
     name: Card (build + verify)
@@ -163,7 +291,7 @@ jobs:
   # card all passed *in the same run* (the per-job gates are no longer decoupled).
   gate:
     name: All gates green
-    needs: [validate, quality, integration, card]
+    needs: [validate, quality, integration, min-consistency, card]
     runs-on: ubuntu-latest
     steps:
       - run: echo "validate, quality (pure-core + coverage), integration (glue + coverage) and card all passed"
