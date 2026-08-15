@@ -55,6 +55,10 @@ _ATTRS = (
     "cover_shade_position",
     "cover_shade_reason",
     "heating_failure",
+    "cooling_failure",  # C.8 cooling pendant to heating_failure
+    # C.8 write-convergence telemetry (diagnostic; 0 = converging normally)
+    "sp_diverged_writes",
+    "mode_diverged_nudges",
     "heat_sp",
     "cool_sp",
     "adaptive_cool",

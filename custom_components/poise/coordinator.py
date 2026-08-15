@@ -1073,6 +1073,22 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """
         self._health.notify_failure(failed)
 
+    def _notify_cooling_failure(self, failed: bool) -> None:
+        """Cooling pendant to ``_notify_failure`` (review C.8); body in
+        ``HealthReporter.notify_cooling_failure``, same instance-dispatch and
+        synchronous-checkpoint reasons."""
+        self._health.notify_cooling_failure(failed)
+
+    def _notify_convergence(self, active: bool) -> None:
+        """Surface persistent write non-convergence as a repair issue (C.8).
+
+        Body in ``HealthReporter.notify_convergence``; a coordinator method
+        for the same reasons as ``_notify_failure`` (instance dispatch from
+        the tick flow, driven directly by the glue tests, synchronous
+        checkpoint emission).
+        """
+        self._health.notify_convergence(active)
+
     def _save_payload(self) -> dict[str, Any]:
         """The v1 store payload — the FORMAT is owned by ``persistence.codec``.
 

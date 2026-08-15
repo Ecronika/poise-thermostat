@@ -501,6 +501,14 @@
       "title": "Heating failure — {zone}",
       "description": "{zone} is not warming up despite a heating demand. Check the TRV/valve, the radiator, or the boiler. Poise keeps commanding heat; this notice clears automatically once the room warms."
     },
+    "cooling_failure": {
+      "title": "Cooling failure — {zone}",
+      "description": "{zone} is not cooling down despite a cooling demand. Check the AC/heat-pump (compressor, filters, airflow) and that windows are closed. Poise keeps commanding cooling; this notice clears automatically once the room cools."
+    },
+    "actuator_not_converging": {
+      "title": "Actuator not applying commands — {zone}",
+      "description": "The actuator in {zone} keeps reporting a different setpoint or mode than Poise commands — the writes are dispatched but never applied. Check the device's connection (Zigbee/Wi-Fi), its child lock, or an internal smart mode overriding external commands. This notice clears automatically once a command lands."
+    },
     "override_suggestion_base_up": {
       "title": "Poise: raise the comfort base?",
       "fix_flow": {
