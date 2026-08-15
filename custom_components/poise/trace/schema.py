@@ -118,6 +118,13 @@ class TraceRecord:
     pi_setpoint: float | None = None  # would-be compensated setpoint [°C]
     pi_offset: float | None = None  # PI offset share [K]
     ref_offset: float | None = None  # actuator<->room frame offset [K]
+    # --- Review C.8 write-convergence telemetry (added within v2, defaulted
+    # — same compat mechanism, no version bump): consecutive unconverged
+    # re-asserts/re-nudges so non-convergence episodes replay from the trace,
+    # plus the cooling-failure verdict (heating rides via ``frozen``-era keys).
+    sp_diverged_writes: int = 0
+    mode_diverged_nudges: int = 0
+    cooling_failure: bool = False
 
     def to_json_line(self) -> str:
         """One compact JSON line; floats rounded and ``None`` fields dropped."""
@@ -166,6 +173,12 @@ def build_record(
 
     def _b(key: str) -> bool:
         return bool(data.get(key, False))
+
+    def _i(key: str) -> int:
+        try:
+            return int(data.get(key, 0))
+        except (TypeError, ValueError):
+            return 0
 
     def _maybe_f(key: str) -> float | None:
         val = data.get(key)
@@ -230,4 +243,7 @@ def build_record(
         pi_setpoint=_maybe_f("pi_setpoint"),
         pi_offset=_maybe_f("pi_offset"),
         ref_offset=_maybe_f("ref_offset"),
+        sp_diverged_writes=_i("sp_diverged_writes"),
+        mode_diverged_nudges=_i("mode_diverged_nudges"),
+        cooling_failure=_b("cooling_failure"),
     )
