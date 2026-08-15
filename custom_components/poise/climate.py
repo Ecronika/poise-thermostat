@@ -158,6 +158,11 @@ _ATTRS = (
     "fan_first_phase",
     "tier2_fan_ce",
     "tier2_pmv_offset",
+    # ADR-0069 N1: maturing progress ("reift · X/24 h" + paused hint).
+    "tier2_fan_ce_dwell_min",
+    "tier2_pmv_dwell_min",
+    "tier2_dwell_target_min",
+    "tier2_dwelling",
     "fan_ce_credit_k",
     "pmv_offset_k",
     "ca_deviation_k",
