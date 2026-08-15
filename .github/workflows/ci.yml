@@ -114,7 +114,12 @@ jobs:
     # enforces), the README badge (what users read) and requirements-test.txt
     # (what CI actually proves). They drifted apart once already; this gate
     # keeps them in lockstep on every push, not just weekly.
-    name: MIN consistency (hacs.json / README / test pin)
+    # GRANULARITY (asked in review): the comparison is major.minor on purpose.
+    # The claim is a release SERIES ("2025.10.x and newer"), and the pin tracks
+    # the newest patch of that series — patch releases do not move the HA API
+    # surface. Demanding an exact match would force the pin onto the .0 build,
+    # which drags in a pre-release dependency (see requirements-test.txt).
+    name: MIN consistency (hacs.json / README / test-pin series)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -147,16 +152,19 @@ jobs:
               p = v.split(".")
               return int(p[0]), int(p[1])
 
-          print(f"CI tests HA {tested} | hacs.json {hacs} | README badge {badge}")
+          print(
+              f"CI tests HA {tested} | hacs.json {hacs} | README badge {badge} "
+              "(compared as release series major.minor)"
+          )
           bad = []
           if minor(tested) != minor(hacs):
               bad.append(f"hacs.json says {hacs}, CI proves {tested}")
           if minor(tested) != minor(badge):
               bad.append(f"README badge says {badge}, CI proves {tested}")
           if bad:
-              print("::error::MIN claim and tested version disagree — " + "; ".join(bad))
+              print("::error::MIN claim and tested series disagree — " + "; ".join(bad))
               sys.exit(1)
-          print("MIN claim matches the version CI actually tests.")
+          print("MIN claim and the tested version are the same release series.")
           PY
 
   harness-freshness:
