@@ -180,6 +180,15 @@ def step_tier(
     return replace(act, dwell_min=dwell)
 
 
+def latch_dwelt(prev: TierActivation, nxt: TierActivation) -> bool:
+    """Display-only: did this tick add qualified dwell time to an eligible latch?
+
+    Feeds the card's maturing-progress hint ("reift · X/24 h"): a frozen dwell
+    (non-qualifying tick) renders as paused. Never used for control decisions.
+    """
+    return nxt.state == STATE_ELIGIBLE and nxt.dwell_min > prev.dwell_min
+
+
 def may_dwell(
     container: ComfortActivation,
     feature: str,
