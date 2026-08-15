@@ -123,9 +123,11 @@ from ..const import (
 )
 from ..contracts import ActuatorCommand, ActuatorPath
 from ..control.comfort_activation import (
+    DWELL_TARGET_MIN,
     ComfortActivation,
     activation_signature,
     cascade_after_invalidation,
+    latch_dwelt,
     may_dwell,
     step_tier,
 )
@@ -2962,6 +2964,16 @@ class TickOrchestrator:
             self._runtime.diagnostics.comfort_activation = ComfortActivation(
                 fan_ce=_ca1.fan_ce, pmv_offset=_pmv_next, generation=_t2_gen
             )
+            # ADR-0069 N1: maturing-progress flag for the card — which latch
+            # grew qualified dwell THIS tick ("" = paused/none). Serialization
+            # guarantees at most one dwelling feature.
+            self._runtime.diagnostics.tier2_dwelling = (
+                "fan_ce"
+                if latch_dwelt(_ca0.fan_ce, _fan_next)
+                else "pmv_offset"
+                if latch_dwelt(_ca1.pmv_offset, _pmv_next)
+                else ""
+            )
             # NEXT-tick solver inputs: the CE credit only against a CONFIRMED
             # fan run (the shadow's velocity is hvac_action-gated, ADR-0068
             # §6 — a still room yields 0.0), the PMV shift only with real
@@ -3275,6 +3287,24 @@ class TickOrchestrator:
             "tier2_pmv_offset": (
                 self._runtime.diagnostics.comfort_activation.pmv_offset.state
             ),
+            # ADR-0069 N1: maturing progress for the card ("reift · X/24 h").
+            # Dwell minutes are rounded to 10-min steps so the recorded
+            # attribute changes ~6x/h instead of every tick.
+            "tier2_fan_ce_dwell_min": (
+                round(
+                    self._runtime.diagnostics.comfort_activation.fan_ce.dwell_min / 10
+                )
+                * 10
+            ),
+            "tier2_pmv_dwell_min": (
+                round(
+                    self._runtime.diagnostics.comfort_activation.pmv_offset.dwell_min
+                    / 10
+                )
+                * 10
+            ),
+            "tier2_dwell_target_min": int(DWELL_TARGET_MIN),
+            "tier2_dwelling": self._runtime.diagnostics.tier2_dwelling,
             "fan_ce_credit_k": self._runtime.latches.fan_ce_credit_k,
             "pmv_offset_k": self._runtime.latches.pmv_offset_k,
             # ADR-0067 F2: the clo-family reading ("" reason = emittable).
