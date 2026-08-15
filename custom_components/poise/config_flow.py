@@ -1030,7 +1030,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     state = self.hass.states.get(act)
                     data[CONF_NAME] = (state.name if state else None) or act
                 await self.async_set_unique_id(act)
-                self._abort_if_unique_id_configured()
+                # E.13d: reload_on_update=False — the default (True) makes this
+                # a reloading flow method, which HA forbids next to an update
+                # listener from 2026.12. Nothing is lost: this call only aborts
+                # a duplicate, it never updates an existing entry here.
+                self._abort_if_unique_id_configured(reload_on_update=False)
                 return self.async_create_entry(title=data[CONF_NAME], data=data)
         return self.async_show_form(
             step_id="room", data_schema=_setup_schema(self.hass), errors=errors
@@ -1041,7 +1045,8 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         # singleton hub entry (ADR-0038)
         await self.async_set_unique_id("poise_system")
-        self._abort_if_unique_id_configured()
+        # E.13d: see async_step_room — abort-only, never reload.
+        self._abort_if_unique_id_configured(reload_on_update=False)
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = _validate_boiler_actions(user_input)  # F11
@@ -1069,9 +1074,12 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                 errors = _validate_boiler_actions(user_input)  # F11
                 if not errors:
                     # V7: full replace (not merge); keep the ENTRY_TYPE tag.
-                    return self.async_update_reload_and_abort(
+                    # E.13d: store only — see the room branch below.
+                    self.hass.config_entries.async_update_entry(
                         entry, data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input}
                     )
+                    self._schedule_reload_if_unloaded(entry)
+                    return self.async_abort(reason="reconfigure_successful")
             return self.async_show_form(
                 step_id="reconfigure",
                 data_schema=self.add_suggested_values_to_schema(
@@ -1136,9 +1144,17 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     and old_actuator != new_data.get(CONF_ACTUATOR)
                 ):
                     await self._park_replaced_actuator(entry, old_actuator)
-                return self.async_update_reload_and_abort(
+                # E.13d: store only — the update listener reloads (it is the
+                # single reload authority; a reloading flow method next to a
+                # listener is an error from HA 2026.12). Written out instead of
+                # ``async_update_and_abort`` on purpose: that helper only
+                # reaches ConfigFlow in HA 2025.12, and these two calls are
+                # exactly what it does, on every version we support.
+                self.hass.config_entries.async_update_entry(
                     entry, unique_id=self.unique_id, data=new_data, options=new_options
                 )
+                self._schedule_reload_if_unloaded(entry)
+                return self.async_abort(reason="reconfigure_successful")
         current = {**entry.data, **entry.options}
         suggested = nest_by_section(current, _RECONFIGURE_SECTIONS)
         # the structural fields live at the top level (not in a section), so carry
@@ -1160,6 +1176,28 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             ),
             errors=errors,
         )
+
+    def _schedule_reload_if_unloaded(self, entry: ConfigEntry) -> None:
+        """Reload a reconfigured entry that has no update listener (E.13d).
+
+        A LOADED entry carries the update listener from ``async_setup_entry``,
+        and that listener is the single reload authority — the flow must not
+        reload as well (HA turns listener + reloading flow method into an
+        error in 2026.12). An entry that is NOT loaded has no listener: the
+        common case is a zone that failed setup (missing actuator, so
+        ``ConfigEntryNotReady``) and is being repaired via Reconfigure. Nobody
+        would apply the corrected wiring, and a pending schema migration would
+        not run either, so here the flow schedules the reload itself — with no
+        listener present, this is not the deprecated combination.
+        """
+        from homeassistant.config_entries import ConfigEntryState
+
+        # ``recoverable`` keeps this to the states a reload can actually fix
+        # (NOT_LOADED / SETUP_RETRY / SETUP_ERROR). Scheduling one for e.g.
+        # MIGRATION_ERROR or SETUP_IN_PROGRESS would only raise inside a
+        # detached task.
+        if entry.state is not ConfigEntryState.LOADED and entry.state.recoverable:
+            self.hass.config_entries.async_schedule_reload(entry.entry_id)
 
     async def _park_replaced_actuator(self, entry: ConfigEntry, actuator: str) -> None:
         """AR-12: release a room's PREVIOUS actuator when a reconfigure repoints the

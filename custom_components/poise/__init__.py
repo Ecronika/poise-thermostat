@@ -35,16 +35,44 @@ def _is_system(entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Apply changed tuning options in place — no reload, so learning survives."""
+    """Apply an entry update: hot-apply tuning, reload on a structural change.
+
+    E.13d: this listener is the SINGLE reload authority. HA deprecated the
+    combination of an update listener with a reloading config-flow method
+    (double load / race) — warning since 2026.6, error from 2026.12 — and the
+    listener is the half we must keep: hot-applying tuning without a reload is
+    what preserves the learned model for a mere comfort tweak. So the flow now
+    only stores (``async_update_entry`` + ``async_abort`` written out —
+    ``ConfigFlow.async_update_and_abort`` only exists from HA 2025.12, above
+    our minimum; see ``config_flow.py``) and the decision lives here:
+
+    * ``entry.data`` unchanged -> options-only -> hot-apply in place;
+    * ``entry.data`` changed (a reconfigure rewired the zone) -> reload, which
+      rebuilds the coordinator from the new wiring.
+
+    Hub entries carry no coordinator state worth preserving, so a structural
+    change reloads them the same way.
+    """
     if _is_system(entry):
+        # The hub has no hot-applyable tuning (F9), so a structural change can
+        # only be rebuilt — but HA fires this listener for EVERY entry change
+        # (rename, pref_disable_polling, …), and reloading on those would drop
+        # the boiler timers for nothing.
+        hub = entry.runtime_data
+        if not hub.structural_unchanged(entry):
+            hass.config_entries.async_schedule_reload(entry.entry_id)
         return
     coordinator = entry.runtime_data
-    # F14: a reconfigure changes entry.data and reloads the entry; this update
-    # listener fires first, so skip the in-place apply on the coordinator that is
-    # about to be discarded (the reload rebuilds it) — hot-apply an options-only
-    # change only.
     if coordinator.structural_unchanged(entry):
         await coordinator.async_apply_options(entry)
+        return
+    # Structural change: the coordinator in runtime_data is about to be
+    # discarded, so do NOT hot-apply onto it — rebuild the entry instead.
+    # SCHEDULE, never await: we are inside the entry-update that HA is still
+    # processing (the flow has not returned yet), and awaiting the reload from
+    # here tears the entry down mid-update. ``async_schedule_reload`` is what
+    # HA's own reloading flow methods use.
+    hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
@@ -89,9 +117,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 
     async def _resume_schedule(call: ServiceCall) -> None:
         has_target = any(call.data.get(key) for key in _resume_target_keys)
-        referenced = (
-            await async_extract_config_entry_ids(hass, call) if has_target else set()
-        )
+        referenced = await async_extract_config_entry_ids(call) if has_target else set()
         for entry in hass.config_entries.async_entries(DOMAIN):
             if _is_system(entry):
                 continue
@@ -115,9 +141,7 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     async def _comfort_feedback(call: ServiceCall) -> None:
         direction = call.data["direction"]
         has_target = any(call.data.get(key) for key in _resume_target_keys)
-        referenced = (
-            await async_extract_config_entry_ids(hass, call) if has_target else set()
-        )
+        referenced = await async_extract_config_entry_ids(call) if has_target else set()
         for entry in hass.config_entries.async_entries(DOMAIN):
             if _is_system(entry):
                 continue
@@ -171,6 +195,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.config_entries.async_forward_entry_setups(
             entry, [Platform.BINARY_SENSOR]
         )
+        # E.13d: the hub needs the same single reload authority as a room.
+        # Its reconfigure now only STORES the new data, so without
+        # a listener the new boiler wiring would sit in the entry unused until
+        # the next restart. The hub has no hot-applyable tuning (its options
+        # flow aborts, F9), so any update means: rebuild. Registered after the
+        # forward for the same reason as the room path (AR-23).
+        entry.async_on_unload(entry.add_update_listener(_async_options_updated))
         return True
 
     from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady

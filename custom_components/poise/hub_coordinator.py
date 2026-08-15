@@ -132,6 +132,12 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
         self._clock = MonotonicClock()
         self._entry = entry
         d = entry.data
+        # E.13d: the config values below are read ONCE here, so only an
+        # ``entry.data`` change needs a reload. The update listener compares
+        # against this snapshot (mirrors PoiseCoordinator.structural_unchanged)
+        # — without it every entry touch, including a UI rename, would rebuild
+        # the hub and drop the boiler activation-delay / keep-alive anchors.
+        self._data_snapshot = dict(d)
         self._count_threshold = int(
             d.get(CONF_BOILER_COUNT_THRESHOLD, DEFAULT_BOILER_COUNT_THRESHOLD)
         )
@@ -508,6 +514,20 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
                 )
         except Exception:  # noqa: BLE001 - hand-over OFF is best-effort
             _LOGGER.exception("Poise: boiler OFF on hub hand-over failed")
+
+    def structural_unchanged(self, entry: ConfigEntry) -> bool:
+        """True if this update touched nothing the hub read at construction.
+
+        Mirror of ``PoiseCoordinator.structural_unchanged`` (E.13d): the update
+        listener is the single reload authority, and HA fires it for EVERY
+        entry change — a UI rename or a ``pref_disable_polling`` toggle
+        included. Reloading on those would cancel the boiler tick timer and
+        reset the activation-delay / keep-alive anchors (they are not part of
+        the persisted boiler payload) for a change the hub never reads. The
+        hub has no hot-applyable tuning (F9), so anything that IS structural
+        simply reloads.
+        """
+        return dict(entry.data) == self._data_snapshot
 
     def cleanup_issues(self) -> None:
         """Delete the hub's repair issues (review F16) so they do not survive a
