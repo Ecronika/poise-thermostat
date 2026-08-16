@@ -536,7 +536,7 @@ class ZoneRuntime:
         ing: IngestResult,
         *,
         entry_id: str,
-        windows: list[str],
+        windows: Sequence[str],
         actuator_entity: str,
         window_auto_cfg: WindowAutoConfig,
         adaptive_cool_cfg: str | bool,

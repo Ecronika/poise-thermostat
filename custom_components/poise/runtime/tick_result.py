@@ -24,6 +24,11 @@ if TYPE_CHECKING:
     from ..comfort.schedule import ScheduleState
     from ..comfort.thermal_shock import AdaptiveCool
     from ..contracts import Reading, Source
+    from ..control.fan_first import FanFirstDecision
+
+    # Plan O.2: the per-tick config view. Typing-only, so this pure module
+    # keeps its zero runtime dependency on the HA adapter layer.
+    from ..ha.tick_snapshot import TickConfigSnapshot
     from ..multi.lifecycle import LifecyclePolicy
     from ..multi.resolvers import DeviceRuntime
     from .tick_inputs import PresenceSnapshot, TickInputs
@@ -394,6 +399,29 @@ class IntentsResult:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class FanFirstStageResult:
+    """ADR-0068 U6 fan-first FSM verdict + the actuator-derived values the
+    later fan-stage write consumes.
+
+    Every field carries the value the fan-first stage's local held when its
+    defensive ``try`` boundary was left — on the exception path those are the
+    pre-set defaults, exactly as the inline block behaved.
+
+    ``requested`` is the mode-seam input (a fan-first candidate wants to
+    intercept a NORMAL cool); ``fan_modes``/``device_fan``/``foreign_fan``/
+    ``presence_ok`` are the observations the ADR-0053 idle-circulation arm of
+    the fan write re-reads.
+    """
+
+    decision: FanFirstDecision
+    requested: bool
+    fan_modes: tuple[str, ...]
+    device_fan: str | None
+    foreign_fan: bool
+    presence_ok: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ModeResolutionResult:
     """Mode arbitration + compressor-guard policy.
 
@@ -556,6 +584,11 @@ class PreparedState:
     ``prepare_until_forecast`` stops at the predictive decision; everything it
     already computed survives until ``resume_prepare`` as the typed stage
     results above.
+
+    ``config`` is the tick's ``TickConfigSnapshot`` (plan step O.2), built
+    right after the availability gate. It travels HERE rather than as an
+    orchestrator attribute so the resume-side stages receive it explicitly,
+    with no hidden ``self`` coupling.
     """
 
     inputs: TickInputs
@@ -563,6 +596,7 @@ class PreparedState:
     observation: ObservationResult
     floors: SafetyFloorsResult
     sched: ScheduleState
+    config: TickConfigSnapshot
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -586,8 +620,15 @@ class FinalizeContext:
     ``act_state`` is the tick's ONE central positioned actuator read and
     ``climate_diag`` is the legacy climate-band domain's already-degraded
     assembly.
+
+    ``config`` is the one field that is NOT a tick local: it is the tick's
+    ``TickConfigSnapshot`` (plan step O.2), carried here so the finalize
+    stages read their policy values from an explicit parameter instead of the
+    coordinator backreference.
     """
 
+    # -- the tick's read-only config view (plan O.2) -------------------------
+    config: TickConfigSnapshot
     # -- clock / ingest / environment ---------------------------------------
     now: float
     room: float
