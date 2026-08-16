@@ -11,14 +11,15 @@ runtime.  Substitution rules:
   flag lives directly on the runtime (``rt.dirty``).
 * config-owned values (``ZoneTuning``/structure attributes, which stay on the
   coordinator) arrive as explicit keyword parameters.
-* PATCH SURFACES: integration tests patch symbols on the COORDINATOR module
-  (``custom_components.poise.coordinator.comfort_decide`` / ``is_frozen`` /
-  ``ingest_temperature`` / ``effective_window_open`` / ``psychro_dewpoint``).
-  Those callables are therefore INJECTED per call (``*_fn`` parameters): the
-  coordinator's delegation resolves the name from its module globals at call
-  time, so ``unittest.mock.patch`` on the coordinator module keeps hitting
-  every dispatch.  They must never be bound early (module import or
-  constructor) here.
+* PATCH SURFACES: integration tests patch these symbols on their OWNING module
+  (``comfort.dual_setpoint.decide`` / ``safety.sensor_watchdog.is_frozen`` /
+  ``ingestion.ingest_temperature`` /
+  ``control.window_auto.effective_window_open`` /
+  ``estimation.psychrometrics.dewpoint``).  Those callables are therefore
+  INJECTED per call (``*_fn`` parameters): the orchestrator's delegation reads
+  the name off the owning MODULE object at call time, so ``unittest.mock.patch``
+  on the owner keeps hitting every dispatch.  They must never be bound early
+  (module import or constructor) here.
 * LOG CHANNELS are behaviour: the two swallow boundaries that log do so via an
   injected ``logging.Logger`` — the coordinator passes its own ``_LOGGER`` so
   every record keeps the baseline channel
@@ -92,7 +93,7 @@ from ..safety.sensor_watchdog import sensor_at_heat_source, should_learn
 
 if TYPE_CHECKING:
     import logging
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from ..comfort.dual_setpoint import ComfortDecision
     from ..comfort.en16798 import Category
@@ -142,7 +143,7 @@ def evaluate_health_issues(
 
     The InputReader's DISCOVERY results (``sched_entity`` etc., static entity
     ids resolved at bootstrap, no live read) are injected as parameters, and
-    ``is_frozen`` dispatches through the coordinator module global (patch
+    ``is_frozen`` is read off ``safety.sensor_watchdog`` at call time (patch
     surface, test_phase0_safety_precedence).  The evaluation appends
     ``HealthUpdate``s to the caller's ``pending`` list AS it evaluates — a
     fixed per-issue order, with conditional gates (an undiscovered guard
@@ -388,7 +389,7 @@ def observe_window_auto(
     now: float,
     cooling: bool = False,
     sensor_unavailable: bool = False,
-    windows: list[str],
+    windows: Sequence[str],
     window_auto_cfg: WindowAutoConfig,
 ) -> None:
     """Feed the sensorless slope detector (ADR-0041).
@@ -479,7 +480,7 @@ def stage_observe(
     ing: IngestResult,
     *,
     entry_id: str,
-    windows: list[str],
+    windows: Sequence[str],
     actuator_entity: str,
     window_auto_cfg: WindowAutoConfig,
     adaptive_cool_cfg: str | bool,
@@ -494,7 +495,7 @@ def stage_observe(
     ``window_sensor_unavailable`` is collected and returned for the stage-end
     checkpoint; the ``TickStageError`` wrap transports it out of a mid-body
     abort (empty-pending aborts propagate bare).  ``effective_window_open``
-    dispatches through the injected coordinator module global
+    is read off ``control.window_auto`` at call time
     (test_phase6_health_checkpoints patch surface); ``set_mpc_params`` writes
     the coordinator's config-shaped ``_mpc_params`` attribute (ZoneTuning-owned
     — the one adapter-owned mutation of this stage, injected as a setter so the
@@ -531,7 +532,7 @@ def _stage_observe_guarded(
     pending: list[HealthUpdate],
     *,
     entry_id: str,
-    windows: list[str],
+    windows: Sequence[str],
     actuator_entity: str,
     window_auto_cfg: WindowAutoConfig,
     adaptive_cool_cfg: str | bool,
@@ -699,8 +700,8 @@ def stage_safety_floors(
 
     ``mould_protection_inactive`` is collected and returned for the stage-end
     checkpoint; the ``TickStageError`` wrap transports it out of a mid-body
-    abort (empty-pending aborts propagate bare).  ``psychro_dewpoint``
-    dispatches through the injected coordinator module global
+    abort (empty-pending aborts propagate bare).  ``dewpoint``
+    is read off ``estimation.psychrometrics`` at call time
     (test_phase6_health_checkpoints patch surface).
     """
     pending: list[HealthUpdate] = []
@@ -1056,8 +1057,8 @@ def stage_setpoint_observe(
 
     The ONE ``ExternalOverrideTracker.observe_setpoint`` call yields decision
     AND reason; ``sp_adopt_reason`` travels in the returned
-    ``SetpointObservation``.  ``setpoint_adopt_reason_fn`` resolves from the
-    coordinator's module globals at call time (patch surface).
+    ``SetpointObservation``.  ``setpoint_adopt_reason_fn`` is a plain import in
+    the orchestrator since plan O.4 (no test ever patched it).
     """
     now = ing.now
     frozen = ing.frozen
@@ -1274,6 +1275,10 @@ def build_finalize_context(
     obs = state.observation
     floors = state.floors
     return FinalizeContext(
+        # Plan O.2: the tick's config view travels with the carrier that
+        # already crossed the forecast seam -- no second parameter, no
+        # coordinator read inside the finalize stages.
+        config=state.config,
         now=ing.now,
         room=ing.room,
         room_decide=op.room_decide,

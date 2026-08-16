@@ -21,11 +21,13 @@ resulting bus events immediately at the in-stage call position; their
 ``dt_util`` reads happen inside the facade, AFTER the mode-nudge await, so a
 nudge-dispatch duration stays observable in ``override_expires_at``.
 
-Patch surfaces: integration tests patch symbols on the COORDINATOR module, so
-the pure reason functions arrive as per-call ``*_fn`` parameters which the
-coordinator's delegation resolves from its module globals at call time —
-``patch("…coordinator.mode_adopt_reason")`` / ``…setpoint_adopt_reason`` /
-``…resolve_desired_mode`` keep hitting every dispatch.  LOG CHANNELS are
+Substitution: the pure reason functions arrive as per-call ``*_fn`` parameters
+so this module binds none of them.  Since plan O.4 none of the three
+(``mode_adopt_reason`` / ``setpoint_adopt_reason`` / ``resolve_desired_mode``)
+is patch surface — no test ever patched them, and the orchestrator now imports
+them plainly from ``control.override`` / ``control.tick_resolve``.  Should one
+become a fault-injection point, the orchestrator's call site switches to the
+owner-module form and the target is the OWNER.  LOG CHANNELS are
 behaviour: the suppressed-adoption debounce log arrives via the injected
 coordinator logger with identical text/level.
 
