@@ -63,6 +63,7 @@ from custom_components.poise.runtime.tick_result import (
     ValveHealthResult,
     WriteTargetResult,
 )
+from tests.test_o2_tick_snapshot import sample_tick_config
 
 
 def _actuator_plan() -> ActuatorPlan:
@@ -151,12 +152,14 @@ def _prepared_state() -> PreparedState:
         observation=_observation_result(),
         floors=_floors(),
         sched=ScheduleState(True, 0, 0.0, 120),
+        config=sample_tick_config(),
     )
 
 
 def _finalize_context() -> FinalizeContext:
     """A representative phase-6a context (value-equal on every call)."""
     return FinalizeContext(
+        config=sample_tick_config(),
         now=1234.5,
         room=20.8,
         room_decide=20.8,
@@ -398,6 +401,9 @@ def test_prepared_state_field_set_is_pinned() -> None:
         "observation",
         "floors",
         "sched",
+        # Plan O.2: the per-tick TickConfigSnapshot rides the carrier across
+        # the forecast seam instead of every stage reading the coordinator.
+        "config",
     ]
 
 
@@ -701,6 +707,9 @@ def test_finalize_context_field_set_is_pinned() -> None:
     # (50 names; ``reading`` narrowed to ``reading_source``). Adding or
     # removing a field is a contract change and must update this pin.
     assert [f.name for f in dataclasses.fields(FinalizeContext)] == [
+        # Plan O.2: the one field that is not a tick local — the per-tick
+        # config view the finalize stages read their policy values from.
+        "config",
         "now",
         "room",
         "room_decide",

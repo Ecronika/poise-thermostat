@@ -8,8 +8,8 @@ semantics:
   two ``compressor_gate_*`` keys (phase-0 finding 3: the available key set
   shrinks by two on a shadow failure),
 * ``evaluate_cover_shadow`` dispatches its kernels ONLY through the injected
-  ``*_fn`` parameters (the coordinator resolves them from its module globals
-  at call time — the fault-injection patch surface),
+  ``*_fn`` parameters (the orchestrator resolves ``predict_peak_operative``
+  off its owning module at call time — the fault-injection patch surface),
 * the F9 dt-cap helper is bit-identical to the four historical inline
   computations,
 * ``compose_climate_band``/``build_outcome_diag`` reproduce the historical
@@ -256,8 +256,8 @@ def test_comp_block_none_becomes_empty_string() -> None:
 
 def test_lifecycle_fragment_dispatches_via_injected_fns() -> None:
     """The lifecycle remaining-time kernels must ONLY be reached through the
-    injected callables (the coordinator resolves ``_lifecycle.*`` from its
-    module globals at call time — the patchable dispatch)."""
+    injected callables (the orchestrator resolves ``_lifecycle.*`` off the
+    ``multi.lifecycle`` module at call time)."""
     calls: list[tuple[str, object, float, object]] = []
 
     def fake_min_off(state: object, now: float, policy: object) -> float:

@@ -84,6 +84,7 @@ from custom_components.poise.runtime.tick_result import (
 )
 from custom_components.poise.runtime.zone_runtime import ZoneRuntime
 from custom_components.poise.safety.sensor_watchdog import is_frozen
+from tests.test_o2_tick_snapshot import sample_tick_config
 
 _LOG = logging.getLogger("tests.phase6b_stages")
 
@@ -836,7 +837,12 @@ def test_build_finalize_context_carries_the_stage_values() -> None:
     res = _mode_res(rt, ing, obs)
     sched = ComfortSchedule.always_comfort().state_at(inputs.local_minute)
     state = PreparedState(
-        inputs=inputs, ingest=ing, observation=obs, floors=floors, sched=sched
+        inputs=inputs,
+        ingest=ing,
+        observation=obs,
+        floors=floors,
+        sched=sched,
+        config=sample_tick_config(),
     )
     ctx = rt.build_finalize_context(
         state=state,
