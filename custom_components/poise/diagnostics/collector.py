@@ -1,18 +1,18 @@
 """The one broad error boundary for pure outcome/savings diagnostics.
 
-``DiagnosticsCollector.safe_collect()`` IS the outcome-diagnostics boundary
-of ``TickOrchestrator._stage_outcome_diag``: defaults init + one ``try``
-around the five state folds (HDH, outcome
-session/stats, CA regulation quality, reference offset, tau settle) and the
-assembly, + the swallowing DEBUG log.  Pulling the state updates out first is
-NOT behaviour-equivalently implementable here: the folds sit INSIDE the
-boundary, so an exception in fold N leaves ``outcome_diag`` on the defaults
-(key shrink), skips folds N+1… and freezes the metrics until the next healthy
-tick — extracted folds would either throw the tick (currently swallowed) or
-degrade differently.  The extraction is therefore a deferred candidate
-(**F-OUTFOLD**); until then the orchestrator passes a ``collect_fn`` that
-runs folds + assembly in text order (mutations on the runtime state in place,
-pure assembly via ``diagnostics.shadows.build_outcome_diag``).
+``DiagnosticsCollector.safe_collect()`` IS the outcome-diagnostics boundary of
+``ReportPhase._stage_outcome_diag``: defaults init + one ``try`` around the six
+state folds (HDH + outcome session/stats, CA/PPD regulation quality, tier-2
+activation stepping, tier-2 solver inputs, reference offset, tau settle) and
+the assembly, + the swallowing DEBUG log.  Pulling the state updates OUT of the
+boundary is not behaviour-equivalently implementable: the folds sit INSIDE it,
+so an exception in fold N leaves ``outcome_diag`` on the defaults (key shrink),
+skips folds N+1… and freezes the metrics until the next healthy tick — folds
+behind their own boundaries would either throw the tick (currently swallowed)
+or degrade differently.  That stays the deferred candidate **F-OUTFOLD**.  Plan
+O.6 did the part that IS equivalent: the folds became ``ReportPhase._fold_*``
+methods called from inside the very same ``collect_fn``, in unchanged text
+order (state mutated in place, assembly via ``shadows.build_outcome_diag``).
 
 Never computes ``tpi_duty``, the lifecycle fold or ``_pi.acc`` — each of
 those owns its own shadow-segment boundary in ``_stage_shadow_domain``

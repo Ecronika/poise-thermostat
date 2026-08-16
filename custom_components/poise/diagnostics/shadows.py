@@ -14,14 +14,13 @@ shadows).  That is why the ``objs`` helpers below come in per-segment
 fragments instead of one flat assembly: a failing segment contributes nothing
 and every other segment still publishes its own keys.
 
-PATCH SURFACES: the finalize domain dispatches ``predict_peak_operative``,
-``shading_target_position`` and the ``_lifecycle`` module alias via
-COORDINATOR module globals (``self._g``) — integration tests patch them there
-(``test_phase0_fault_shadow_domain`` patches
-``coordinator.predict_peak_operative``).  Every composition that moved such a
-call therefore takes it as a ``*_fn`` parameter which the orchestrator
-resolves from the coordinator's module globals at call time; nothing here
-binds those names at import time.  The MPC/TPI/PI kernels
+PATCH SURFACES: of the finalize kernels only ``predict_peak_operative`` is one
+(``test_phase0_fault_shadow_domain``), and since plan O.4 it is patched on the
+module that OWNS it — ``control.cover_shading`` — which is also where the
+orchestrator reads it at call time.  ``shading_target_position`` and the
+``_lifecycle`` members are plain imports there now.  Every composition that
+moved such a call still takes it as a ``*_fn`` parameter; nothing here binds
+those names at import time.  The MPC/TPI/PI kernels
 (``evaluate_shadow``/``evaluate_tpi_shadow``/``evaluate_pi_shadow``) and the
 kernels no test patches (comfort indices, ``rh_high_for_category``,
 ``settle_confidence``, ``compensated_setpoint``) are imported directly by the
@@ -187,9 +186,9 @@ def evaluate_cover_shadow(
     Forecasts the peak operative temperature (Tier-2 linear while the EKF is
     not identified, e.g. summer) and what a cover *would* do — diagnostic
     only, no cover is moved.  Returns ``(peak, position, reason, binding)``.
-    The two kernels arrive as ``*_fn`` parameters resolved by the coordinator
-    from its module globals at call time (``predict_peak_operative`` is the
-    patched fault-injection surface).
+    The two kernels arrive as ``*_fn`` parameters; the orchestrator resolves
+    ``predict_peak_operative`` off ``control.cover_shading`` at call time
+    (the patched fault-injection surface) and imports the other plainly.
     """
     peak = predict_peak_operative_fn(
         operative,
