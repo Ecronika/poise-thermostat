@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 import time
 from collections.abc import Callable, Sequence
 from datetime import timedelta
@@ -61,7 +60,13 @@ from .ha.actuator_executor import ActuatorExecutor
 from .ha.forecast_provider import ForecastProvider
 from .ha.health_reporter import HealthReporter
 from .ha.input_reader import InputReader
+from .ha.phase_actuate import ActuatePhase
+from .ha.phase_prepare import PreparePhase
+from .ha.phase_report import ReportPhase
+from .ha.phase_shadow import ShadowPhase
 from .ha.tick_orchestrator import TickOrchestrator
+from .ha.tick_ports import CoordinatorSnapshotSource, CoordinatorTickPorts
+from .ha.tick_snapshot import TickConfigSnapshot, ZoneBindings
 from .persistence import codec as _codec
 from .persistence.migrations import migrate_v0_bare_ekf
 from .runtime.config import (
@@ -79,37 +84,6 @@ from .runtime.tick_result import (
 )
 from .runtime.zone_runtime import ZoneRuntime
 from .storage import PoiseStore
-
-# isort: off
-# --- PATCH SURFACE (binding, do not "clean up") -------------------------------
-# These names are imported here even though this module no longer calls them:
-# the fault-injection tests patch ``custom_components.poise.coordinator.<name>``
-# and ``ha.tick_orchestrator.TickOrchestrator`` resolves each one through THIS
-# module at call time (``self._g.<name>``). Deleting an import, or importing the
-# name in the orchestrator instead, turns the patch target into a dead name --
-# the tests keep passing while testing nothing. Patched by tests today:
-# is_frozen, ingest_temperature, effective_window_open, psychro_dewpoint,
-# comfort_decide, resolve_write_target, humidity_decide, predict_peak_operative,
-# plan_preheat. Documented as patch surface (not patched yet):
-# resolve_desired_mode, mode_adopt_reason, setpoint_adopt_reason,
-# shading_target_position, evaluate_thermal_shadow, _lifecycle.
-from .comfort.dual_setpoint import decide as comfort_decide  # noqa: F401
-from .comfort.humidity import humidity_decide  # noqa: F401
-from .control.cover_shading import predict_peak_operative  # noqa: F401
-from .control.cover_shading import shading_target_position  # noqa: F401
-from .control.optimal_start import plan_preheat  # noqa: F401
-from .control.override import mode_adopt_reason  # noqa: F401
-from .control.override import setpoint_adopt_reason  # noqa: F401
-from .control.tick_resolve import resolve_desired_mode  # noqa: F401
-from .control.tick_resolve import resolve_write_target  # noqa: F401
-from .control.window_auto import effective_window_open  # noqa: F401
-from .estimation.psychrometrics import dewpoint as psychro_dewpoint  # noqa: F401
-from .ingestion import ingest_temperature  # noqa: F401
-from .multi import lifecycle as _lifecycle  # noqa: F401
-from .multi.shadow import evaluate_thermal_shadow  # noqa: F401
-from .safety.sensor_watchdog import is_frozen  # noqa: F401
-
-# isort: on
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -297,25 +271,65 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # require-before-tuning throw order, while async_apply_options parses
         # HotApplyConfig directly (no structural reads).
         self._apply_hot_tuning(HotApplyConfig.from_zone_config(cfg, hold))
-        # The whole per-tick program (8 tick methods + 26 stages) lives in
-        # ``ha/tick_orchestrator.py``; this class keeps the HA coupling. Built
-        # LAST so every collaborator handed over already exists. ``sys.modules
-        # [__name__]`` hands the orchestrator THIS module object so it can
-        # resolve the fault-injection patch surface at call time — see that
-        # module's docstring for the binding rules. The two CHECKPOINTS are
-        # deliberately NOT handed over as bound methods: the orchestrator
-        # calls ``self._c._maybe_save()`` and ``self._c._health.emit(...)``,
-        # i.e. it re-resolves both on THIS instance at call time, exactly as
-        # the pre-move ``self._maybe_save()``/``self._emit_health_updates()``
-        # did.
+        # THE COMPOSITION ROOT of the per-tick program (plan O.5). The tick
+        # runs in five objects: the sequencer in ``ha/tick_orchestrator.py``
+        # (order, seams, checkpoints, trace ownership) and the four phase
+        # classes that hold the stage bodies, cut along the AWAIT TOPOLOGY —
+        # ``PreparePhase``/``ShadowPhase``/``ReportPhase`` are await-free,
+        # ``ActuatePhase`` carries every executor await and every commit.
+        # Built LAST, so every collaborator handed over already exists.
+        #
+        # CAPABILITY NARROWING: THIS is the only place allowed to create and
+        # wire the ``ActuatorExecutor``, and it hands it to ``ActuatePhase``
+        # alone — no other tick object can even reach the writer. Likewise the
+        # forecast provider goes only to ``PreparePhase`` (for its ``.forecast``
+        # cache READ; the forecast AWAIT keeps running through
+        # ``_forecast_outdoor`` behind the ``forecast_outdoor`` port) and the
+        # diagnostics collector only to ``ReportPhase``.
+        #
+        # ONE port adapter serves all five, each typed against just its own
+        # view: it re-resolves every capability on this instance at call time,
+        # so no checkpoint is ever frozen as a bound method — exactly as the
+        # pre-move ``self._maybe_save()`` / ``self._emit_health_updates()``
+        # behaved. Plan O.4: the fault-injection patch surface is not routed
+        # through THIS module either — each of those nine functions is called
+        # through its OWNING module, which is where the tests patch.
+        tick_ports = CoordinatorTickPorts(self)
         self._tick = TickOrchestrator(
-            self,
-            coordinator_module=sys.modules[__name__],
+            tick_ports,
+            source=CoordinatorSnapshotSource(self),
+            hass=hass,
             logger=_LOGGER,
             runtime=self._zone_runtime,
             input_reader=self._input_reader,
-            actuator_executor=self._actuator_executor,
-            diag_collector=self._diag_collector,
+            prepare=PreparePhase(
+                runtime=self._zone_runtime,
+                reader=self._input_reader,
+                forecast=self._forecast_provider,
+                hass=hass,
+                ports=tick_ports,
+                logger=_LOGGER,
+            ),
+            actuate=ActuatePhase(
+                runtime=self._zone_runtime,
+                reader=self._input_reader,
+                executor=self._actuator_executor,
+                ports=tick_ports,
+                logger=_LOGGER,
+            ),
+            shadow=ShadowPhase(
+                runtime=self._zone_runtime,
+                reader=self._input_reader,
+                ports=tick_ports,
+                logger=_LOGGER,
+            ),
+            report=ReportPhase(
+                runtime=self._zone_runtime,
+                reader=self._input_reader,
+                diag=self._diag_collector,
+                ports=tick_ports,
+                logger=_LOGGER,
+            ),
             trace_slug=entry.entry_id,
         )
 
@@ -1047,6 +1061,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         rh: float | None,
         t_rm: float | None,
         now: float,
+        config: TickConfigSnapshot,
     ) -> None:
         """Append this tick to the opt-in field trace (ADR-0011 golden-file
         replay).
@@ -1057,9 +1072,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         coordinator INSTANCE: test_phase8_presenter replaces
         ``coord._maybe_record_trace`` with a spy that wraps the original, and
         that replacement must be seen at the call site.
+
+        ``config`` is the tick's ``TickConfigSnapshot`` (plan O.2): the
+        ``trace_enabled`` gate reads it from the per-tick view instead of the
+        live attribute, and this facade only forwards it.
         """
         await self._tick._maybe_record_trace(
-            data, room=room, t_out=t_out, rh=rh, t_rm=t_rm, now=now
+            data, room=room, t_out=t_out, rh=rh, t_rm=t_rm, now=now, config=config
         )
 
     def _notify_failure(self, failed: bool) -> None:
@@ -1297,17 +1316,24 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 data["tick_over_budget"] = self._tick_budget.over_budget
             return data
 
-    async def _write_unavailable_safe_state(self) -> None:
+    async def _write_unavailable_safe_state(self, bindings: ZoneBindings) -> None:
         """Command the frost/mould floor after a sustained room-sensor loss.
 
-        The body lives in ``TickOrchestrator._write_unavailable_safe_state``
-        (resolve → executor sequence → commit). It stays a coordinator method
-        because ``_run_unavailable_tick`` dispatches it through the coordinator
-        INSTANCE: test_phase0_persistence_checkpoint replaces
-        ``coord._write_unavailable_safe_state`` to record the checkpoint order,
-        and that replacement must be seen at the call site.
+        The body lives in ``ActuatePhase.write_unavailable_safe_state``
+        (resolve → executor sequence → commit) since plan O.5 — that is the
+        sixth executor await, and only the actuation phase may hold the
+        executor; ``TickOrchestrator._write_unavailable_safe_state`` is the
+        thin facade in between and keeps the POSITION. This method stays a
+        coordinator method because ``_run_unavailable_tick`` dispatches it
+        through the coordinator INSTANCE: test_phase0_persistence_checkpoint
+        replaces ``coord._write_unavailable_safe_state`` to record the
+        checkpoint order, and that replacement must be seen at the call site.
+
+        ``bindings`` is the tick's ``ZoneBindings`` (plan O.2): the actuator
+        entity id and the zone name come from the per-tick view, so this
+        facade forwards it rather than the body reading the coordinator.
         """
-        await self._tick._write_unavailable_safe_state()
+        await self._tick._write_unavailable_safe_state(bindings)
 
     async def _run_once(self) -> dict[str, Any]:
         """One tick under the lock — the whole flow lives in
