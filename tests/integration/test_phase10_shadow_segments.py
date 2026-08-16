@@ -41,6 +41,12 @@ from custom_components.poise.const import (
 )
 from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 
+# Patch where the name is BOUND, not where it is defined. Plan O.5 split the
+# tick: the four shadow kernels are from-imported by the shadow phase module
+# (a from-import binds at IMPORT time, so patching their defining modules would
+# inject nothing), while ``build_tick_record`` belongs to the trace function
+# and stayed with the sequencer.
+_SHADOW = "custom_components.poise.ha.phase_shadow"
 _ORCH = "custom_components.poise.ha.tick_orchestrator"
 
 # Each segment's own published keys, and the log tag it reports under.
@@ -138,10 +144,10 @@ async def _tick(hass: HomeAssistant, coord: Any) -> dict[str, Any]:
 @pytest.mark.parametrize(
     ("target", "tag", "own_keys", "also_lost"),
     [
-        (f"{_ORCH}.evaluate_shadow", "mpc", _MPC_KEYS, ()),
-        (f"{_ORCH}.evaluate_tpi_shadow", "tpi", _TPI_KEYS, ()),
-        (f"{_ORCH}.evaluate_pi_shadow", "pi", _PI_KEYS, ()),
-        (f"{_ORCH}.evaluate_multi_shadow", "arbitration", _ARBITRATION_KEYS, ()),
+        (f"{_SHADOW}.evaluate_shadow", "mpc", _MPC_KEYS, ()),
+        (f"{_SHADOW}.evaluate_tpi_shadow", "tpi", _TPI_KEYS, ()),
+        (f"{_SHADOW}.evaluate_pi_shadow", "pi", _PI_KEYS, ()),
+        (f"{_SHADOW}.evaluate_multi_shadow", "arbitration", _ARBITRATION_KEYS, ()),
         # the ONE real dependency: the arbitration consumes the folded runtime
         (
             "custom_components.poise.multi.lifecycle.observe",

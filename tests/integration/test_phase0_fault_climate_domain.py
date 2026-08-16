@@ -208,7 +208,7 @@ async def test_humidity_decide_failure_keeps_the_shadows_warn_once(
     set_mode = async_mock_service(hass, "climate", "set_hvac_mode")
 
     with patch(
-        "custom_components.poise.coordinator.humidity_decide",
+        "custom_components.poise.comfort.humidity.humidity_decide",
         side_effect=RuntimeError("injected humidity_decide failure"),
     ):
         # ---- tick 1: first failure -------------------------------------
@@ -286,11 +286,15 @@ async def test_shadow_composition_failure_spares_the_live_dry_nudge(
     async_mock_service(hass, "climate", "set_hvac_mode")
     hass.states.async_set("sensor.rh", "70", {"device_class": "humidity"})
 
-    # patched where the orchestrator BOUND it (module-level import), not in the
+    # patched where the caller BOUND it (module-level import), not in the
     # defining module — the humidity kernel is the one that keeps its
-    # coordinator-namespace dispatch, this composition never needed it.
+    # owner-module dispatch, this composition never needed it. Plan O.5 moved
+    # ``_climate_shadows`` out of ``ha/tick_orchestrator.py`` into
+    # ``ha/phase_prepare.py``, so the binding site — and with it this patch
+    # target — moved along; a from-import binds at IMPORT time, so patching
+    # the old module would now inject nothing while this test stayed green.
     with patch(
-        "custom_components.poise.ha.tick_orchestrator.compose_climate_band",
+        "custom_components.poise.ha.phase_prepare.compose_climate_band",
         side_effect=RuntimeError("injected climate shadow failure"),
     ):
         clock.t += 60.0

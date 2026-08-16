@@ -23,8 +23,9 @@ Coordinator anchor points (line numbers verified against coordinator.py v0.179):
   monotonic ``coord._clock``. A FakeClock therefore cannot age the sensor;
   the repo-proven pattern (tests/integration/test_coverage_paths.py::
   test_frozen_sensor_writes_health_floor) patches
-  ``custom_components.poise.coordinator.is_frozen`` instead — the narrowest
-  possible injection, used here for the frozen cases only.
+  ``custom_components.poise.safety.sensor_watchdog.is_frozen`` instead — the
+  narrowest possible injection (the OWNING module since plan O.4), used here
+  for the frozen cases only.
 * 1380–1403  window contact read (any configured contact "on" = open),
   combined via ``effective_window_open`` (2126–2129).
 * 1412–1418  ``_device_max`` from the actuator's ``max_temp`` attribute (the
@@ -232,7 +233,10 @@ async def test_safety_precedence_table(hass: HomeAssistant, case: Case) -> None:
         hass.states.async_set("binary_sensor.window", "on", {"device_class": "window"})
 
     frozen_ctx = (
-        patch("custom_components.poise.coordinator.is_frozen", return_value=True)
+        patch(
+            "custom_components.poise.safety.sensor_watchdog.is_frozen",
+            return_value=True,
+        )
         if case.frozen
         else nullcontext()
     )

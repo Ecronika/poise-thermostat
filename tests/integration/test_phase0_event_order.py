@@ -40,7 +40,6 @@ import homeassistant.util.dt as dt_util
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.poise import coordinator as coordinator_mod
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,
@@ -58,6 +57,7 @@ from custom_components.poise.const import (
     FROST_FLOOR_C,
     OVERRIDE_POLICY_SCHEDULE,
 )
+from custom_components.poise.control import optimal_start as optimal_start_mod
 
 
 class _FakeClock:
@@ -301,12 +301,12 @@ async def test_preheat_hold_end_event_fires_before_actuator_writes(
     assert not coord.runtime.latches.was_preheating
     order = _arm_recorder(hass)
 
-    real_plan = coordinator_mod.plan_preheat
+    real_plan = optimal_start_mod.plan_preheat
 
     def _forced_preheat(**kwargs: Any) -> Any:
         return dataclasses.replace(real_plan(**kwargs), preheating=True, coasting=False)
 
-    with patch.object(coordinator_mod, "plan_preheat", _forced_preheat):
+    with patch.object(optimal_start_mod, "plan_preheat", _forced_preheat):
         await coord.async_refresh()
         await hass.async_block_till_done()
 

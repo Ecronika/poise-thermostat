@@ -15,7 +15,8 @@ Eingefrorenes Ist-Verhalten (coordinator.py, Zeilennummern Stand heute):
   mould_protection_inactive (Z. 2216-2221).
 * Spaete, NICHT try-gekapselte Schritte, die den Tick zum Scheitern bringen:
   ``comfort_decide`` (Z. 2402) und ``resolve_write_target`` (Z. 2494) — beide
-  Modul-Attribute von ``custom_components.poise.coordinator`` und damit eng
+  Attribute ihres BESITZENDEN Moduls (``comfort.dual_setpoint.decide`` bzw.
+  ``control.tick_resolve.resolve_write_target``, Plan O.4) und damit eng
   patchbar.
 * F12-Wrapper ``_async_update_data`` (Z. 1814-1850): Exception aus
   ``_run_once`` inkrementiert ``_tick_failures`` (Z. 1828), raist
@@ -154,7 +155,7 @@ async def test_window_issue_set_early_survives_midtick_exception(
 
     hass.states.async_set(WINDOW, "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.comfort_decide",
+        "custom_components.poise.comfort.dual_setpoint.decide",
         side_effect=RuntimeError("injected mid-tick failure"),
     ):
         await _failed_tick(hass, coord)
@@ -176,7 +177,7 @@ async def test_window_issue_cleared_early_stays_cleared_despite_midtick_exceptio
     # erst das Issue etablieren (fehlschlagender Tick genuegt dafuer — s. o.)
     hass.states.async_set(WINDOW, "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.comfort_decide",
+        "custom_components.poise.comfort.dual_setpoint.decide",
         side_effect=RuntimeError("injected mid-tick failure"),
     ):
         await _failed_tick(hass, coord)
@@ -202,7 +203,7 @@ async def test_mould_issue_set_early_survives_midtick_exception(
 
     hass.states.async_set(HUMIDITY, "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.resolve_write_target",
+        "custom_components.poise.control.tick_resolve.resolve_write_target",
         side_effect=RuntimeError("injected mid-tick failure"),
     ):
         await _failed_tick(hass, coord)
@@ -234,7 +235,7 @@ async def test_f12_counting_unchanged_under_partial_emission(
 
     hass.states.async_set(HUMIDITY, "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.comfort_decide",
+        "custom_components.poise.comfort.dual_setpoint.decide",
         side_effect=RuntimeError("injected mid-tick failure"),
     ):
         for _ in range(2):

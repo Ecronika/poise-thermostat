@@ -291,7 +291,9 @@ async def test_f4a_lockout_disabled_passes_none_to_decision(
         captured.update(kwargs)
         return _real_decide(**kwargs)
 
-    with patch("custom_components.poise.coordinator.comfort_decide", side_effect=_spy):
+    with patch(
+        "custom_components.poise.comfort.dual_setpoint.decide", side_effect=_spy
+    ):
         await _setup_zone(
             hass,
             _base(**{CONF_OUTDOOR_SENSOR: "sensor.outdoor"}),

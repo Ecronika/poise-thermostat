@@ -273,9 +273,11 @@ async def test_unavailable_dirty_flush_follows_safe_state_write(
 
     orig_safe = coord._write_unavailable_safe_state
 
-    async def _rec_safe() -> None:
+    # Plan O.2: the facade forwards the tick's ZoneBindings (actuator entity +
+    # zone name); the spy passes it straight through.
+    async def _rec_safe(bindings: Any) -> None:
         events.append(("safe_state_write", None))
-        await orig_safe()
+        await orig_safe(bindings)
 
     coord._write_unavailable_safe_state = _rec_safe
 

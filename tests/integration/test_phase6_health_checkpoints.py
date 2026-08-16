@@ -13,16 +13,17 @@ am Abbruch-Checkpoint und re-raist die ORIGINAL-Exception — die
 F12-Zaehlung in ``_async_update_data`` und der DataUpdateCoordinator sehen
 die unveraenderte Klasse (``coordinator.last_exception``).
 
-Injektionspunkte (Modul-Attribute von ``custom_components.poise.
-coordinator``, gleiche Technik wie die Phase-0-Pins):
+Injektionspunkte (seit Plan O.4 Attribute des BESITZENDEN Moduls, gleiche
+Technik wie die Phase-0-Pins):
 
-* ``effective_window_open`` — in ``_stage_observe`` NACH der Sammlung von
-  window_sensor_unavailable -> Transport-Pfad der Observe-Stage.
-* ``ingest_temperature`` — in ``_stage_ingest`` NACH der Sammlung der
-  sieben Geraete-Health-Updates -> Transport-Pfad der Ingest-Stage.
-* ``psychro_dewpoint`` — in ``_stage_safety_floors`` VOR der Sammlung von
-  mould_protection_inactive -> leerer Pending-Puffer, der Abbruch muss
-  BARE propagieren (byte-identischer Fehlerpfad, kein Transport-Wrap).
+* ``control.window_auto.effective_window_open`` — in ``_stage_observe`` NACH
+  der Sammlung von window_sensor_unavailable -> Transport-Pfad der
+  Observe-Stage.
+* ``ingestion.ingest_temperature`` — in ``_stage_ingest`` NACH der Sammlung
+  der sieben Geraete-Health-Updates -> Transport-Pfad der Ingest-Stage.
+* ``estimation.psychrometrics.dewpoint`` — in ``_stage_safety_floors`` VOR der
+  Sammlung von mould_protection_inactive -> leerer Pending-Puffer, der Abbruch
+  muss BARE propagieren (byte-identischer Fehlerpfad, kein Transport-Wrap).
 """
 
 from __future__ import annotations
@@ -147,7 +148,7 @@ async def test_observe_midstage_abort_transports_set_direction(
 
     hass.states.async_set(WINDOW, "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.effective_window_open",
+        "custom_components.poise.control.window_auto.effective_window_open",
         side_effect=RuntimeError("injected in-stage failure"),
     ):
         await _failed_tick(hass, coord)
@@ -172,7 +173,7 @@ async def test_observe_midstage_abort_transports_clear_direction(
 
     hass.states.async_set(WINDOW, "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.effective_window_open",
+        "custom_components.poise.control.window_auto.effective_window_open",
         side_effect=RuntimeError("injected in-stage failure"),
     ):
         await _failed_tick(hass, coord)
@@ -197,7 +198,7 @@ async def test_ingest_midstage_abort_transports_guard_updates(
 
     hass.states.async_set("climate.trv", "unavailable", {})
     with patch(
-        "custom_components.poise.coordinator.ingest_temperature",
+        "custom_components.poise.ingestion.ingest_temperature",
         side_effect=RuntimeError("injected ingest failure"),
     ):
         await _failed_tick(hass, coord)
@@ -217,7 +218,7 @@ async def test_empty_pending_abort_propagates_bare(hass: HomeAssistant) -> None:
     issue_id = f"mould_protection_inactive_{entry.entry_id}"
 
     with patch(
-        "custom_components.poise.coordinator.psychro_dewpoint",
+        "custom_components.poise.estimation.psychrometrics.dewpoint",
         side_effect=RuntimeError("injected dewpoint failure"),
     ):
         await _failed_tick(hass, coord)

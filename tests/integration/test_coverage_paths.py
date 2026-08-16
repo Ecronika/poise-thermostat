@@ -234,7 +234,9 @@ async def test_frozen_sensor_writes_health_floor(hass: HomeAssistant) -> None:
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
     _actuator(hass, modes=["heat", "off"])
-    with patch("custom_components.poise.coordinator.is_frozen", return_value=True):
+    with patch(
+        "custom_components.poise.safety.sensor_watchdog.is_frozen", return_value=True
+    ):
         entry = await _setup(hass, _base())
         await entry.runtime_data.async_refresh()
         await hass.async_block_till_done()
@@ -265,7 +267,9 @@ async def test_frozen_sensor_floor_respects_device_min(hass: HomeAssistant) -> N
             "max_temp": 30,
         },
     )
-    with patch("custom_components.poise.coordinator.is_frozen", return_value=True):
+    with patch(
+        "custom_components.poise.safety.sensor_watchdog.is_frozen", return_value=True
+    ):
         entry = await _setup(hass, _base())
         await entry.runtime_data.async_refresh()
         await hass.async_block_till_done()

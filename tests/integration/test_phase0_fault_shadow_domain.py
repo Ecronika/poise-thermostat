@@ -52,9 +52,10 @@ from custom_components.poise.const import (
 )
 from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 
-# the earliest shadow step (the cover segment's peak forecast); patched in the
-# coordinator's namespace so ONLY the coordinator's call site raises.
-_INJECT_AT = "custom_components.poise.coordinator.predict_peak_operative"
+# the earliest shadow step (the cover segment's peak forecast); patched on the
+# OWNING module (plan O.4 - patch where the name is looked up), which after O.4
+# has exactly one runtime resolver: the orchestrator's cover-shadow segment.
+_INJECT_AT = "custom_components.poise.control.cover_shading.predict_peak_operative"
 # the cover segment's own log line — the ONE segment the injection degrades
 _COVER_FAILED = "shadow evaluation failed (cover)"
 
