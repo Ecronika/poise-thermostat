@@ -3,13 +3,17 @@
 The S2 relocation moved the pure stage bodies out of ``coordinator.py`` into
 ``control/tick_pipeline.py`` with ``ZoneRuntime`` (``runtime/zone_runtime.py``)
 delegating, and ``commit_execution``/``teardown_hold``/``mark_actuated``/
-``restore``/``seed_ekf_cold_start`` onto the runtime itself.  Behavioural
-equivalence is pinned by the (unchanged) phase-0 + integration suites; THIS
-module makes the moved code exercisable by the HA-free py310 gate — every
-moved stage runs at least once against minimal state groups + ``TickInputs``
-and asserts its result type and core fields, which also keeps the two new
-modules inside the pure-core 85 % coverage aggregate (pyproject omit list
-excludes neither ``runtime/*`` nor ``control/*``).
+``restore``/``seed_ekf_cold_start`` onto the runtime itself.  Plan P.1 then
+split that module along its consumers into ``control/pipeline_prepare.py``,
+``control/pipeline_actuate.py`` and ``control/pipeline_finalize.py``; the
+stages are reached here through the runtime, so the split is invisible to
+these tests.  Behavioural equivalence is pinned by the (unchanged) phase-0 +
+integration suites; THIS module makes the moved code exercisable by the
+HA-free py310 gate — every moved stage runs at least once against minimal
+state groups + ``TickInputs`` and asserts its result type and core fields,
+which also keeps the moved modules inside the pure-core 85 % coverage
+aggregate (pyproject omit list excludes neither ``runtime/*`` nor
+``control/*``).
 
 Injection contracts exercised here on purpose:
 

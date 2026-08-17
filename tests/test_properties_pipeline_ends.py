@@ -11,7 +11,7 @@ snapping). This covers what feeds it and what guards the exit:
   the system funnels through. Its contract is algebraic (idempotent, invents
   no values, ties go health-first), and today it rests on a handful of worked
   examples.
-* ``control.tick_pipeline.plan_setpoint_write`` — the write gate. One promise
+* ``control.pipeline_actuate.plan_setpoint_write`` — the write gate. One promise
   matters above all: no write escapes a gate.
 
 Strategy bounds follow the measured traps (see the F.5 mapping): a comfort
@@ -32,7 +32,7 @@ from custom_components.poise.comfort import dual_setpoint
 from custom_components.poise.constraints import Constraint, ConstraintKind
 from custom_components.poise.constraints import resolve_constraints as solve
 from custom_components.poise.contracts import Precedence
-from custom_components.poise.control.tick_pipeline import plan_setpoint_write
+from custom_components.poise.control.pipeline_actuate import plan_setpoint_write
 from custom_components.poise.control.tick_resolve import snap_to_step
 from custom_components.poise.runtime.tick_result import (
     ModeAdoptionResult,
