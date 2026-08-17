@@ -7,7 +7,8 @@ tests and internal readers reach every field as
 ``coord.runtime.<group>.<field>`` while ownership stays explicit.
 
 The runtime also owns the PURE tick stages (delegating to their implementations
-in ``control/tick_pipeline.py``), ``commit_execution`` (incl. the ``EndHold``
+in ``control/pipeline_prepare.py``, ``control/pipeline_actuate.py`` and
+``control/pipeline_finalize.py``), ``commit_execution`` (incl. the ``EndHold``
 teardown and the ``mark_actuated`` flip), and ``restore(decoded)`` — the
 decoded-store application plus the deferred domain hooks (echo-window
 re-stamping via the owned clock, hold-expiry normalisation with the schedule
@@ -40,7 +41,9 @@ from ..clock import Clock
 from ..const import SETPOINT_ADOPT_ECHO_WINDOW_S
 from ..control import external_override as _external_override
 from ..control import override_runtime as _override_runtime
-from ..control import tick_pipeline as _pipeline
+from ..control import pipeline_actuate as _actuate
+from ..control import pipeline_finalize as _finalize
+from ..control import pipeline_prepare as _prepare
 from ..control.override import resolve_hold_expiry
 from .state import (
     ActuatorRuntime,
@@ -496,7 +499,8 @@ class ZoneRuntime:
                     self.learning.ekf.seed_beta_h(prior)
 
     # ------------------------------------------------------------------
-    # Pure prepare stages (implementations in control/tick_pipeline.py)
+    # Pure tick stages (implementations in control/pipeline_prepare.py,
+    # control/pipeline_actuate.py and control/pipeline_finalize.py)
     # ------------------------------------------------------------------
 
     def stage_ingest(
@@ -515,7 +519,7 @@ class ZoneRuntime:
         ingest_temperature_fn: Callable[..., Any],
     ) -> IngestResult:
         """Health flags + temperature/environment ingest."""
-        return _pipeline.stage_ingest(
+        return _prepare.stage_ingest(
             self,
             inputs,
             air,
@@ -546,7 +550,7 @@ class ZoneRuntime:
         logger: logging.Logger,
     ) -> ObservationResult:
         """Window signals, capability, dynamics retune, learn gate."""
-        return _pipeline.stage_observe(
+        return _prepare.stage_observe(
             self,
             inputs,
             ing,
@@ -570,7 +574,7 @@ class ZoneRuntime:
         psychro_dewpoint_fn: Callable[[float, float], float],
     ) -> SafetyFloorsResult:
         """Mould floor + dewpoint cap from humidity."""
-        return _pipeline.stage_safety_floors(
+        return _prepare.stage_safety_floors(
             ing,
             entry_id=entry_id,
             humidity_entity=humidity_entity,
@@ -588,7 +592,7 @@ class ZoneRuntime:
         optimal_stop: bool,
     ) -> ScheduleGateResult:
         """Schedule state + predictive decision."""
-        return _pipeline.stage_schedule_gate(
+        return _prepare.stage_schedule_gate(
             self,
             inputs,
             ing,
@@ -617,7 +621,7 @@ class ZoneRuntime:
         comfort_decide_fn: Callable[..., ComfortDecision],
     ) -> ComfortDecision:
         """The central comfort solver."""
-        return _pipeline.stage_comfort_solve(
+        return _prepare.stage_comfort_solve(
             self,
             ing,
             obs,
@@ -642,7 +646,7 @@ class ZoneRuntime:
         wt: WriteTargetResult,
     ) -> IntentsResult:
         """Heat/cool intent + EKF drive latches (ADR-0024)."""
-        return _pipeline.stage_intents(self, ing, obs, wt)
+        return _prepare.stage_intents(self, ing, obs, wt)
 
     def stage_mode_resolution(
         self,
@@ -662,7 +666,7 @@ class ZoneRuntime:
         fan_first_requested: bool = False,
     ) -> ModeResolutionResult:
         """Mode arbitration + compressor-guard policy."""
-        return _pipeline.stage_mode_resolution(
+        return _actuate.stage_mode_resolution(
             self,
             ing,
             obs,
@@ -695,7 +699,7 @@ class ZoneRuntime:
     ) -> SetpointObservation:
         """Setpoint observation, §4 throttle, echo re-baseline, with the
         unified decision+reason observation."""
-        return _pipeline.stage_setpoint_observe(
+        return _actuate.stage_setpoint_observe(
             self,
             ing,
             obs,
@@ -779,7 +783,7 @@ class ZoneRuntime:
         spo: SetpointObservation,
     ) -> ActuatorPlan:
         """Setpoint write gate -> the tick's ``ActuatorPlan``."""
-        return _pipeline.plan_setpoint_write(self, wt, adoption, nudge, spo)
+        return _actuate.plan_setpoint_write(self, wt, adoption, nudge, spo)
 
     def build_finalize_context(
         self,
@@ -799,7 +803,7 @@ class ZoneRuntime:
         sp_adopt_reason: str,
     ) -> FinalizeContext:
         """Assemble the prepare->finalize contract."""
-        return _pipeline.build_finalize_context(
+        return _finalize.build_finalize_context(
             state=state,
             sp=sp,
             op=op,
