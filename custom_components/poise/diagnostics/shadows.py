@@ -465,7 +465,7 @@ def compose_climate_band(
     rh_max = max_safe_rh(room, t_out_eff) if t_out_eff is not None else None
     abs_max = absolute_humidity(room, rh_max) if rh_max is not None else None
     # Recomputed with the SAME pure function + inputs as the floors stage
-    # (tick_pipeline), so this is by construction the undisturbed DIAGNOSTIC
+    # (pipeline_prepare), so this is by construction the undisturbed DIAGNOSTIC
     # mould value — never the window-suppressed write value (design B.2 note).
     mold_min: float | None = None
     mold_capped = False
