@@ -814,7 +814,7 @@ class TickOrchestrator:
         """Assemble the prepare->finalize contract from the typed stage
         results (pure construction — no ``self`` reads, no I/O).
 
-        Body in ``tick_pipeline.build_finalize_context`` via the runtime; the
+        Body in ``pipeline_finalize.build_finalize_context`` via the runtime; the
         field set is pinned by test_phase1_tick_result."""
         return self._runtime.build_finalize_context(
             state=state,

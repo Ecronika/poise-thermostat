@@ -169,7 +169,7 @@ class PreparePhase:
     ) -> IngestResult:
         """Health flags + temperature/environment ingest.
 
-        Body in ``tick_pipeline.stage_ingest`` via the runtime (incl. the
+        Body in ``pipeline_prepare.stage_ingest`` via the runtime (incl. the
         device-health evaluation, whose InputReader DISCOVERY entity ids —
         static bootstrap results, no live read — are injected here).
         ``is_frozen`` (patch surface for test_phase0_safety_precedence) and
@@ -203,7 +203,7 @@ class PreparePhase:
         """Window signals, capability, dynamics retune, EKF learn gate and
         window-auto observation.
 
-        Body in ``tick_pipeline.stage_observe`` via the runtime (learn,
+        Body in ``pipeline_prepare.stage_observe`` via the runtime (learn,
         window-auto and seasonless observations). ``effective_window_open``
         (test_phase6_health_checkpoints) is read off ``control.window_auto`` at
         call time; the module ``_LOGGER`` is injected so both
@@ -229,7 +229,7 @@ class PreparePhase:
     ) -> SafetyFloorsResult:
         """Mould floor + dewpoint cap from humidity.
 
-        Body in ``tick_pipeline.stage_safety_floors`` via the runtime;
+        Body in ``pipeline_prepare.stage_safety_floors`` via the runtime;
         ``dewpoint`` (test_phase6_health_checkpoints) is read off
         ``estimation.psychrometrics`` at call time.
         """
@@ -249,7 +249,7 @@ class PreparePhase:
     ) -> ScheduleGateResult:
         """Schedule state + predictive decision -- the forecast seam.
 
-        Body in ``tick_pipeline.stage_schedule_gate`` via the runtime (no
+        Body in ``pipeline_prepare.stage_schedule_gate`` via the runtime (no
         patch surface; config schedule/optimal-start/-stop injected).
         """
         return self._runtime.stage_schedule_gate(
@@ -501,7 +501,7 @@ class PreparePhase:
     ) -> ComfortDecision:
         """The central comfort solver (already pure).
 
-        Body in ``tick_pipeline.stage_comfort_solve`` via the runtime;
+        Body in ``pipeline_prepare.stage_comfort_solve`` via the runtime;
         ``comfort.dual_setpoint.decide`` (patch surface for
         test_phase0_health_emission and test_review_v161_fixes) is read off its
         owning module at call time — resolved per call, never bound at import,
@@ -951,7 +951,7 @@ class PreparePhase:
     ) -> IntentsResult:
         """Heat/cool intent + EKF drive latches (ADR-0024).
 
-        Body in ``tick_pipeline.stage_intents`` via the runtime (no patch
+        Body in ``pipeline_prepare.stage_intents`` via the runtime (no patch
         surface, no config parameter)."""
         return self._runtime.stage_intents(ing, obs, wt)
 

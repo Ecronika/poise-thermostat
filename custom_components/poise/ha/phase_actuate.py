@@ -133,7 +133,7 @@ class ActuatePhase:
     ) -> ModeResolutionResult:
         """Mode arbitration + compressor-guard policy (ADR-0046 paragraph 8).
 
-        Body in ``tick_pipeline.stage_mode_resolution`` via the runtime — the
+        Body in ``pipeline_actuate.stage_mode_resolution`` via the runtime — the
         invariant (unconditional ``final_mode``/guard resolution, pinned by
         test_frost_rescue_disabled) lives in the moved body."""
         return self._runtime.stage_mode_resolution(
@@ -378,7 +378,7 @@ class ActuatePhase:
         """Device setpoint observation, ADR-0052 paragraph-4 throttle,
         own-echo re-baseline and external-setpoint detection.
 
-        Body in ``tick_pipeline.stage_setpoint_observe`` via the runtime. The
+        Body in ``pipeline_actuate.stage_setpoint_observe`` via the runtime. The
         two ``parse_attr_number`` reads of the tick's ONE actuator State
         object (incl. the ``or 0.1`` step fallback) are pre-parsed here: the
         helper lives in ``ha/`` and importing it into the pipeline would pull
@@ -450,7 +450,7 @@ class ActuatePhase:
         """Setpoint write gate → the tick's ``ActuatorPlan`` (gate position —
         see the reorder proofs in ``resume_prepare``).
 
-        Body in ``tick_pipeline.plan_setpoint_write`` via the runtime."""
+        Body in ``pipeline_actuate.plan_setpoint_write`` via the runtime."""
         return self._runtime.plan_setpoint_write(wt, adoption, nudge, spo)
 
     async def _stage_setpoint_write(
