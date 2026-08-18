@@ -456,9 +456,14 @@ _RATCHET: tuple[_Entry, ...] = (
         # is drift - 608 of those lines are docstring and comment. So: growth
         # guard at the measured value, no lowering target, and the total is
         # explicitly NOT treated as a violation.
+        # +14/+6 for the translated exceptions (quality-scale
+        # exception-translations): HA's API takes translation_domain +
+        # translation_key + a placeholders dict where an f-string took one
+        # line. Irreducible at 88 columns, and the trade is a message the user
+        # can read in their language instead of an English internal string.
         identifier="custom_components/poise/coordinator.py",
-        baseline_total=1358,
-        baseline_code=750,
+        baseline_total=1372,
+        baseline_code=756,
         headroom=50,
         note="1358/750 - growth guard only; code metric is what counts",
     ),

@@ -4,17 +4,24 @@ from __future__ import annotations
 
 from custom_components.poise.const import (
     CONF_ACTUATOR,
+    CONF_CATEGORY,
     CONF_COMFORT_BASE,
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
     CONF_ENTRY_TYPE,
     CONF_NAME,
     CONF_OCCUPANCY_SENSOR,
+    CONF_OUTDOOR_HUMIDITY_SENSOR,
     CONF_PRESENCE_HOME,
     CONF_TEMP_SENSOR,
     CONF_WINDOW_SENSOR,
 )
-from custom_components.poise.migration import as_entity_list, migrate_room_entry
+from custom_components.poise.migration import (
+    SETUP_TUNING_KEYS,
+    STRUCTURAL_KEYS,
+    as_entity_list,
+    migrate_room_entry,
+)
 
 
 def test_tuning_moves_to_options_structure_stays() -> None:
@@ -102,3 +109,60 @@ def test_as_entity_list_normalizes() -> None:
     assert as_entity_list(["a", "b"]) == ["a", "b"]  # list passes through
     assert as_entity_list(["a", "", None]) == ["a"]  # falsy members filtered
     assert as_entity_list(("x",)) == ["x"]  # tuple -> list
+
+
+# --- MINOR_VERSION 3: the onboarding tuning leaves entry.data -------------------
+
+
+def test_setup_tuning_keys_are_disjoint_from_structural_keys() -> None:
+    """The contract that makes the plain V2 split the WHOLE minor-3 rule.
+
+    ``async_step_room`` writes ``SETUP_TUNING_KEYS`` into ``options``; for
+    entries created before that, the migration relocates them. It does so only
+    because they are not in ``STRUCTURAL_KEYS`` — so a future setup-form tuning
+    field is migrated by construction, and one accidentally declared structural
+    would silently stay in ``data``. That must fail here instead.
+    """
+    assert SETUP_TUNING_KEYS
+    assert SETUP_TUNING_KEYS.isdisjoint(STRUCTURAL_KEYS)
+
+
+def test_setup_tuning_moves_out_of_data_on_reprocess() -> None:
+    """A v2.2 entry as ``async_step_room`` used to create it: structure plus the
+    two tuning fields in ``data``, nothing in ``options``. The split relocates
+    exactly those two and leaves every structural key where it is."""
+    data = {
+        CONF_NAME: "Büro",
+        CONF_TEMP_SENSOR: "sensor.t",
+        CONF_ACTUATOR: "climate.ac",
+        CONF_OUTDOOR_HUMIDITY_SENSOR: "sensor.rh_out",
+        CONF_COMFORT_BASE: 22.0,
+        CONF_CATEGORY: "I",
+    }
+    new_data, new_options = migrate_room_entry(dict(data), {})
+    assert new_options == {CONF_COMFORT_BASE: 22.0, CONF_CATEGORY: "I"}
+    assert new_data == {
+        CONF_NAME: "Büro",
+        CONF_TEMP_SENSOR: "sensor.t",
+        CONF_ACTUATOR: "climate.ac",
+        CONF_OUTDOOR_HUMIDITY_SENSOR: "sensor.rh_out",
+    }
+
+
+def test_outdoor_humidity_sensor_is_structural() -> None:
+    """ADR-0066 B.3 wiring must not be filed as tuning by the split.
+
+    It is a ``ZoneStructure`` field and the reconfigure form owns it, so a copy
+    left behind in ``options`` would be reanimated after the user cleared it.
+    """
+    assert CONF_OUTDOOR_HUMIDITY_SENSOR in STRUCTURAL_KEYS
+
+
+def test_options_value_wins_over_the_data_copy_of_setup_tuning() -> None:
+    """Collision rule for minor 3: the options value was edited later, so it is
+    the newer one and must survive the relocation."""
+    data = {CONF_ACTUATOR: "climate.ac", CONF_COMFORT_BASE: 21.0, CONF_CATEGORY: "II"}
+    options = {CONF_COMFORT_BASE: 23.5}  # re-tuned via the options flow
+    new_data, new_options = migrate_room_entry(dict(data), dict(options))
+    assert new_options == {CONF_COMFORT_BASE: 23.5, CONF_CATEGORY: "II"}
+    assert CONF_COMFORT_BASE not in new_data

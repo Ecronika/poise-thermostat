@@ -196,6 +196,10 @@ def test_zone_bindings_has_nine_fields_and_copies_their_values() -> None:
 _HOT_APPLYED = (
     "_active_comfort",
     "_adaptive_cool_cfg",
+    # Hot-applyable since schema 2.3: the adopt gates were init-only (one
+    # reload per toggle) until ``_apply_hot_tuning`` took them over.
+    "_adopt_external_mode",
+    "_adopt_external_setpoint",
     "_category",
     "_clo_offset",
     "_comfort_base",
@@ -221,11 +225,11 @@ _HOT_APPLYED = (
     "_trace_enabled",
     "_vent_notify",
 )
+# Both are default-constructed constants the parser never config-reads, so
+# there is nothing for a hot-apply to re-read.
 _INIT_ONLY_CONFIG = (
     "_window_auto_cfg",
     "_override_cfg",
-    "_adopt_external_mode",
-    "_adopt_external_setpoint",
 )
 _BINDINGS_INIT_ONLY = (
     "_entry_id",

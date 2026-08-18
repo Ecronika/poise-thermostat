@@ -150,6 +150,92 @@ def test_parse_service_action_rejects_malformed() -> None:
     assert parse_service_action("boiler/turn_on") is None  # no dots
 
 
+def test_parse_service_action_accepts_structured_fields() -> None:
+    """The config flow's field editor writes a mapping; it must parse into the
+    SAME ServiceAction the equivalent legacy free-text spec produces, so nothing
+    downstream (actuation, unload hand-over, removal OFF) can tell them apart."""
+    from custom_components.poise.control.hub_aggregate import parse_service_action
+
+    legacy = parse_service_action("switch.boiler/switch.turn_on")
+    fields = parse_service_action(
+        {"entity_id": "switch.boiler", "action": "switch.turn_on"}
+    )
+    assert fields == legacy
+
+    legacy_attr = parse_service_action("climate.b/climate.set_hvac_mode/hvac_mode:heat")
+    fields_attr = parse_service_action(
+        {
+            "entity_id": "climate.b",
+            "action": "climate.set_hvac_mode",
+            "data": {"hvac_mode": "heat"},
+        }
+    )
+    assert fields_attr == legacy_attr
+
+    # Extra data is stringified, exactly as the "attr:value" path does.
+    numeric = parse_service_action(
+        {"entity_id": "switch.b", "action": "switch.turn_on", "data": {"percent": 42}}
+    )
+    assert numeric is not None
+    assert numeric.data == {"entity_id": "switch.b", "percent": "42"}
+
+
+def test_parse_service_action_rejects_malformed_fields() -> None:
+    """A structured action must be complete and well formed, or the hub stays
+    shadow-only — the same contract the free-text form has."""
+    from custom_components.poise.control.hub_aggregate import parse_service_action
+
+    assert parse_service_action({}) is None  # empty mapping is falsy
+    assert parse_service_action({"action": "switch.turn_on"}) is None  # no entity
+    assert parse_service_action({"entity_id": "switch.b"}) is None  # no action
+    assert parse_service_action({"entity_id": "switch.b", "action": 7}) is None
+    assert parse_service_action({"entity_id": "boiler", "action": "s.t"}) is None
+    assert parse_service_action({"entity_id": "switch.b", "action": "turn_on"}) is None
+    assert (
+        parse_service_action({"entity_id": "switch.b", "action": "switch."}) is None
+    )  # empty service half
+    assert (
+        parse_service_action(
+            {"entity_id": "switch.b", "action": "switch.turn_on", "data": "nope"}
+        )
+        is None
+    )  # a non-mapping "data" is a mistake, not an absent extra
+    # entry.data is untyped JSON: a value that is neither string nor mapping
+    # must not reach .split().
+    assert parse_service_action(["switch.b", "switch.turn_on"]) is None  # type: ignore[arg-type]
+
+
+def test_service_action_fields_round_trips_both_stored_forms() -> None:
+    """The config-flow pre-fill decomposes a stored action back into fields;
+    re-parsing those fields must yield the identical ServiceAction."""
+    from custom_components.poise.control.hub_aggregate import (
+        parse_service_action,
+        service_action_fields,
+    )
+
+    plain = service_action_fields("switch.boiler/switch.turn_on")
+    assert plain == {"entity_id": "switch.boiler", "action": "switch.turn_on"}
+
+    with_data = service_action_fields(
+        "climate.b/climate.set_hvac_mode/hvac_mode:heat/x:1"
+    )
+    assert with_data == {
+        "entity_id": "climate.b",
+        "action": "climate.set_hvac_mode",
+        "data": {"hvac_mode": "heat", "x": "1"},
+    }
+    assert parse_service_action(with_data) == parse_service_action(
+        "climate.b/climate.set_hvac_mode/hvac_mode:heat/x:1"
+    )
+
+    # Already-structured values pass through unchanged (idempotent).
+    assert service_action_fields(with_data) == with_data
+
+    # Nothing sensible to pre-fill from an unusable value.
+    assert service_action_fields("typo") is None
+    assert service_action_fields(None) is None
+
+
 def test_target_boiler_state_activation_delay_then_on() -> None:
     from custom_components.poise.control.hub_aggregate import target_boiler_state
 
