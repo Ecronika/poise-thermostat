@@ -320,11 +320,11 @@ class ZoneTuning:
         * ``window_auto_cfg``/``override_cfg``/``mpc_params`` are default-
           constructed constants, never config-read — the per-tick derivation
           of dynamics/PI/MPC stays in the coordinator.
-        * ``adopt_external_setpoint``/``adopt_external_mode`` ARE parsed (they
-          are tuning fields), but only ``__init__`` reads them —
-          ``async_apply_options`` never re-reads them (pre-existing drift).
-          The wiring must keep NOT hot-applying them; fixing that drift is a
-          separate, deliberate change.
+        * ``adopt_external_setpoint``/``adopt_external_mode`` are read on BOTH
+          paths since schema 2.3. They used to be parsed here but applied only
+          by ``__init__`` (a pre-existing drift that cost one reload per
+          toggle); ``_apply_hot_tuning`` now writes them too — see the rationale
+          there for why flipping the gate mid-run leaves no stale state behind.
         * ``climate_mode`` is NOT parsed: store-owned user intent
           (``UserControlState``).
         """
@@ -631,15 +631,19 @@ def structures_equal(a: ZoneStructure, b: ZoneStructure) -> bool:
 
     WARNING: this field-wise comparison is NOT a drop-in replacement for the
     predicate ``dict(entry.data) == self._data_snapshot``. Room ``entry.data``
-    carries keys outside the ``ZoneStructure`` fields (the installation keys
+    carries keys outside the ``ZoneStructure`` fields — the installation keys
     ``controls_boiler``/``compressor_group``/``declared_power``/
-    ``design_flow_temp``/``source_policy``; on fresh v2.2 entries also
-    ``comfort_base`` + ``category`` until their first reconfigure), whose
-    changes must KEEP reading as structural (hot-apply skipped on the
-    coordinator the reload is about to discard). Conversely
-    ``presence_home_entities``/``occupancy_entities`` are options-owned and
-    hot-applied, so they must stay OUT of any reload predicate. The coordinator
-    therefore keeps the data-dict comparison until that gap is deliberately
-    resolved.
+    ``design_flow_temp``/``source_policy`` — whose changes must KEEP reading as
+    structural (hot-apply skipped on the coordinator the reload is about to
+    discard). Conversely ``presence_home_entities``/``occupancy_entities`` are
+    options-owned and hot-applied, so they must stay OUT of any reload
+    predicate. The coordinator therefore keeps the data-dict comparison until
+    that gap is deliberately resolved.
+
+    What is NO LONGER an obstacle: ``comfort_base`` + ``category`` used to ride
+    in a fresh v2.2 entry's ``data`` until its first reconfigure. Schema 2.3
+    ends that (onboarding writes them to ``options``; the migration relocates
+    existing ones), so tuning can no longer appear in ``entry.data`` by
+    construction.
     """
     return a == b
