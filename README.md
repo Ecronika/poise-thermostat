@@ -100,6 +100,18 @@ Ein übernommener Sollwert ist ein normaler Hold und steht damit **unter** der P
 
 **Nachvollziehbarkeit:** die Herkunft eines Holds steht als `override_reason` an der `climate`-Entität (`ui_setpoint`, `device_adopt_setpoint`, `device_adopt_mode`, `frost_rescue`); die Card zeigt sie als „Gerät" / „App" an der Hold-Pille. Der Grund **je Tick** — auch der einer *unterdrückten* Übernahme aus der Tabelle oben — steht als `sp_adopt_reason` / `mode_adopt_reason` in den Attributen der `climate`-Entität und im Debug-Log.
 
+## Use cases
+
+Poise is for rooms whose heating or cooling already lives in Home Assistant and whose comfort you want *held* rather than scheduled by hand.
+
+- **Make a radiator valve behave like a room thermostat.** A TRV regulates against its own body — bolted to the radiator, metres from where you sit. Point Poise at a free-standing room sensor and it writes the setpoint the valve needs so that the *room*, not the valve, lands in the comfort band. Where the TRV has an external-temperature input, Poise feeds the true room temperature into the device as well and hands the sensor source back to `internal` when you remove the zone.
+- **Stop hand-tuning the night setback and the morning start.** Configure a comfort *window* instead of a temperature schedule. Poise learns the room's time constant and heat-up rate and starts early enough to be at comfort *when the window opens* (optimal start), then coasts down to the lower comfort edge before it closes (optimal stop) instead of heating into an empty room.
+- **Heat to a norm band instead of a number.** The target is an EN 16798-1 comfort band around your comfort base, with an unconditional frost floor and a DIN 4108-2 mould floor underneath it and an ASR A3.5 ceiling above. You pick the category and the comfort-vs-energy weight; the precedence solver composes every bound into exactly one safe command per actuator.
+- **Keep a manual change from sticking forever.** A setpoint set on the card, in the HA UI or on the TRV's own wheel becomes a *temporary hold* with a defined end (next switch point / timer / permanent — your choice per zone), never a silent permanent override.
+- **Don't fight an open window.** With a window contact, or without one via the slope detector, the room drops to the safety floor and learning pauses. A per-zone bypass switch covers the "yes, I really do want to heat with the window open" case.
+- **Give a shared boiler one demand signal.** The optional *Poise System* hub aggregates the call-for-heat of the zones that opt in into one frost-safe `binary_sensor` you can automate off — or let it switch the boiler itself with activation delay, keep-alive and minimum on/off times.
+- **Watch the predictive engine before trusting it.** MPC, direct-valve TPI and the PI setpoint compensator run every tick against the live learned model and publish what they *would* command, without touching the actuator; the EN 15500-1 control-accuracy metric measures the controller that is actually driving.
+
 ## Scope & Non-Goals
 
 Poise controls heating/cooling **setpoints** and protects against **surface condensation / mould** (building physics). To stay honest and publishable, it explicitly does **not**:
@@ -123,6 +135,45 @@ Alpha — under active development against a documented architecture (60+ ADRs) 
 3. *Settings → Devices & Services → Add Integration → Poise.*
 
 Use a **free-standing room sensor** (not the TRV's internal sensor) for best results; Poise raises a repair issue if it detects a likely heat-source-mounted sensor.
+
+
+## Supported devices
+
+Poise is not a device integration: it drives whatever Home Assistant `climate` entity you point it at, through the standard `climate` services. Compatibility therefore follows from the *entity's* capabilities, not from the brand — and every device adaptation below keys off detected entities and attributes, never off a model name (ADR-0029).
+
+### What a thermostat must offer
+
+| Requirement | What happens otherwise |
+| --- | --- |
+| Home Assistant on **metric units (°C)** | Setup aborts: *"Poise requires a metric (°C) Home Assistant."* The control path is Celsius-only. |
+| A `climate` entity with **one target temperature** | Poise writes a single `climate.set_temperature`. A device whose only conditioning mode is `heat_cool` (dual setpoint) is rejected in the flow with *"This device only supports the combined heat/cool (dual-setpoint) mode."* |
+| A **separate room sensor** | A sensor sitting on the actuator's own device is rejected in the flow — that is the TRV's built-in sensor, which reads the radiator. |
+| **One zone per thermostat** | A thermostat already used by another Poise zone is rejected (*"Each thermostat can belong to only one zone."*). Poise is the single writer for its actuator. |
+
+**Heat/cool capability** is read from the entity's `hvac_modes`: heating from `heat`, `heat_cool` or `auto`; cooling **only** from an explicit `cool` or `heat_cool`. `auto` alone never enables cooling — many radiator TRVs expose `auto` for their internal weekly program and cannot cool at all. A heat-only TRV therefore only ever shows `heat` / `off`.
+
+### Optional device features Poise picks up automatically
+
+If the actuator's device also exposes any of these, Poise detects and uses them; nothing here is configured by hand.
+
+| Detected on the device | What Poise does with it |
+| --- | --- |
+| a writable valve-position `number` — id containing `valve_position`, `pi_heating_demand`, `heating_demand` or `valve_opening_degree` | selects the direct-valve (TPI) actuation path and publishes the duty as `tpi_*` (**shadow** today, see [Known limitations](#known-limitations)). `valve_closing_degree` is explicitly excluded and never written. |
+| a writable calibration `number` — `local_temperature_calibration`, `temperature_offset`, `temperature_calibration` | the calibration path; built and unit-tested, **not yet wired into the tick**. |
+| a `number` whose id contains `external` (temperature device class or none) | feeds the fused room temperature into the TRV and switches its sensor-source `select` to `external`; re-pushed at least every 10 min so a device that times the input out never falls back to its own sensor. Restored to `internal` when the zone is deleted. |
+| a `switch` whose id contains `schedule` | detects the device's own weekly program and raises a repair issue. Poise never flips that switch for you — a second program is yours to end — but it does hold a heat-capable actuator in `heat`, so the device follows the written setpoint instead of its own `auto`. |
+| a `switch`/`select` containing `adaptive` or `smart_temperature` | detects a second control loop running on the device itself and raises a repair issue. |
+| a `binary_sensor` containing `valve_alarm`, `fault`, `problem` or `alarm` | surfaces the device fault as a repair issue and feeds the heating-failure detector. |
+| a battery level | low-battery repair issue at or below **15 %**. |
+| valve step counters (`closing_steps` / `idle_steps`) | stuck/uncalibrated-valve detection. |
+| `hvac_action` / `running_state` | heating- and cooling-failure detection, and the HVAC action shown on the Poise entity. |
+
+### What has actually been on a bench
+
+Honest scope: exactly one device class has been verified against real hardware.
+
+- **Sonoff TRVZB** (Zigbee, heat-only, setpoint + writable valve opening). The setpoint path is the live one. The direct-valve mechanism was bench-tested on a real device on 2026-08-14 (protocol as an addendum in `docs/adr/ADR-0036-TPI-Direktventil-TRVZB.md`): `valve_opening_degree` is an **opening limit**, not a drive command — writes while the valve is idle persist but move nothing; limit changes inside an open regime do move the valve; and the device's own `smart_temperature_control` must be **off** or limit writes are ignored entirely. That last finding is why the device's adaptive/smart mode has its own repair issue.
+- Everything else — the cooling, `dry` and compressor-guard paths for AC / heat-pump `climate` entities, the generic `pi_heating_demand` valve path, the quirk detectors written against Zigbee TRV naming (Aqara E1 SRTS-A01 and Sonoff TRVZB are the examples named in the code) — is validated in the simulation harness and against the capability detection, **not on a bench**. If your device meets the requirements above it will be driven; Poise simply cannot yet publish a broad tested-hardware list.
 
 
 ## Removing the integration
@@ -211,19 +262,317 @@ sections:
 
 ## Entities created
 
-**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), a per-zone **`switch`** that toggles the open-window bypass, two **`button`** entities (*too warm* / *too cold* — the voluntary comfort-feedback channel behind the clo-offset learning, ADR-0067; also callable as the service `poise.comfort_feedback`), and **18 diagnostic `sensor` entities** (each suffixed onto the room name):
+**Per room** — `climate.<room>` (the thermostat: comfort-band attributes, HA preset modes, and the live setpoint), a per-zone **`switch`** that toggles the open-window bypass, two **`button`** entities (*too warm* / *too cold* — the voluntary comfort-feedback channel behind the clo-offset learning, ADR-0067; also callable as the service `poise.comfort_feedback`), and **23 diagnostic `sensor` entities** (each suffixed onto the room name):
 
 - `operative_temperature`, `t_rm`, `mrt`, `q_solar`, `beta_s`, `tau_hours` — comfort inputs and learned physics.
 - `confidence`, `identification_progress`, `learning_phase` — model-learning progress.
-- `mpc_power`, `mpc_weight` — predictive-shadow output.
+- `mpc_power`, `mpc_weight`, `mpc_setpoint` — predictive-shadow output.
+- `tpi_valve_percent`, `pi_setpoint`, `pi_offset`, `ref_offset` — the per-device actuation shadow (valve duty *or* droop compensation) and the actuator↔room frame offset, as long-term-statistics series for the winter shadow→live evaluation.
 - `ca_deviation_k`, `ca_cycles_per_h`, `ca_time_in_band` — the EN 15500-1 control-accuracy metric.
 - `compressor_guard_blocked`, `tick_duration_ms` — single-AC guard state and per-tick compute budget.
 - `vent_advice` — the ventilation-advice state token (`idle` / `open` / `close` / `discourage`) for automations (ADR-0066).
 - `override_expires_at` — the manual hold's end-time as a timestamp, enabled by default so the override is visible without the card (ADR-0059).
 
-Everything else Poise exposes for transparency lives as **attributes on the `climate` entity — not as standalone sensors** — so read them from `climate.<room>`'s state attributes rather than looking for a `sensor.<room>_…`: the comfort index (`pmv` / `ppd`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`, `fan_velocity_ms`), the actuator↔room reference-frame offset (`ref_offset*`, `cool_sp_compensated`), the transparency flags (`override_clamped`, `mould_floor`, `dewpoint`), and the per-device `tpi_*` / `pi_*` shadow values. (For example there is no `sensor.<room>_pmv`; read the `pmv` attribute from the climate entity instead.)
+Only four are enabled on a fresh install — `operative_temperature`, `confidence` (*Model confidence*), `learning_phase` and `override_expires_at` — plus the climate entity, the bypass switch and the two feedback buttons. The other 19 sensors are registered but disabled; enable the ones you want under *Settings → Devices & Services → Entities*.
+
+Everything else Poise exposes for transparency lives as **attributes on the `climate` entity — not as standalone sensors** — so read them from `climate.<room>`'s state attributes rather than looking for a `sensor.<room>_…`: the comfort index (`pmv` / `ppd`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`, `fan_velocity_ms`), the reference-frame details (`ref_offset_dev`, `ref_offset_trusted`, `cool_sp_compensated`), the transparency flags (`override_clamped`, `mould_floor`, `dewpoint`), the hold lifecycle (`override_active`, `override_reason`, `sp_adopt_reason`, `mode_adopt_reason`), the savings estimate (`savings_*`) and this zone's `heat_demand`. (For example there is no `sensor.<room>_pmv`; read the `pmv` attribute from the climate entity instead. The four `tpi_*`/`pi_*`/`ref_offset` values above are the exception — they exist *both* as attributes and as the disabled-by-default statistics sensors listed earlier.)
 
 **System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow target and load-shedding attributes).
+
+> **Entity ids in the examples below** follow Home Assistant's usual `has_entity_name` slug: the device (room) name plus the *translated* entity name — a room called *Wohnzimmer* gets `climate.wohnzimmer`, `sensor.wohnzimmer_model_confidence`, `switch.wohnzimmer_ignore_open_window_reaction`, `button.wohnzimmer_too_warm`. Check yours in *Developer tools → States*.
+
+
+## How Poise updates its data
+
+Poise polls no network and no cloud (`iot_class: local_polling` refers to polling Home Assistant's own state machine). Each **room** entry is a `DataUpdateCoordinator` with a **60-second** update interval; that scheduled tick *is* the control loop — read inputs, estimate, decide, write at most one command per actuator, publish.
+
+Between scheduled ticks a change on one of these entities requests an **extra tick immediately**:
+
+| Reacts at once | Only picked up by the next scheduled tick |
+| --- | --- |
+| room temperature sensor · window sensor(s) · the actuator itself · presence (person / device_tracker) · occupancy sensor | outdoor temperature · humidity · running-mean `T_rm` · MRT · irradiance · the weather entity · the TRV's external-temperature `number` |
+
+Two filters stop that from becoming a refresh storm: a state-change event whose **state value is unchanged** is dropped (pure attribute churn — the single exception is the actuator's `hvac_action`), and the surviving requests are coalesced by the coordinator's request-refresh debouncer, so a burst collapses into one tick. Your own commands (setpoint, HVAC mode, preset, the bypass switch) also request a refresh, so a change you make is acted on at once instead of up to a minute later.
+
+The **weather forecast** behind optimal start is not polled on the tick: it comes from Home Assistant's own `weather.get_forecasts` behind a TTL cache with back-off. Only a cold cache awaits I/O; a stale-but-present cache is served immediately and refreshed in the background.
+
+The optional **Poise System hub** deliberately runs *without* a coordinator update interval (`update_interval=None`). It is driven by its own 60-second timer registered at setup, so boiler keep-alive and the minimum on/off cycling keep running even when no zone is publishing.
+
+Learned model and user intent are written to Home Assistant's `.storage`, and flushed on Home Assistant shutdown rather than only periodically.
+
+
+## Examples
+
+### Announce when automatic control comes back
+
+Poise fires `poise_override_ended` on the bus when a manual hold ends. Payload: `zone`, `entry_id`, `reason` (`expired_timer` · `schedule_point` · `presence_change` · `user_resume` · `mode_change`) and `entity_id` when the climate entity is known.
+
+```yaml
+automation:
+  - alias: "Poise: automatic control resumed"
+    triggers:
+      - trigger: event
+        event_type: poise_override_ended
+    actions:
+      - action: notify.persistent_notification
+        data:
+          title: "Poise · {{ trigger.event.data.zone }}"
+          message: >-
+            Manual hold ended ({{ trigger.event.data.reason }}) —
+            the zone follows the schedule again.
+```
+
+### Drop every manual hold when the house empties
+
+`poise.resume_schedule` clears the active hold *and* the preset. Called **without a target** it applies to every Poise room zone; with a target only to the zones behind those entities/devices/areas.
+
+```yaml
+automation:
+  - alias: "Poise: resume the schedule when everyone has left"
+    triggers:
+      - trigger: state
+        entity_id: group.family
+        to: "not_home"
+        for: "00:10:00"
+    actions:
+      - action: poise.resume_schedule   # no target = all room zones
+```
+
+### Act on the ventilation advice
+
+`poise_ventilation_advice` fires on every change of the advice **action**, with `zone`, `entry_id`, `action` (`idle` · `open` · `close` · `discourage`), `reason` and `delta_gm3` (indoor − outdoor absolute humidity). The same token is also available as the `vent_advice` sensor and the `vent_action` climate attribute — the event is the fast rail, the sensor the slow one.
+
+```yaml
+automation:
+  - alias: "Poise: airing advice"
+    triggers:
+      - trigger: event
+        event_type: poise_ventilation_advice
+    conditions:
+      - condition: template
+        value_template: "{{ trigger.event.data.action == 'open' }}"
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          message: >-
+            {{ trigger.event.data.zone }}: airing recommended
+            ({{ trigger.event.data.reason }},
+            {{ trigger.event.data.delta_gm3 }} g/m³ vs. outside).
+```
+
+Poise never opens a window, runs a fan or drives a humidifier itself — this advice is exactly the seam where your own automation takes over.
+
+### Switch a shared boiler off the hub's demand sensor
+
+For a hub left in its default **diagnostic-only** mode (no boiler actions configured):
+
+```yaml
+automation:
+  - alias: "Poise: boiler follows the aggregated demand"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.poise_system_boiler_demand
+        to: ["on", "off"]
+    actions:
+      # resolves to switch.turn_on / switch.turn_off
+      - action: "switch.turn_{{ trigger.to_state.state }}"
+        target:
+          entity_id: switch.boiler
+```
+
+If you would rather let Poise do it, configure the hub's on/off actions instead — then it owns the boiler with activation delay, keep-alive and the 120 s-floored minimum on/off dwell, and you should *not* run this automation as well.
+
+### Feed comfort feedback from a physical button
+
+Same channel as the two `button` entities; the service just makes it reachable from a wall switch, a voice assistant or a dashboard tap.
+
+```yaml
+automation:
+  - alias: "Poise: wall button reports 'too cold'"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.wohnzimmer_wall_button
+        to: "on"
+    actions:
+      - action: poise.comfort_feedback
+        target:
+          entity_id: climate.wohnzimmer
+        data:
+          direction: cold      # warm | cold
+```
+
+Feedback is observe-only: it folds into the household clothing assumption and may surface a *fixable* repair issue suggesting a clo change. Presses in masked situations (window open, active hold, setback/absent, frozen sensors, invalid PMV) are discarded.
+
+### Air a room on purpose without losing the heating
+
+```yaml
+automation:
+  - alias: "Poise: deliberate airing keeps the heating on"
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.deliberate_airing
+        to: "on"
+    actions:
+      - action: switch.turn_on
+        target:
+          entity_id: switch.badezimmer_ignore_open_window_reaction
+```
+
+### Notice a heating failure
+
+The climate entity carries `heating_failure` / `cooling_failure` as attributes (and Poise raises the matching repair issue itself):
+
+```yaml
+automation:
+  - alias: "Poise: heating failure"
+    triggers:
+      - trigger: state
+        entity_id: climate.wohnzimmer
+        attribute: heating_failure
+        to: true
+        for: "00:15:00"
+    actions:
+      - action: notify.mobile_app_phone
+        data:
+          message: "Wohnzimmer is not warming up despite a heating demand."
+```
+
+### Dashboard without the Poise card
+
+The bundled `custom:poise-card` (see [Card](#card-dashboard-display)) is the intended surface, but everything it shows is readable from plain cards too:
+
+```yaml
+type: entities
+title: Wohnzimmer — Poise
+entities:
+  - entity: climate.wohnzimmer
+  - entity: sensor.wohnzimmer_operative_temperature
+  - entity: sensor.wohnzimmer_model_confidence
+  - entity: sensor.wohnzimmer_learning_phase
+  - entity: sensor.wohnzimmer_override_expires_at
+  - type: attribute
+    entity: climate.wohnzimmer
+    attribute: comfort_low
+    name: Comfort band — lower
+  - type: attribute
+    entity: climate.wohnzimmer
+    attribute: comfort_high
+    name: Comfort band — upper
+  - type: attribute
+    entity: climate.wohnzimmer
+    attribute: pmv
+    name: Comfort index (PMV)
+  - entity: button.wohnzimmer_too_warm
+  - entity: button.wohnzimmer_too_cold
+```
+
+
+## Known limitations
+
+Poise is **Alpha**. The list below is the honest counterpart to the [Capability status](#capability-status) at the top.
+
+### The predictive machinery does not drive yet
+
+Everything under *Shadow / diagnostic* is computed every tick against the live learned model and published, but **writes nothing**. That is enforced structurally, not by convention: within the tick exactly one adapter module may dispatch service calls (pinned by a test), and the only actuation path it ever constructs is the plain setpoint write.
+
+- **MPC** (`mpc_*`) never commands the actuator; live authority is gated on cold-season validation (ADR-0033).
+- **Direct-valve TPI** (`tpi_*`) is computed for devices with a writable valve opening but the valve is not written (ADR-0036). `valve_closing_degree` is never written at all.
+- **PI setpoint compensation** (`pi_*`) is computed for setpoint-only TRVs and not applied (ADR-0037).
+- **TRV offset calibration** (`control/calibration.py`) is written and unit-tested but **not wired into the tick**. Without a TRV external-temperature input, Poise performs no live TRV offset compensation.
+- **Multi-zone load shedding, compressor-group protection and the flow-temperature allocator** are shadow computations; only the boiler-demand aggregate (and, opt-in, the boiler switch itself) actuates.
+- **Fan cooling-effect credit** (`fan_ce_k`) and the **PMV band shift** stay diagnostic until the ADR-0055/0069 maturity gates release them.
+- **The efficiency report** (`savings_*`) and the **humidity/ventilation axis** are observe-only by design — no fan, no window, no humidifier is ever commanded.
+- **KNX expose** is designed, not built.
+
+### Environment and device constraints
+
+- **Celsius only.** Setup aborts on an imperial/°F Home Assistant; the whole control path is metric.
+- **`heat_cool`-only actuators are rejected.** Poise writes exactly one target temperature per actuator, so a device whose only conditioning mode is the dual-setpoint `heat_cool` cannot be driven. A device that *also* offers plain `heat` or `cool` is fine.
+- **Single writer per actuator.** One thermostat belongs to exactly one Poise zone, and Poise assumes it is the only thing writing that setpoint. A second controller — another automation, a Generic Thermostat, the device's own weekly program or its internal adaptive/smart-temperature loop — will fight it. Poise *detects* the device-side cases and raises a repair issue, but it deliberately does not switch them off for you.
+- **One actuator per zone.** Multi-actuator arbitration is designed (ADR-0046) but a zone still writes a single climate entity.
+- **Only setpoint and HVAC mode are adopted from the device.** Fan speed, swing, device-side presets and `heat_cool` dual setpoints are left alone and create no hold. Adoption is also conditional — see [Geräteseitige Eingriffe (Adoption)](#geräteseitige-eingriffe-adoption) for every reason a device-side change is *not* taken over.
+- **Home Assistant 2025.10 or newer** (enforced by HACS); the integration is UI-configured only — there are no YAML keys.
+
+### It has to learn first
+
+- A fresh zone starts in `learning_phase: cold` and is not `identified`. Optimal start/stop and the shadow estimators are gated on an identified model, so the first days behave like a plain setpoint thermostat.
+- The learned model lives per zone. Reconfiguring preserves it; deleting the entry deletes it.
+- Learning **pauses** while a window is open, while the room sensor is frozen, and during detected heating/cooling failures — deliberately, so the estimator never learns from a broken room.
+- Room sensor placement dominates the result. A sensor on or near the radiator yields an implausibly short time constant and Poise raises a repair issue about it; the model degrades regardless.
+
+### Explicit non-goals
+
+Poise does not manage ventilation-system hygiene (VDI 6022), does not act on CO₂, and cannot humidify — see [Scope & Non-Goals](#scope--non-goals).
+
+
+## Troubleshooting
+
+Poise reports problems as Home Assistant **repair issues** (*Settings → System → Repairs*) rather than log noise. Almost all of them are transition-based: they appear when the condition starts and disappear on their own when it ends. Three are *fixable* — they offer an **Apply / Ignore** choice instead of just text.
+
+### Inputs and sensors
+
+| Repair issue | What it means | What to do |
+| --- | --- | --- |
+| **Room sensor unavailable** | The configured room temperature sensor is `unavailable`; Poise cannot control this room. | Check the sensor/device. Clears automatically. |
+| **Room sensor frozen** | The reading has not changed for a long time (dead battery, stalled integration). Learning is paused; control continues on the last value. | Check battery/integration. Clears on the next real update. |
+| **Room sensor may be at the heat source** | The learned time constant is implausibly short — typical of a sensor on or near the radiator (e.g. a TRV's built-in sensor). | Move to a free-standing position away from the heater. The room model degrades until you do. |
+| **Window sensor unavailable** | The configured window contact(s) cannot be read; Poise falls back to slope-based auto-detection. | Check the contact. Clears automatically. |
+| **Mould protection inactive** | The humidity sensor is unavailable, so the mould-avoidance minimum temperature cannot be computed. Frost protection still applies. | Check the humidity sensor. Clears automatically. |
+| **A required entity is disabled** | The room sensor or the thermostat is *disabled* in the entity registry, so it will never publish a state and a retry loop would never end. | Re-enable it under *Settings → Devices & Services → Entities*, then reload Poise. |
+
+### The thermostat / actuator
+
+| Repair issue | What it means | What to do |
+| --- | --- | --- |
+| **Thermostat unavailable** | The controlled climate entity is `unavailable`; no setpoint can be written. | Check the device/integration. Clears automatically. |
+| **Thermostat's own schedule is active** | The device's built-in weekly program is switched on and will fight Poise. | Turn the device schedule off so Poise owns the setpoint. |
+| **Thermostat's own adaptive mode is active** | The device runs its own adaptive/smart-temperature loop — a second regulator on the same valve. | Turn that mode off. (On a Sonoff TRVZB this is also what makes valve-opening writes ineffective.) |
+| **Thermostat reports a fault** | The device signals a valve/installation fault — not mounted correctly, valve failure, bad calibration, broken external-sensor link. | Check the device; re-mount or re-pair. |
+| **Valve may be stuck** | The valve's calibration step count is near zero — calibration failed or the valve is mechanically jammed. | Re-pair or re-calibrate the TRV; clears once a normal step count is reported. |
+| **Thermostat battery low** | Battery at or below 15 %; sensing and valve actuation degrade before the device dies. | Replace the battery. |
+| **Actuator not applying commands** | Writes are dispatched but the device keeps reporting a different setpoint or mode — the write-convergence watchdog escalated. | Check the Zigbee/Wi-Fi link, the device's child lock, or an internal smart mode overriding external commands. Clears when a command finally lands. |
+| **External-temperature input implausible** | The `number` entity configured as the TRV's external-temperature input does not look like a temperature input. Poise stopped feeding it and handed the TRV's sensor source back to `internal`. | Pick a different entity in the zone's *Reconfigure*, or clear the field. |
+| **Operative input not available** | Operative TRV input is enabled but no usable external-temperature input exists for this thermostat; Poise fell back to air-side control. | Configure a valid external-temperature `number`, or switch operative input off. |
+
+### Control and safety
+
+| Repair issue | What it means | What to do |
+| --- | --- | --- |
+| **Heating failure — *zone*** | The room is not warming up despite a heating demand. Poise keeps commanding heat. | Check the valve/radiator/boiler. Clears when the room warms. |
+| **Cooling failure — *zone*** | The room is not cooling despite a cooling demand. | Check the AC/heat pump (compressor, filter, airflow) and that windows are closed. |
+| **Control tick repeatedly failing** | Several consecutive control updates raised an error; control is not running reliably for this room. | Look for the underlying exception in the Home Assistant log — and please report it. |
+| **Cannot save learned model** | Repeated failures writing to `.storage`; learning and recent changes would be lost on restart. | Check disk space and the `.storage` directory. Clears on the next successful save. |
+
+### Multi-zone hub
+
+| Repair issue | What it means | What to do |
+| --- | --- | --- |
+| **Freezing room not controlling the shared boiler** | Listed rooms sit at frost-protection temperature but are not opted into the boiler aggregate, so it will not fire for them. | Enable *This room may request the shared boiler* under *Reconfigure → Shared plant* for rooms the boiler actually heats. A cooling-only room can stay off. |
+| **Room sensor lost — heating on frost protection** | Listed rooms lost their temperature sensor and fell back to local frost protection; the hub is firing the boiler so they do not freeze. | Fix the sensor (battery/integration). Comfort control is degraded until it returns. |
+
+### Suggestions and hints (advisory)
+
+These come from the override-pattern learning and are gated on the per-zone *Suggestion learning* toggle (default on). The first three are **fixable**: choosing *Apply* writes the config change through the normal options path; either choice stamps a 30-day cool-down for that pattern.
+
+| Repair issue | What it means |
+| --- | --- |
+| **Raise / lower the comfort base?** *(fixable)* | You repeatedly overrode the setpoint in the same direction. Apply shifts the comfort base by the offered step. |
+| **Start the comfort window earlier?** *(fixable)* | You repeatedly overrode *before* the comfort window opened. Apply moves the window start earlier. |
+| **Raise / lower the clothing assumption?** *(fixable)* | Your *too warm* / *too cold* feedback consistently points one way. Apply shifts the clo offset by 0.1. |
+| **Heat-only / cool-only mode in the wrong season** | The zone's climate mode is pinned to one direction while the outdoor running mean has been past the opposite lockout for days, so conditioning is gated anyway. Purely advisory — Poise never switches the mode itself. |
+
+### Things that are not repair issues
+
+| Symptom | Explanation |
+| --- | --- |
+| The setpoint I typed was changed | A value outside the comfort band is **clamped to the band edge** and flagged as `override_clamped` rather than silently accepted. Frost, mould and the open-window reaction outrank a manual hold entirely. |
+| My change on the TRV wheel "didn't stick" | Device-side adoption is conditional. The per-tick reason is on the climate entity as `sp_adopt_reason` / `mode_adopt_reason` (`own_echo`, `echo_window`, `stable_offset`, `schedule_active`, `safety_window`, …); the table under [Geräteseitige Eingriffe (Adoption)](#geräteseitige-eingriffe-adoption) explains each one. |
+| Optimal start does nothing | It is gated on an *identified* model. Check `sensor.<room>_learning_phase` and `sensor.<room>_model_confidence`. |
+| The `mpc_*` / `tpi_*` / `pi_*` sensors are missing | They ship **disabled by default**; enable them under *Settings → Devices & Services → Entities*. Only four diagnostic sensors are enabled on a fresh install. |
+| There is no `sensor.<room>_pmv` | The comfort index and most shadow values are **attributes on the climate entity**, not separate sensors — see [Entities created](#entities-created). |
+| Nothing is written to the actuator | Poise writes only on a real change: the setpoint is compared against the device's actual value, snapped to its step, and skipped when it already matches. |
+
+For anything else, `custom_components.poise` at debug level logs the per-tick decision, and *Settings → Devices & Services → Poise → ⋮ → Download diagnostics* produces a redacted dump worth attaching to an issue.
 
 ---
 
