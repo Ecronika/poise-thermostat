@@ -267,3 +267,46 @@ async def test_off_hold_ends_when_user_turns_back_on(hass: HomeAssistant) -> Non
     assert (
         coord.runtime.user.mode_override is None
     )  # off-hold ended; zone resumes control
+
+
+# --- schema 2.3: the mode opt-out is hot-applyable too --------------------------
+
+
+async def test_mode_opt_out_toggle_applies_without_a_reload(
+    hass: HomeAssistant,
+) -> None:
+    """The mode channel's gate hot-applies as well: opening it in the options flow
+    makes the very next tick adopt, on the same coordinator instance."""
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    async_mock_service(hass, "climate", "set_temperature")
+    _set_ac(hass, mode="heat")
+    entry = await _setup(hass, **{CONF_ADOPT_EXTERNAL_MODE: False})
+    coord = entry.runtime_data
+    assert coord._adopt_external_mode is False
+
+    clock = _FakeClock(1000.0)
+    coord.runtime.clock = clock
+    coord.runtime.external.last_commanded_hvac = "heat"
+    coord.runtime.external.last_hvac_cmd_ts = 1000.0
+    coord.runtime.external.prev_device_mode = "heat"
+    clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_ac(hass, mode="fan_only")
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.mode_override is None
+
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_ADOPT_EXTERNAL_MODE: True}
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data is coord  # hot-applied in place, NOT reloaded
+    assert coord._adopt_external_mode is True
+
+    coord.runtime.external.last_commanded_hvac = "heat"
+    coord.runtime.external.last_hvac_cmd_ts = clock.t
+    coord.runtime.external.prev_device_mode = "heat"
+    clock.t += SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_ac(hass, mode="fan_only")
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.mode_override == "fan_only"

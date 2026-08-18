@@ -1,4 +1,4 @@
-"""V1 -> V2 config-entry store migration, end to end (glue, CI-only).
+"""Config-entry store migration to schema 2.3, end to end (glue, CI-only).
 
 An old V1 entry (everything in ``data``, single-id pickers) must migrate on setup
 to the V2 split (structural ``data`` + hot-applyable ``options``) with the
@@ -6,6 +6,12 @@ window/presence/occupancy ids normalized to lists — and the coordinator must t
 read that list-form presence without breaking the tick. Outdoor is mild so the
 ADR-0051 hot-day cool-raise stays inert; the empty-house (person 'not_home') AWAY
 relaxation is the only thing moving the written cooling setpoint.
+
+The second half pins MINOR_VERSION 3: a v2.2 entry created by the old onboarding
+step still carries ``comfort_base``/``category`` in ``data``; HA must run the
+migration on it (the minor bump is what triggers that at all), the values must
+land in ``options`` unchanged, a value already in ``options`` must win, and the
+whole thing must stay idempotent.
 """
 
 from __future__ import annotations
@@ -97,9 +103,9 @@ async def test_v1_entry_migrates_and_runs_list_presence(hass: HomeAssistant) -> 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    # migrated to V2; minor_version pinned to 2 (ADR-0059: override_policy stamp)
+    # migrated to V2; minor_version pinned to the current schema (2.3)
     assert entry.version == 2
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     # tuning moved out of data into options; structural inputs stayed in data
     assert CONF_COMFORT_BASE not in entry.data
     assert entry.options[CONF_COMFORT_BASE] == 21.0
@@ -149,3 +155,92 @@ async def test_migration_is_idempotent(hass: HomeAssistant) -> None:
     assert entry.version == 2
     assert dict(entry.data) == data_once
     assert dict(entry.options) == options_once
+
+
+# --- MINOR_VERSION 3: onboarding tuning leaves entry.data -----------------------
+
+
+def _v22_data() -> dict[str, Any]:
+    """A v2.2 entry exactly as the OLD ``async_step_room`` created it: structural
+    wiring plus the accuracy section's two tuning fields, all in ``data``."""
+    return {
+        CONF_NAME: "Office",
+        CONF_TEMP_SENSOR: "sensor.room_temp",
+        CONF_ACTUATOR: "climate.ac",
+        CONF_OUTDOOR_SENSOR: "sensor.outdoor",
+        CONF_COMFORT_BASE: 22.5,
+        CONF_CATEGORY: "I",
+    }
+
+
+async def test_v22_entry_migrates_setup_tuning_into_options(
+    hass: HomeAssistant,
+) -> None:
+    """HA runs the migration on a 2.2 entry (the minor bump is what makes it) and
+    the two tuning values move to ``options`` with their values intact."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _warm_room(hass)
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.ac",
+        data=_v22_data(),
+        version=2,
+        minor_version=2,
+        title="Office",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert (entry.version, entry.minor_version) == (2, 3)
+    assert CONF_COMFORT_BASE not in entry.data
+    assert CONF_CATEGORY not in entry.data
+    assert entry.options[CONF_COMFORT_BASE] == 22.5
+    assert entry.options[CONF_CATEGORY] == "I"
+    # the wiring stayed where it belongs
+    assert entry.data[CONF_TEMP_SENSOR] == "sensor.room_temp"
+    assert entry.data[CONF_OUTDOOR_SENSOR] == "sensor.outdoor"
+    # and the value the coordinator actually runs on is the migrated one
+    assert entry.runtime_data._comfort_base == 22.5
+
+
+async def test_v22_migration_keeps_the_newer_options_value(
+    hass: HomeAssistant,
+) -> None:
+    """Collision rule: a value already in ``options`` was edited later than the
+    ``data`` copy the onboarding step left behind, so it must win."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.ac",
+        data=_v22_data(),
+        options={CONF_COMFORT_BASE: 19.0},  # re-tuned via the options flow
+        version=2,
+        minor_version=2,
+        title="Office",
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    assert entry.options[CONF_COMFORT_BASE] == 19.0  # options wins, data dropped
+    assert entry.options[CONF_CATEGORY] == "I"  # the uncontested one still moved
+    assert CONF_COMFORT_BASE not in entry.data
+
+
+async def test_v22_migration_is_idempotent(hass: HomeAssistant) -> None:
+    """A second pass over the now-2.3 entry reproduces the same split."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.ac",
+        data=_v22_data(),
+        version=2,
+        minor_version=2,
+        title="Office",
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry) is True
+    data_once, options_once = dict(entry.data), dict(entry.options)
+    assert await async_migrate_entry(hass, entry) is True
+    assert (dict(entry.data), dict(entry.options)) == (data_once, options_once)
+    assert (entry.version, entry.minor_version) == (2, 3)

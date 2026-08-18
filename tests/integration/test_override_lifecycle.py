@@ -343,7 +343,8 @@ async def test_migration_minor_1_to_2_stamps_timer_policy(
     hass: HomeAssistant,
 ) -> None:
     """A V2 room stored below minor_version 2 (no explicit policy) is pinned to the
-    fixed-timer hold and its (version, minor_version) becomes (2, 2) (ADR-0059 §7)."""
+    fixed-timer hold; the stamp is keyed on the STORED minor (1), while the
+    written pair is the current schema (2, 3) (ADR-0059 §7)."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         unique_id="climate.trv",
@@ -356,7 +357,7 @@ async def test_migration_minor_1_to_2_stamps_timer_policy(
 
     assert await async_migrate_entry(hass, entry) is True
     assert entry.version == 2
-    assert entry.minor_version == 2
+    assert entry.minor_version == 3
     assert entry.options[CONF_OVERRIDE_POLICY] == OVERRIDE_POLICY_TIMER
 
 

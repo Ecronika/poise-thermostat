@@ -101,6 +101,15 @@ async def test_user_menu_then_room_creates_entry(hass: HomeAssistant) -> None:
     assert result["data"][CONF_ACTUATOR] == "climate.trv"
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert entry.unique_id == "climate.trv"
+    # Schema 2.3: entry.data is STRUCTURE. The accuracy section's two tuning
+    # fields are created in options, so the reload-vs-hot-apply predicate
+    # (structural_unchanged) never sees a tuning edit on a fresh entry either.
+    assert (entry.version, entry.minor_version) == (2, 3)
+    assert CONF_COMFORT_BASE not in entry.data
+    assert CONF_CATEGORY not in entry.data
+    assert entry.options[CONF_COMFORT_BASE] == 21.0
+    assert entry.options[CONF_CATEGORY] == "II"
+    assert entry.data[CONF_TEMP_SENSOR] == "sensor.room_temp"
 
 
 async def test_duplicate_actuator_aborts(hass: HomeAssistant) -> None:
@@ -343,7 +352,13 @@ async def test_system_setup_rejects_invalid_boiler_action(
     hass: HomeAssistant,
 ) -> None:
     """F11: a boiler action that doesn't parse is rejected at setup rather than
-    silently leaving the hub shadow-only."""
+    silently leaving the hub shadow-only.
+
+    The action is entered field by field now (roadmap 6), so the submitted value
+    is a mapping; ``turn_on`` without a domain is the free-text escape of the
+    service combobox being misused. See tests/integration/
+    test_boiler_action_fields.py for the rest of the structured-input contract.
+    """
     _add_room(hass)  # AR-30: 'system' is only offered once a room exists
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": "user"}
@@ -352,12 +367,13 @@ async def test_system_setup_rejects_invalid_boiler_action(
         result["flow_id"], {"next_step_id": "system"}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_BOILER_ON_ACTION: "not a valid action"}
+        result["flow_id"],
+        {CONF_BOILER_ON_ACTION: {"entity_id": "switch.boiler", "action": "turn_on"}},
     )
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "system"
-    assert result["errors"] == {"base": "invalid_boiler_action"}
+    assert result["errors"] == {"base": "invalid_boiler_action_fields"}
 
 
 async def test_system_setup_accepts_valid_boiler_action(
@@ -371,16 +387,16 @@ async def test_system_setup_accepts_valid_boiler_action(
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "system"}
     )
+    action = {"entity_id": "switch.boiler", "action": "switch.turn_on"}
     with patch("custom_components.poise.async_setup_entry", return_value=True):
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {CONF_BOILER_ON_ACTION: "switch.boiler/switch.turn_on"},
+            result["flow_id"], {CONF_BOILER_ON_ACTION: action}
         )
         await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_ENTRY_TYPE] == ENTRY_TYPE_SYSTEM
-    assert result["data"][CONF_BOILER_ON_ACTION] == "switch.boiler/switch.turn_on"
+    assert result["data"][CONF_BOILER_ON_ACTION] == action
 
 
 async def test_system_reconfigure_rejects_invalid_boiler_action(
@@ -400,12 +416,19 @@ async def test_system_reconfigure_rejects_invalid_boiler_action(
         assert result["type"] is FlowResultType.FORM
         assert result["step_id"] == "reconfigure"
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_BOILER_OFF_ACTION: "typo"}
+            result["flow_id"],
+            {
+                CONF_BOILER_OFF_ACTION: {
+                    "entity_id": "switch.boiler",
+                    "action": "switch.turn_off",
+                    "data": "not a mapping",
+                }
+            },
         )
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reconfigure"
-    assert result["errors"] == {"base": "invalid_boiler_action"}
+    assert result["errors"] == {"base": "invalid_boiler_action_fields"}
 
 
 async def test_user_menu_hides_system_until_a_room_exists(

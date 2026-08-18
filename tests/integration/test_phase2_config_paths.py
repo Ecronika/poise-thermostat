@@ -6,11 +6,11 @@ Pins the phase-2 rewiring of ``coordinator.py`` onto ``runtime.config``:
   (``async_apply_options``) fill the identical hot-applyable tuning for the
   same entry — the "identisches Config-Objekt aus beiden Pfaden" test of the
   refactoring plan (section 6, phase 2);
-* (b) a hot-apply changes tuning but never the structural wiring, never
-  ``climate_mode`` (AR-04, store-owned) and never the adopt-external toggles
-  (init-only today — pre-existing path drift, phase-2 analysis Befunde 1+2,
-  deliberately preserved), while the options-owned presence lists DO
-  hot-apply (Befund 8);
+* (b) a hot-apply changes tuning — including the two adopt-external toggles,
+  hot-applyable since schema 2.3 (they were init-only, phase-2 analysis
+  Befunde 1+2; the drift is now deliberately RESOLVED) and the options-owned
+  presence lists (Befund 8) — but never the structural wiring and never
+  ``climate_mode`` (AR-04, store-owned);
 * (c) a store-restored ``climate_mode`` survives an options submit (today's
   semantics: the options form value must not clobber the live selection);
 * (d) ``structural_unchanged`` (F14) keeps its data-dict predicate: an
@@ -186,6 +186,8 @@ def _hot_tuning_attrs(coord: Any) -> dict[str, Any]:
         "optimal_start": coord._optimal_start,
         "optimal_stop": coord._optimal_stop,
         "operative_input": coord._operative_input,
+        "adopt_external_setpoint": coord._adopt_external_setpoint,
+        "adopt_external_mode": coord._adopt_external_mode,
     }
 
 
@@ -223,6 +225,8 @@ def _expected_from_parser(entry: MockConfigEntry) -> dict[str, Any]:
         "optimal_start": t.optimal_start,
         "optimal_stop": t.optimal_stop,
         "operative_input": t.operative_input,
+        "adopt_external_setpoint": t.adopt_external_setpoint,
+        "adopt_external_mode": t.adopt_external_mode,
     }
 
 
@@ -265,9 +269,11 @@ async def test_hot_apply_changes_tuning_but_not_structure_or_climate_mode(
 ) -> None:
     """(b) Options submit hot-applies tuning only.
 
-    Structure (even a structural key smuggled into options), ``climate_mode``
-    (AR-04) and the adopt-external toggles (Befunde 1+2) stay untouched; the
-    options-owned presence lists do hot-apply (Befund 8).
+    Structure (even a structural key smuggled into options) and
+    ``climate_mode`` (AR-04) stay untouched; the options-owned presence lists
+    (Befund 8) and — since schema 2.3 — the adopt-external toggles (Befunde
+    1+2) DO hot-apply. The last one is a deliberately flipped pin: it used to
+    assert the one-reload latency of ``adopt_external_setpoint``.
     """
     entry = await _setup(hass)
     coord: Any = entry.runtime_data
@@ -285,7 +291,8 @@ async def test_hot_apply_changes_tuning_but_not_structure_or_climate_mode(
             # must all be ignored by the hot-apply:
             CONF_CLIMATE_MODE: "heat",  # store-owned (AR-04)
             CONF_TEMP_SENSOR: "sensor.sneaky",  # structural — reload-only
-            CONF_ADOPT_EXTERNAL_SETPOINT: False,  # init-only (Befund 1)
+            # hot-applyable since 2.3 (was init-only, Befund 1)
+            CONF_ADOPT_EXTERNAL_SETPOINT: False,
         },
     )
     await hass.async_block_till_done()
@@ -294,11 +301,11 @@ async def test_hot_apply_changes_tuning_but_not_structure_or_climate_mode(
     assert coord._comfort_base == 23.5
     assert coord._dynamics_override is not None
     assert coord._presence_home_entities == ["person.alice"]
-    # …structure, climate_mode and the adopt toggle untouched:
+    assert coord._adopt_external_setpoint is False  # no reload needed any more
+    # …structure and climate_mode untouched:
     assert coord._temp == "sensor.room_temp"
     assert coord.zone_name == "Test Room"
     assert coord.runtime.user.climate_mode == "auto"
-    assert coord._adopt_external_setpoint is True
 
 
 async def test_store_restored_climate_mode_survives_options_update(

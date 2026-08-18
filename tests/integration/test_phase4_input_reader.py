@@ -21,6 +21,7 @@ CI-only: needs a modern HA runtime (see conftest); the sandbox HA 2023.7 skips.
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 from unittest.mock import patch
@@ -34,6 +35,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.poise.clock import ManualClock
 from custom_components.poise.ha.input_reader import (
+    _GUARD_MAX_ATTEMPTS,
+    _GUARD_RETRY_SPACING_S,
     InputReader,
     actuator_snapshot,
     parse_attr_number,
@@ -444,14 +447,245 @@ async def test_guard_discovery_valve_steps_first_match_wins(
 
 
 async def test_guard_discovery_failure_is_swallowed(hass: HomeAssistant) -> None:
+    """A registry error never escapes (setup boundary) — but it is not final.
+
+    The swallow is unchanged; what changed is that a raise no longer burns the
+    single lifetime attempt.  ``guards_resolved`` now means "no further attempt
+    will be made", so it stays False while retries are still owed (the bounded
+    retry itself is pinned by the tests below).
+    """
     reader = _reader(hass)
     with patch(
         "homeassistant.helpers.entity_registry.async_get",
         side_effect=RuntimeError("registry down"),
     ):
         reader.resolve_device_guards()  # must not raise (setup boundary)
-    assert reader.guards_resolved
+    assert reader.guards_resolved is False
     assert reader.sched_entity is None
+
+
+# --- device-guard discovery: bounded retry -------------------------------------
+
+
+async def test_guard_discovery_success_is_never_retried(hass: HomeAssistant) -> None:
+    """Success is FINAL: one registry access, ever (today's semantics)."""
+    act = _register_trv_device(hass)
+    clock = ManualClock(1000.0)
+    reader = InputReader(hass, _structure(actuator=act), clock)
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", wraps=er.async_get
+    ) as spy:
+        reader.resolve_device_guards()
+        assert reader.guards_resolved
+        assert spy.call_count == 1
+        clock.advance(86_400.0)  # a day past every backoff window
+        reader.resolve_device_guards()
+        assert spy.call_count == 1
+    assert reader.sched_entity == "switch.trv_schedule"
+
+
+async def test_guard_discovery_transient_error_retries_once_then_succeeds(
+    hass: HomeAssistant,
+) -> None:
+    """The bug this budget fixes: a transient miss no longer waits for reload.
+
+    Attempt 1 raises, the next call INSIDE the spacing window does not even
+    reach the registry, and the first call after it resolves the guards for
+    good.
+    """
+    act = _register_trv_device(hass)
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(actuator=act), clock)
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get",
+        side_effect=RuntimeError("registry down"),
+    ) as spy:
+        reader.resolve_device_guards()
+        assert reader.guards_resolved is False
+        assert spy.call_count == 1
+        clock.advance(_GUARD_RETRY_SPACING_S[0] - 0.1)
+        reader.resolve_device_guards()
+        assert spy.call_count == 1  # spacing not elapsed: no registry access
+
+    clock.advance(0.1)
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", wraps=er.async_get
+    ) as spy:
+        reader.resolve_device_guards()
+        assert spy.call_count == 1  # exactly ONE retry
+        assert reader.guards_resolved
+        clock.advance(86_400.0)
+        reader.resolve_device_guards()
+        assert spy.call_count == 1  # ... and success is final
+
+    assert reader.sched_entity == "switch.trv_schedule"
+    assert reader.battery_entity == "sensor.trv_battery"
+
+
+async def test_guard_discovery_permanent_error_stops_after_the_budget(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A registry that never recovers costs N attempts and two log lines.
+
+    Driven at the real tick rate (one call per TICK_INTERVAL_S over two
+    hours): the spacing, not the caller's frequency, decides — so the tick is
+    never slowed by more than the float comparison, and the log escalates once
+    per STAGE (first failure, give-up) instead of once per attempt.
+    """
+    caplog.set_level(logging.DEBUG, logger="custom_components.poise.ha.input_reader")
+    act = _register_trv_device(hass)
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(actuator=act), clock)
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get",
+        side_effect=RuntimeError("registry down"),
+    ) as spy:
+        for _ in range(120):
+            reader.resolve_device_guards()
+            clock.advance(60.0)
+        assert spy.call_count == _GUARD_MAX_ATTEMPTS == 3
+
+    assert reader.guards_resolved  # terminal: no attempt will follow
+    assert reader.sched_entity is None
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum("device-guard resolution failed" in m for m in messages) == 1
+    assert sum("gave up after 3 attempts" in m for m in messages) == 1
+
+
+async def test_guard_discovery_retry_spacing_is_the_declared_backoff(
+    hass: HomeAssistant,
+) -> None:
+    """The attempt INSTANTS are the declared spacing (ManualClock proof).
+
+    One call per second for an hour; the recorded monotonic instants must be
+    exactly ``0, 0+60, 60+300`` and then stop.
+    """
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(), clock)
+    seen: list[float] = []
+
+    def _exploding_registry(_hass: HomeAssistant) -> er.EntityRegistry:
+        seen.append(clock.monotonic())
+        raise RuntimeError("registry down")
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", new=_exploding_registry
+    ):
+        for _ in range(3600):
+            reader.resolve_device_guards()
+            clock.advance(1.0)
+
+    assert seen == [0.0, 60.0, 360.0]
+    assert len(seen) == _GUARD_MAX_ATTEMPTS
+    assert list(_GUARD_RETRY_SPACING_S) == [
+        seen[1] - seen[0],
+        seen[2] - seen[1],
+    ]
+    assert reader.guards_resolved
+
+
+async def test_guard_discovery_registryless_actuator_is_final(
+    hass: HomeAssistant,
+) -> None:
+    """A live State without a registry entry can never gain one.
+
+    ``EntityPlatform._async_add_entity`` creates the registry entry BEFORE the
+    state is written, so an actuator that HAS a state and NO entry carries no
+    unique_id — the ordinary ``generic_thermostat``/template setup.  Spending
+    retries on that permanent answer would be pure waste, so it is final on
+    the first attempt.
+    """
+    _set_actuator(hass)  # state only, never registered
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(), clock)
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", wraps=er.async_get
+    ) as spy:
+        reader.resolve_device_guards()
+        assert reader.guards_resolved
+        clock.advance(86_400.0)
+        reader.resolve_device_guards()
+        assert spy.call_count == 1
+    assert reader.sched_entity is None
+
+
+async def test_guard_discovery_deviceless_entity_is_final(
+    hass: HomeAssistant,
+) -> None:
+    """Registered but device-less: the registry gave a definitive answer."""
+    dev_entry = MockConfigEntry(domain="demo", title="Device-less")
+    dev_entry.add_to_hass(hass)
+    act = (
+        er.async_get(hass)
+        .async_get_or_create(
+            "climate", "demo", "lonely", config_entry=dev_entry, suggested_object_id="l"
+        )
+        .entity_id
+    )
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(actuator=act), clock)
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", wraps=er.async_get
+    ) as spy:
+        reader.resolve_device_guards()
+        assert reader.guards_resolved
+        clock.advance(86_400.0)
+        reader.resolve_device_guards()
+        assert spy.call_count == 1
+
+
+async def test_guard_discovery_picks_up_a_late_arriving_actuator(
+    hass: HomeAssistant,
+) -> None:
+    """Neither entry nor state = a race with a still-starting integration.
+
+    This is the transient case the old "one attempt per reload" gate lost: the
+    TRV's integration finishes registering its entities between two ticks and
+    the retry finds the guards it would otherwise have missed until reload.
+    """
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(), clock)  # climate.trv: nothing yet
+    reader.resolve_device_guards()
+    assert reader.guards_resolved is False
+    assert reader.sched_entity is None
+
+    assert _register_trv_device(hass) == "climate.trv"
+    clock.advance(_GUARD_RETRY_SPACING_S[0])
+    reader.resolve_device_guards()
+
+    assert reader.guards_resolved
+    assert reader.sched_entity == "switch.trv_schedule"
+    assert reader.valve_entity == "number.trv_valve_opening_degree"
+
+
+async def test_snapshot_drives_the_retry_on_the_injected_clock(
+    hass: HomeAssistant,
+) -> None:
+    """The backoff anchor is snapshot()'s own unified instant.
+
+    Ten ticks on a frozen ManualClock cost exactly ONE registry access; only
+    advancing the injected clock releases the next attempt.  (A wall/monotonic
+    read inside the method would make this untestable and would break the
+    module's "one instant per pre-await segment" rule.)
+    """
+    clock = ManualClock(0.0)
+    reader = InputReader(hass, _structure(), clock)  # climate.trv absent entirely
+
+    with patch(
+        "homeassistant.helpers.entity_registry.async_get", wraps=er.async_get
+    ) as spy:
+        for _ in range(10):
+            reader.snapshot()
+        assert spy.call_count == 1
+        clock.advance(_GUARD_RETRY_SPACING_S[0])
+        reader.snapshot()
+        assert spy.call_count == 2
+    assert reader.guards_resolved is False
 
 
 # --- positioned post-await reads -----------------------------------------------

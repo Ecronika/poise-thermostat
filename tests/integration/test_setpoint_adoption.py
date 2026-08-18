@@ -440,3 +440,108 @@ async def test_real_pre_write_stamp_path_adopts_in_window_change(
     await coord.async_refresh()
     await hass.async_block_till_done()
     assert coord.runtime.user.override == 23.0
+
+
+# --- schema 2.3: the opt-out is hot-applyable (was one reload per toggle) --------
+
+
+async def test_opt_out_toggle_applies_without_a_reload(hass: HomeAssistant) -> None:
+    """Flipping ``adopt_external_setpoint`` in the options flow takes effect on the
+    NEXT tick, on the SAME coordinator — no reload, so the learned model, the echo
+    baselines and any running hold all survive the toggle.
+
+    Deliberately flipped behaviour: until schema 2.3 the toggle was init-only and
+    needed a zone reload (pinned by ``test_phase2_config_paths`` test (b)).
+    """
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_trv(hass, setpoint=20.0)
+    entry = await _setup(hass, **{CONF_ADOPT_EXTERNAL_SETPOINT: False})
+    coord = entry.runtime_data
+    assert coord._adopt_external_setpoint is False
+
+    clock = _FakeClock(1000.0)
+    coord.runtime.clock = clock
+
+    # (1) with the gate closed, a wheel turn is ignored
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
+    clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_trv(hass, setpoint=23.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.override is None
+
+    # (2) the user opens the gate in the options flow
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_ADOPT_EXTERNAL_SETPOINT: True}
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data is coord  # hot-applied in place, NOT reloaded
+    assert coord._adopt_external_setpoint is True
+
+    # (3) the value the device was ALREADY showing while the gate was closed is
+    # not grabbed retroactively — ``prev_device_sp`` was tracked every tick, so
+    # 23.0 reads as a value the device is merely holding, not a fresh move.
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = clock.t
+    clock.t += SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_trv(hass, setpoint=23.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.override is None
+
+    # (4) a NEW wheel turn now is adopted, on the same coordinator
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = clock.t
+    clock.t += SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_trv(hass, setpoint=24.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.override == 24.0
+
+
+async def test_closing_the_gate_leaves_a_running_hold_alone(
+    hass: HomeAssistant,
+) -> None:
+    """The state question for the hot toggle: switching adoption OFF closes the
+    gate for FUTURE device changes and does nothing to the hold that is already
+    running (holds are store-owned; the reload this replaces did not end one
+    either). Nothing about the adoption is 'half applied'."""
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _set_trv(hass, setpoint=20.0)
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    assert coord._adopt_external_setpoint is True
+
+    clock = _FakeClock(1000.0)
+    coord.runtime.clock = clock
+    coord.runtime.external.last_written_sp = 20.0
+    coord.runtime.external.last_sp_write_ts = 1000.0
+    clock.t = 1000.0 + SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_trv(hass, setpoint=23.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.override == 23.0
+    expiry = coord.runtime.user.override_expires_at
+
+    # close the gate while that hold is live
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, CONF_ADOPT_EXTERNAL_SETPOINT: False}
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data is coord
+    assert coord._adopt_external_setpoint is False
+    # the running hold is untouched — value AND announced expiry
+    assert coord.runtime.user.override == 23.0
+    assert coord.runtime.user.override_expires_at == expiry
+
+    # …and a further device move is no longer adopted on top of it
+    coord.runtime.external.last_written_sp = 23.0
+    coord.runtime.external.last_sp_write_ts = clock.t
+    clock.t += SETPOINT_ADOPT_ECHO_WINDOW_S + 1.0
+    _set_trv(hass, setpoint=25.0)
+    await coord.async_refresh()
+    await hass.async_block_till_done()
+    assert coord.runtime.user.override == 23.0  # still the old hold, not 25.0
