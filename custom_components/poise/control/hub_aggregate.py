@@ -12,7 +12,7 @@ time, passed in by the caller).
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -217,14 +217,61 @@ class ServiceAction:
     data: dict[str, str]
 
 
-def parse_service_action(spec: str | None) -> ServiceAction | None:
-    """Parse ``entity_id/domain.service[/attr:value...]`` (Versatile format).
+def _parse_action_fields(spec: Mapping[str, Any]) -> ServiceAction | None:
+    """Parse the STRUCTURED boiler-action form the config flow now writes.
 
-    Returns None for empty/malformed specs (the hub then stays shadow-only).
+    Shape: ``{"entity_id": "switch.boiler", "action": "switch.turn_on",
+    "data": {...}}`` — ``action`` is HA's own script-syntax name for
+    ``domain.service`` (it replaced ``service:`` in HA 2024.8). ``data`` is
+    optional extra service data and its values are stringified, so a structured
+    action and the legacy free-text spec produce the *same* ``ServiceAction``.
+    Anything malformed returns None, exactly like the free-text path.
+    """
+    entity_id = spec.get("entity_id")
+    action = spec.get("action")
+    if not isinstance(entity_id, str) or not isinstance(action, str):
+        return None
+    entity_id, action = entity_id.strip(), action.strip()
+    if "." not in entity_id or "." not in action:
+        return None
+    domain, service = (p.strip() for p in action.split(".", 1))
+    if not domain or not service:
+        return None
+    data: dict[str, str] = {"entity_id": entity_id}
+    extra = spec.get("data")
+    if isinstance(extra, Mapping):
+        data.update({str(k): str(v) for k, v in extra.items()})
+    elif extra:  # a non-mapping "data" is a mistake, not an absent extra
+        return None
+    return ServiceAction(domain=domain, service=service, data=data)
+
+
+def parse_service_action(
+    spec: str | Mapping[str, Any] | None,
+) -> ServiceAction | None:
+    """Parse a stored boiler action into a callable ``domain.service`` + data.
+
+    TWO stored forms are accepted on purpose (ADR-0039 store compatibility):
+
+    * a **mapping** ``{entity_id, action, data}`` — what the config flow's
+      structured field editor writes today, and
+    * the legacy **free-text** ``entity_id/domain.service[/attr:value...]``
+      (Versatile format) that every entry created before that still carries.
+
+    Making the parser total over both is what keeps the hub's safety paths
+    (unload hand-over, removal OFF) correct for ANY store state — including an
+    old backup restored into a new install — instead of depending on a
+    migration having run first.
+
+    Returns None for an empty/malformed spec (the hub then stays shadow-only).
     Attribute values are kept as strings (e.g. ``hvac_mode:heat``).
     """
     if not spec:
         return None
+    if isinstance(spec, Mapping):
+        return _parse_action_fields(spec)
+    if not isinstance(spec, str):
+        return None  # entry.data is untyped JSON: anything else is not an action
     parts = [p.strip() for p in spec.split("/") if p.strip()]
     if len(parts) < 2 or "." not in parts[0] or "." not in parts[1]:
         return None
@@ -235,6 +282,31 @@ def parse_service_action(spec: str | None) -> ServiceAction | None:
             key, value = extra.split(":", 1)
             data[key.strip()] = value.strip()
     return ServiceAction(domain=domain.strip(), service=service.strip(), data=data)
+
+
+def service_action_fields(
+    spec: str | Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return the STRUCTURED field form of a stored boiler action.
+
+    The inverse of :func:`parse_service_action`, used to pre-fill the config
+    flow's field editor: a legacy free-text spec decomposes losslessly into the
+    same ``{entity_id, action, data}`` the editor writes, so an entry created
+    before the structured form is edited — not retyped. ``data`` is omitted when
+    there is no extra service data. None when the value does not parse (there is
+    nothing sensible to pre-fill).
+    """
+    action = parse_service_action(spec)
+    if action is None:
+        return None
+    data = dict(action.data)
+    fields: dict[str, Any] = {
+        "entity_id": data.pop("entity_id"),
+        "action": f"{action.domain}.{action.service}",
+    }
+    if data:
+        fields["data"] = data
+    return fields
 
 
 def target_boiler_state(
