@@ -93,19 +93,38 @@
           "max_flow_temp": "Maximale Vorlauftemperatur (Deckel)",
           "flow_hysteresis": "Vorlauf-Hysterese (gegen Pendeln, K)",
           "default_heat_source": "Standard-Heizquelle für „auto“-Zonen"
+        },
+        "data_description": {
+          "boiler_on_action": "Wird Feld für Feld ausgefüllt: erst die Entität wählen, dann den Dienst, der darauf aufgerufen wird (ein freier Dienst lässt sich eintippen). Zusätzliche Dienstdaten sind optional — z. B. hvac_mode: heat für climate.set_hvac_mode.",
+          "boiler_off_action": "Dieselben Felder wie bei der EIN-Aktion. Poise schaltet den Kessel nur, wenn BEIDE Aktionen gesetzt sind; beide leer lassen für reinen Diagnosebetrieb."
         }
       }
     },
     "error": {
       "sensor_on_actuator": "Der Raumsensor sitzt am selben Gerät wie das Thermostat — das ist dessen eingebauter Fühler, der den Heizkörper misst, nicht den Raum. Wähle einen separaten, freistehenden Raumsensor, damit Poise den Raum korrekt lernt.",
       "invalid_boiler_action": "Diese Kessel-Aktion konnte nicht gelesen werden. Format: entity_id/domain.service[/attr:value], z. B. switch.boiler/switch.turn_on — oder leer lassen für reinen Diagnosebetrieb.",
-      "heat_cool_only": "Dieses Gerät unterstützt nur den kombinierten Heiz-/Kühl-Modus (Dual-Sollwert). Poise schreibt einen Sollwert pro Aktor und kann es nicht steuern — wähle ein Gerät mit einzelnem Heiz- oder Kühl-Ziel."
+      "heat_cool_only": "Dieses Gerät unterstützt nur den kombinierten Heiz-/Kühl-Modus (Dual-Sollwert). Poise schreibt einen Sollwert pro Aktor und kann es nicht steuern — wähle ein Gerät mit einzelnem Heiz- oder Kühl-Ziel.",
+      "invalid_boiler_action_fields": "Diese Kessel-Aktion ist unvollständig. Sie braucht eine Entität und einen Dienst in der Form domain.service (z. B. switch.turn_on); zusätzliche Dienstdaten müssen als Schlüssel/Wert-Paare angegeben werden. Aktion ganz entfernen für reinen Diagnosebetrieb."
     },
     "abort": {
       "already_configured": "Dieses Thermostat ist bereits konfiguriert.",
       "reconfigure_successful": "Poise wurde aktualisiert.",
       "actuator_in_use": "Dieses Thermostat wird bereits von der Poise-Zone „{zone}“ gesteuert. Jedes Thermostat kann nur zu einer Zone gehören.",
       "imperial_not_supported": "Poise benötigt ein metrisches (°C) Home Assistant. Imperiale/°F-Systeme werden nicht unterstützt — der Regelpfad ist ausschließlich °C."
+    }
+  },
+  "exceptions": {
+    "missing_required_setting": {
+      "message": "Der Poise-Zone „{title}“ fehlt die erforderliche Einstellung „{key}“. Konfiguriere die Zone neu, um sie erneut auszuwählen."
+    },
+    "required_entity_disabled": {
+      "message": "Poise kann nicht starten, weil eine benötigte Entität in der Entitätsregistrierung deaktiviert ist: {entities}. Aktiviere sie wieder und lade Poise neu."
+    },
+    "required_entity_missing": {
+      "message": "Poise wartet auf eine benötigte Entität, die es noch nicht gibt: {entities}. Die Einrichtung wird automatisch wiederholt."
+    },
+    "persisted_state_unreadable": {
+      "message": "Poise {zone} konnte den gespeicherten Zustand nicht lesen. Die Einrichtung wird automatisch wiederholt; es gingen keine Lerndaten verloren."
     }
   },
   "entity": {
@@ -510,8 +529,8 @@
             },
             "data_description": {
               "override_policy": "Wann ein manueller Sollwert zur Automatik zurückkehrt.",
-              "adopt_external_setpoint": "Wird nur übernommen, wenn sie sich vom Echo des eigenen Schreibvorgangs unterscheiden lässt: ein vorheriger Schreibvorgang dient als Vergleichswert (wird mitgespeichert und übersteht damit einen Neustart — er fehlt nur, bis Poise einmal geschrieben hat), und eine Änderung binnen 120 s danach gilt als dessen Echo. Unterdrückt, solange die geräteeigene Zeitschaltuhr läuft. Der entstehende Halt wird weiterhin von Fenster/Frost/Schimmel und vom Komfortband geklemmt. Eine Änderung dieser Option wird erst nach dem Neuladen der Zone oder einem Neustart von Home Assistant wirksam.",
-              "adopt_external_mode": "Gleiche Vergleichswert- und 120-s-Echo-Bedingungen wie beim Sollwert. Keine Übernahme bei offenem Fenster, eingefrorener Sensorik oder für Modi, die das Gerät nicht beherrscht (inkl. heat_cool). Lüfterstufe, Swing und geräteseitige Presets werden nie übernommen. Eine Änderung dieser Option wird erst nach dem Neuladen der Zone oder einem Neustart von Home Assistant wirksam.",
+              "adopt_external_setpoint": "Wird nur übernommen, wenn sie sich vom Echo des eigenen Schreibvorgangs unterscheiden lässt: ein vorheriger Schreibvorgang dient als Vergleichswert (wird mitgespeichert und übersteht damit einen Neustart — er fehlt nur, bis Poise einmal geschrieben hat), und eine Änderung binnen 120 s danach gilt als dessen Echo. Unterdrückt, solange die geräteeigene Zeitschaltuhr läuft. Der entstehende Halt wird weiterhin von Fenster/Frost/Schimmel und vom Komfortband geklemmt.",
+              "adopt_external_mode": "Gleiche Vergleichswert- und 120-s-Echo-Bedingungen wie beim Sollwert. Keine Übernahme bei offenem Fenster, eingefrorener Sensorik oder für Modi, die das Gerät nicht beherrscht (inkl. heat_cool). Lüfterstufe, Swing und geräteseitige Presets werden nie übernommen.",
               "override_suggestions": "Nach mindestens 3 gleichgerichteten manuellen Eingriffen (≥ 0,5 K, gleiche Zeitplan-Phase, 14 Tage) erzeugt Poise einen sichtbaren Vorschlag (Reparatur-Hinweis), die Komfortbasis oder das Komfortfenster anzupassen. Es wird nie still geändert. Standardmäßig aus, bis die Erkennungsschwellen feld-kalibriert sind."
             }
           }
@@ -574,6 +593,13 @@
       "options": {
         "warm": "Zu warm",
         "cold": "Zu kalt"
+      }
+    },
+    "boiler_action": {
+      "fields": {
+        "entity_id": "Kessel-Entität",
+        "action": "Aufzurufender Dienst (domain.service)",
+        "data": "Zusätzliche Dienstdaten (optional)"
       }
     }
   },
