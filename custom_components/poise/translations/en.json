@@ -115,7 +115,7 @@
   },
   "exceptions": {
     "missing_required_setting": {
-      "message": "Poise zone '{title}' is missing the required '{key}' setting. Reconfigure the zone to select it again."
+      "message": "Poise zone {title} is missing the required setting {key}. Reconfigure the zone to select it again."
     },
     "required_entity_disabled": {
       "message": "Poise cannot start because a required entity is disabled in the entity registry: {entities}. Re-enable it, then reload Poise."
