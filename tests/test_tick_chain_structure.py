@@ -410,12 +410,27 @@ _RATCHET: tuple[_Entry, ...] = (
             "custom_components/poise/control/pipeline_prepare.py"
             "::_stage_observe_guarded"
         ),
-        baseline_total=157,
+        # Total grew +17 with the P.2b decision docstring; CODE is unchanged at
+        # 105. Section 18.5: the code count is the complexity signal, the total
+        # is drift - and a total that forbids writing down why a split was
+        # rejected would be a gate against the record itself.
+        baseline_total=174,
         baseline_code=105,
         headroom=10,
         note=(
-            "157/105 - growth guard only, no lowering target in this plan "
-            "(split is explicitly out of scope, plan section 10)"
+            "174/105 - growth guard, no lowering target. P.2 ANALYSED 2026-08-17, "
+            "outcome P.2b: no seam worth taking. One real candidate exists - the "
+            "actuator-capability/dynamics block, which owns the whole swallowing "
+            "boundary and shares no state with the window->learning chain "
+            "(measured: learn_step, observe_seasonless and observe_window_auto "
+            "touch neither rt.compressor nor rt.learning.pi). It was extracted and "
+            "measured: the function drops to 135/90, but the MODULE grows "
+            "891/597 -> 951/626, i.e. +29 code lines to save 15, and the four "
+            "config parameters become pure pass-throughs because the call cannot "
+            "move earlier without changing what has run when the window block "
+            "aborts. Reverted. The rest is one narrative chained by data: window "
+            "health -> effective window signal -> learning gate -> window-auto "
+            "update."
         ),
     ),
     _Entry(
@@ -461,7 +476,9 @@ _RATCHET: tuple[_Entry, ...] = (
     # sitting just under it.
     _Entry(
         identifier="custom_components/poise/control/pipeline_prepare.py",
-        baseline_total=891,
+        # +26 total from the module-level "HA-free synchronous, not pure"
+        # definition and the P.2b decision docstring; code unchanged at 597.
+        baseline_total=917,
         baseline_code=597,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from P.1",
@@ -2114,3 +2131,127 @@ def test_pending_invariant_not_silently_skipped(inv: _PendingInvariant) -> None:
         f"invariant must now be implemented as an enforced check in this "
         f"file, not left as an inert placeholder row."
     )
+
+
+# --- orphan-module guard: catch upload debris generically -------------------
+
+# Every module of the component must be reachable by an import from another
+# module - unless it is on this list, which names WHY it is not.
+#
+# Motivation, from a real failure: P.1 deleted control/tick_pipeline.py, but
+# the GitHub tree is maintained by web upload, which adds files and does not
+# delete them. The old aggregate module therefore survived there and CI went
+# red on the P.1 gate. That gate is specific to one filename; this one is the
+# general form. A stale module is not merely dead weight - it is exactly the
+# "compatibility shim" the split forbade, and the next change may well import
+# from it again.
+_HA_ENTRY_POINTS = frozenset(
+    {
+        # Home Assistant imports these BY NAME from the component package;
+        # nothing in the package imports them, and that is correct.
+        "__init__",
+        "climate",
+        "sensor",
+        "binary_sensor",
+        "switch",
+        "button",
+        "config_flow",
+        "repairs",
+        "diagnostics.entry",
+    }
+)
+
+# Modules that are deliberately not wired yet. Each names its ADR, so the entry
+# is a decision on record rather than a place to hide forgotten code.
+_UNWIRED_BY_DESIGN: dict[str, str] = {
+    "pipeline": (
+        "ADR-0006/0014 reference tick skeleton - exercised by the pure core "
+        "and the closed-loop harness, deliberately not the production path"
+    ),
+    "control.calibration": (
+        "ADR-0015 TRV calibration - implemented ahead of its wiring, covered "
+        "by tests/test_calibration.py"
+    ),
+    "multi.schema": (
+        "ADR-0046 section 12 capability-driven field selection - implemented "
+        "ahead of its wiring"
+    ),
+}
+
+
+def _component_module_graph() -> tuple[dict[str, Path], set[str]]:
+    """Return (module name -> path, set of module names imported by someone)."""
+    root = REPO_ROOT / "custom_components" / "poise"
+    modules = {
+        ".".join(p.relative_to(root).with_suffix("").parts): p
+        for p in sorted(root.rglob("*.py"))
+        if "__pycache__" not in p.parts
+    }
+    imported: set[str] = set()
+    for name, path in modules.items():
+        package = name.rsplit(".", 1)[0] if "." in name else ""
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            targets: list[str] = []
+            if isinstance(node, ast.ImportFrom):
+                if node.level:  # relative
+                    base = package.split(".") if package else []
+                    if node.level > 1:
+                        base = base[: len(base) - (node.level - 1)]
+                    tail = node.module.split(".") if node.module else []
+                    resolved = ".".join([*base, *tail]).strip(".")
+                elif (node.module or "").startswith("custom_components.poise"):
+                    resolved = (node.module or "")[len("custom_components.poise.") :]
+                else:
+                    continue
+                targets.append(resolved)
+                # `from .pkg import module` also imports pkg.module
+                targets += [
+                    f"{resolved}.{a.name}" if resolved else a.name for a in node.names
+                ]
+            elif isinstance(node, ast.Import):
+                targets += [
+                    a.name[len("custom_components.poise.") :]
+                    for a in node.names
+                    if a.name.startswith("custom_components.poise.")
+                ]
+            imported.update(t for t in targets if t in modules)
+    return modules, imported
+
+
+def test_no_orphan_module_in_the_component() -> None:
+    """No module is unreachable, so upload debris cannot sit in the tree.
+
+    A file that nothing imports and that is not a declared entry point or a
+    declared unwired module is either dead code or a leftover. Both are
+    findings; neither should be able to arrive quietly.
+    """
+    modules, imported = _component_module_graph()
+    packages = {m for m in modules if m.endswith("__init__")}
+    orphans = sorted(
+        set(modules) - imported - _HA_ENTRY_POINTS - set(_UNWIRED_BY_DESIGN) - packages
+    )
+    assert not orphans, (
+        f"module(s) nothing imports: {orphans}. Either they are leftovers (a "
+        f"deleted file that came back, e.g. through a web upload that adds but "
+        f"never removes) - then delete them - or they are intentional, and then "
+        f"they belong in _UNWIRED_BY_DESIGN with their ADR."
+    )
+
+
+def test_orphan_detector_is_not_vacuous() -> None:
+    """The detector must actually resolve imports.
+
+    Without this, a broken resolver would report "no orphans" for every tree,
+    including one full of debris. Positive control: the three declared unwired
+    modules exist and really are unimported - if the resolver started matching
+    everything, this set would come back empty.
+    """
+    modules, imported = _component_module_graph()
+    assert len(modules) > 100, f"only {len(modules)} modules found - resolver broken?"
+    assert len(imported) > 50, f"only {len(imported)} imports resolved - too few"
+    for name, reason in _UNWIRED_BY_DESIGN.items():
+        assert name in modules, f"{name} is listed as unwired but does not exist"
+        assert name not in imported, (
+            f"{name} is listed as unwired but IS imported now - remove the "
+            f"exemption ({reason})"
+        )
