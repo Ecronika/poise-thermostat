@@ -6,7 +6,7 @@ the injectable monotonic clock. The coordinator constructs exactly one
 tests and internal readers reach every field as
 ``coord.runtime.<group>.<field>`` while ownership stays explicit.
 
-The runtime also owns the PURE tick stages (delegating to their implementations
+The runtime also owns the tick stages (delegating to their implementations
 in ``control/pipeline_prepare.py``, ``control/pipeline_actuate.py`` and
 ``control/pipeline_finalize.py``), ``commit_execution`` (incl. the ``EndHold``
 teardown and the ``mark_actuated`` flip), and ``restore(decoded)`` — the
@@ -20,7 +20,7 @@ through the injected runtime.
 
 ``dirty`` is the documented exception: the persistence-meta flag is
 adapter-shaped, but ``commit_execution``/``teardown_hold``/``mark_actuated``
-and the observe stage mutate it as part of their pure bodies — so the flag
+and the observe stage mutate it as part of their bodies — so the flag
 lives here and the adapter's ``_maybe_save`` reads it as ``runtime.dirty``.
 
 The ``clock`` attribute is deliberately a plain, replaceable reference:
@@ -499,7 +499,7 @@ class ZoneRuntime:
                     self.learning.ekf.seed_beta_h(prior)
 
     # ------------------------------------------------------------------
-    # Pure tick stages (implementations in control/pipeline_prepare.py,
+    # Tick stages (implementations in control/pipeline_prepare.py,
     # control/pipeline_actuate.py and control/pipeline_finalize.py)
     # ------------------------------------------------------------------
 
