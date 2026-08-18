@@ -21,7 +21,7 @@ replace that with an explicit, narrow contract:
 Why a snapshot is legitimate at all (the load-bearing argument, pinned by
 ``tests/test_o2_tick_snapshot.py``): the 30 config attributes are written
 only by ``PoiseCoordinator.__init__`` and ``PoiseCoordinator._apply_hot_tuning``
-(four of them by ``__init__`` alone), and ``_apply_hot_tuning`` runs only from
+(two of them by ``__init__`` alone), and ``_apply_hot_tuning`` runs only from
 ``__init__`` and from ``async_apply_options``, which takes the SAME tick lock
 that ``_async_update_data`` holds for the whole tick. The bindings are written
 by ``__init__`` alone, except ``_trv_ext_temp``, whose one other writer runs
@@ -63,10 +63,10 @@ class TickConfigSnapshot:
     """The tick's read-only policy/config view (30 fields).
 
     Field name == coordinator attribute without the leading underscore. Every
-    field is either hot-applyable tuning (26, written by ``_apply_hot_tuning``)
-    or deliberately init-only (4: ``window_auto_cfg``, ``override_cfg``,
-    ``adopt_external_mode``, ``adopt_external_setpoint``). Both groups are
-    constant for the duration of a tick — see the module docstring.
+    field is either hot-applyable tuning (28, written by ``_apply_hot_tuning``)
+    or deliberately init-only (2: ``window_auto_cfg``, ``override_cfg`` — both
+    default-constructed constants the parser never config-reads). Both groups
+    are constant for the duration of a tick — see the module docstring.
 
     Deliberately NOT here: ``_mpc_params`` (written by the tick itself through
     ``_set_mpc_params``) and ``_unavailable_logged`` (adapter state the
