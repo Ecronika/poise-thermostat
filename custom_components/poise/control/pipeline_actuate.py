@@ -1,4 +1,4 @@
-"""Pure actuation-phase tick stage implementations.
+"""HA-free synchronous actuation-phase tick stage implementations.
 
 The three stages behind ``ActuatePhase``: the mode arbitration plus
 compressor-guard policy, the device-setpoint observation (ADR-0052 §4
@@ -18,7 +18,7 @@ rules:
 * NO PATCH SURFACE lives in this module.  ``setpoint_adopt_reason_fn`` is
   injected for layering, not for patching: it is a plain import in the
   orchestrator since plan O.4, and no test ever patched it.  The awaits of the
-  actuation phase stay in ``ha/phase_actuate.py`` — these stages are the pure
+  actuation phase stay in ``ha/phase_actuate.py`` — these stages are the
   decisions between them.
 * NO ERROR BOUNDARY lives here either: an exception in one of these stages
   propagates to ``_run_once`` unwrapped, because none of them collects

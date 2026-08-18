@@ -1,11 +1,20 @@
-"""Pure prepare-phase tick stage implementations.
+"""HA-free synchronous prepare-phase tick stage implementations.
 
 The eleven stages behind ``PreparePhase``: the device-health evaluation and
 the temperature/environment ingest, the observation family (EKF learn gate,
 window-auto slope detector, seasonless heat-up rate), the safety floors, the
 schedule/forecast gate, the central comfort solve and the intent latches.
 
-``ZoneRuntime`` owns the domain state and all PURE prepare stages; this module
+"HA-free synchronous" rather than "pure", and the distinction is not
+pedantic: five of these functions mutate the ``ZoneRuntime`` passed to them
+(``learn_step``, ``observe_window_auto``, ``observe_seasonless``,
+``_stage_observe_guarded``, ``stage_intents``), two of those log, and five
+carry an error boundary.  What they do NOT do is touch Home Assistant, await,
+or reach a device -- every effect they have lands on an object handed in by
+the caller.  ``pipeline_finalize`` is the one module here that really is pure
+construction.
+
+``ZoneRuntime`` owns the domain state and all prepare stages; this module
 holds those stage *implementations* as plain functions over (state groups,
 inputs, prior stage results).  The ``ZoneRuntime`` methods delegate here 1:1
 and the coordinator's ``_stage_*`` methods are thin delegations onto the
@@ -541,7 +550,24 @@ def _stage_observe_guarded(
     set_mpc_params: Callable[[MpcParams], None],
     logger: logging.Logger,
 ) -> ObservationResult:
-    """``stage_observe`` body under its transport wrap."""
+    """``stage_observe`` body under its transport wrap.
+
+    One narrative, chained by data in this order: window health (and the ADR-0041
+    §5 reset) -> effective window signal -> actuator capability + dynamics retune
+    -> learning gate -> window-auto update -> result. Only the retune is wrapped;
+    the ``try`` below covers those three statements and nothing else, so a failing
+    tuning refresh costs the profile and leaves window handling and learning
+    untouched.
+
+    NOT split, and that is a decision on record (plan P.2, outcome P.2b,
+    2026-08-17). The capability/retune block is the one genuine seam - it owns
+    that whole boundary and shares no state with the window chain - but
+    extracting it measured out at +29 code lines in the module to save 15 here,
+    with the four config parameters degraded to pass-throughs. The call cannot
+    move earlier to avoid that: today a window-block abort means the retune has
+    NOT run, and reordering would change that. The ratchet row carries the full
+    reasoning.
+    """
     now = ing.now
     frozen = ing.frozen
     reading = ing.reading
