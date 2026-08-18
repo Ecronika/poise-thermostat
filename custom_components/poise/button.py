@@ -56,11 +56,6 @@ class PoiseComfortFeedbackButton(CoordinatorEntity[PoiseCoordinator], ButtonEnti
         self._direction = direction
         self._attr_translation_key = f"too_{direction}"
         self._attr_unique_id = f"{entry.entry_id}_feedback_{direction}"
-        self._attr_icon = (
-            "mdi:thermometer-chevron-up"
-            if direction == "warm"
-            else "mdi:thermometer-chevron-down"
-        )
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=coordinator.zone_name,

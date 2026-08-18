@@ -93,6 +93,10 @@
           "max_flow_temp": "Maximum flow temperature (cap)",
           "flow_hysteresis": "Flow hysteresis (anti-hunt, K)",
           "default_heat_source": "Default heat source for 'auto' zones"
+        },
+        "data_description": {
+          "boiler_on_action": "Filled in field by field: pick the entity, then the service to call on it (a free-text service can be typed in). Extra service data is optional — e.g. hvac_mode: heat for climate.set_hvac_mode.",
+          "boiler_off_action": "Same fields as the ON action. Poise only switches the boiler when BOTH actions are set; leave both empty to stay diagnostic-only."
         }
       }
     },
@@ -105,7 +109,22 @@
     "error": {
       "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly.",
       "invalid_boiler_action": "That boiler action could not be read. Use the format entity_id/domain.service[/attr:value], e.g. switch.boiler/switch.turn_on — or leave it empty to stay diagnostic-only.",
-      "heat_cool_only": "This device only supports the combined heat/cool (dual-setpoint) mode. Poise writes one setpoint per actuator and can't drive it — pick a device with a single heat or cool target."
+      "heat_cool_only": "This device only supports the combined heat/cool (dual-setpoint) mode. Poise writes one setpoint per actuator and can't drive it — pick a device with a single heat or cool target.",
+      "invalid_boiler_action_fields": "That boiler action is incomplete. It needs an entity and a service written as domain.service (e.g. switch.turn_on); any extra service data must be given as key/value pairs. Remove the action entirely to stay diagnostic-only."
+    }
+  },
+  "exceptions": {
+    "missing_required_setting": {
+      "message": "Poise zone '{title}' is missing the required '{key}' setting. Reconfigure the zone to select it again."
+    },
+    "required_entity_disabled": {
+      "message": "Poise cannot start because a required entity is disabled in the entity registry: {entities}. Re-enable it, then reload Poise."
+    },
+    "required_entity_missing": {
+      "message": "Poise is waiting for a required entity that does not exist yet: {entities}. Setup retries automatically."
+    },
+    "persisted_state_unreadable": {
+      "message": "Poise {zone} could not read its persisted state. Setup retries automatically; no learned data was discarded."
     }
   },
   "options": {
@@ -238,8 +257,8 @@
             },
             "data_description": {
               "override_policy": "When a manual setpoint returns to automatic.",
-              "adopt_external_setpoint": "Only adopted when it can be told apart from an echo of Poise's own write: a prior write is needed as a baseline (persisted, so it survives a restart — it is only missing until Poise has written once), and a change within 120 s of one counts as its echo. Suppressed while the device's own schedule runs. The resulting hold is still clamped by window/frost/mould and the comfort band. Changing this option takes effect only after the zone is reloaded or Home Assistant restarts.",
-              "adopt_external_mode": "Same baseline and 120 s echo conditions as the setpoint. Not adopted while a window is open or sensors are frozen, or for modes the device does not support (incl. heat_cool). Fan speed, swing and device-side presets are never adopted. Changing this option takes effect only after the zone is reloaded or Home Assistant restarts.",
+              "adopt_external_setpoint": "Only adopted when it can be told apart from an echo of Poise's own write: a prior write is needed as a baseline (persisted, so it survives a restart — it is only missing until Poise has written once), and a change within 120 s of one counts as its echo. Suppressed while the device's own schedule runs. The resulting hold is still clamped by window/frost/mould and the comfort band.",
+              "adopt_external_mode": "Same baseline and 120 s echo conditions as the setpoint. Not adopted while a window is open or sensors are frozen, or for modes the device does not support (incl. heat_cool). Fan speed, swing and device-side presets are never adopted.",
               "override_suggestions": "After at least 3 same-direction manual nudges (>= 0.5 K, same schedule phase, 14 days) Poise raises a visible suggestion (repair issue) to adjust the comfort base or the comfort window. Nothing is ever changed silently. Off by default until the detection thresholds finished field tuning."
             }
           }
@@ -302,6 +321,13 @@
       "options": {
         "warm": "Too warm",
         "cold": "Too cold"
+      }
+    },
+    "boiler_action": {
+      "fields": {
+        "entity_id": "Boiler entity",
+        "action": "Service to call (domain.service)",
+        "data": "Additional service data (optional)"
       }
     }
   },

@@ -1,0 +1,95 @@
+{
+  "entity": {
+    "sensor": {
+      "q_solar": {
+        "default": "mdi:weather-sunny"
+      },
+      "beta_s": {
+        "default": "mdi:solar-power"
+      },
+      "tau_hours": {
+        "default": "mdi:timer-sand"
+      },
+      "confidence": {
+        "default": "mdi:gauge"
+      },
+      "identification_progress": {
+        "default": "mdi:progress-clock"
+      },
+      "learning_phase": {
+        "default": "mdi:school",
+        "state": {
+          "cold": "mdi:snowflake",
+          "early": "mdi:progress-clock",
+          "learning": "mdi:school",
+          "identified": "mdi:check-decagram"
+        }
+      },
+      "vent_advice": {
+        "default": "mdi:window-open-variant",
+        "state": {
+          "idle": "mdi:window-closed-variant",
+          "open": "mdi:window-open-variant",
+          "close": "mdi:window-closed-variant",
+          "discourage": "mdi:cancel"
+        }
+      },
+      "mpc_power": {
+        "default": "mdi:chart-timeline-variant"
+      },
+      "mpc_weight": {
+        "default": "mdi:scale-balance"
+      },
+      "tpi_valve_percent": {
+        "default": "mdi:valve"
+      },
+      "pi_offset": {
+        "default": "mdi:delta"
+      },
+      "ref_offset": {
+        "default": "mdi:swap-vertical"
+      },
+      "ca_deviation_k": {
+        "default": "mdi:bullseye-arrow"
+      },
+      "ca_cycles_per_h": {
+        "default": "mdi:sine-wave"
+      },
+      "ca_time_in_band": {
+        "default": "mdi:clock-check"
+      },
+      "compressor_guard_blocked": {
+        "default": "mdi:shield-lock-outline"
+      },
+      "tick_duration_ms": {
+        "default": "mdi:timer-outline"
+      }
+    },
+    "binary_sensor": {
+      "boiler_demand": {
+        "default": "mdi:fire"
+      }
+    },
+    "switch": {
+      "window_bypass": {
+        "default": "mdi:window-open-variant"
+      }
+    },
+    "button": {
+      "too_warm": {
+        "default": "mdi:thermometer-chevron-up"
+      },
+      "too_cold": {
+        "default": "mdi:thermometer-chevron-down"
+      }
+    }
+  },
+  "services": {
+    "resume_schedule": {
+      "service": "mdi:calendar-clock"
+    },
+    "comfort_feedback": {
+      "service": "mdi:thumbs-up-down"
+    }
+  }
+}

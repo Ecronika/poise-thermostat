@@ -45,7 +45,6 @@ class PoiseWindowBypassSwitch(CoordinatorEntity[PoiseCoordinator], SwitchEntity)
     # it is the user-facing escape hatch, so a fresh install shows it.
     _attr_entity_registry_enabled_default = True
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:window-open-variant"
 
     def __init__(self, coordinator: PoiseCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)

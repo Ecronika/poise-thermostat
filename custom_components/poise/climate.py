@@ -31,6 +31,7 @@ from .devices.hvac_modes import (
     current_hvac_mode,
     resolve_hvac_action,
 )
+from .runtime.tick_inputs import ActuatorSnapshot
 
 _ATTRS = (
     "operative_temperature",
@@ -204,6 +205,13 @@ _ATTRS = (
 # single actuator choke-point, so updates need no per-entity throttling.
 PARALLEL_UPDATES = 0
 
+# The step published while the actuator reports none of its own -- the value
+# this entity has always published, and a granularity every heating device can
+# honour. Deliberately NOT the write path's 0.1 fallback (phase_actuate): that
+# one snaps an already-computed setpoint and must not coarsen it, while this is
+# the granularity offered to a human on a slider.
+_FALLBACK_STEP_C = 0.5
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -235,9 +243,6 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
         | ClimateEntityFeature.TURN_OFF
     )
     _attr_preset_modes = [m.value for m in OverrideMode]
-    _attr_min_temp = FROST_FLOOR_C
-    _attr_max_temp = DEVICE_MAX_C
-    _attr_target_temperature_step = 0.5
 
     def __init__(self, coordinator: PoiseCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
@@ -278,6 +283,91 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
     @property
     def target_temperature(self) -> float | None:
         return self._d.get("target_temperature")
+
+    # ---- published setpoint envelope (dynamic, not constants) --------------
+    #
+    # The write side has always known the actuator's real limits; the entity
+    # used to publish ``[FROST_FLOOR_C, DEVICE_MAX_C]`` and a fixed 0.5 step,
+    # so the UI offered values the device cannot reach and hid values it can.
+    #
+    # What the published pair MEANS is fixed by HA: ``climate.set_temperature``
+    # is validated against exactly ``min_temp``/``max_temp`` and raises
+    # ``ServiceValidationError`` ("temp_out_of_range") outside them. Everything
+    # that passes lands in ``async_set_temperature`` -> ``set_override``, which
+    # sanitises the hold into ``[FROST_FLOOR_C, DEVICE_MAX_C]``. So the honest
+    # envelope is the INTERSECTION of Poise's accepted range and the device's
+    # physical one: every accepted value is kept unchanged, every value that
+    # would be silently clamped is refused up front with the limit named.
+    #
+    # NOT part of the envelope: the arbitrated comfort band (``heat_sp`` /
+    # ``cool_sp``, which also caps a hold -- see ``override_clamped``) and the
+    # dynamic mould floor. Both move every tick and are control decisions, not
+    # input validation; publishing them would make the slider jump under the
+    # user's finger (and the band is read-only by design, see the class
+    # docstring).
+
+    @property
+    def _actuator(self) -> ActuatorSnapshot:
+        """The actuator's own limits, freshly read.
+
+        A display-time read outside the tick, taken through the single
+        reading adapter ``ha/input_reader`` (the phase-4 read boundary) --
+        the same route the ``capability`` / ``hvac_modes`` pair already uses,
+        and one ``states.get`` for the whole snapshot. Deliberately NOT
+        ``coordinator.data``: the limits must be right before the first tick
+        has ever run and while the zone reports unavailable, neither of which
+        carries pipeline output.
+        """
+        # Named local: CoordinatorEntity is untyped to mypy (HA stubs are
+        # ignored), so ``self.coordinator`` arrives as Any.
+        coordinator: PoiseCoordinator = self.coordinator
+        return coordinator.input_reader.read_actuator()
+
+    @property
+    def max_temp(self) -> float:
+        """The device ceiling, never above Poise's own ``DEVICE_MAX_C``.
+
+        A device reporting more (an AC at 35 °C) would otherwise advertise a
+        setpoint ``sanitize_override`` silently pulls back to 30 °C. Absent or
+        non-numeric (no actuator state yet, device offline): the constant --
+        ``None`` or a raise here would break the entity, the card and the HA
+        thermostat card at once, so the fallback is exactly today's value.
+        """
+        device_max = self._actuator.max_temp
+        return DEVICE_MAX_C if device_max is None else min(device_max, DEVICE_MAX_C)
+
+    @property
+    def min_temp(self) -> float:
+        """The device floor, raised to the frost floor, kept below the ceiling.
+
+        Both directions are real. ``FROST_FLOOR_C`` is a safety floor Poise
+        never goes below (``sanitize_override`` clamps a hold up to it,
+        ``resolve_write_target`` re-applies it as a HEALTH floor), so passing a
+        lower device minimum straight through -- Zigbee TRVs commonly report
+        5 °C -- would advertise setpoints the zone discards. The other way round
+        matters just as much: a 16 °C-minimum AC must not advertise 7 °C, which
+        is the improvement over the old constant.
+
+        The closing ``min(..., self.max_temp)`` keeps the pair ordered even for
+        a device whose whole range sits above ``DEVICE_MAX_C``; an inverted
+        envelope makes the HA slider unusable and every set call fail.
+        """
+        device_min = self._actuator.min_temp
+        floor = FROST_FLOOR_C if device_min is None else max(device_min, FROST_FLOOR_C)
+        return min(floor, self.max_temp)
+
+    @property
+    def target_temperature_step(self) -> float:
+        """The device's own step, else ``_FALLBACK_STEP_C``.
+
+        HA serialises ``ClimateEntity.target_temperature_step`` under the wire
+        key ``target_temp_step``, not under the property name (review A.4); the
+        snapshot reads it under that key, so this property inherits the one
+        spelling the rest of the code uses. A non-positive step is treated as
+        absent: 0 makes HA's stepping arithmetic degenerate.
+        """
+        step = self._actuator.target_temperature_step
+        return step if step is not None and step > 0.0 else _FALLBACK_STEP_C
 
     @property
     def hvac_modes(self) -> list[HVACMode]:

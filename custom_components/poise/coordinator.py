@@ -192,8 +192,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             # raise an uncaught KeyError; the pure parser signals it and only
             # this adapter knows the entry id for the message.
             raise ConfigEntryError(
-                f"Poise entry '{entry.entry_id}' is missing the required "
-                f"'{err.key}' setting; reconfigure the zone."
+                translation_domain=DOMAIN,
+                translation_key="missing_required_setting",
+                translation_placeholders={
+                    "title": entry.title or entry.entry_id,
+                    "key": err.key,
+                },
             ) from err
         structure = cfg.structure
         self.zone_name: str = structure.zone_name
@@ -223,11 +227,6 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # see ``attach_listeners``/``_subscribe_inputs``.
         self._unsub_listeners: Callable[[], None] | None = None
         self._watched: tuple[str, ...] = ()
-        # Adopt device-side setpoint/mode changes as manual holds. Parsed as
-        # tuning but applied ONLY here: async_apply_options does not re-read
-        # them, so they stay deliberately absent from _apply_hot_tuning.
-        self._adopt_external_setpoint: bool = cfg.tuning.adopt_external_setpoint
-        self._adopt_external_mode: bool = cfg.tuning.adopt_external_mode
         # The single READING HA adapter: owns every ``states.get`` primitive
         # plus the device-guard discovery state. Constructed BEFORE the
         # hot-tuning apply so the apply can sync the options-owned presence
@@ -416,10 +415,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
 
         The ONE write path shared by ``__init__`` and ``async_apply_options``
         — exactly the fields both paths re-read. Deliberately NOT here: the
-        structural wiring and the adopt-external toggles (init-only),
-        ``climate_mode`` (store-owned) and the per-tick derived
-        ``_dynamics``/``_mpc_params``/PI profile (re-derived every tick in
-        ``_run_once``; an options submit must never reset them).
+        structural wiring, ``climate_mode`` (store-owned) and the per-tick
+        derived ``_dynamics``/``_mpc_params``/PI profile (re-derived every tick
+        in ``_run_once``; an options submit must never reset them).
         ``HotApplyConfig`` carries no structural fields at all, so this method
         cannot even reach for one.
         """
@@ -495,6 +493,15 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # now coupled to optimal-start (predictive scheduling), splittable later.
         self._optimal_stop = tuning.optimal_stop
         self._operative_input = tuning.operative_input
+        # ADR-0059 §8: adopt device-side setpoint/mode changes as manual holds.
+        # Hot-applyable since schema 2.3 — pure GATES inside ``observe_setpoint``
+        # /``observe_mode``, while every baseline they consult is maintained by
+        # stages that run on EVERY tick regardless of the gate. Flipping one
+        # therefore only opens/closes the gate from the next tick: nothing that
+        # happened while it was off is adopted late, and a hold already running
+        # is untouched (nor did the reload this replaces end one).
+        self._adopt_external_setpoint = tuning.adopt_external_setpoint
+        self._adopt_external_mode = tuning.adopt_external_mode
 
     def set_climate_entity_id(self, entity_id: str) -> None:
         """Record the room's climate entity_id for the ended-event payload."""
@@ -870,7 +877,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             data = await self._store.load()
         except Exception as err:  # noqa: BLE001 - transient I/O -> retry, don't wipe
             raise ConfigEntryNotReady(
-                f"Poise {self.zone_name}: could not load persisted state"
+                translation_domain=DOMAIN,
+                translation_key="persisted_state_unreadable",
+                translation_placeholders={"zone": self.zone_name},
             ) from err
         # Corruption recovery (narrowly scoped): the store FORMAT is owned by
         # ``persistence.codec``. ``decode()`` reproduces the pinned restore
@@ -1254,11 +1263,16 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         coordinator (the reload rebuilds it with the new data anyway).
 
         The data-dict comparison is deliberate: a field-wise ``ZoneStructure``
-        comparison is NOT equivalent — room ``entry.data`` carries
-        non-structure keys (the installation keys; on fresh entries also
-        ``comfort_base``/``category``) whose changes must keep reading as
-        structural, while the options-owned presence lists must stay out of
-        this predicate (see ``runtime.config.structures_equal``).
+        comparison is NOT equivalent — room ``entry.data`` still carries the
+        installation keys (``controls_boiler``/``compressor_group``/
+        ``declared_power``/``design_flow_temp``/``source_policy``), outside
+        ``ZoneStructure`` yet structural here, while the options-owned presence
+        lists ARE ``ZoneStructure`` fields and must stay OUT of this predicate
+        (see ``runtime.config.structures_equal``). The SECOND reason is gone
+        since schema 2.3 — fresh entries no longer put ``comfort_base``/
+        ``category`` in ``entry.data`` — so a field-wise predicate is thinkable
+        now, but it still has to answer the installation keys first: a separate
+        deliberate step, not a side effect of the storage change.
         """
         return dict(entry.data) == self._data_snapshot
 

@@ -136,9 +136,31 @@ from .const import (
     ENTRY_TYPE_SYSTEM,
     FROST_FLOOR_C,
 )
-from .control.hub_aggregate import parse_service_action
+from .control.hub_aggregate import parse_service_action, service_action_fields
+from .migration import SETUP_TUNING_KEYS
 
 _DYNAMICS_OPTIONS = ["auto", "fast_air", "slow_hydronic", "very_slow"]
+
+# Services a boiler/heat generator is realistically switched with. Offered as a
+# combobox WITH a free-text escape (``custom_value``) because HA has no "pick a
+# service" selector at all: the selector registry knows ``entity``/``target``
+# but no service type, and the one widget that does offer a service picker
+# (``action``) yields a whole script SEQUENCE — a different execution model than
+# the hub's single, blocking, timeout-bounded service call (see _boiler_action).
+_BOILER_SERVICES = [
+    "switch.turn_on",
+    "switch.turn_off",
+    "input_boolean.turn_on",
+    "input_boolean.turn_off",
+    "homeassistant.turn_on",
+    "homeassistant.turn_off",
+    "climate.set_hvac_mode",
+    "water_heater.set_operation_mode",
+    "valve.open_valve",
+    "valve.close_valve",
+    "script.turn_on",
+    "button.press",
+]
 
 # Options-flow section groups (ADR-0008): the single source of truth for which
 # tuning field lives in which collapsible section. Drives both the schema and the
@@ -467,6 +489,68 @@ def _setup_schema(hass: HomeAssistant) -> vol.Schema:
     )
 
 
+def _boiler_action() -> selector.ObjectSelector:
+    """Structured field editor for one boiler action (entity + service + data).
+
+    WHY THIS SELECTOR. The value is a single service call, and the hub executes
+    it as one — one blocking, timeout-bounded dispatch of ``domain`` + ``service``
+    + data, with the target entity id read back out of that data for the unload
+    hand-over comparison (AR-01). Of the three HA-native candidates only this one
+    matches that execution model:
+
+    * ``ActionSelector`` renders the familiar automation action editor (the only
+      HA widget with a real service picker) but its value is a SCRIPT SEQUENCE —
+      steps, delays, conditions, templates. Running it needs the ``Script``
+      helper, and "which entity does the OFF action target?" stops being a
+      question a sequence can answer, which is exactly what the hand-over and
+      removal safety paths ask. That is a hub change, not a form change.
+    * A flat set of ``EntitySelector`` + ``SelectSelector`` keys renders inline
+      and validates server-side, but it multiplies the two stored keys into six
+      and forces every reader (hub coordinator, unload, removal, diagnostics
+      redaction) onto a new key layout.
+    * ``ObjectSelector`` with declared ``fields`` keeps ONE key per action and
+      renders real sub-selectors (an entity picker among them), so the stored
+      value stays a single self-contained action.
+
+    How much the selector VALIDATES depends on the HA version: from 2026 it
+    checks the declared fields (required present, each sub-selector applied,
+    no unknown key), while on the supported minimum (2025.10) it hands the
+    submitted value through untouched. ``_validate_boiler_actions`` therefore
+    stays the load-bearing check — on the minimum it is the only one, and on
+    2026 it still catches what a field selector cannot judge (a service that is
+    not ``domain.service``; the combobox has a free-text escape by necessity).
+
+    The entity picker is deliberately UNFILTERED: the free-text form it replaces
+    accepted any domain, and a boiler is switched through a switch, an
+    input_boolean, a climate entity, a valve, a script or a button depending on
+    the plant. A domain filter would silently make existing setups unpickable.
+    """
+    fields: dict[str, Any] = {
+        "entity_id": {"selector": {"entity": {}}, "required": True},
+        "action": {
+            "selector": {
+                "select": {
+                    "options": _BOILER_SERVICES,
+                    "custom_value": True,
+                    "mode": "dropdown",
+                    "sort": False,
+                }
+            },
+            "required": True,
+        },
+        "data": {"selector": {"object": {}}, "required": False},
+    }
+    return selector.ObjectSelector(
+        selector.ObjectSelectorConfig(
+            fields=fields,
+            multiple=False,
+            label_field="entity_id",
+            description_field="action",
+            translation_key="boiler_action",
+        )
+    )
+
+
 def _system_schema() -> vol.Schema:
     return vol.Schema(
         {
@@ -482,8 +566,8 @@ def _system_schema() -> vol.Schema:
                     min=0, max=100000, step=0.1, mode=selector.NumberSelectorMode.BOX
                 )
             ),
-            vol.Optional(CONF_BOILER_ON_ACTION): selector.TextSelector(),
-            vol.Optional(CONF_BOILER_OFF_ACTION): selector.TextSelector(),
+            vol.Optional(CONF_BOILER_ON_ACTION): _boiler_action(),
+            vol.Optional(CONF_BOILER_OFF_ACTION): _boiler_action(),
             vol.Required(
                 CONF_BOILER_ACTIVATION_DELAY, default=DEFAULT_BOILER_ACTIVATION_DELAY_S
             ): selector.NumberSelector(
@@ -943,15 +1027,49 @@ def _heat_cool_only(hass: HomeAssistant, actuator: str) -> bool:
 def _validate_boiler_actions(user_input: Mapping[str, Any]) -> dict[str, str]:
     """Reject a boiler on/off action that doesn't parse (F11).
 
-    The on/off actions are free-text service specs; a typo would silently leave the
-    hub shadow-only. An empty action is allowed (diagnostic-only); a non-empty action
-    that ``parse_service_action`` can't parse fails the form so the mistake surfaces.
+    An unusable action would silently leave the hub shadow-only, so a non-empty
+    action that ``parse_service_action`` can't parse fails the form. An empty
+    action stays allowed (diagnostic-only hub).
+
+    Both stored forms are accepted: the structured mapping the field editor
+    writes and the legacy free-text spec (which the form itself can still submit
+    on the supported minimum, where ``ObjectSelector`` validates nothing — see
+    ``_boiler_action``). They get different messages because the advice differs:
+    a structured value has named fields, so "use the slash format" would be
+    wrong guidance.
     """
     for key in (CONF_BOILER_ON_ACTION, CONF_BOILER_OFF_ACTION):
         spec = user_input.get(key)
         if spec and parse_service_action(spec) is None:
+            if isinstance(spec, Mapping):
+                return {"base": "invalid_boiler_action_fields"}
             return {"base": "invalid_boiler_action"}
     return {}
+
+
+def _system_suggested(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Hub reconfigure pre-fill: show every stored boiler action in FIELD form.
+
+    An entry created before the structured editor stores the free-text spec; the
+    object selector expects a mapping, so decompose it (losslessly — the same
+    entity / ``domain.service`` / extra data) before it reaches the form. The
+    submit then writes the structured form back, so a legacy entry normalizes on
+    its first reconfigure without a store migration.
+
+    A stored value that does not parse is dropped from the pre-fill: it is
+    already inert (the hub stays shadow-only on it), and a field editor can only
+    render it as an empty row, so that action is started from scratch instead.
+    """
+    suggested = dict(data)
+    for key in (CONF_BOILER_ON_ACTION, CONF_BOILER_OFF_ACTION):
+        if key not in suggested:
+            continue
+        fields = service_action_fields(suggested[key])
+        if fields is None:
+            del suggested[key]
+        else:
+            suggested[key] = fields
+    return suggested
 
 
 class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg]
@@ -961,8 +1079,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     # window/presence/occupancy pickers (now multiple=True) to lists.
     # MINOR_VERSION 2 (ADR-0059 §7): migration pins pre-0.162 zones to the "timer"
     # override policy so their fixed-2 h manual hold is preserved verbatim.
+    # MINOR_VERSION 3: the onboarding step no longer writes its two tuning fields
+    # (SETUP_TUNING_KEYS) into ``data`` — the migration pulls them out of ``data``
+    # on entries created before that, so ``entry.data`` means "structure" again.
     VERSION = 2
-    MINOR_VERSION = 2
+    MINOR_VERSION = 3
     # F5: hub-existence captured when the reconfigure form was RENDERED, reused on
     # submit so the anlagen section shown and the reconcile's structural flag can
     # never disagree. The class-level default also gives mypy the type at the
@@ -1000,11 +1121,12 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
-            # The flattened sections land in entry.data, tuning fields
-            # (comfort_base/category) included: a new entry is created at
-            # VERSION 2, so migrate_room_entry never splits it —
-            # reconcile_reconfigure carries them into options on the first
-            # reconfigure.
+            # The flattened sections land in entry.data — except the two tuning
+            # fields the accuracy section collects (SETUP_TUNING_KEYS), which go
+            # straight into entry.options below. ``entry.data`` therefore means
+            # "structural wiring" on a fresh entry too, not "whatever the first
+            # form happened to show" (MINOR_VERSION 3 does the same for entries
+            # created before this).
             data = flatten_sections(user_input, ("accuracy",))
             act = data[CONF_ACTUATOR]
             reg = er.async_get(self.hass)
@@ -1035,7 +1157,14 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                 # listener from 2026.12. Nothing is lost: this call only aborts
                 # a duplicate, it never updates an existing entry here.
                 self._abort_if_unique_id_configured(reload_on_update=False)
-                return self.async_create_entry(title=data[CONF_NAME], data=data)
+                # Structure -> data, the two tuning values -> options. Reads are
+                # merged either way ({**data, **options}); what changes is the
+                # MEANING of entry.data, which the reload-vs-hot-apply predicate
+                # (PoiseCoordinator.structural_unchanged) keys on.
+                options = {k: data.pop(k) for k in SETUP_TUNING_KEYS if k in data}
+                return self.async_create_entry(
+                    title=data[CONF_NAME], data=data, options=options
+                )
         return self.async_show_form(
             step_id="room", data_schema=_setup_schema(self.hass), errors=errors
         )
@@ -1055,9 +1184,16 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     title="Poise System",
                     data={CONF_ENTRY_TYPE: ENTRY_TYPE_SYSTEM, **user_input},
                 )
-        return self.async_show_form(
-            step_id="system", data_schema=_system_schema(), errors=errors
-        )
+        schema = _system_schema()
+        if user_input is not None:
+            # A rejected submit keeps what was entered. This matters more now
+            # that a boiler action is filled in field by field: re-rendering an
+            # empty form would throw the whole dialog away over one typo. The
+            # raw submit is used as-is (NOT via _system_suggested, which drops
+            # an unparseable value — here that value is exactly what has to come
+            # back for the user to fix).
+            schema = self.add_suggested_values_to_schema(schema, user_input)
+        return self.async_show_form(step_id="system", data_schema=schema, errors=errors)
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
@@ -1083,7 +1219,7 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             return self.async_show_form(
                 step_id="reconfigure",
                 data_schema=self.add_suggested_values_to_schema(
-                    _system_schema(), entry.data
+                    _system_schema(), _system_suggested(entry.data)
                 ),
                 errors=errors,
             )

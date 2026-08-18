@@ -220,8 +220,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         eid = entry.data.get(key)
         if not isinstance(eid, str) or not eid:
             raise ConfigEntryError(
-                f"Poise entry '{entry.title}' is missing the required '{key}' "
-                "setting; reconfigure the zone."
+                translation_domain=DOMAIN,
+                translation_key="missing_required_setting",
+                translation_placeholders={"title": entry.title, "key": key},
             )
         required[key] = eid
 
@@ -253,7 +254,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             },
         )
         raise ConfigEntryError(
-            f"required entity disabled in the registry: {disabled_ids}"
+            translation_domain=DOMAIN,
+            translation_key="required_entity_disabled",
+            translation_placeholders={"entities": ", ".join(disabled_ids)},
         )
 
     # Retry setup while a required entity does not exist yet — the actuator/sensor
@@ -262,7 +265,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # degraded path (hold last state, then the frost/mould safe state).
     missing = [eid for eid in required.values() if hass.states.get(eid) is None]
     if missing:
-        raise ConfigEntryNotReady(f"required entity not available yet: {missing}")
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key="required_entity_missing",
+            translation_placeholders={"entities": ", ".join(missing)},
+        )
 
     coordinator = PoiseCoordinator(hass, entry)
     await coordinator.async_bootstrap()
@@ -293,7 +300,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """V1 -> V2 config-entry schema migration (ADR-0007/0008).
+    """Config-entry schema migration to 2.3 (ADR-0007/0008/0059).
 
     Split ``entry.data`` into structural inputs (kept in ``data``) + hot-applyable
     tuning (moved to ``options``) and normalize the multi-entity pickers
@@ -301,6 +308,15 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     step can later shrink to structural fields without silently dropping tuning
     that used to live in ``data``. Hub entries keep their content unchanged (only
     the version bumps).
+
+    MINOR_VERSION 3 widens the REACH of that one split to entries stored at 2.2:
+    the onboarding step used to write ``comfort_base``/``category``
+    (``SETUP_TUNING_KEYS``) into ``data``, so those entries carried tuning in
+    ``data`` until their first reconfigure. Re-running the split relocates them —
+    and only them, because every other key a v2.2 ``data`` can hold is in
+    ``STRUCTURAL_KEYS``. A value already present in ``options`` is the newer one
+    and survives (the split's options-over-data merge), and the split is
+    idempotent, so a repeated migration cannot corrupt the store.
     """
     # AR-36: HA itself refuses to *downgrade* a config entry — it never calls
     # async_migrate_entry when entry.version exceeds the integration's schema — so
@@ -322,13 +338,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # (version, minor_version) pair and does not treat the entry as needing a
     # minor migration on every load.
     hass.config_entries.async_update_entry(
-        entry, data=new_data, options=new_options, version=2, minor_version=2
+        entry, data=new_data, options=new_options, version=2, minor_version=3
     )
     # F22: leave a diagnosable trace of the migration (ADR-0018).
     import logging
 
     logging.getLogger(__name__).info(
-        "Poise: migrated config entry '%s' to schema version 2", entry.title
+        "Poise: migrated config entry '%s' to schema version 2.3", entry.title
     )
     return True
 

@@ -22,7 +22,10 @@ rules:
   common-modules: done  # coordinator.py; pure core/HA-glue separation (ADR-0005)
   dependency-transparency:
     status: exempt
-    comment: No external Python dependencies (manifest requirements: []).
+    # Quoted: the unquoted plain scalar broke on the ": " inside it, which
+    # made the whole file unparseable (hassfest only schema-checks
+    # quality_scale.yaml for CORE integrations, so CI never noticed).
+    comment: "No external Python dependencies (manifest requirements: [])."
   action-setup:
     status: done
     comment: >-
@@ -45,8 +48,14 @@ rules:
   brands:
     status: todo
     comment: >-
-      In-repo brand/icon.png + logo.png exist (satisfies HACS); a PR to
-      home-assistant/brands is still needed for the core rule.
+      NOT achievable from this repository — the rule is satisfied by an
+      EXTERNAL asset repo, not by anything under custom_components/.
+      brand/icon.png + brand/logo.png exist here (both 256x256) and satisfy
+      HACS. Outstanding, and only the integration owner (@Ecronika) can do
+      it: open a PR against github.com/home-assistant/brands adding
+      custom_integrations/poise/ with the icon/logo sizes that repo's README
+      mandates (a 512x512 icon@2x is likely needed on top of today's 256px
+      assets). Until that PR is merged this entry must stay todo.
   docs-removal-instructions: done  # README "Removing the integration" section
 
   # ---------------- Silver ----------------
@@ -92,36 +101,67 @@ rules:
   entity-disabled-by-default:
     status: done
     comment: >-
-      14 of the 18 diagnostic sensors (mpc_*, beta_s, q_solar, ca_*, t_rm,
-      mrt, tau_hours, vent_advice, tick_duration_ms, ...) ship
-      entity_registry_enabled_default False; only the lean user-facing set
-      (operative_temperature, confidence, learning_phase,
-      override_expires_at) is enabled. tpi_*/pi_* are climate attributes,
-      not entities.
+      19 of the 23 diagnostic sensors (mpc_*, tpi_valve_percent, pi_*,
+      ref_offset, beta_s, q_solar, ca_*, t_rm, mrt, tau_hours,
+      identification_progress, vent_advice, compressor_guard_blocked,
+      tick_duration_ms) ship entity_registry_enabled_default False; only the
+      lean user-facing set (operative_temperature, confidence,
+      learning_phase, override_expires_at) is enabled — pinned by
+      tests/integration/test_entity_defaults.py, together with the
+      window-bypass switch and the two feedback buttons.
   exception-translations:
-    status: todo
-    comment: Make the ConfigEntryNotReady / error messages translatable.
+    status: done
+
   icon-translations:
-    status: todo
-    comment: Add icons.json with icon translations.
+    status: done
+
   docs-supported-functions: done  # README capability status + Entities created
   docs-data-update:
-    status: todo
-    comment: Document the 60 s polling + event-driven update model in the docs.
+    status: done
+    comment: >-
+      README "How Poise updates its data" — 60 s DataUpdateCoordinator tick,
+      the IMMEDIATE vs NEXT_TICK input split (runtime/input_registry.py), the
+      unchanged-state/attribute-churn filter, refresh coalescing, the cached
+      weather forecast, and the hub's separate 60 s timer with
+      update_interval=None.
   docs-supported-devices:
-    status: todo
-    comment: List known-good TRVs / climate entities.
+    status: done
+    comment: >-
+      README "Supported devices" — hard requirements (metric, single target
+      temperature, no heat_cool-only, separate room sensor, one zone per
+      thermostat), the hvac_modes-based heat/cool capability rule, the table
+      of auto-detected optional device features, and an explicit statement
+      that only the Sonoff TRVZB has been bench-verified (ADR-0036 addendum);
+      everything else is harness/capability-validated. No invented
+      "known-good" list.
   docs-known-limitations:
-    status: todo
-    comment: Document the Alpha / shadow-only predictive paths as limitations.
+    status: done
+    comment: >-
+      README "Known limitations" — shadow-only MPC/TPI/PI/calibration, the
+      shadow multi-zone allocators, Celsius-only, heat_cool-only rejection,
+      the single-writer assumption, one actuator per zone, the adoption
+      modality limit, the learning cold start, and the non-goals.
   docs-troubleshooting:
-    status: todo
-    comment: Add a troubleshooting section (repair issues, common pitfalls).
+    status: done
+    comment: >-
+      README "Troubleshooting" — all repair issues taken from the code
+      (health_reporter.py, control/pipeline_prepare.py, ha/phase_*.py,
+      coordinator.py, hub_coordinator.py, __init__.py, repairs.py), grouped
+      by area, each with meaning + action, plus the three fixable suggestion
+      flows and a "not a repair issue" section for the common pitfalls
+      (clamped override, suppressed device adoption, disabled sensors,
+      attributes vs entities, write throttle).
   docs-use-cases:
-    status: todo
+    status: done
+    comment: README "Use cases".
   docs-examples:
-    status: todo
-    comment: Add automation/dashboard examples.
+    status: done
+    comment: >-
+      README "Examples" — seven automations plus a card, written against the
+      real surface: poise.resume_schedule / poise.comfort_feedback from
+      services.yaml, the poise_override_ended and poise_ventilation_advice
+      bus events with their actual payload keys, real climate attributes and
+      the entity ids pinned by tests/integration/test_entity_defaults.py.
 
   # ---------------- Platinum ----------------
   strict-typing: done  # mypy --strict over the whole integration (no ignore_errors)

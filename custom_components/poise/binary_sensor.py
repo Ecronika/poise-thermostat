@@ -65,7 +65,6 @@ class PoiseBoilerDemand(CoordinatorEntity[PoiseHubCoordinator], BinarySensorEnti
     _attr_translation_key = "boiler_demand"
     _attr_device_class = BinarySensorDeviceClass.HEAT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:fire"
 
     def __init__(self, coordinator: PoiseHubCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)

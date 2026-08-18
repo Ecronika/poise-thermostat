@@ -6,12 +6,24 @@ hot-applyable tuning to ``options``, so the reconfigure step (a full data
 replace) can shrink to structural fields without silently dropping tuning that
 still lived in ``data``. The multi-entity pickers (window / presence /
 occupancy) also migrate from a single entity id to a one-element list.
+
+MINOR_VERSION 3 closes the last hole in that rule at the SOURCE: the onboarding
+step used to write its two tuning fields (``SETUP_TUNING_KEYS`` — comfort base
+and comfort category) into ``data`` as well, so a freshly created v2.2 entry
+carried tuning in ``data`` until its first reconfigure. ``async_step_room`` now
+creates the entry with those two in ``options``, and the minor bump re-runs the
+very same V2 split over existing entries — no separate rule, so any future
+setup-form tuning key is relocated by construction (pinned:
+``SETUP_TUNING_KEYS`` and ``STRUCTURAL_KEYS`` are disjoint). A value already in
+``options`` is the newer one and wins, exactly as on the V1 path.
 """
 
 from __future__ import annotations
 
 from .const import (
     CONF_ACTUATOR,
+    CONF_CATEGORY,
+    CONF_COMFORT_BASE,
     CONF_COMPRESSOR_GROUP,
     CONF_CONTROLS_BOILER,
     CONF_DECLARED_POWER,
@@ -22,6 +34,7 @@ from .const import (
     CONF_MRT_SENSOR,
     CONF_NAME,
     CONF_OCCUPANCY_SENSOR,
+    CONF_OUTDOOR_HUMIDITY_SENSOR,
     CONF_OUTDOOR_SENSOR,
     CONF_OVERRIDE_POLICY,
     CONF_PRESENCE_HOME,
@@ -44,6 +57,10 @@ STRUCTURAL_KEYS: frozenset[str] = frozenset(
         CONF_ACTUATOR,
         CONF_OUTDOOR_SENSOR,
         CONF_HUMIDITY_SENSOR,
+        # ADR-0066 B.3: added to the reconfigure form long after this set was
+        # written. It is entity wiring (a ``ZoneStructure`` field, reload-only),
+        # so it belongs here — without it the split would file it as tuning.
+        CONF_OUTDOOR_HUMIDITY_SENSOR,
         CONF_WINDOW_SENSOR,
         CONF_WEATHER,
         CONF_TRM_SENSOR,
@@ -57,6 +74,13 @@ STRUCTURAL_KEYS: frozenset[str] = frozenset(
         CONF_SOURCE_POLICY,
     }
 )
+
+# Tuning the ONBOARDING form collects (``config_flow._setup_schema``). These go
+# into ``entry.options`` at creation time and are pulled out of ``data`` by the
+# MINOR_VERSION 3 migration for entries created before that. Disjoint from
+# ``STRUCTURAL_KEYS`` by contract (pinned in ``tests/test_migration.py``), which
+# is what makes the plain V2 split the whole minor-3 rule.
+SETUP_TUNING_KEYS: frozenset[str] = frozenset({CONF_COMFORT_BASE, CONF_CATEGORY})
 
 # Multi-entity pickers: a single entity id migrates to a one-element list.
 MULTI_ENTITY_KEYS: frozenset[str] = frozenset(
@@ -80,6 +104,11 @@ def migrate_room_entry(
     options value wins (it holds the newer, hot-tuned value) — except for the
     structural keys, which are data-owned (they need a reload and are never
     hot-tuned), so a stale options copy must not shadow them on the merge.
+
+    Idempotent: the output of a split is already split, so re-running it is a
+    no-op. That is what lets MINOR_VERSION 3 reuse this one rule to relocate
+    ``SETUP_TUNING_KEYS`` on entries created before the onboarding step wrote
+    them into ``options`` itself.
     """
     if data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM:
         return dict(data), dict(options)  # hub entry: untouched
