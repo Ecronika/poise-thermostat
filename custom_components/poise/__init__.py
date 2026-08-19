@@ -542,9 +542,8 @@ async def _park_room_actuator(
         CONF_SETBACK_DELTA,
         DEFAULT_COMFORT_BASE,
         DEFAULT_SETBACK_DELTA,
-        FROST_FLOOR_C,
     )
-    from .control.lifecycle import resolve_park_command
+    from .ha.actuator_lifecycle import park_actuator
     from .storage import PoiseStore
 
     stored = await PoiseStore(hass, entry.entry_id).load() or {}
@@ -560,112 +559,18 @@ async def _park_room_actuator(
         "disable" if live_mode else "removal",
     )
     cfg = {**entry.data, **entry.options}
-    st = hass.states.get(actuator)
-    modes = (
-        [str(m) for m in (st.attributes.get("hvac_modes") or [])]
-        if st is not None
-        else []
-    )
     setback = float(cfg.get(CONF_COMFORT_BASE, DEFAULT_COMFORT_BASE)) - float(
         cfg.get(CONF_SETBACK_DELTA, DEFAULT_SETBACK_DELTA)
     )
     # AR-13: the live climate mode is the store's, not the static entry config's.
-    climate_mode = str(stored.get("climate_mode", "auto"))
-    plan = resolve_park_command(
-        is_valve=actuator.startswith("number."),
-        hvac_modes=modes,
-        heats_for_zone="heat" in modes and climate_mode != "cool_only",
+    # State read, device_min clamp, plan and execution live in the shared
+    # lifecycle module (review 2026-08-19 P1) — only the policy stays here.
+    await park_actuator(
+        hass,
+        actuator,
+        climate_mode=str(stored.get("climate_mode", "auto")),
         setback_setpoint=setback,
-        floor=FROST_FLOOR_C,
     )
-    await _execute_park(hass, actuator, plan)
-    await _restore_trv_internal(hass, actuator)
-
-
-async def _execute_park(hass: HomeAssistant, actuator: str, plan: Any) -> None:
-    """Perform the resolved park command on delete/disable (review F3/F27).
-
-    Blocking on every call (AR-17/F27) so an execution error surfaces instead of
-    being lost as a fire-and-forget background task, and ``set_hvac_mode`` is
-    awaited BEFORE ``set_temperature`` so a device that only accepts a setpoint in
-    its target mode honours it. Expected execution errors are caught and logged,
-    not silently swallowed.
-    """
-    import logging
-
-    from homeassistant.exceptions import HomeAssistantError
-
-    if plan is None:
-        return
-    try:
-        if plan.kind == "valve":
-            await hass.services.async_call(
-                "number",
-                "set_value",
-                {"entity_id": actuator, "value": plan.valve_value},
-                blocking=True,
-            )
-            return
-        await hass.services.async_call(
-            "climate",
-            "set_hvac_mode",
-            {"entity_id": actuator, "hvac_mode": plan.hvac_mode},
-            blocking=True,
-        )
-        if plan.setpoint is not None:
-            await hass.services.async_call(
-                "climate",
-                "set_temperature",
-                {"entity_id": actuator, "temperature": plan.setpoint},
-                blocking=True,
-            )
-    except (HomeAssistantError, ValueError):
-        logging.getLogger(__name__).exception("Poise: actuator park on removal failed")
-
-
-async def _restore_trv_internal(hass: HomeAssistant, actuator: str) -> None:
-    """Flip a TRV sensor-source select back to 'internal' so a deleted/disabled zone
-    no longer regulates the device against a now-frozen external feed (review F6).
-
-    Only touches a select the repo's own classifier recognises as a sensor-source
-    switch (``is_external_sensor_select`` — must expose BOTH 'external' and
-    'internal', AR-18) and skips one already 'internal' (idempotent, no needless
-    write).
-    """
-    import logging
-
-    from homeassistant.helpers import entity_registry as er
-
-    from .devices.model_fixes import is_external_sensor_select
-
-    try:
-        reg = er.async_get(hass)
-        ent = reg.async_get(actuator)
-        if ent is None or ent.device_id is None:
-            return
-        for dev_ent in er.async_entries_for_device(reg, ent.device_id):
-            if dev_ent.domain != "select":
-                continue
-            st = hass.states.get(dev_ent.entity_id)
-            if st is None:
-                continue
-            options = st.attributes.get("options") or []
-            # AR-18: only a genuine internal/external sensor-source select.
-            if not is_external_sensor_select(dev_ent.entity_id, options):
-                continue
-            # AR-18: already internal -> nothing to do (idempotent, no thrash).
-            if st.state == "internal":
-                continue
-            await hass.services.async_call(
-                "select",
-                "select_option",
-                {"entity_id": dev_ent.entity_id, "option": "internal"},
-                blocking=False,
-            )
-    except Exception:  # noqa: BLE001 - sensor-source restore is best-effort
-        logging.getLogger(__name__).exception(
-            "Poise: TRV sensor-source restore on removal failed"
-        )
 
 
 def _remove_trace_file(path: str) -> None:

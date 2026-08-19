@@ -725,122 +725,37 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             user.suggestion_rejected_at = _utcnow_ts()
         self._zone_runtime.dirty = True
 
+    # The three suggestion-issue mirrors are thin facades since review
+    # 2026-08-19 P3: the bodies live on the HealthReporter (the owner of the
+    # repair-issue surface), while the PORT names stay here — the O.2/O.3
+    # census and the ports adapter (``tick_ports``) bind ``_sync_*`` on the
+    # coordinator, and the coordinator-owned gate/readings travel per call.
+
     def _sync_clo_suggestion_issue(self, suggestion: CloSuggestion | None) -> None:
-        """ADR-0067 F2: mirror the emittable clo reading into a fixable issue.
-
-        Same trust rules as L2: gated on the ``override_suggestions`` toggle
-        (ADR-0060 §3: default on, the toggle is the per-zone opt-out); the
-        caller already resolved the #4 conflict, so ``None`` here also
-        covers a blocked reading.
-        """
-        from homeassistant.helpers import issue_registry as ir
-
-        issue_id = f"clo_suggestion_{self._entry_id}"
-        if not (self._override_suggestions and suggestion):
-            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-            return
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=True,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=(
-                "clo_suggestion_up"
-                if suggestion.direction > 0
-                else "clo_suggestion_down"
-            ),
-            translation_placeholders={
-                "name": self.zone_name,
-                "count": str(suggestion.evidence),
-                # Mirrors control.feedback.CLO_SUGGEST_STEP (display only).
-                "step": "0.1",
-            },
-            data={
-                "entry_id": self._entry_id,
-                "kind": "clo_offset",
-                "direction": suggestion.direction,
-                "key": suggestion.key,
-            },
+        """ADR-0067 F2 facade — body in ``HealthReporter``."""
+        self._health.sync_clo_suggestion_issue(
+            suggestion, enabled=self._override_suggestions
         )
 
     def _sync_suggestion_issue(
         self, suggestion: OverrideSuggestion | None, suppressed: bool
     ) -> None:
-        """Mirror the detected L2 pattern into a fixable repair issue.
-
-        Emission is gated on the ``override_suggestions`` toggle (ADR-0060
-        §3: default on, the toggle is the per-zone opt-out); the issue
-        disappears as soon as the pattern does. ``async_create_issue`` is
-        idempotent per tick.
-        """
-        from homeassistant.helpers import issue_registry as ir
-
-        issue_id = f"override_suggestion_{self._entry_id}"
-        if not (self._override_suggestions and suggestion and not suppressed):
-            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-            return
-        if suggestion.kind == "comfort_base":
-            translation_key = (
-                "override_suggestion_base_up"
-                if suggestion.direction > 0
-                else "override_suggestion_base_down"
-            )
-            step = f"{suggestion.step_k:.1f}"
-        else:
-            translation_key = "override_suggestion_earlier"
-            step = str(suggestion.step_min)
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=True,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=translation_key,
-            translation_placeholders={
-                "name": self.zone_name,
-                "count": str(suggestion.evidence),
-                "step": step,
-            },
-            data={
-                "entry_id": self._entry_id,
-                "kind": suggestion.kind,
-                "direction": suggestion.direction,
-                "key": suggestion.key,
-            },
+        """ADR-0060 L2 facade — body in ``HealthReporter``."""
+        self._health.sync_suggestion_issue(
+            suggestion, suppressed, enabled=self._override_suggestions
         )
 
     def _sync_season_hint_issue(self, hint: str | None) -> None:
-        """ADR-0060 §2: mirror the season-mode advisory into a repair issue.
-
-        NON-fixable (purely advisory — the user switches the mode, never
-        Poise); same trust rules as L2: gated on the ``override_suggestions``
-        toggle, and the issue disappears as soon as the condition does.
-        """
-        from homeassistant.helpers import issue_registry as ir
-
-        issue_id = f"season_mode_hint_{self._entry_id}"
-        if not (self._override_suggestions and hint):
-            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-            return
-        threshold = (
-            self._heat_max_outdoor
-            if hint == "heat_only_in_cooling"
-            else self._cool_min_outdoor
-        )
-        t_rm = (self.data or {}).get("t_rm")
-        ir.async_create_issue(
-            self.hass,
-            DOMAIN,
-            issue_id,
-            is_fixable=False,
-            severity=ir.IssueSeverity.WARNING,
-            translation_key=f"season_hint_{hint}",
-            translation_placeholders={
-                "name": self.zone_name,
-                "t_rm": str(t_rm) if t_rm is not None else "?",
-                "threshold": f"{threshold:.0f}",
-            },
+        """ADR-0060 §2 facade — body in ``HealthReporter``."""
+        self._health.sync_season_hint_issue(
+            hint,
+            enabled=self._override_suggestions,
+            threshold=(
+                self._heat_max_outdoor
+                if hint == "heat_only_in_cooling"
+                else self._cool_min_outdoor
+            ),
+            t_rm=(self.data or {}).get("t_rm"),
         )
 
     @property
