@@ -10,7 +10,9 @@
           "actuator": "Thermostat / TRV to control"
         },
         "data_description": {
-          "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
+          "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong.",
+          "name": "Becomes the device and entity name.",
+          "actuator": "The climate entity Poise writes to — changing it releases the old device (parked in a safe state) and starts adopting the new one."
         },
         "sections": {
           "sensors": {
@@ -26,6 +28,17 @@
               "weather_entity": "Weather entity (forecast)",
               "irradiance_sensor": "Solar irradiance sensor (W/m²)",
               "trv_external_temp_input": "TRV external-temperature input"
+            },
+            "data_description": {
+              "trm_sensor": "A precomputed running-mean outdoor temperature (T_rm). Without it, Poise derives T_rm itself from the outdoor input.",
+              "outdoor_sensor": "A physical outdoor sensor. Without one, Poise falls back to the weather entity's current temperature.",
+              "humidity_sensor": "Enables the DIN 4108-2 mould-protection floor and the humidity comfort ceiling for this room.",
+              "outdoor_humidity_sensor": "Lets the ventilation advice compare indoor vs. outdoor moisture before recommending airing.",
+              "mrt_sensor": "Mean radiant temperature for the operative-temperature calculation. Without it, Poise estimates MRT from the room model.",
+              "window_sensor": "Open pauses heating and model learning. Even without a contact, Poise can detect an opened window from the temperature slope.",
+              "weather_entity": "Forecast source for optimal start/stop (preheat and coast timing). Read through Home Assistant's forecast service and cached.",
+              "irradiance_sensor": "Solar irradiance (W/m²) sharpens the learned solar-gain model; without it a clear-sky estimate is used.",
+              "trv_external_temp_input": "The TRV's number entity for an external room temperature. When set, Poise feeds the room sensor to the TRV so it regulates on real room air instead of its internal probe."
             }
           },
           "anlagen": {
@@ -37,6 +50,13 @@
               "declared_power": "Declared heating power (for load shedding / weighted demand)",
               "design_flow_temp": "Design flow temperature for this zone",
               "source_policy": "Heat-source policy (set by your energy automation)"
+            },
+            "data_description": {
+              "controls_boiler": "ON = this zone's heat demand counts toward the shared boiler request.",
+              "compressor_group": "Zones sharing one outdoor unit. Within a group the guard blocks conflicting heat/cool and rapid mode flips.",
+              "declared_power": "Nominal emitter power of this zone — the weight behind the power-threshold gate and load shedding.",
+              "design_flow_temp": "The flow temperature this zone's emitter was sized for; feeds the aggregated flow target.",
+              "source_policy": "Written by your energy automation (e.g. PV surplus → heat pump); 'auto' follows the hub's default heat source."
             }
           }
         }
@@ -50,7 +70,9 @@
           "actuator": "Thermostat / TRV to control"
         },
         "data_description": {
-          "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong."
+          "temp_sensor": "Use a free-standing room sensor away from the radiator — NOT the thermostat's/TRV's built-in sensor, or the room model learns wrong.",
+          "name": "Optional — becomes the device and entity name. Left blank, Poise derives it from the thermostat's friendly name.",
+          "actuator": "The climate entity Poise writes to — TRV, AC unit or thermostat (one Poise zone per device). Poise detects its capabilities and picks the safest write path."
         },
         "sections": {
           "accuracy": {
@@ -64,6 +86,15 @@
               "outdoor_humidity_sensor": "Outdoor humidity (ventilation advice)",
               "window_sensor": "Window / contact sensor (pauses heating when open)",
               "weather_entity": "Weather entity (forecast, for optimal start)"
+            },
+            "data_description": {
+              "comfort_base": "The temperature the comfort band is built around. Schedule and presets shift around this base — adjust the base, not the presets.",
+              "category": "EN 16798-1 comfort class: I = tightest band (highest comfort demand), III = widest (most savings). II is the norm default for dwellings.",
+              "outdoor_sensor": "A physical outdoor sensor. Without one, Poise falls back to the weather entity's current temperature.",
+              "humidity_sensor": "Enables the DIN 4108-2 mould-protection floor and the humidity comfort ceiling for this room.",
+              "outdoor_humidity_sensor": "Lets the ventilation advice compare indoor vs. outdoor moisture before recommending airing.",
+              "window_sensor": "Open pauses heating and model learning. Even without a contact, Poise can detect an opened window from the temperature slope.",
+              "weather_entity": "Forecast source for optimal start/stop (preheat and coast timing). Read through Home Assistant's forecast service and cached — Poise itself polls no cloud."
             }
           }
         }
@@ -96,7 +127,18 @@
         },
         "data_description": {
           "boiler_on_action": "Filled in field by field: pick the entity, then the service to call on it (a free-text service can be typed in). Extra service data is optional — e.g. hvac_mode: heat for climate.set_hvac_mode.",
-          "boiler_off_action": "Same fields as the ON action. Poise only switches the boiler when BOTH actions are set; leave both empty to stay diagnostic-only."
+          "boiler_off_action": "Same fields as the ON action. Poise only switches the boiler when BOTH actions are set; leave both empty to stay diagnostic-only.",
+          "boiler_count_threshold": "How many zones must actively call for heat before the boiler is requested (1 = any single zone).",
+          "boiler_power_threshold": "Alternative demand gate: request the boiler once the declared-power-weighted demand reaches this value. Empty/0 = count gate only.",
+          "boiler_activation_delay_s": "Debounce — demand must persist this long before the ON action fires, riding out brief TRV blips.",
+          "boiler_keepalive_s": "Re-sends the ON action periodically, for receivers that drop to a fallback state when idle (0 = off).",
+          "boiler_min_on_s": "Anti-short-cycle: once switched on, the boiler stays on at least this long.",
+          "boiler_min_off_s": "Anti-short-cycle: once switched off, the boiler stays off at least this long.",
+          "max_power_sensor": "Sensor holding the currently allowed total power. Together with the current-power sensor it enables load shedding.",
+          "current_power_sensor": "Sensor holding the current total draw — compared against the maximum for load shedding.",
+          "max_flow_temp": "Upper cap on the aggregated flow-temperature target published for the boiler.",
+          "flow_hysteresis": "Minimum change (K) before a new flow target is published — prevents hunting on the mixing valve.",
+          "default_heat_source": "The heat source zones on 'auto' use while no energy automation has written a policy."
         }
       }
     },

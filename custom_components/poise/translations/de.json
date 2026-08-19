@@ -10,7 +10,9 @@
           "actuator": "Zu steuerndes Thermostat / TRV"
         },
         "data_description": {
-          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
+          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch.",
+          "name": "Wird zum Geräte- und Entitätsnamen.",
+          "actuator": "Die climate-Entität, in die Poise schreibt — ein Wechsel gibt das alte Gerät frei (sicher geparkt) und beginnt die Übernahme des neuen."
         },
         "sections": {
           "sensors": {
@@ -26,6 +28,17 @@
               "weather_entity": "Wetter-Entität (Prognose)",
               "irradiance_sensor": "Globalstrahlungssensor (W/m²)",
               "trv_external_temp_input": "TRV-Eingang externe Temperatur"
+            },
+            "data_description": {
+              "trm_sensor": "Ein vorberechneter gleitender Außentemperatur-Mittelwert (T_rm). Ohne ihn leitet Poise T_rm selbst aus dem Außenwert ab.",
+              "outdoor_sensor": "Ein physischer Außensensor. Ohne ihn nutzt Poise die aktuelle Temperatur der Wetter-Entität.",
+              "humidity_sensor": "Aktiviert den Schimmelschutz-Boden nach DIN 4108-2 und die Feuchte-Komfortobergrenze für diesen Raum.",
+              "outdoor_humidity_sensor": "Erlaubt der Lüftungsempfehlung den Vergleich von Innen- und Außenfeuchte, bevor Lüften empfohlen wird.",
+              "mrt_sensor": "Mittlere Strahlungstemperatur für die operative Temperatur. Ohne sie schätzt Poise die MRT aus dem Raummodell.",
+              "window_sensor": "Offen pausiert Heizen und Modelllernen. Auch ohne Kontakt kann Poise ein geöffnetes Fenster am Temperaturverlauf erkennen.",
+              "weather_entity": "Prognosequelle für Optimal Start/Stopp (Vorheiz- und Ausroll-Timing). Über Home Assistants Forecast-Dienst gelesen und gecacht.",
+              "irradiance_sensor": "Solare Einstrahlung (W/m²) schärft das gelernte Solargewinn-Modell; ohne sie wird eine Klarhimmel-Schätzung genutzt.",
+              "trv_external_temp_input": "Die number-Entität des TRV für eine externe Raumtemperatur. Gesetzt speist Poise den Raumsensor ins TRV, sodass es auf echte Raumluft regelt statt auf den internen Fühler."
             }
           },
           "anlagen": {
@@ -37,6 +50,13 @@
               "declared_power": "Angegebene Heizleistung (für Lastabwurf / gewichteten Bedarf)",
               "design_flow_temp": "Auslegungs-Vorlauftemperatur dieser Zone",
               "source_policy": "Heizquellen-Policy (von deiner Energie-Automation gesetzt)"
+            },
+            "data_description": {
+              "controls_boiler": "EIN = die Wärmeanforderung dieser Zone zählt für die gemeinsame Kesselanforderung.",
+              "compressor_group": "Zonen an einem gemeinsamen Außengerät. Innerhalb einer Gruppe blockiert der Wächter widersprüchliches Heizen/Kühlen und schnelle Moduswechsel.",
+              "declared_power": "Nennleistung des Wärmeübergebers dieser Zone — das Gewicht hinter Leistungs-Gate und Lastabwurf.",
+              "design_flow_temp": "Die Vorlauftemperatur, für die der Wärmeübergeber dieser Zone ausgelegt ist; fließt ins aggregierte Vorlaufziel ein.",
+              "source_policy": "Wird von der Energie-Automation geschrieben (z. B. PV-Überschuss → Wärmepumpe); 'auto' folgt der Standard-Wärmequelle des Hubs."
             }
           }
         }
@@ -50,7 +70,9 @@
           "actuator": "Zu steuerndes Thermostat / TRV"
         },
         "data_description": {
-          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch."
+          "temp_sensor": "Einen freistehenden Raumsensor abseits des Heizkörpers verwenden — NICHT den eingebauten Sensor des Thermostats/TRV, sonst lernt das Raummodell falsch.",
+          "name": "Optional — wird zum Geräte- und Entitätsnamen. Leer gelassen leitet Poise ihn vom Namen des Thermostats ab.",
+          "actuator": "Die climate-Entität, in die Poise schreibt — TRV, Klimagerät oder Thermostat (eine Poise-Zone pro Gerät). Poise erkennt die Fähigkeiten und wählt den sichersten Schreibpfad."
         },
         "sections": {
           "accuracy": {
@@ -64,6 +86,15 @@
               "outdoor_humidity_sensor": "Außenluftfeuchte (Lüftungs-Empfehlung)",
               "window_sensor": "Fenster-/Kontaktsensor (pausiert Heizen bei offenem Fenster)",
               "weather_entity": "Wetter-Entität (Prognose, für Optimal-Start)"
+            },
+            "data_description": {
+              "comfort_base": "Die Temperatur, um die das Komfortband aufgebaut wird. Zeitplan und Presets verschieben um diese Basis — die Basis anpassen, nicht die Presets.",
+              "category": "EN-16798-1-Komfortklasse: I = engstes Band (höchster Komfortanspruch), III = weitestes (größte Einsparung). II ist der Norm-Standard für Wohnräume.",
+              "outdoor_sensor": "Ein physischer Außensensor. Ohne ihn nutzt Poise die aktuelle Temperatur der Wetter-Entität.",
+              "humidity_sensor": "Aktiviert den Schimmelschutz-Boden nach DIN 4108-2 und die Feuchte-Komfortobergrenze für diesen Raum.",
+              "outdoor_humidity_sensor": "Erlaubt der Lüftungsempfehlung den Vergleich von Innen- und Außenfeuchte, bevor Lüften empfohlen wird.",
+              "window_sensor": "Offen pausiert Heizen und Modelllernen. Auch ohne Kontakt kann Poise ein geöffnetes Fenster am Temperaturverlauf erkennen.",
+              "weather_entity": "Prognosequelle für Optimal Start/Stopp (Vorheiz- und Ausroll-Timing). Wird über Home Assistants Forecast-Dienst gelesen und gecacht — Poise selbst fragt keine Cloud ab."
             }
           }
         }
@@ -96,7 +127,18 @@
         },
         "data_description": {
           "boiler_on_action": "Wird Feld für Feld ausgefüllt: erst die Entität wählen, dann den Dienst, der darauf aufgerufen wird (ein freier Dienst lässt sich eintippen). Zusätzliche Dienstdaten sind optional — z. B. hvac_mode: heat für climate.set_hvac_mode.",
-          "boiler_off_action": "Dieselben Felder wie bei der EIN-Aktion. Poise schaltet den Kessel nur, wenn BEIDE Aktionen gesetzt sind; beide leer lassen für reinen Diagnosebetrieb."
+          "boiler_off_action": "Dieselben Felder wie bei der EIN-Aktion. Poise schaltet den Kessel nur, wenn BEIDE Aktionen gesetzt sind; beide leer lassen für reinen Diagnosebetrieb.",
+          "boiler_count_threshold": "Wie viele Zonen aktiv Wärme anfordern müssen, bevor der Kessel angefordert wird (1 = jede einzelne Zone).",
+          "boiler_power_threshold": "Alternatives Anforderungs-Gate: Kessel anfordern, sobald die leistungsgewichtete Anforderung diesen Wert erreicht. Leer/0 = nur Zonenzahl-Gate.",
+          "boiler_activation_delay_s": "Entprellung — die Anforderung muss so lange anstehen, bevor die EIN-Aktion feuert; überbrückt kurze TRV-Spitzen.",
+          "boiler_keepalive_s": "Sendet die EIN-Aktion periodisch erneut, für Empfänger, die im Leerlauf in einen Fallback-Zustand fallen (0 = aus).",
+          "boiler_min_on_s": "Anti-Takt-Schutz: einmal eingeschaltet bleibt der Kessel mindestens so lange an.",
+          "boiler_min_off_s": "Anti-Takt-Schutz: einmal ausgeschaltet bleibt der Kessel mindestens so lange aus.",
+          "max_power_sensor": "Sensor mit der aktuell erlaubten Gesamtleistung. Zusammen mit dem Ist-Leistungssensor ermöglicht er Lastabwurf.",
+          "current_power_sensor": "Sensor mit der aktuellen Gesamtlast — wird für den Lastabwurf gegen das Maximum verglichen.",
+          "max_flow_temp": "Obergrenze für das aggregierte Vorlauftemperatur-Ziel, das für den Kessel veröffentlicht wird.",
+          "flow_hysteresis": "Mindeständerung (K), bevor ein neues Vorlaufziel veröffentlicht wird — verhindert Pendeln am Mischventil.",
+          "default_heat_source": "Die Wärmequelle, die Zonen auf 'auto' nutzen, solange keine Energie-Automation eine Vorgabe geschrieben hat."
         }
       }
     },
