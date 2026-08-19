@@ -40,6 +40,10 @@ DEFAULT_HEAT_OUT_DT_OFF_K: float = 1.0
 # Moisture guard for free-cooling: never trade heat for muggy air — outside
 # may be at most this much MORE humid than inside (delta = in - out >= -guard).
 DEFAULT_HEAT_OUT_HUMID_GUARD_GM3: float = 1.0
+# N2 (v0.192.0) mould guard: how close the smoothed surface RH may come to the
+# safe ceiling before free-cooling is vetoed [pp]. Small on purpose — this is a
+# guard against advising the LAST step toward the limit, not a second alarm.
+DEFAULT_MOLD_GUARD_MARGIN_PP: float = 2.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +59,7 @@ class VentConfig:
     heat_out_dt_on_k: float = DEFAULT_HEAT_OUT_DT_ON_K
     heat_out_dt_off_k: float = DEFAULT_HEAT_OUT_DT_OFF_K
     heat_out_humid_guard_gm3: float = DEFAULT_HEAT_OUT_HUMID_GUARD_GM3
+    mold_guard_margin_pp: float = DEFAULT_MOLD_GUARD_MARGIN_PP
 
 
 _DEFAULT = VentConfig()
@@ -63,8 +68,9 @@ _DEFAULT = VentConfig()
 @dataclass(frozen=True, slots=True)
 class VentilationAdvice:
     action: str  # "idle" | "open" | "close" | "discourage"
-    reason: str  # stable token: mold_risk|too_dry|moisture_out|co2|
-    #             target_reached|thermal_floor|no_gain|no_data
+    reason: str  # stable token: mold_risk|mold_guard|too_dry|moisture_out|co2|
+    #             heat_out|cooled_off|target_reached|thermal_floor|
+    #             no_gain|no_data
     level: str  # "ok" | "warn" | "alert" (card urgency)
     delta_gm3: float | None  # w_in - w_out behind the advice (None w/o data)
 
@@ -108,6 +114,9 @@ def ventilation_advise(
     cool_capable: bool = False,
     fan_capable: bool = False,
     prev_heat_out: bool = False,
+    surface_rh_pct: float | None = None,
+    rh_max_safe_pct: float | None = None,
+    cool_edge_protected: bool = False,
 ) -> VentilationAdvice:
     """Decision table B.2 of the design, precedence top-down.
 
@@ -127,6 +136,18 @@ def ventilation_advise(
     the room reaches the band, then ``cooled_off`` advises closing. The
     moisture guard vetoes muggy outside air (delta >= -humid_guard). NOT
     occupancy-gated by design: night purge is most valuable in an empty room.
+
+    N2 (v0.192.0) adds the two halves of the mould guard. Guard 5 vetoes
+    ``heat_out`` when the cooling edge is itself held up by a protection floor
+    (``cool_edge_protected`` — such an edge is not a comfort target: airing
+    down onto it works AGAINST the protection) or when the smoothed surface RH
+    has come within ``mold_guard_margin_pp`` of the safe ceiling. The
+    ``mold_guard`` rule is the active counterpart: an open window over a bound
+    floor with the CURRENT surface RH already past the ceiling advises closing
+    — before rule 5a, which waits for the AIR to reach the floor and is
+    therefore too late once the WALLS are over the limit. It deliberately does
+    NOT require drier outside air: the risk driver is the surfaces cooling
+    down, not imported vapour.
     """
     if w_in_gm3 is None or w_out_gm3 is None:
         # Design §9: no indoor value or no outdoor source -> feature silent.
@@ -143,6 +164,21 @@ def ventilation_advise(
     ):
         level = "alert" if (mold_floor_binding or mold_capped) else "warn"
         return VentilationAdvice("open", "mold_risk", level, round(delta, 1))
+    # Rule 1b (N2) — mould GUARD: close the window before the fabric pays.
+    # Below rule 1 (drier outside air plus an acute 48-h mean still argues for
+    # airing) but above everything else, including the dryness veto, which
+    # would only "discourage" where the building needs the window shut. Reads
+    # the CURRENT surface RH, not the 48-h mean: the mean is deliberately slow
+    # (mould CAUSE), while this is the acute state. Building protection ->
+    # never occupancy-gated, and no drier-outside condition.
+    if (
+        window_open
+        and cool_edge_protected
+        and surface_rh_pct is not None
+        and rh_max_safe_pct is not None
+        and surface_rh_pct > rh_max_safe_pct
+    ):
+        return VentilationAdvice("close", "mold_guard", "warn", round(delta, 1))
     # Rule 2 — dryness veto (never gated): venting a dry room against drier
     # outside air over-dries it further.
     if w_in_gm3 <= cfg.dry_warn_gm3 and outside_drier:
@@ -155,8 +191,17 @@ def ventilation_advise(
     # Rule 3t — free-cooling (heat_out): capability-gated (window-only zones),
     # asymmetric dT hysteresis, muggy-outside veto. Not occupancy-gated.
     free_cool_zone = not cool_capable and not fan_capable
+    # Guard 5 (N2): never advise cooling toward an edge that a protection floor
+    # holds up, and stop one margin short of the mould-safe ceiling.
+    surface_near_limit = (
+        surface_rh_mean_pct is not None
+        and rh_max_safe_pct is not None
+        and surface_rh_mean_pct >= rh_max_safe_pct - cfg.mold_guard_margin_pp
+    )
     if (
         free_cool_zone
+        and not cool_edge_protected
+        and not surface_near_limit
         and room_c is not None
         and cool_edge_c is not None
         and t_out_c is not None
@@ -185,6 +230,11 @@ def ventilation_advise(
 
 # --- B.5 emission edge (ADR-0066): pure decision, delivery stays in glue ----
 
+# Advice REASONS that carry an episode of their own on the human rails, even
+# though their action token is a plain "close" (ADR-0066 N2). Everything else
+# is announced by its ACTION change alone.
+NOTIFY_REASONS: tuple[str, ...] = ("mold_guard",)
+
 
 @dataclass(frozen=True, slots=True)
 class AdviceEmission:
@@ -201,7 +251,12 @@ class AdviceEmission:
 
 
 def advice_transition(
-    prev_action: str, action: str, *, notify_opt_in: bool
+    prev_action: str,
+    action: str,
+    *,
+    notify_opt_in: bool,
+    prev_reason: str = "",
+    reason: str = "",
 ) -> AdviceEmission:
     """Edge-detect one tick's advice ACTION token against the previous tick.
 
@@ -209,12 +264,22 @@ def advice_transition(
     settling into ``idle`` announces nothing, but waking up INTO an active
     advice (e.g. restart during an open episode) re-announces it — the
     notification would otherwise be lost across the restart.
+
+    N2 (v0.192.0): a few REASONS carry an episode of their own and must reach
+    the human rails even though their action token is the same ``close`` the
+    harmless all-clears use (``mold_guard``). For those — and only those — the
+    edge is the pair, so ``target_reached -> mold_guard`` announces while
+    ``target_reached -> cooled_off`` stays silent. Called without the reason
+    arguments this function is bit-identical to the pre-N2 behaviour.
     """
-    changed = action != prev_action
-    if not changed or (prev_action == "" and action == "idle"):
+    prev_key = (prev_action, prev_reason if prev_reason in NOTIFY_REASONS else "")
+    key = (action, reason if reason in NOTIFY_REASONS else "")
+    if key == prev_key or (prev_action == "" and action == "idle"):
         return AdviceEmission(False, False, False)
+    episode = action == "open" or reason in NOTIFY_REASONS
+    prev_episode = prev_action == "open" or prev_reason in NOTIFY_REASONS
     return AdviceEmission(
         fire_event=True,
-        notify_create=notify_opt_in and action == "open",
-        notify_dismiss=notify_opt_in and prev_action == "open",
+        notify_create=notify_opt_in and episode,
+        notify_dismiss=notify_opt_in and prev_episode and not episode,
     )
