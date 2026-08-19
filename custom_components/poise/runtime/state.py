@@ -299,6 +299,11 @@ class HumidityRuntime:
     # edge re-announce a still-open episode (the notification survives the
     # reboot) and stay silent when settling into idle.
     vent_last_action: str = ""
+    # ADR-0066 N2: the REASON that went with ``vent_last_action``. A few
+    # reasons carry their own episode under the shared "close" token
+    # (``mold_guard``), so the edge needs the pair. Transient for the same
+    # reason as the action: after a restart the guard re-announces itself.
+    vent_last_reason: str = ""
     # Rule 3t (free-cooling, v0.188.0): previous advice REASON — the dT
     # hysteresis anchor ("heat_out" holds the episode at the lower exit
     # edge). Deliberately TRANSIENT: a restart mid-episode re-applies the
