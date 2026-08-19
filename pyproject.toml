@@ -49,6 +49,9 @@ omit = [
     "custom_components/poise/__init__.py",
     "custom_components/poise/ha/*",
     "custom_components/poise/config_flow.py",
+    # P2 split (review 2026-08-19): the schema/rendering half of the config
+    # flow — HA-selector glue like config_flow.py, measured by the glue suite.
+    "custom_components/poise/config_schema.py",
     "custom_components/poise/coordinator.py",
     "custom_components/poise/climate.py",
     "custom_components/poise/storage.py",
