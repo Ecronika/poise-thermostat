@@ -381,8 +381,8 @@ class CoordinatorSnapshotSource:
     Both builders read the LIVE coordinator on every call, exactly as the
     inline ``ZoneBindings.from_coordinator(self._c)`` /
     ``TickConfigSnapshot.from_coordinator(self._c)`` calls did: a snapshot
-    taken in a constructor would go stale (``validate_configured_ext_temp``
-    resets ``_trv_ext_temp`` during bootstrap).
+    taken in a constructor would go stale (``async_bootstrap``
+    resets ``_trv_ext_temp`` on the reporter's verdict).
     """
 
     __slots__ = ("_c",)

@@ -21,28 +21,26 @@ middle of the stage — it must never become a coroutine and must never be
 deferred to the stage end; the three ``issue()`` calls inside
 ``validate_configured_ext_temp`` keep their positions around the one await.
 
-NO OWN STATE (binding).  ``_active_issues`` deliberately stays a real
-coordinator attribute and is read/written through ``self._c`` on every call:
-``PoiseCoordinator.async_bootstrap`` REBINDS it (``self._active_issues =
-{...}``) when it re-adopts the entry's issues after a restart, so a set object
-snapshotted here would silently decouple at that point.  It is also pinned as
-adapter-owned by ``tests/integration/test_phase6b_state_move.py``.  The
-siblings ``_save_failures`` / ``_tick_failures`` stay coordinator-owned for the
-same reason: their only writers (``_note_save_result`` and
-``_async_update_data``) remain in the coordinator.
+OWNED STATE, NOT BORROWED (plan S.3).  The reporter holds an ``IssueLedger``
+— the set of repair-issue ids this entry currently owns — plus the entry
+identity it stamps into issue ids and placeholders.  It used to reach all of
+that through a coordinator backreference, for one concrete reason:
+``PoiseCoordinator.async_bootstrap`` RE-ADOPTED the entry's issues by
+*rebinding* ``self._active_issues``, so a set snapshotted here would have
+decoupled at that moment.  ``IssueLedger.adopt()`` replaces the content in
+place instead, which removed the reason and with it the backreference.  The
+siblings ``_save_failures`` / ``_tick_failures`` stay coordinator-owned: their
+only writers (``_note_save_result`` and ``_async_update_data``) live there.
 
-TRANSITIONAL COORDINATOR BACKREFERENCE.  ``self._c`` is a documented
-transition form (same rule as ``TickOrchestrator``): it carries
-``_active_issues``, ``_entry_id``, ``zone_name`` and the config attributes the
-moved bodies read verbatim (``_trv_ext_temp``, ``_actuator``) plus the one
-write those bodies perform (``_trv_ext_temp = None``).  A later step narrows
-it; nothing here may rely on it growing.
+``validate_configured_ext_temp`` no longer writes the coordinator's
+``_trv_ext_temp`` either — it REPORTS whether the configured entity survives
+validation and the coordinator performs the invalidation.  One field, one
+writer, and the reporter needs nothing but its own inputs.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
@@ -51,11 +49,9 @@ from ..const import DOMAIN
 from ..devices.model_fixes import (
     ext_temp_number_is_implausible,
 )
+from ..runtime.issue_ledger import IssueLedger
 from ..runtime.tick_result import HealthUpdate
 from .input_reader import InputReader
-
-if TYPE_CHECKING:  # pragma: no cover - typing only, avoids the import cycle
-    from ..coordinator import PoiseCoordinator
 
 
 class HealthReporter:
@@ -66,25 +62,42 @@ class HealthReporter:
     checkpoint callable), so every collaborator handed over already exists.
     """
 
-    __slots__ = ("_c", "_hass", "_log", "_reader")
+    __slots__ = (
+        "_actuator",
+        "_entry_id",
+        "_hass",
+        "_issues",
+        "_log",
+        "_reader",
+        "_zone_name",
+    )
 
     def __init__(
         self,
-        coordinator: PoiseCoordinator,
         *,
         hass: HomeAssistant,
         logger: logging.Logger,
         input_reader: InputReader,
+        issues: IssueLedger,
+        entry_id: str,
+        zone_name: str,
+        actuator: str,
     ) -> None:
-        # Transitional backreference for ``_active_issues``, ``_entry_id``,
-        # ``zone_name`` and the config attributes — see the module docstring.
-        self._c = coordinator
         self._hass = hass
         # The coordinator module's own logger: the channel
         # ``custom_components.poise.coordinator`` is behaviour, so it is
         # injected rather than created here.
         self._log = logger
         self._reader = input_reader
+        self._issues = issues
+        # Identity, copied at construction. Safe because a change to
+        # ``entry.data`` RELOADS the entry (see
+        # ``PoiseCoordinator.structural_unchanged``), which builds a new
+        # coordinator and with it a new reporter — unlike ``_trv_ext_temp``,
+        # which mutates within a run and is therefore passed per call.
+        self._entry_id = entry_id
+        self._zone_name = zone_name
+        self._actuator = actuator
 
     def issue(
         self,
@@ -95,8 +108,8 @@ class HealthReporter:
         placeholders: dict[str, str] | None = None,
     ) -> None:
         """Raise/clear a Home Assistant repair issue on transitions (ADR-0012)."""
-        if active and issue_id not in self._c._active_issues:
-            self._c._active_issues.add(issue_id)
+        if active and issue_id not in self._issues:
+            self._issues.add(issue_id)
             ir.async_create_issue(
                 self._hass,
                 DOMAIN,
@@ -106,8 +119,8 @@ class HealthReporter:
                 translation_key=translation_key,
                 translation_placeholders=placeholders or {},
             )
-        elif not active and issue_id in self._c._active_issues:
-            self._c._active_issues.discard(issue_id)
+        elif not active and issue_id in self._issues:
+            self._issues.discard(issue_id)
             ir.async_delete_issue(self._hass, DOMAIN, issue_id)
 
     def emit(self, updates: tuple[HealthUpdate, ...]) -> None:
@@ -144,10 +157,10 @@ class HealthReporter:
         self.emit(
             (
                 HealthUpdate(
-                    issue_id=f"heating_failure_{self._c._entry_id}",
+                    issue_id=f"heating_failure_{self._entry_id}",
                     active=failed,
                     translation_key="heating_failure",
-                    placeholders={"zone": self._c.zone_name},
+                    placeholders={"zone": self._zone_name},
                 ),
             )
         )
@@ -159,10 +172,10 @@ class HealthReporter:
         self.emit(
             (
                 HealthUpdate(
-                    issue_id=f"cooling_failure_{self._c._entry_id}",
+                    issue_id=f"cooling_failure_{self._entry_id}",
                     active=failed,
                     translation_key="cooling_failure",
-                    placeholders={"zone": self._c.zone_name},
+                    placeholders={"zone": self._zone_name},
                 ),
             )
         )
@@ -178,15 +191,15 @@ class HealthReporter:
         self.emit(
             (
                 HealthUpdate(
-                    issue_id=f"actuator_not_converging_{self._c._entry_id}",
+                    issue_id=f"actuator_not_converging_{self._entry_id}",
                     active=active,
                     translation_key="actuator_not_converging",
-                    placeholders={"zone": self._c.zone_name},
+                    placeholders={"zone": self._zone_name},
                 ),
             )
         )
 
-    async def validate_configured_ext_temp(self) -> None:
+    async def validate_configured_ext_temp(self, entity_id: str | None) -> bool:
         """Vet the *configured* external-temp number once (not per tick).
 
         A value the user picked EXPLICITLY via CONF_TRV_EXTERNAL_TEMP is trusted
@@ -197,12 +210,15 @@ class HealthReporter:
         internal, or the device would keep regulating against a now-frozen
         external value; then raise a repair issue. When plausible or unset,
         clear it. A registry miss must never block setup.
+
+        Returns whether the configured entity may keep feeding the TRV. The
+        caller owns ``_trv_ext_temp`` and performs the invalidation (S.3):
+        this method reports, it does not reach back.
         """
-        issue_id = f"external_temp_implausible_{self._c._entry_id}"
-        entity_id = self._c._trv_ext_temp
+        issue_id = f"external_temp_implausible_{self._entry_id}"
         if not entity_id:
             self.issue(issue_id, False, translation_key="external_temp_implausible")
-            return
+            return True
         try:
             # The registry/state signature read lives in the reader; its
             # errors propagate into THIS try — the "a registry miss must never
@@ -215,13 +231,13 @@ class HealthReporter:
                 entity_id,
                 exc_info=True,
             )
-            return
+            return True
         if not implausible:
             self.issue(issue_id, False, translation_key="external_temp_implausible")
-            return
-        # Implausible: never feed it, and hand the TRV sensor source back to
-        # internal so the device does not regulate against a frozen value.
-        self._c._trv_ext_temp = None
+            return True
+        # Implausible: hand the TRV sensor source back to internal so the
+        # device does not regulate against a frozen value. Dropping the feed
+        # itself is the caller's write (S.3): one field, one writer.
         try:
             # Documented write-gate exception: this restore deliberately
             # DELEGATES to __init__.py's lifecycle helper (shared with entry
@@ -231,7 +247,7 @@ class HealthReporter:
             # exception covers its service calls.
             from .. import _restore_trv_internal
 
-            await _restore_trv_internal(self._hass, self._c._actuator)
+            await _restore_trv_internal(self._hass, self._actuator)
         except Exception:  # noqa: BLE001 - best-effort restore must not block setup
             self._log.debug(
                 "Poise: TRV sensor-source restore after ext-temp reject failed",
@@ -241,5 +257,6 @@ class HealthReporter:
             issue_id,
             True,
             translation_key="external_temp_implausible",
-            placeholders={"entity": entity_id, "name": self._c.zone_name},
+            placeholders={"entity": entity_id, "name": self._zone_name},
         )
+        return False

@@ -14,7 +14,7 @@ replace that with an explicit, narrow contract:
   tick, BEFORE the availability gate: the gate's very first HA state read is
   ``bindings.temp``, and the unavailable path itself needs ``temp``,
   ``actuator`` and ``zone_name``. It must NOT be snapshotted in a constructor
-  either — ``HealthReporter.validate_configured_ext_temp`` resets
+  either — ``PoiseCoordinator.async_bootstrap`` resets
   ``_trv_ext_temp`` during ``async_bootstrap``, so a construction-time copy
   would be stale for every tick that follows.
 
@@ -154,7 +154,7 @@ class ZoneBindings:
     (``zone_name`` has none). All nine are structural (``entry.data``), so a
     change reloads the entry and discards the running coordinator; the one
     exception, ``trv_ext_temp``, is additionally reset by
-    ``HealthReporter.validate_configured_ext_temp`` during ``async_bootstrap``
+    ``async_bootstrap`` on the reporter's verdict (S.3)
     — which is why this object is rebuilt every tick instead of once.
     """
 

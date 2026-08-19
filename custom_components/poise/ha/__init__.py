@@ -14,9 +14,10 @@ the binding patch-surface and dispatch-through-the-coordinator rules.
 ``health_reporter`` owns the repair-issue surface — the transition-only
 ``issue()``, the ``emit()`` checkpoint the tick flow drives, the
 heating-failure ``notify_failure()`` and the setup-time
-``validate_configured_ext_temp()``; ``_active_issues`` stays a coordinator
-attribute on purpose (``async_bootstrap`` rebinds it), see that module's
-docstring.
+``validate_configured_ext_temp()``. Since S.3 it borrows nothing from the
+coordinator: it holds the ``IssueLedger`` (whose content ``async_bootstrap``
+re-adopts IN PLACE, which is what made the old backreference necessary), the
+entry identity, and it reports the ext-temp verdict instead of writing it.
 
 These modules belong to the HA adapter layer and are therefore covered by
 the HA-runtime integration gate (``coverage_glue.ini``), not the pure-core

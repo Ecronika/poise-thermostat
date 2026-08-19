@@ -341,7 +341,7 @@ class TickOrchestrator:
         ``bindings`` is built HERE, before the availability gate (plan O.2):
         the gate's first HA state read IS ``bindings.temp``, the unavailable
         short-circuit needs ``temp``/``actuator``/``zone_name``, and a
-        constructor copy would be stale (``validate_configured_ext_temp``
+        constructor copy would be stale (``async_bootstrap``
         resets ``_trv_ext_temp`` at bootstrap). It reads attributes only — no
         HA read, no I/O — so nothing observable moves ahead of the gate.
         """
