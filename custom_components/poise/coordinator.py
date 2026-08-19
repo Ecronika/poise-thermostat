@@ -76,6 +76,7 @@ from .runtime.config import (
     ZoneConfig,
 )
 from .runtime.input_registry import build_input_registry, immediate_entities
+from .runtime.issue_ledger import IssueLedger
 from .runtime.tick_result import (
     CommitResult,
     ExecutionReport,
@@ -173,7 +174,10 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._data_snapshot: dict[str, Any] = dict(entry.data)  # reconfigure guard
         self._save_failures = 0  # consecutive store-save failures
         self._tick_failures = 0  # consecutive _run_once failures
-        self._active_issues: set[str] = set()
+        # The repair issues this entry owns. A real object, not a bare set:
+        # ``async_bootstrap`` re-adopts its content IN PLACE, so the health
+        # reporter keeps working without a coordinator backreference (S.3).
+        self._issues = IssueLedger()
         self._lock = asyncio.Lock()
         self._override_policy: str = DEFAULT_OVERRIDE_POLICY
         self._climate_entity_id: str | None = None  # for the ended-event payload
@@ -257,12 +261,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # The repair-issue surface (``ha/health_reporter.py``): the
         # transition-only ``issue`` primitive, the ``emit`` checkpoint the tick
         # flow drives, the heating-failure notify and the setup-time ext-temp
-        # validation. ``_active_issues`` stays a coordinator attribute (it is
-        # REBOUND by async_bootstrap) and the reporter reads it through its
-        # backreference. This module's ``_LOGGER`` is injected so the two debug
-        # records keep the channel ``custom_components.poise.coordinator``.
+        # validation. It owns nothing of the coordinator any more (S.3): the
+        # ledger it shares, the identity it stamps into issue ids and the
+        # actuator it may hand back to internal are handed over here, and the
+        # one field that mutates within a run (``_trv_ext_temp``) travels per
+        # call. This module's ``_LOGGER`` is injected so the two debug records
+        # keep the channel ``custom_components.poise.coordinator``.
         self._health = HealthReporter(
-            self, hass=hass, logger=_LOGGER, input_reader=self._input_reader
+            hass=hass,
+            logger=_LOGGER,
+            input_reader=self._input_reader,
+            issues=self._issues,
+            entry_id=self._entry_id,
+            zone_name=self.zone_name,
+            actuator=self._actuator,
         )
         # Every hot-applyable field flows through the ONE shared apply method,
         # so the init and options paths can never drift. The already parsed
@@ -862,11 +874,13 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # are instance-local and orphaned once the condition resolves).
         try:
             _reg = ir.async_get(self.hass)
-            self._active_issues = {
+            # adopt(), not a rebind: the health reporter holds this very
+            # ledger and must observe the re-adopted ids (S.3).
+            self._issues.adopt(
                 iid
                 for (dom, iid) in _reg.issues
                 if dom == DOMAIN and iid.endswith(self._entry_id)
-            }
+            )
         except Exception:  # noqa: BLE001 - registry read must never block setup
             pass
         # Keep store I/O and parsing failures separate. A transient load
@@ -918,9 +932,12 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             comfort_base=self._comfort_base,
             day_ordinal_fn=lambda: dt_util.now().toordinal(),
         )
-        # Vet the configured external-temp number once, now that _active_issues
-        # has been re-adopted so a stale issue can be cleared on recovery.
-        await self._health.validate_configured_ext_temp()
+        # Vet the configured external-temp number once, now that the issue
+        # ledger has been re-adopted so a stale issue can be cleared on
+        # recovery. The reporter REPORTS; dropping the feed is this method's
+        # write, which keeps ``_trv_ext_temp`` at one writer per scope (S.3).
+        if not await self._health.validate_configured_ext_temp(self._trv_ext_temp):
+            self._trv_ext_temp = None
 
     def _apply_decoded_state(self, decoded: _codec.DecodedPersistence) -> None:
         """Apply a decoded v1 store onto the live state.
@@ -1249,11 +1266,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             pid = f"persistence_failed_{self._entry_id}"
             self._health.issue(pid, True, translation_key="persistence_failed")
             keep.add(pid)
-        for issue_id in list(self._active_issues):
+        for issue_id in self._issues.snapshot():
             if issue_id in keep:
                 continue
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
-            self._active_issues.discard(issue_id)
+            self._issues.discard(issue_id)
 
     def structural_unchanged(self, entry: ConfigEntry) -> bool:
         """True if only tuning options changed since setup.
