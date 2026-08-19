@@ -678,14 +678,14 @@ def _stage_observe_guarded(
                 rt, room, t_out_eff, now=now, day_ordinal=inputs.local_day_ordinal
             )
     else:
-        # While learning is paused (open window / frozen sensor, which now also
-        # covers a DEFAULT-source reading -- see the ``frozen =`` assignment
-        # above -- and a latched heating or cooling failure) drop the time
-        # anchors, so the
-        # first step after resumption re-anchors from that tick instead of
-        # integrating the whole contaminated interval.  A brief airing would
-        # otherwise poison the EKF with a real-looking sub-hour dt (the 0<dt<1h
-        # guard only rejects long gaps).  ADR-0024.
+        # While learning is paused (open window / frozen sensor, which now
+        # also covers a DEFAULT-source reading -- see the ``frozen =``
+        # assignment above -- and a latched heating or cooling failure) drop
+        # the time anchors, so the first step after resumption re-anchors
+        # from that tick instead of integrating the whole contaminated
+        # interval.  A brief airing would otherwise poison the EKF with a
+        # real-looking sub-hour dt (the 0<dt<1h guard only rejects long
+        # gaps).  ADR-0024.
         rt.learning.last_mono = None
         rt.learning.prev_room = None
         rt.learning.prev_room_mono = None
