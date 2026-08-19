@@ -34,10 +34,11 @@ Evidence rules (per tick, adversarial-review hardened):
   mode is a fresh command and ends the episode. The device reaching the
   desired mode clears it; unknown/unsupported device modes are no evidence.
 * Episodes EXPIRE: a gap of ``CONV_EVIDENCE_TTL_S`` without any evidence on
-  a channel ends its episode. Otherwise a stale count (seasonal idle, long
-  unavailable, replaced device behind a persisted baseline) would merge with
-  fresh counts and fire the issue on the first write of a healthy restart —
-  inverting the ``CONV_FAIL_MIN_S`` protection.
+  a channel ends its episode. Otherwise a stale count (seasonal idle, a long
+  unavailable stretch, a device swapped mid-run behind a still-standing
+  in-memory baseline) would merge with fresh counts and fire the issue on
+  the first writes after regulation resumes — inverting the
+  ``CONV_FAIL_MIN_S`` protection.
 
 Escalation needs BOTH a count and a minimum elapsed time since the episode
 began, so slow-reporting/poll integrations cannot false-positive. Transient
@@ -62,6 +63,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Project-chosen conservative thresholds (no upstream source).
 CONV_FAIL_WRITES: int = 5  # consecutive unconverged setpoint re-asserts
 CONV_FAIL_NUDGES: int = 5  # consecutive identical mode re-nudges
 CONV_FAIL_MIN_S: float = 600.0  # AND at least this long since the episode began

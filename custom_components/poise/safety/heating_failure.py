@@ -3,7 +3,8 @@
 If the room is commanded well above its temperature for a sustained period but
 does not actually warm up, a heating failure (closed valve, empty radiator,
 boiler off) is flagged. Pure and testable; the coordinator turns the flag into
-a persistent notification with auto-clear on recovery.
+a persistent notification with auto-clear on recovery. The sign-mirrored
+cooling pendant lives here too, sharing the window/latch implementation.
 """
 
 from __future__ import annotations

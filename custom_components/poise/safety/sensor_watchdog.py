@@ -96,7 +96,8 @@ def should_learn(
     heating_failed: bool = False,
     cooling_failed: bool = False,
 ) -> bool:
-    """Learn only when the room signal is trustworthy and heat actually works.
+    """Learn only when the room signal is trustworthy and the commanded
+    conditioning actually works.
 
     An open window (air mixing) or a frozen sensor (stale value) must pause EKF
     learning so the model is not poisoned (F1/ADR-0012). A confirmed heating
