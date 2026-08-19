@@ -9,6 +9,12 @@ on:
     - cron: "17 6 * * 1" # Mondays, 06:17 UTC
   workflow_dispatch:
 
+# S.1 (2026-08-19): least privilege for GITHUB_TOKEN. Nothing in this
+# workflow writes to the repository, so a compromised action step cannot
+# push, tag or open a PR with the default token.
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validate (hassfest + HACS)
@@ -225,6 +231,40 @@ jobs:
               sys.exit(1)
           print("LATEST pin is the newest released harness.")
           PY
+
+  supply-chain:
+    # S.1: the only third-party code that reaches a USER is the card's npm
+    # tree — build.mjs runs esbuild with `bundle: true`, so `lit` is compiled
+    # INTO the shipped poise-card.js, while the integration itself declares
+    # `"requirements": []`. The OFFLINE half of this guard (every lockfile
+    # entry pins a content hash, direct deps are an exact-pinned allowlist)
+    # lives in tests/test_supply_chain.py and runs everywhere. What needs the
+    # network is the advisory database, and it follows the same rule as
+    # harness-freshness above: scheduled only, and deliberately NOT in the
+    # `gate` needs list — an advisory published tomorrow must surface as a red
+    # Monday run, never as a red unrelated pull request.
+    name: Supply chain (npm advisories)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: card
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: card/package-lock.json
+      - name: Install (reproducible — lockfile)
+        run: npm ci --no-audit --no-fund
+      - name: Audit (moderate and above)
+        # `--audit-level=high` would have been GREEN on the one finding this
+        # repo actually carried (GHSA-67mh-4wv8-2f99, esbuild 0.24.2,
+        # moderate) — that is how a security gate ends up proving nothing.
+        # Fixed by pinning esbuild 0.25.12; the rebuilt bundle came out
+        # byte-identical, so the bump cost nothing.
+        run: npm audit --audit-level=moderate
 
   card:
     name: Card (build + verify)
