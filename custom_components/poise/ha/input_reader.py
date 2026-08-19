@@ -134,9 +134,6 @@ def actuator_snapshot(state: State | None) -> ActuatorSnapshot:
     attrs = state.attributes
     hvac_action = attrs.get("hvac_action")
     fan_mode = attrs.get("fan_mode")
-    # parse_finite directly on the attribute: current_temperature keeps its
-    # NO-availability-gate contract (unlike parse_attr_number), gaining only
-    # the finite rejection (review B.5).
     current = parse_finite(attrs.get("current_temperature"))
     return ActuatorSnapshot(
         state=state.state,

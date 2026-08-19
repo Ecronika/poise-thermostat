@@ -92,10 +92,10 @@ composition root ``coordinator.py`` builds the four phase objects and hands
 them in, so the sequencer cannot reach past the phase it is calling.
 
 STATE OWNED HERE.  ``_trace_recorder`` (the lazily built ADR-0011 trace
-writer) and ``_trace_slug`` (seeded from ``entry.entry_id``) belong to this
-class — the only reader, ``_maybe_record_trace``, lives here.  Nothing
-outside may read them (pinned by
-``tests/integration/test_phase6b_state_move.py``).
+writer) and ``_trace_slug`` (the ADR-0022 salted slug in production; the
+coordinator seeds it) belong to this class — the only reader,
+``_maybe_record_trace``, lives here.  Nothing outside may read them (pinned
+by ``tests/integration/test_phase6b_state_move.py``).
 """
 
 from __future__ import annotations

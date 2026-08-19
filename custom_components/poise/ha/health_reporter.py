@@ -2,10 +2,11 @@
 
 ``coordinator.py`` keeps the HA coupling (``DataUpdateCoordinator`` lifecycle,
 the tick lock, ``tick_ms``/``TickBudget``, persistence and the entity-facing
-command API); the four methods that translate Poise health into Home Assistant
+command API); the methods that translate Poise health into Home Assistant
 repair issues live here: the transition-only ``issue()`` primitive, the
-``emit()`` checkpoint primitive the tick flow drives, the heating-failure
-``notify_failure()`` and the setup-time ``validate_configured_ext_temp()``.
+``emit()`` checkpoint primitive the tick flow drives, the ``notify_*``
+checkpoint facades (heating/cooling failure, write convergence) and the
+setup-time ``validate_configured_ext_temp()``.
 
 The logger CHANNEL is behaviour: records must keep the name
 ``custom_components.poise.coordinator``, so the coordinator injects its
@@ -15,11 +16,12 @@ EMISSION POSITIONS ARE BEHAVIOUR (binding).  Nothing here defers, batches or
 re-orders a create/delete.  ``issue()`` keeps its transition-only semantics
 (create only on False->True, delete only on True->False) so a repeated call
 with an unchanged flag stays a no-op, and ``emit()`` walks its tuple in the
-given order.  ``notify_failure()`` is called from
-``TickOrchestrator._stage_failure_detect`` as a SYNCHRONOUS checkpoint in the
-middle of the stage — it must never become a coroutine and must never be
-deferred to the stage end; the three ``issue()`` calls inside
-``validate_configured_ext_temp`` keep their positions around the one await.
+given order.  Every ``notify_*`` facade is called from the tick flow as a
+SYNCHRONOUS checkpoint at its position (mid-stage for the failure pair,
+directly after the setpoint segment and on the disabled path for
+convergence) — none may become a coroutine or be deferred to a stage end;
+the three ``issue()`` calls inside ``validate_configured_ext_temp`` keep
+their positions around the one await.
 
 OWNED STATE, NOT BORROWED (plan S.3).  The reporter holds an ``IssueLedger``
 — the set of repair-issue ids this entry currently owns — plus the entry
@@ -184,9 +186,10 @@ class HealthReporter:
         """Surface persistent write non-convergence as a repair issue (C.8).
 
         Raised while the watchdog escalates (the actuator keeps ignoring our
-        setpoint/mode commands), cleared when a command finally lands —
-        transition-only like every other issue. Runs as a synchronous
-        checkpoint emission right after the setpoint segment.
+        setpoint/mode commands), cleared when a command finally lands or the
+        evidence episode expires — transition-only like every other issue.
+        Emitted synchronously right after the setpoint segment; the
+        disabled/off-hold path clears it explicitly.
         """
         self.emit(
             (
