@@ -6,9 +6,12 @@ Poise carries its version in four places that must never drift:
 * ``custom_components/poise/const.py``      — what the ``poise/card_version``
   websocket endpoint serves to every card instance
 * ``card/package.json``                     — what the built bundle embeds
+* ``card/package-lock.json``                — the reproducible install of
+  that package; it carries its own copy of the version and sat three
+  minor releases behind (0.150.0) until the supply-chain pass found it
 * ``pyproject.toml``                        — what packaging and tooling read
 
-CI already compared the first three (in the card job, via shell). It never
+CI already compared three of them (in the card job, via shell). It never
 looked at ``pyproject.toml``, and nothing compared any of them to the release
 tag. This test closes the file half and runs locally as part of the pure
 suite; the tag half needs the git ref and therefore stays a CI step, which
@@ -65,6 +68,13 @@ def _card_version() -> str:
     return str(data["version"])
 
 
+def _card_lock_version() -> str:
+    data = json.loads(
+        (REPO_ROOT / "card" / "package-lock.json").read_text(encoding="utf-8")
+    )
+    return str(data["version"])
+
+
 def _pyproject_version() -> str:
     data = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return str(data["project"]["version"])
@@ -74,6 +84,7 @@ _SOURCES = {
     "manifest.json": _manifest_version,
     "const.py": _const_version,
     "card/package.json": _card_version,
+    "card/package-lock.json": _card_lock_version,
     "pyproject.toml": _pyproject_version,
 }
 
@@ -93,8 +104,8 @@ def test_each_version_source_is_readable_and_semver(name: str) -> None:
     )
 
 
-def test_all_four_version_sources_agree() -> None:
-    """The four files carry the same version.
+def test_all_version_sources_agree() -> None:
+    """Every source carries the same version.
 
     Drift here is not cosmetic: ``const.VERSION`` is what the card asks for
     over the websocket, and a mismatch against the bundle's embedded version
@@ -103,8 +114,8 @@ def test_all_four_version_sources_agree() -> None:
     seen = {name: read() for name, read in _SOURCES.items()}
     distinct = set(seen.values())
     assert len(distinct) == 1, (
-        f"version drift: {seen}. All four must match; bump them together and "
-        f"rebuild the card bundle."
+        f"version drift: {seen}. All of them must match; bump them together "
+        f"and rebuild the card bundle."
     )
 
 

@@ -244,7 +244,14 @@ _BINDINGS_INIT_ONLY = (
 
 _INIT = "PoiseCoordinator.__init__"
 _HOT = "PoiseCoordinator._apply_hot_tuning"
-_VALIDATE = "HealthReporter.validate_configured_ext_temp"
+_BOOTSTRAP = "PoiseCoordinator.async_bootstrap"
+# S.3: the reporter keeps its OWN ``_entry_id``/``_actuator`` slots. The
+# scan below is receiver-agnostic on purpose (that is how it once caught
+# ``self._c._trv_ext_temp = ...``), so those constructor assignments show
+# up here even though they can no longer touch the coordinator - the
+# reporter has no reference to it any more, which
+# ``test_the_port_adapter_is_the_only_coordinator_backreference`` pins.
+_REPORTER_INIT = "HealthReporter.__init__"
 
 # Permitted writers, NOT expected writers: a field may be written by a subset
 # (most hot-applyed ones are only written in _apply_hot_tuning, which __init__
@@ -253,9 +260,14 @@ _WRITER_ALLOWLIST: dict[str, frozenset[str]] = {
     **{attr: frozenset({_INIT, _HOT}) for attr in _HOT_APPLYED},
     **{attr: frozenset({_INIT}) for attr in _INIT_ONLY_CONFIG},
     **{attr: frozenset({_INIT}) for attr in _BINDINGS_INIT_ONLY},
+    # Same NAME, different object: the health reporter's own identity slots.
+    "_entry_id": frozenset({_INIT, _REPORTER_INIT}),
+    "_actuator": frozenset({_INIT, _REPORTER_INIT}),
     # The one documented exception, and the reason ZoneBindings is rebuilt per
-    # tick instead of once in the constructor.
-    "_trv_ext_temp": frozenset({_INIT, _VALIDATE}),
+    # tick instead of once in the constructor. Since S.3 the invalidating
+    # write is the COORDINATOR's: the reporter reports a verdict, the owner
+    # acts on it, and the field keeps exactly one writer per scope.
+    "_trv_ext_temp": frozenset({_INIT, _BOOTSTRAP}),
 }
 
 
@@ -285,10 +297,11 @@ def _qualified_writers() -> dict[str, set[str]]:
     """``attribute -> {qualified function that assigns it}`` over the package.
 
     Any attribute assignment counts, whatever the receiver expression is —
-    ``self._trv_ext_temp = ...`` in the coordinator and
-    ``self._c._trv_ext_temp = ...`` in the health reporter are both writers of
+    ``self._trv_ext_temp = ...`` in the coordinator and (until S.3 removed it)
+    ``self._c._trv_ext_temp = ...`` in the health reporter were both writers of
     the same coordinator attribute, and a scan keyed on ``self.`` alone would
-    have missed the second one.
+    have missed the second one. The price of that reach is that an unrelated
+    class writing the same NAME lands here too; the allowlist says which.
     """
     writers: dict[str, set[str]] = collections.defaultdict(set)
     watched = set(_WRITER_ALLOWLIST)
