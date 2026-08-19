@@ -103,9 +103,10 @@ class ActuatorSnapshot:
     equivalent); ``hvac_action``, ``fan_mode`` and ``fan_modes`` feed the
     fan/PMV shadows; ``context_id`` is the actuator state's originating context
     for own-write echo detection; ``current_temperature`` is the device's own
-    sensor reading for the ADR-0056 reference-offset shadow — finite-parsed
-    via the attribute-number rule (no availability gate; a NaN used to poison
-    the deviation EMA until restart, review B.5).
+    sensor reading for the ADR-0056 reference-offset shadow — parsed with
+    ``parse_finite`` directly on the attribute, deliberately NOT the
+    availability-gated attribute-number rule (a NaN used to poison the
+    deviation EMA until restart, review B.5).
     """
 
     state: str | None
