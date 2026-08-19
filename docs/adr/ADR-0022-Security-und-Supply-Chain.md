@@ -1,6 +1,6 @@
 # ADR-0022: Security & Supply-Chain
 
-**Status:** In Arbeit (75 %) · **Wirkung:** teilw. · **Datum:** 2026-06-18 · **Bezug:** E30, G28 · **Verifizierung:** Code-Review Versatile/RoomMind/ThermoSmart/BT/Vesta (Thema O)
+**Status:** Implementiert · **Wirkung:** Live-D · **Datum:** 2026-06-18 (umgesetzt 2026-08-19) · **Bezug:** E30, G28 · **Verifizierung:** Code-Review Versatile/RoomMind/ThermoSmart/BT/Vesta (Thema O)
 
 ## Kontext
 Die Charta verlangt vollständige Lokalität und anonymisierte, nie automatische Exporte (G28). Offen: Abhängigkeitspolitik, Netzwerkverhalten, Export-/Diagnostics-Datenschutz.
@@ -29,6 +29,19 @@ Minimale Angriffs-/Lieferkettenfläche; keine Cloud-Abhängigkeit; keine PII in 
 
 ## Compliance
 Erfüllt G28 (lokal, anonymisiert, nie automatisch). Eigenständige Umsetzung.
+
+## Umsetzungsstand (2026-08-19)
+Alle fünf Entscheidungen sind im Code:
+1. `manifest.json` `requirements: []`, Numerik stdlib (EKF/MPC ohne BLAS).
+2. `iot_class: local_polling`, keine REST/Cloud-Calls im Kern (Import-Audit: nur stdlib + HA).
+3. **Export-Anonymisierung geschlossen:** Trace-Zeitstempel werden quantisiert
+   (`trace/schema.py::TRACE_TS_QUANTUM_S` = 900 s, `mono` als Replay-dt-Quelle bleibt
+   exakt — ADR-0014-Determinismus unberührt) und der Trace-Dateiname trägt den
+   gesalzenen SHA-256-Slug statt der Entry-ID (`trace/recorder.py::salted_trace_slug`,
+   Salt = HA-Installations-ID; ThermoSmart-Muster). Die Record-Zeilen selbst tragen
+   keine Zonen-Identität. Löschpfad räumt salted- und Alt-Namen samt Rotation.
+4. `diagnostics/` redigiert 28 ID-tragende Schlüssel (`async_redact_data`-Muster).
+5. Keine Secrets; Version einquellig (Gate `test_version_consistency`).
 
 ## Verknüpfungen
 Diagnostics-Redaktion ergänzt ADR-0012; Versionsquelle/`min_ha_version` aus ADR-0018; stdlib-Numerik berührt ADR-0001/0009 (kein BLAS). Globalstrahlungssensor bleibt externer Eingang (Strukturplan-Ebene 0).
