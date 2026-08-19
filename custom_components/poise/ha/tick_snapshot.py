@@ -33,7 +33,7 @@ belongs to the tick program that ``coordinator.py`` itself imports, so a
 runtime import would close the cycle (``ha/tick_orchestrator.py`` does the
 same for the same reason).
 
-MUTABILITY RULE (gated by ``tests/test_tick_chain_structure.py``): no field of
+MUTABILITY RULE (gated by ``tests/test_structure_snapshot.py``): no field of
 either class may be typed ``list``/``dict``/``set``. ``frozen=True`` freezes
 the field BINDING, not the object behind it — ``coordinator._windows`` is a
 live ``list[str]``, so ``windows`` is a ``tuple[str, ...]`` built with

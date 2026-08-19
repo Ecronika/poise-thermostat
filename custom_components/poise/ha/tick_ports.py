@@ -20,8 +20,8 @@ replaces the remaining backreference with explicit, typed contracts:
 
 NO SERVICE LOCATOR (binding, plan O.3). A ``__getattr__`` forwarding to the
 coordinator would be ``self._c`` under a new name; it is forbidden here, also
-as a transitional form, and ``tests/test_tick_chain_structure.py`` enforces
-that plus the absence of any ``getattr(self._c, <variable>)``. Every port is
+as a transitional form, and ``tests/test_structure_ports.py`` enforces that
+plus the absence of any ``getattr(self._c, <variable>)``. Every port is
 written out with its real signature.
 
 WHY FIVE VIEWS AND NOT ONE. A single 20-method protocol handed to every phase
@@ -71,9 +71,15 @@ method in the middle is the documented patch point:
       -> PoiseCoordinator._maybe_record_trace(...)          # THE patch point
       -> TickOrchestrator._maybe_record_trace(...)
 
-NO GLOBAL CLAIM. ``ha/health_reporter.py`` deliberately keeps its own ``self._c``
-(it also WRITES through it); O.3 does not touch it. The "only place that knows
-the coordinator" statement is scoped to the tick-orchestration and phase chain.
+THE CLAIM IS NOW GLOBAL (S.3). It used to be scoped to the tick-orchestration
+and phase chain, because ``ha/health_reporter.py`` kept a ``self._c`` of its
+own — it needed the CURRENT ``_active_issues`` set, which ``async_bootstrap``
+rebound after the reporter was built. An ``IssueLedger`` that re-adopts its
+content in place removed that need, so this module is the only holder of a
+coordinator reference in the whole package, and
+``test_the_port_adapter_is_the_only_coordinator_backreference`` enforces
+exactly that — in both directions, since too FEW holders would mean the
+detector stopped working.
 """
 
 from __future__ import annotations
