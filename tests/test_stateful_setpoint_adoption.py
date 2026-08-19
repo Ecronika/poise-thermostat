@@ -37,6 +37,9 @@ from custom_components.poise.control.external_override import ExternalOverrideTr
 from custom_components.poise.control.override import setpoint_adopt_reason
 from custom_components.poise.runtime.state import ExternalOverrideRuntime
 
+# Arbitrary injected window, deliberately not the production default
+# (SETPOINT_ADOPT_ECHO_WINDOW_S = 120): the machine only needs SOME window to
+# drive the inside/outside branches.
 ECHO_WINDOW_S = 90.0
 SETPOINTS = st.sampled_from([5.0, 7.0, 16.0, 18.5, 20.0, 21.0, 21.5, 24.0, 30.0])
 # Gates are the exception in a running zone, not the rule. Unweighted booleans

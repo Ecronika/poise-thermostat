@@ -1,6 +1,7 @@
-"""One version number, four files, and the tag that ships them.
+"""One version number, every file that carries it, and the tag that ships it.
 
-Poise carries its version in four places that must never drift:
+Poise carries its version in these places, and they must never drift
+(the list below is prose; ``_SOURCES`` is the one that runs):
 
 * ``custom_components/poise/manifest.json`` — what HACS and hassfest read
 * ``custom_components/poise/const.py``      — what the ``poise/card_version``
@@ -20,7 +21,7 @@ is read.
 
 Why a test and not more shell: the card job's guard only runs when the card
 job runs, needs node to read two JSON files, and reports drift in a language
-nobody can execute locally. Reading four files is the kind of thing the pure
+nobody can execute locally. Reading them all is the kind of thing the pure
 suite should own.
 """
 

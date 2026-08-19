@@ -704,8 +704,9 @@ def test_finalize_context_value_semantics_and_frozen() -> None:
 def test_finalize_context_field_set_is_pinned() -> None:
     # Phase 6a (S1): the field set IS the prepare→finalize contract — it was
     # established by an AST free-variable scan of the post-savepoint segment
-    # (50 names; ``reading`` narrowed to ``reading_source``). Adding or
-    # removing a field is a contract change and must update this pin.
+    # (originally 50 names, ``reading`` narrowed to ``reading_source``; later
+    # extensions are annotated in-line below). Adding or removing a field is
+    # a contract change and must update this pin.
     assert [f.name for f in dataclasses.fields(FinalizeContext)] == [
         # Plan O.2: the one field that is not a tick local — the per-tick
         # config view the finalize stages read their policy values from.

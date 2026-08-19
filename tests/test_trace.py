@@ -7,6 +7,7 @@ from dataclasses import replace
 from custom_components.poise.estimation.thermal_ekf import ThermalEKF
 from custom_components.poise.trace.schema import (
     MIN_SUPPORTED_TRACE_VERSION,
+    TRACE_TS_QUANTUM_S,
     TRACE_VERSION,
     ModelSnapshot,
     TraceRecord,
@@ -382,9 +383,9 @@ def test_shadow_outputs_round_trip_and_default() -> None:
 
 
 def test_convergence_telemetry_round_trip_and_default() -> None:
-    """Review C.8: die Write-Convergence-Zähler reiten als defaultete
-    In-Version-Felder im Trace mit (gleicher Kompat-Mechanismus, kein
-    Version-Bump), damit Nicht-Konvergenz-Episoden im Replay sichtbar sind."""
+    """Review C.8: the write-convergence counters ride along as defaulted
+    in-version trace fields (same compat mechanism, no version bump) so
+    non-convergence episodes are visible in a replay."""
     model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
     data = {"sp_diverged_writes": 3, "mode_diverged_nudges": 2}
     rec = build_record(
@@ -396,7 +397,7 @@ def test_convergence_telemetry_round_trip_and_default() -> None:
     back = TraceRecord.from_json_line(rec.to_json_line())
     assert back.sp_diverged_writes == 3 and back.mode_diverged_nudges == 2
 
-    # absent (alter Writer / konvergiert) -> Defaults, kein Version-Bump
+    # absent (old writer / converged) -> defaults, no version bump
     rec2 = build_record(
         {}, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
     )
@@ -405,8 +406,8 @@ def test_convergence_telemetry_round_trip_and_default() -> None:
 
 
 def test_cooling_failure_round_trip_and_default() -> None:
-    """Review C.8: das Cooling-Failure-Verdikt reitet wie heating im Trace mit
-    (defaultet in-version, kein Bump)."""
+    """Review C.8: the cooling-failure verdict rides in the trace (defaulted
+    in-version, no bump)."""
     model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
     rec = build_record(
         {"cooling_failure": True},
@@ -426,3 +427,50 @@ def test_cooling_failure_round_trip_and_default() -> None:
         {}, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
     )
     assert rec2.v == TRACE_VERSION and rec2.cooling_failure is False
+
+
+def test_frozen_reads_the_live_feed_key_and_heating_failure_rides_along() -> None:
+    """The v3 fix: the live tick feed publishes ``sensor_frozen`` (see
+    ``phase_report``), so ``build_record`` must read THAT key — v2 recorded a
+    permanently-False ``frozen``. The heating-failure verdict (fed as
+    ``heating_failure`` all along) gets its trace field, symmetric to
+    ``cooling_failure``."""
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    rec = build_record(
+        {"sensor_frozen": True, "heating_failure": True},
+        model,
+        ts=1.0,
+        mono=60.0,
+        room=20.0,
+        t_out=5.0,
+        u_h=1.0,
+        u_c=0.0,
+    )
+    assert rec.frozen is True
+    assert rec.heating_failure is True
+    back = TraceRecord.from_json_line(rec.to_json_line())
+    assert back.frozen is True and back.heating_failure is True
+
+    # The semantics fix is version-marked: records claiming trustworthy
+    # ``frozen`` carry v3; the replay window still accepts v1/v2.
+    assert TRACE_VERSION == 3
+    assert is_supported_version(2) is True
+
+    # absent keys (old feed shape) -> defaults
+    rec2 = build_record(
+        {}, model, ts=1.0, mono=60.0, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec2.frozen is False and rec2.heating_failure is False
+
+
+def test_ts_is_quantized_to_the_privacy_bucket() -> None:
+    """ADR-0022 decision 3: the wall-clock anchor is quantised (15 min
+    buckets) so a shared trace carries no fine-grained usage pattern. ``mono``
+    — the actual dt source for replay — stays exact."""
+    model = ModelSnapshot(0.12, 2.5, 4.0, 0.5, 0.3, 0.4, 61, 22, 0, True)
+    rec = build_record(
+        {}, model, ts=1700000123.5, mono=4321.25, room=20.0, t_out=5.0, u_h=1.0, u_c=0.0
+    )
+    assert rec.ts == 1700000100.0  # floor(ts / 900) * 900
+    assert rec.ts % TRACE_TS_QUANTUM_S == 0.0
+    assert rec.mono == 4321.25  # replay dt source is untouched

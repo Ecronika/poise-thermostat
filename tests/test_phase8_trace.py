@@ -43,7 +43,7 @@ _DATA: dict[str, Any] = {
     "heat_sp": 21.0,
     "cool_sp": 26.0,
     "window_open": True,
-    "frozen": False,
+    "sensor_frozen": True,
     "mode_nudge_blocked": "compressor_min_off",
     "preheating": True,
     "coasting": False,
@@ -114,7 +114,9 @@ def test_build_tick_record_maps_ekf_state_and_drive_inputs_verbatim() -> None:
         t_rm=None,
     )
     assert r.v == TRACE_VERSION
-    assert (r.ts, r.mono, r.room, r.t_out) == (1.5, 2.5, 3.5, 4.5)
+    # ts is privacy-quantised (ADR-0022: floor to TRACE_TS_QUANTUM_S buckets,
+    # 1.5 -> 0.0); mono — the replay dt source — passes through verbatim.
+    assert (r.ts, r.mono, r.room, r.t_out) == (0.0, 2.5, 3.5, 4.5)
     assert (r.u_h, r.u_c, r.q_solar, r.q_occ) == (0.25, 0.5, 0.75, 0.0)
     assert (r.rh, r.t_rm) == (None, None)
     assert (r.alpha, r.beta_h, r.beta_c, r.beta_s, r.beta_o) == (
