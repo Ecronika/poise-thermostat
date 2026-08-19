@@ -5,8 +5,9 @@ the tick lock, ``tick_ms``/``TickBudget``, persistence and the entity-facing
 command API); the methods that translate Poise health into Home Assistant
 repair issues live here: the transition-only ``issue()`` primitive, the
 ``emit()`` checkpoint primitive the tick flow drives, the ``notify_*``
-checkpoint facades (heating/cooling failure, write convergence) and the
-setup-time ``validate_configured_ext_temp()``.
+checkpoint facades (heating/cooling failure, write convergence), the three
+``sync_*_issue`` suggestion mirrors (idempotent per-tick create/delete, P3)
+and the setup-time ``validate_configured_ext_temp()``.
 
 The logger CHANNEL is behaviour: records must keep the name
 ``custom_components.poise.coordinator``, so the coordinator injects its
@@ -43,11 +44,16 @@ writer, and the reporter needs nothing but its own inputs.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
 from ..const import DOMAIN
+
+if TYPE_CHECKING:
+    from ..control.feedback import CloSuggestion
+    from ..control.suggestion import OverrideSuggestion
 from ..devices.model_fixes import (
     ext_temp_number_is_implausible,
 )
@@ -202,6 +208,132 @@ class HealthReporter:
             )
         )
 
+    def sync_clo_suggestion_issue(
+        self, suggestion: CloSuggestion | None, *, enabled: bool
+    ) -> None:
+        """ADR-0067 F2: mirror the emittable clo reading into a fixable issue.
+
+        Moved here from the coordinator (review 2026-08-19 P3) — the reporter
+        owns the whole repair-issue surface. DELIBERATELY not routed through
+        ``issue()``/the ledger: these suggestion mirrors are idempotent
+        per-tick create/delete (``async_create_issue`` is idempotent), not
+        transition-only, and the gate toggle is coordinator-owned tuning, so
+        it arrives per call (``enabled``) like ``_trv_ext_temp`` does. Same
+        trust rules as L2 (ADR-0060 §3: default on, per-zone opt-out); the
+        caller already resolved the #4 conflict, so ``None`` here also covers
+        a blocked reading.
+        """
+        issue_id = f"clo_suggestion_{self._entry_id}"
+        if not (enabled and suggestion):
+            ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=(
+                "clo_suggestion_up"
+                if suggestion.direction > 0
+                else "clo_suggestion_down"
+            ),
+            translation_placeholders={
+                "name": self._zone_name,
+                "count": str(suggestion.evidence),
+                # Mirrors control.feedback.CLO_SUGGEST_STEP (display only).
+                "step": "0.1",
+            },
+            data={
+                "entry_id": self._entry_id,
+                "kind": "clo_offset",
+                "direction": suggestion.direction,
+                "key": suggestion.key,
+            },
+        )
+
+    def sync_suggestion_issue(
+        self,
+        suggestion: OverrideSuggestion | None,
+        suppressed: bool,
+        *,
+        enabled: bool,
+    ) -> None:
+        """Mirror the detected L2 pattern into a fixable repair issue.
+
+        Moved here from the coordinator (review 2026-08-19 P3); see
+        ``sync_clo_suggestion_issue`` for why it bypasses the ledger. Emission
+        is gated on the ``override_suggestions`` toggle (ADR-0060 §3); the
+        issue disappears as soon as the pattern does.
+        """
+        issue_id = f"override_suggestion_{self._entry_id}"
+        if not (enabled and suggestion and not suppressed):
+            ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+            return
+        if suggestion.kind == "comfort_base":
+            translation_key = (
+                "override_suggestion_base_up"
+                if suggestion.direction > 0
+                else "override_suggestion_base_down"
+            )
+            step = f"{suggestion.step_k:.1f}"
+        else:
+            translation_key = "override_suggestion_earlier"
+            step = str(suggestion.step_min)
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=translation_key,
+            translation_placeholders={
+                "name": self._zone_name,
+                "count": str(suggestion.evidence),
+                "step": step,
+            },
+            data={
+                "entry_id": self._entry_id,
+                "kind": suggestion.kind,
+                "direction": suggestion.direction,
+                "key": suggestion.key,
+            },
+        )
+
+    def sync_season_hint_issue(
+        self,
+        hint: str | None,
+        *,
+        enabled: bool,
+        threshold: float,
+        t_rm: float | None,
+    ) -> None:
+        """ADR-0060 §2: mirror the season-mode advisory into a repair issue.
+
+        Moved here from the coordinator (review 2026-08-19 P3). NON-fixable
+        (purely advisory — the user switches the mode, never Poise); same
+        trust rules as L2, and the issue disappears as soon as the condition
+        does. ``threshold`` and ``t_rm`` are coordinator-owned readings and
+        arrive per call.
+        """
+        issue_id = f"season_mode_hint_{self._entry_id}"
+        if not (enabled and hint):
+            ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=f"season_hint_{hint}",
+            translation_placeholders={
+                "name": self._zone_name,
+                "t_rm": str(t_rm) if t_rm is not None else "?",
+                "threshold": f"{threshold:.0f}",
+            },
+        )
+
     async def validate_configured_ext_temp(self, entity_id: str | None) -> bool:
         """Vet the *configured* external-temp number once (not per tick).
 
@@ -243,14 +375,14 @@ class HealthReporter:
         # itself is the caller's write (S.3): one field, one writer.
         try:
             # Documented write-gate exception: this restore deliberately
-            # DELEGATES to __init__.py's lifecycle helper (shared with entry
-            # teardown and the config_flow park) instead of the tick executor
-            # — a one-shot setup-time write with its own blocking semantics,
-            # not a tick effect. The write-boundary gate's __init__.py
-            # exception covers its service calls.
-            from .. import _restore_trv_internal
+            # DELEGATES to the shared lifecycle helper (same module the entry
+            # teardown and the config_flow park use) instead of the tick
+            # executor — a one-shot setup-time write with its own blocking
+            # semantics, not a tick effect. The write-boundary gate's
+            # actuator_lifecycle exception covers its service calls.
+            from .actuator_lifecycle import restore_trv_internal
 
-            await _restore_trv_internal(self._hass, self._actuator)
+            await restore_trv_internal(self._hass, self._actuator)
         except Exception:  # noqa: BLE001 - best-effort restore must not block setup
             self._log.debug(
                 "Poise: TRV sensor-source restore after ext-temp reject failed",
