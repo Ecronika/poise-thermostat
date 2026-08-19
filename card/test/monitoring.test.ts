@@ -12,7 +12,9 @@ import {
   ppdFromPmv,
   tempVerdictAsrOffice,
   tempVerdictComfort,
+  ventChip,
 } from "../src/monitoring.ts";
+import { t } from "../src/localize.ts";
 
 test("co2Verdict uses UBA absolute defaults 1000/2000", () => {
   assert.equal(co2Verdict(null), "unknown");
@@ -379,4 +381,68 @@ test("comfortMeasure maturing progress: dwell figures, paused hint, fallback", (
   assert.equal(legacy?.maturing, true);
   assert.equal(legacy?.dwellMin, null);
   assert.equal(legacy?.dwellPaused, false);
+});
+
+test("a collapsed band renders grey WITH its own text (ADR-0049 N1)", () => {
+  assert.equal(tempVerdictComfort("no_band"), "unknown");
+  const lamps = buildMonitor({
+    temperature: 22.7,
+    comfortVerdict: "no_band",
+    humidity: null,
+    co2: null,
+  });
+  const temp = lamps.find((l) => l.key === "temperature")!;
+  assert.equal(temp.level, "unknown");
+  // The measurement IS there — only the band verdict is impossible.
+  assert.equal(temp.value, 22.7);
+  assert.equal(temp.detailKey, "no_band");
+  // Control: a genuinely absent verdict carries no explanation, so the lamp
+  // keeps the generic "no measurement" label.
+  const none = buildMonitor({
+    temperature: null,
+    comfortVerdict: null,
+    humidity: null,
+    co2: null,
+  });
+  assert.equal(none[0]!.detailKey, undefined);
+});
+
+test("the collapsed-band text is translated in both locales", () => {
+  for (const lang of ["en", "de"]) {
+    const s = t(lang, "no_band");
+    assert.notEqual(s, "no_band"); // key must not fall through untranslated
+    assert.notEqual(s, t(lang, "unknown")); // and must NOT be "no measurement"
+  }
+});
+
+test("ventChip shows the open advice and the mould guard only (ADR-0066 N2)", () => {
+  assert.deepEqual(ventChip("open", "moisture_out", "ok"), {
+    labelKey: "vent_open",
+    reasonKey: "vent_moisture_out",
+    alert: false,
+  });
+  assert.equal(ventChip("open", "mold_risk", "alert")!.alert, true);
+  // A reason the card does not know yet still shows the advice, without the
+  // bracket — never a raw token in the UI.
+  assert.equal(ventChip("open", "brand_new_reason", "ok")!.reasonKey, null);
+  // The mould guard is the ONE close advice that asks the user to act...
+  assert.deepEqual(ventChip("close", "mold_guard", "warn"), {
+    labelKey: "vent_close",
+    reasonKey: "vent_mold_guard",
+    alert: false,
+  });
+  // ...every harmless all-clear stays silent (no chip noise).
+  assert.equal(ventChip("close", "target_reached", "ok"), null);
+  assert.equal(ventChip("close", "cooled_off", "ok"), null);
+  assert.equal(ventChip("close", "thermal_floor", "warn"), null);
+  assert.equal(ventChip("idle", "no_gain", "ok"), null);
+  assert.equal(ventChip(null, null, null), null);
+});
+
+test("the mould-guard chip text is translated in both locales", () => {
+  for (const lang of ["en", "de"]) {
+    for (const key of ["vent_close", "vent_mold_guard"]) {
+      assert.notEqual(t(lang, key), key);
+    }
+  }
 });
