@@ -7,6 +7,10 @@ export type Verdict =
   | "in_band"
   | "warm_edge"
   | "above"
+  // ADR-0049 N1: the band collapsed onto a point because a protection floor
+  // (mould/norm) holds the setpoint at the upper edge. A band verdict is
+  // impossible — which is NOT the same as having no measurement.
+  | "no_band"
   | "unknown";
 
 export interface BandInput {
@@ -21,6 +25,9 @@ export interface BandModel {
   low: number;
   high: number;
   span: number;
+  // ADR-0049 N1: low == high — the band display stays omitted, but the state
+  // is distinguishable from "no band data at all".
+  collapsed: boolean;
   operative: number | null;
   setpoint: number | null;
   category: string;
@@ -64,17 +71,23 @@ export function verdictFor(
 
 export function buildBand(input: BandInput): BandModel | null {
   const { operative, setpoint, low, high } = input;
-  if (low == null || high == null || high <= low) return null;
+  // An INVERTED band (high < low) stays a contract violation — the backend
+  // never publishes one (dual_setpoint: cool_sp = max(cool_sp, heat_sp)). A
+  // COLLAPSED band (high == low) is a real state and keeps its model
+  // (ADR-0049 N1); only the band verdict is impossible.
+  if (low == null || high == null || high < low) return null;
+  const collapsed = high === low;
   const axisLow = low - AXIS_PAD_K;
   const axisHigh = high + AXIS_PAD_K;
   return {
     low,
     high,
     span: high - low,
+    collapsed,
     operative,
     setpoint,
     category: input.category ?? "",
-    verdict: verdictFor(operative, low, high),
+    verdict: collapsed ? "no_band" : verdictFor(operative, low, high),
     axisLow,
     axisHigh,
     lowFrac: frac(low, axisLow, axisHigh),

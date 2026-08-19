@@ -126,6 +126,12 @@ export function tempVerdictComfort(v: Verdict | null): Level {
     case "below":
     case "above":
       return "alert";
+    // ADR-0049 N1: the band collapsed onto a binding protection floor. No
+    // colour verdict on purpose — above such a floor "above the band" is not a
+    // fault, so red would mislead exactly as much as the old grey "no
+    // measurement" did. Grey plus a reason is the honest answer.
+    case "no_band":
+      return "unknown";
     default:
       return "unknown";
   }
@@ -240,6 +246,41 @@ export interface Lamp {
   detailKey?: string; // localizable detail (translated in the card renderer)
 }
 
+// --- Ventilation advice chip (ADR-0066 B, N2) ------------------------------
+// The advice carries text, not a measurand, so it is a chip and not a lamp.
+// Pure decision here, icon and markup in the renderer.
+export interface VentChip {
+  labelKey: "vent_open" | "vent_close";
+  reasonKey: string | null; // null = reason unknown to this card version
+  alert: boolean;
+}
+
+// Open reasons the card can name. An unknown one still shows the advice —
+// dropping it would hide a real recommendation, printing the raw token would
+// be worse than saying nothing about the why.
+const VENT_OPEN_REASONS = ["mold_risk", "moisture_out", "co2", "heat_out"];
+// Close advices are silent by default: "you may shut the window again" is an
+// all-clear, not a task. The mould guard is the exception (ADR-0066 N2) —
+// there the fabric is already over its limit and closing IS the action.
+const VENT_CLOSE_REASONS = ["mold_guard"];
+
+export function ventChip(
+  action: unknown,
+  reason: unknown,
+  level?: unknown,
+): VentChip | null {
+  const r = typeof reason === "string" ? reason : "";
+  const alert = level === "alert";
+  if (action === "open") {
+    const known = VENT_OPEN_REASONS.includes(r);
+    return { labelKey: "vent_open", reasonKey: known ? `vent_${r}` : null, alert };
+  }
+  if (action === "close" && VENT_CLOSE_REASONS.includes(r)) {
+    return { labelKey: "vent_close", reasonKey: `vent_${r}`, alert };
+  }
+  return null;
+}
+
 // --- "Aktive Behaglichkeit" measure line (ADR-0069 E7, display only) ---
 export interface ComfortMeasureInput {
   active: boolean; // the real active_comfort toggle attribute
@@ -311,6 +352,9 @@ export function buildMonitor(input: MonitorInput, config?: MonitorConfig): Lamp[
     unit: "°C",
     level: tLevel,
     color: levelColor(tLevel),
+    // ADR-0049 N1: say WHY the lamp is grey when a verdict is impossible —
+    // the temperature itself is present, so "no measurement" would be a lie.
+    ...(input.comfortVerdict === "no_band" ? { detailKey: "no_band" } : {}),
   });
   if (isNum(input.humidity)) {
     const abs = input.absHumidityGm3 ?? null;

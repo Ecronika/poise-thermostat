@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing, svg, type PropertyValues } from "lit";
 import type { HomeAssistant, LovelaceCard } from "./ha-types.ts";
 import { buildBand } from "./comfort.ts";
-import { buildMonitor, comfortMeasure, type Lamp } from "./monitoring.ts";
+import { buildMonitor, comfortMeasure, ventChip, type Lamp } from "./monitoring.ts";
 import {
   type PoiseCardConfig,
   type ResolvedConfig,
@@ -607,19 +607,21 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     // Derived from vent_action ("open" IS advice-active by definition) —
     // vent_advice_active is a payload/latch key, deliberately NOT an entity
     // attribute (v0.181.1 fix: the attribute read could never fire).
-    if (r.chips.has("humidity") && a["vent_action"] === "open") {
-      const reason = String(a["vent_reason"] ?? "");
-      const known = ["mold_risk", "moisture_out", "co2", "heat_out"].includes(reason);
-      const label = known
-        ? `${t(lang, "vent_open")} (${t(lang, "vent_" + reason)})`
-        : t(lang, "vent_open");
+    const vent = r.chips.has("humidity")
+      ? ventChip(a["vent_action"], a["vent_reason"], a["vent_level"])
+      : null;
+    if (vent) {
+      const base = t(lang, vent.labelKey);
+      const label = vent.reasonKey ? `${base} (${t(lang, vent.reasonKey)})` : base;
       chips.push(
         this._chip(
-          "mdi:weather-windy",
+          vent.labelKey === "vent_close"
+            ? "mdi:window-closed-variant"
+            : "mdi:weather-windy",
           label,
           undefined,
           lang,
-          a["vent_level"] === "alert",
+          vent.alert,
         ),
       );
     }
@@ -704,9 +706,14 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     // Field feedback: quality lamps (comfort, control accuracy) need their
     // own level vocabulary — "Erhöht" (elevated) is air-quality language and
     // reads backwards for a quality percentage.
+    // ADR-0049 N1: a grey lamp that HAS a value is not "no measurement" — it
+    // is a value without a verdict, and the lamp's own detail says why. Only
+    // a lamp without any value keeps the generic label.
     const lvlKey =
       l.level === "unknown"
-        ? "unknown"
+        ? l.detailKey && l.value != null
+          ? l.detailKey
+          : "unknown"
         : `${l.key === "pmv" || l.key === "ca" ? l.key : "air"}_${l.level}`;
     const lvl = t(lang, lvlKey);
     let val = "—";
@@ -714,7 +721,9 @@ export class PoiseCard extends LitElement implements LovelaceCard {
       val =
         l.key === "temperature" ? l.value.toFixed(1) : String(Math.round(l.value));
     }
-    const extra = l.detailKey ? t(lang, l.detailKey) : l.detail;
+    const detail = l.detailKey ? t(lang, l.detailKey) : l.detail;
+    // ...and never say the same sentence twice when the detail IS the level.
+    const extra = detail === lvl ? undefined : detail;
     const desc = `${label}: ${val} ${l.unit} — ${lvl}${extra ? ` · ${extra}` : ""}`;
     return html`<div class="lamp" title=${desc} aria-label=${desc}>
       <span class="dot" style="background:${l.color}"></span>
