@@ -9,6 +9,7 @@ upload debris that once put a deleted module back into the tree.
 from __future__ import annotations
 
 import ast
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,8 @@ from tests.structure_support import (
     _CURRENT_STEP,
     _STEP_ORDER,
     REPO_ROOT,
+    _component_sources,
+    _rel,
 )
 
 # --- structural invariants (activation-gated, plan O.0 section 6) ----------
@@ -223,3 +226,82 @@ def test_orphan_detector_is_not_vacuous() -> None:
             f"{name} is listed as unwired but IS imported now - remove the "
             f"exemption ({reason})"
         )
+
+
+# --- S.2: the pre-split aggregate must stay gone ----------------------------
+
+# Same guard shape as P.1's ``test_the_old_pipeline_module_is_gone_...``, and
+# for the same reason: this repository is maintained by web upload, which ADDS
+# and OVERWRITES but never DELETES. A restored copy of the pre-split file does
+# not merely duplicate 133 tests - it carries the ratchet table and the
+# detector controls as they were BEFORE the split, so it fails on the current
+# code while the current gates pass, and the run reads like a code regression
+# instead of a stale file. This test says which it is.
+_PRE_SPLIT_STRUCTURE_GATE = "tests/test_tick_chain_structure.py"
+_SPLIT_GATES = (
+    "tests/structure_support.py",
+    "tests/test_structure_ratchet.py",
+    "tests/test_structure_snapshot.py",
+    "tests/test_structure_ports.py",
+    "tests/test_structure_phases.py",
+    "tests/test_structure_pipeline.py",
+    "tests/test_structure_meta.py",
+)
+
+
+def test_the_pre_split_structure_gate_is_gone_and_its_successors_exist() -> None:
+    """S.2: one file became seven; the original must not come back.
+
+    Both halves on purpose. Without the second, deleting a successor by
+    accident would leave this test happily green on a gate that no longer
+    runs - the exact vacuum the split was supposed to make impossible.
+    """
+    assert not (REPO_ROOT / _PRE_SPLIT_STRUCTURE_GATE).exists(), (
+        f"{_PRE_SPLIT_STRUCTURE_GATE} is back. S.2 split it into "
+        f"{list(_SPLIT_GATES)} and deleted it; a stale copy re-runs the "
+        f"PRE-split ratchet baselines and detector controls against current "
+        f"code, which fails for reasons that have nothing to do with the code. "
+        f"Delete the file - do not adjust the code to satisfy it."
+    )
+    missing = [rel for rel in _SPLIT_GATES if not (REPO_ROOT / rel).exists()]
+    assert not missing, f"structure gate(s) missing after the S.2 split: {missing}"
+
+
+# --- docstrings that point at a gate must point at a gate that exists -------
+
+_TEST_PATH_IN_PROSE = re.compile(r"tests/[A-Za-z0-9_/]+\.py")
+
+
+def test_every_gate_named_in_a_production_docstring_still_exists() -> None:
+    """In this package a docstring naming a gate is architecture documentation
+    with binding character: it tells the next reader WHERE the rule above is
+    enforced. A pointer to a file that no longer exists is worse than none —
+    it looks like a guarantee and is one nobody can follow.
+
+    Found the hard way: S.2 split the structure gate into seven files, and two
+    module docstrings kept pointing at the deleted aggregate. Nothing failed,
+    because prose does not run.
+
+    The first assertion is the anti-vacuum control: production code DOES name
+    its gates in several places, so a matcher that finds none is broken rather
+    than proof of a clean tree.
+    """
+    named: dict[str, list[str]] = {}
+    for path in _component_sources():
+        for hit in _TEST_PATH_IN_PROSE.findall(path.read_text(encoding="utf-8")):
+            named.setdefault(hit, []).append(_rel(path))
+    assert len(named) >= 3, (
+        f"only {len(named)} gate pointers found in the component "
+        f"({sorted(named)}) - the pattern no longer matches the way this "
+        f"package cites its gates, so this test proves nothing."
+    )
+    missing = {
+        gate: sorted(set(sources))
+        for gate, sources in named.items()
+        if not (REPO_ROOT / gate).exists()
+    }
+    assert not missing, (
+        f"production docstrings point at gates that do not exist: {missing}. "
+        f"Update the pointer to the gate that took the rule over - a dangling "
+        f"reference reads as an enforced invariant and is not one."
+    )

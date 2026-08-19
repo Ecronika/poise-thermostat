@@ -323,7 +323,12 @@ _RATCHET: tuple[_Entry, ...] = (
         baseline_total=1389,
         baseline_code=764,
         headroom=50,
-        note="1358/750 - growth guard only; code metric is what counts",
+        note=(
+            "growth guard only, no lowering target - the code metric is "
+            "what counts. Deliberately WITHOUT a number pair: the "
+            "baselines above are the single place that carries it, and a "
+            "second copy in prose went stale twice."
+        ),
     ),
     # ---- the three pure-pipeline modules (new with P.1) --------------------
     # The row added after the O.7 audit guarded control/tick_pipeline.py at
@@ -387,8 +392,8 @@ _RATCHET: tuple[_Entry, ...] = (
     ),
     _Entry(
         identifier="tests/test_structure_ratchet.py",
-        baseline_total=584,
-        baseline_code=296,
+        baseline_total=597,
+        baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight
         # lines - and its six siblings - are part of what it measures. The
@@ -429,9 +434,17 @@ _RATCHET: tuple[_Entry, ...] = (
         note="1200/900 total/code - the S.2 gate split; the gate measures itself",
     ),
     _Entry(
+        # +39/+17: the S.2 successor guard, added after a CI run showed the
+        # pre-split file back in the checkout (web upload adds, never
+        # deletes). Two failures that read like a code regression were in
+        # truth one stale file; the guard now says which.
+        # +43/+22: the dangling-gate-pointer guard. An external review found
+        # two module docstrings still naming the deleted aggregate - prose
+        # does not run, so nothing had failed. Both classes of stale
+        # cross-reference now have a detector.
         identifier="tests/test_structure_meta.py",
-        baseline_total=225,
-        baseline_code=121,
+        baseline_total=307,
+        baseline_code=165,
         headroom=50,
         note="1200/900 total/code - the S.2 gate split; the gate measures itself",
     ),
