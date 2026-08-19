@@ -24,14 +24,32 @@ reach the file before the entry goes away.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections import deque
 from contextlib import suppress
 from pathlib import Path
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import instance_id
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def salted_trace_slug(hass: HomeAssistant, entry_id: str) -> str:
+    """ADR-0022 decision 3 (ThermoSmart pattern): the trace filename carries a
+    salted hash, never the raw entry id.
+
+    A trace file is the artifact users SHARE for offline replay; the record
+    lines carry no zone identity, so the filename is the one channel that
+    would link a shared trace back to a config entry. The salt is the HA
+    installation id — stable across restarts (the recorder must keep
+    appending to the same file) and never part of the shared artifact, so the
+    hash cannot be reversed to the entry without access to the instance.
+    """
+    salt = await instance_id.async_get(hass)
+    return hashlib.sha256(f"{salt}:{entry_id}".encode()).hexdigest()[:12]
+
 
 # ~8.5 h of queued ticks at the 60 s cadence. Only ever reached when the drain
 # cannot keep up (a stalled disk); a healthy drain empties the queue in one

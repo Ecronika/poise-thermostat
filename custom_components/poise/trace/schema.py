@@ -17,13 +17,25 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any
 
-TRACE_VERSION: int = 2
+# v3: semantics fix — ``frozen`` is now actually populated (v2 always recorded
+# False because ``build_record`` read the key ``frozen`` while the live feed
+# publishes ``sensor_frozen``), and the heating-failure verdict gains its trace
+# field. The bump marks TRUSTWORTHY ``frozen``/``heating_failure`` semantics:
+# in a v<=2 record their False is meaningless, in a v3 record it is a verdict.
+TRACE_VERSION: int = 3
 # Oldest on-disk trace version the replay loader still accepts (deprecation
 # window). Bump this — and retire the matching frozen golden — only when a
 # schema change makes older records genuinely un-replayable. Today a v1 record
-# replays fine (its missing v2 fields simply default), so v1 stays supported and
-# is pinned by a frozen legacy golden.
+# replays fine (its missing v2/v3 fields simply default), so v1 stays supported
+# and is pinned by a frozen legacy golden.
 MIN_SUPPORTED_TRACE_VERSION: int = 1
+
+# ADR-0022 decision 3 (privacy): the wall-clock anchor ``ts`` is quantised to
+# this bucket before recording, so a shared trace file carries no fine-grained
+# presence/usage pattern. 15 min is coarse enough to hide behaviour and fine
+# enough to keep the human anchor useful; ``mono`` — the replay dt source —
+# is deliberately NOT quantised (determinism, ADR-0014).
+TRACE_TS_QUANTUM_S: float = 900.0
 
 
 def is_supported_version(v: int) -> bool:
@@ -77,6 +89,10 @@ class TraceRecord:
     heat_sp: float = 0.0
     cool_sp: float = 0.0
     window_open: bool = False
+    # Fed from the live tick feed's ``sensor_frozen`` key since v3. In v<=2
+    # records this is permanently False (the historical mapping bug read the
+    # non-existent key ``frozen``) — a replay must not treat an old False as
+    # "sensor was healthy".
     frozen: bool = False
     mode_nudge_blocked: str = ""
     preheating: bool = False
@@ -105,10 +121,10 @@ class TraceRecord:
     surface_rh_mean: float | None = None  # EWMA surface RH — rule-1 trigger
     vent_action: str = ""  # ventilation advice: idle|open|close|discourage
     vent_reason: str = ""  # stable reason token (mold_risk|moisture_out|...)
-    # --- September instrumentation (winter-gate evidence; added within v2,
-    # all defaulted — same compat mechanism as the ADR-0066 fields, no
-    # version bump needed): the shadow OUTPUTS (ADR-0033b/0036/0037/0056)
-    # ride along so cold-season flip evidence replays without the recorder's
+    # --- Winter-gate instrumentation (added within v2, all defaulted — same
+    # compat mechanism as the ADR-0066 fields, no version bump needed): the
+    # shadow OUTPUTS (ADR-0033 flip criterion (b), ADR-0036/0037/0056) ride
+    # along so cold-season flip evidence replays without the recorder's
     # ~10-day attribute history. -------------------------------------------
     mpc_active: bool = False
     mpc_setpoint: float | None = None  # would-be MPC setpoint [°C]
@@ -121,10 +137,14 @@ class TraceRecord:
     # --- Review C.8 write-convergence telemetry (added within v2, defaulted
     # — same compat mechanism, no version bump): consecutive unconverged
     # re-asserts/re-nudges so non-convergence episodes replay from the trace,
-    # plus the cooling-failure verdict (heating rides via ``frozen``-era keys).
+    # plus the cooling-failure verdict.
     sp_diverged_writes: int = 0
     mode_diverged_nudges: int = 0
     cooling_failure: bool = False
+    # v3: the heating-failure verdict, symmetric to ``cooling_failure`` (the
+    # feed published ``heating_failure`` all along; only the trace field was
+    # missing). Defaulted, so v1/v2 records load unchanged.
+    heating_failure: bool = False
 
     def to_json_line(self) -> str:
         """One compact JSON line; floats rounded and ``None`` fields dropped."""
@@ -192,7 +212,8 @@ def build_record(
     ca = data.get("ca_deviation_k")
     return TraceRecord(
         v=TRACE_VERSION,
-        ts=ts,
+        # ADR-0022: privacy quantisation — see TRACE_TS_QUANTUM_S above.
+        ts=ts - (ts % TRACE_TS_QUANTUM_S),
         mono=mono,
         room=room,
         t_out=t_out,
@@ -215,7 +236,9 @@ def build_record(
         heat_sp=_f("heat_sp"),
         cool_sp=_f("cool_sp"),
         window_open=_b("window_open"),
-        frozen=_b("frozen"),
+        # v3 fix: the feed key is ``sensor_frozen`` (phase_report), not
+        # ``frozen`` — reading the latter recorded a permanent False.
+        frozen=_b("sensor_frozen"),
         mode_nudge_blocked=str(data.get("mode_nudge_blocked", "")),
         preheating=_b("preheating"),
         coasting=_b("coasting"),
@@ -246,4 +269,5 @@ def build_record(
         sp_diverged_writes=_i("sp_diverged_writes"),
         mode_diverged_nudges=_i("mode_diverged_nudges"),
         cooling_failure=_b("cooling_failure"),
+        heating_failure=_b("heating_failure"),
     )
