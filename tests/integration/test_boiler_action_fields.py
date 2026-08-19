@@ -21,10 +21,8 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import selector
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.poise.config_flow import (
-    _system_schema,
-    _validate_boiler_actions,
-)
+from custom_components.poise.config_flow import _validate_boiler_actions
+from custom_components.poise.config_schema import _system_schema
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_BOILER_OFF_ACTION,

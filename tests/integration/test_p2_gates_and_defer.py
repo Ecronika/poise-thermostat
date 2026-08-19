@@ -21,7 +21,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.poise.config_flow import _reconfigure_schema
+from custom_components.poise.config_schema import _reconfigure_schema
 from custom_components.poise.const import (
     CONF_ACTUATOR,
     CONF_CATEGORY,

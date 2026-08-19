@@ -116,7 +116,10 @@ async def test_room_disable_parks_heater(hass: HomeAssistant) -> None:
     coord.runtime.actuator.has_actuated = True  # AR-11: gate the teardown park
     coord.runtime.user.climate_mode = "auto"
 
-    with patch("custom_components.poise._execute_park", new_callable=AsyncMock) as park:
+    with patch(
+        "custom_components.poise.ha.actuator_lifecycle.execute_park",
+        new_callable=AsyncMock,
+    ) as park:
         await hass.config_entries.async_set_disabled_by(
             entry.entry_id, ConfigEntryDisabler.USER
         )
@@ -127,6 +130,44 @@ async def test_room_disable_parks_heater(hass: HomeAssistant) -> None:
     assert plan.kind == "climate"
     assert plan.hvac_mode == "heat"
     assert plan.setpoint == 18.0  # comfort_base 21 - setback 3, floored at 7
+
+
+async def test_room_disable_park_clamps_to_device_min(hass: HomeAssistant) -> None:
+    """Review 2026-08-19 P1: the delete/disable park must clamp the setback up
+    to the device's ``min_temp`` — a high-min heat pump / split AC would reject
+    an 18 °C setback and silently stay on the old comfort setpoint. The
+    reconfigure park always did this; this pins the shared lifecycle path so
+    the two can never drift apart again."""
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat"],
+            "temperature": 21.0,
+            "current_temperature": 21.5,
+            "min_temp": 20.0,
+        },
+    )
+    entry = await _setup_room(hass)
+    coord = entry.runtime_data
+    coord.runtime.actuator.has_actuated = True
+    coord.runtime.user.climate_mode = "auto"
+
+    with patch(
+        "custom_components.poise.ha.actuator_lifecycle.execute_park",
+        new_callable=AsyncMock,
+    ) as park:
+        await hass.config_entries.async_set_disabled_by(
+            entry.entry_id, ConfigEntryDisabler.USER
+        )
+        await hass.async_block_till_done()
+
+    assert park.await_count == 1
+    plan = park.await_args.args[2]
+    assert plan.kind == "climate"
+    assert plan.hvac_mode == "heat"
+    # comfort_base 21 - setback 3 = 18, clamped UP to the device min of 20.
+    assert plan.setpoint == 20.0
 
 
 async def test_room_disable_parks_cool_only_off(hass: HomeAssistant) -> None:
@@ -146,7 +187,10 @@ async def test_room_disable_parks_cool_only_off(hass: HomeAssistant) -> None:
     coord.runtime.actuator.has_actuated = True
     coord.runtime.user.climate_mode = "cool_only"
 
-    with patch("custom_components.poise._execute_park", new_callable=AsyncMock) as park:
+    with patch(
+        "custom_components.poise.ha.actuator_lifecycle.execute_park",
+        new_callable=AsyncMock,
+    ) as park:
         await hass.config_entries.async_set_disabled_by(
             entry.entry_id, ConfigEntryDisabler.USER
         )
