@@ -248,7 +248,10 @@ async def test_trace_recording_appends_a_replay_line(hass: HomeAssistant) -> Non
 
     # capture is pure observation: the tick still produced a normal payload
     assert coord.data["available"] is True
-    path = Path(hass.config.path("poise_traces", f"{entry.entry_id}.jsonl"))
+    from custom_components.poise.trace.recorder import salted_trace_slug
+
+    slug = await salted_trace_slug(hass, entry.entry_id)
+    path = Path(hass.config.path("poise_traces", f"{slug}.jsonl"))
     assert path.exists()
     lines = path.read_text(encoding="utf-8").splitlines()
     assert len(lines) >= 1

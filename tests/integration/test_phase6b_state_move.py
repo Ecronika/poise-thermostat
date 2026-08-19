@@ -147,7 +147,7 @@ async def test_proxy_writes_are_bidirectionally_visible(
 
 
 async def test_clock_swap_reaches_every_reader(hass: HomeAssistant) -> None:
-    """``coord._clock = fake`` must govern runtime, reader and provider."""
+    """``coord.runtime.clock = fake`` must govern runtime, reader and provider."""
     entry = await _setup(hass)
     coord = entry.runtime_data
     fake = ManualClock(1234.5)
@@ -196,6 +196,11 @@ async def test_adapter_owned_attributes_did_not_move(
         # The orchestrator is __slots__-based, so ownership is a slot + a value.
         assert name in type(coord._tick).__slots__, f"{name} missing from the slots"
         assert hasattr(coord._tick, name), f"{name} should be set in __init__"
-    # Seeded from the entry id, recorder lazily built (opt-in trace, default off).
-    assert coord._tick._trace_slug == entry.entry_id
+    # Seeded with the ADR-0022 salted slug (never the raw entry id), recorder
+    # lazily built (opt-in trace, default off).
+    from custom_components.poise.trace.recorder import salted_trace_slug
+
+    expected_slug = await salted_trace_slug(hass, entry.entry_id)
+    assert coord._tick._trace_slug == expected_slug
+    assert expected_slug != entry.entry_id
     assert coord._tick._trace_recorder is None

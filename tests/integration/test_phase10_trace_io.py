@@ -119,7 +119,10 @@ async def test_slow_disk_no_longer_inflates_tick_ms(hass: HomeAssistant) -> None
         f"tick_ms={tick_ms} — the tick still waited for the trace write"
     )
     # non-vacuous: the write really did happen (and really was slow)
-    path = Path(hass.config.path("poise_traces", f"{entry.entry_id}.jsonl"))
+    from custom_components.poise.trace.recorder import salted_trace_slug
+
+    slug = await salted_trace_slug(hass, entry.entry_id)
+    path = Path(hass.config.path("poise_traces", f"{slug}.jsonl"))
     assert path.exists()
     assert path.read_text(encoding="utf-8").splitlines()
 

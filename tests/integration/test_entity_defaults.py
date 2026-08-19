@@ -205,3 +205,54 @@ async def test_winter_evidence_sensors_registered_and_mapped(
     assert descs["ref_offset"].value_fn(data) == -0.83
     for key in new_keys:
         assert descs[key].value_fn({}) is None
+
+
+async def test_climate_attribute_recorder_diet(hass: HomeAssistant) -> None:
+    """ISO-review E1: the climate entity carries ~150 per-tick attributes; the
+    recorder must only persist the headline set (card history + episode
+    charts). Everything else stays a LIVE attribute (card/templates read it
+    from the state machine) but is excluded from the database via
+    ``_unrecorded_attributes`` — otherwise every 60 s tick writes a multi-KB
+    attribute blob per zone that the recorder cannot deduplicate."""
+    from custom_components.poise.climate import _ATTRS, _RECORDED_ATTRS, PoiseClimate
+
+    # The partition is total: every extra attribute is either deliberately
+    # recorded or deliberately excluded — a new _ATTRS key cannot silently
+    # start writing history without showing up here.
+    assert PoiseClimate._unrecorded_attributes == frozenset(_ATTRS) - _RECORDED_ATTRS
+    assert frozenset(_ATTRS) >= _RECORDED_ATTRS
+
+    # The card's history graph reads exactly these from recorded attributes
+    # (poise-card.ts _loadHistory); losing either breaks the 24 h chart.
+    assert "operative_temperature" in _RECORDED_ATTRS
+    # Episode/context series users chart from history: band, verdicts, holds.
+    for key in (
+        "comfort_low",
+        "comfort_high",
+        "heat_sp",
+        "cool_sp",
+        "pmv",
+        "ppd",
+        "window_open",
+        "sensor_frozen",
+        "heating_failure",
+        "cooling_failure",
+        "override_active",
+        "override_expires_at",
+        "mould_floor",
+    ):
+        assert key in _RECORDED_ATTRS, key
+
+    # Spot-check the noisy tail is OUT: per-tick learning/shadow/diagnostic
+    # churn that the trace and the opt-in instrumentation sensors carry.
+    for key in (
+        "window_auto_slope",
+        "tick_over_budget",
+        "confidence",
+        "mpc_setpoint",
+        "tpi_duty",
+        "savings_eur_month",
+        "ca_deviation_k",
+        "minutes_to_comfort",
+    ):
+        assert key in PoiseClimate._unrecorded_attributes, key
