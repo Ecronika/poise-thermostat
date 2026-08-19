@@ -57,11 +57,17 @@ ALLOWED = {
         "calls until its own phase)"
     ),
     "__init__.py": (
-        "entry setup/teardown lifecycle writes (boiler OFF, actuator park, "
-        "TRV sensor-source restore — also delegated to from the "
-        "coordinator's _validate_configured_ext_temp and config_flow) — "
+        "hub-removal boiler OFF — a deliberate one-shot teardown write with "
+        "its own blocking semantics, outside the tick's write boundary (the "
+        "actuator park / TRV restore writes moved to ha/actuator_lifecycle.py, "
+        "review 2026-08-19 P1)"
+    ),
+    "ha/actuator_lifecycle.py": (
+        "the shared hand-back lifecycle (actuator park + TRV sensor-source "
+        "restore), delegated to from __init__ teardown, the config_flow "
+        "actuator swap and health_reporter's ext-temp invalidation — "
         "deliberate one-shot writes with their own blocking semantics, "
-        "outside the tick's write boundary"
+        "outside the tick's write boundary (review 2026-08-19 P1)"
     ),
 }
 

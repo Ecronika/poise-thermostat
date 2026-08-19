@@ -47,9 +47,14 @@ ALLOWED = {
         "previews, not tick reads"
     ),
     "__init__.py": (
-        "entry setup/teardown lifecycle reads (required-entity check, TRV "
-        "sensor-source restore on removal) — move with the later ha/ phases, "
-        "not with the tick's read boundary"
+        "entry setup lifecycle reads (required-entity check) — move with the "
+        "later ha/ phases, not with the tick's read boundary"
+    ),
+    "ha/actuator_lifecycle.py": (
+        "the shared hand-back lifecycle (park state read incl. min_temp, TRV "
+        "sensor-source restore) — one-shot teardown/reconfigure reads shared "
+        "by __init__, config_flow and health_reporter (review 2026-08-19 P1), "
+        "never on the tick"
     ),
 }
 

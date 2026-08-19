@@ -286,8 +286,11 @@ _STATES_READERS: dict[str, str] = {
     "custom_components/poise/config_flow.py": (
         "setup/reconfigure dialogs - runs outside any tick"
     ),
-    "custom_components/poise/__init__.py": (
-        "entry setup guards and the TRV restore helper - once per entry"
+    "custom_components/poise/__init__.py": ("entry setup guards - once per entry"),
+    "custom_components/poise/ha/actuator_lifecycle.py": (
+        "the shared hand-back lifecycle (park state read + TRV restore) - "
+        "one-shot teardown/reconfigure reads, never on the tick "
+        "(review 2026-08-19 P1)"
     ),
     "custom_components/poise/hub_coordinator.py": (
         "the boiler hub's own aggregation; it has no InputReader"

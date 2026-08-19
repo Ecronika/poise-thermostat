@@ -319,9 +319,13 @@ _RATCHET: tuple[_Entry, ...] = (
         # are handed over by keyword instead of via a backreference, and the
         # ext-temp invalidation moved here from the reporter. Bought with a
         # backreference removed from the package, not with plumbing.
+        # -78/-67 for review 2026-08-19 P3: the three suggestion-issue bodies
+        # (_sync_clo_suggestion_issue / _sync_suggestion_issue /
+        # _sync_season_hint_issue) moved to the HealthReporter — the owner of
+        # the repair-issue surface — leaving thin port-named facades here.
         identifier="custom_components/poise/coordinator.py",
-        baseline_total=1389,
-        baseline_code=764,
+        baseline_total=1311,
+        baseline_code=697,
         headroom=50,
         note=(
             "growth guard only, no lowering target - the code metric is "
