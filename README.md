@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.191.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.192.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.10%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -29,8 +29,8 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Cooling decision & modes** — capability-aware dual setpoints; `COOL` is surfaced as an HVAC mode **only when the actuator supports cooling** (heat-only TRVs stay HEAT/OFF).
 - **Humidity (dry) & hot-day cooling** — capability-gated and live: a `dry`-capable AC lowers humidity through the dead-band (cool-first, dew-point-guarded, category-bound RH ceiling with 5 % hysteresis; the comfort ceiling only applies while the room is **occupied**, the absolute 12 g/kg health/mould backstop always), and on hot days the cooling edge is raised toward the EN / ASR ceiling (rate-limited ≤ 0.5 K/tick); heat-only TRVs are unaffected (ADR-0050/0051).
 - **Open-window reaction (sensor *or* sensorless)** — a configured window sensor or the **slope detector** (open threshold adapted to the learned time constant τ) drops the room to the frost/mould floor through the solver and pauses learning; a per-zone **bypass switch** overrides it. The sensor wins when present.
-- **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks, and a value pushed outside the comfort band is clamped to it and flagged (`override_clamped`) rather than limited silently. A setpoint or HVAC mode changed **on the device itself** (TRV wheel / IR remote / vendor app) is adopted as such a hold — with the zone's return rule — *once Poise can tell it apart from an echo of its own write*; the preconditions and the modality limits are spelled out under [Geräteseitige Eingriffe (Adoption)](#geräteseitige-eingriffe-adoption) (default on, opt-out per zone; ADR-0059).
-- **„Aktive Behaglichkeit" (opt-in)** — with the per-zone `active_comfort` toggle ON (default off), a fan-capable AC uses the **fan as the first cooling stage** (echo-gated fan-first sequence with dwell/anti-flap, ADR-0068) plus the ADR-0053 idle circulation; the tier-2 comfort measures (fan-CE credit on the cooling edge, capped PMV band shift) additionally wait for the ADR-0055 maturity gates (ADR-0069).
+- **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks, and a value pushed outside the comfort band is clamped to it and flagged (`override_clamped`) rather than limited silently. A setpoint or HVAC mode changed **on the device itself** (TRV wheel / IR remote / vendor app) is adopted as such a hold — with the zone's return rule — *once Poise can tell it apart from an echo of its own write*; the preconditions and the modality limits are spelled out under [Device-side interventions (adoption)](#device-side-interventions-adoption) (default on, opt-out per zone; ADR-0059).
+- **Active comfort (opt-in)** — with the per-zone `active_comfort` toggle ON (default off), a fan-capable AC uses the **fan as the first cooling stage** (echo-gated fan-first sequence with dwell/anti-flap, ADR-0068) plus the ADR-0053 idle circulation; the tier-2 comfort measures (fan-CE credit on the cooling edge, capped PMV band shift) additionally wait for the ADR-0055 maturity gates (ADR-0069).
 - **Bundled Lovelace cards** — Poise ships its own cards inside the integration and **auto-registers** them (no separate HACS plugin, no manual resource URL). `poise-card` puts the **EN 16798 comfort band** front and centre — operative temperature & setpoint as markers in the live band, a 24 h history graph, clickable status chips, learning confidence and a **shadow pill that shows what the engine *would* do** (TPI %/PI/MPC). `poise-system-card` surfaces the multi-zone hub (boiler demand, heating zones, flow target, load shedding). Self-contained Lit/TS, only `lit` bundled (ADR-0040).
 - **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts (and flushed on Home Assistant shutdown, not only periodically). While enabled, Poise also keeps a heat-capable actuator in its `heat` mode so it follows Poise's setpoint instead of running its own `auto`/schedule.
 
@@ -53,52 +53,52 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
 - **Multi-zone resource coordination** — via the *Poise System* hub (ADR-0038/0039): boiler-demand aggregate + opt-in boiler actuation, plus **load-shedding, compressor-group protection and a flow-temperature allocator computed as diagnostic shadows** (smallest-gap shedding, per-group min-run/off, highest-request-wins flow with anti-hunt hysteresis — the last harness-validated against oscillation, ADR-0013). Zone-side / generator-side enforcement is the next stage.
 
-## Manuelle Eingriffe & Rückkehr zur Automatik
+## Manual interventions & returning to automatic
 
-Ein manueller Sollwert ist ein **temporärer Hold**, kein Dauerzustand: Poise übernimmt den von Hand gestellten Wert und kehrt anschließend automatisch in den geregelten Betrieb zurück. **Wann** zurückgekehrt wird, ist konfigurierbar (*Optionen → „Manuelle Eingriffe"*).
+A manual setpoint is a **temporary hold**, not a permanent state: Poise adopts the hand-set value and then returns to regulated operation on its own. **When** it returns is configurable (*Options → "Manual interventions"*).
 
-| Eingriff | gilt bis | wie beenden |
+| Intervention | lasts until | how to end it |
 | --- | --- | --- |
-| **Manueller Sollwert** | Policy `schedule` → bis zum nächsten Schaltpunkt (hart gedeckelt auf 8 h; ohne konfiguriertes Zeitfenster greift der Timer); `timer` → fester Timer (Default 2 h); `permanent` → bis zum Widerruf | Modus wählen, X auf der Card, `poise.resume_schedule`, oder Ablauf abwarten |
-| **Boost-Preset** | Default 60 min, danach Rückkehr zum vorherigen Preset | Ablauf abwarten oder anderes Preset wählen |
-| **Eco / Comfort / Away** | Zustandswahl (kein Timer); **Away** endet über die Anwesenheit | anderes Preset / Modus wählen |
-| **HVAC-Modus** | persistent — das ist **Konfiguration**, kein Override | Modus erneut wählen |
+| **Manual setpoint** | policy `schedule` → the next switch point (hard-capped at 8 h; without a configured comfort window the timer applies); `timer` → fixed timer (default 2 h); `permanent` → until revoked | pick an HVAC mode, tap the X on the card, call `poise.resume_schedule`, or wait it out |
+| **Boost preset** | default 60 min, then back to the previous preset | wait it out or pick another preset |
+| **Eco / Comfort / Away** | state selection (no timer); **Away** ends via presence | pick another preset / mode |
+| **HVAC mode** | persistent — that is **configuration**, not an override | pick the mode again |
 
-**Prioritätenkette** — der jeweils höhere Rang gewinnt:
+**Precedence chain** — the higher rank always wins:
 
-**Fenster / Frost / Schimmel  >  manueller Sollwert  >  Preset  >  Zeitplan / Anwesenheit**
+**window / frost / mould  >  manual setpoint  >  preset  >  schedule / presence**
 
-Sicherheits- und Kontextlagen (offenes Fenster, Frost- und Schimmelschutz) sind nie verhandelbar und setzen sich immer gegen einen manuellen Sollwert durch; dieser schlägt das aktive Preset, und das Preset schlägt Zeitplan und Anwesenheit.
+Safety and context conditions (open window, frost and mould protection) are never negotiable and always beat a manual setpoint; the manual setpoint beats the active preset, and the preset beats schedule and presence.
 
-**Wie beenden:** einen HVAC-Modus wählen, das **X** auf der Card antippen, den Service `poise.resume_schedule` aufrufen (Zone oder alle Zonen), oder den Ablauf abwarten.
+**How to end a hold:** pick an HVAC mode, tap the **X** on the card, call the `poise.resume_schedule` service (one zone or all zones), or wait for it to expire.
 
-> **Migration:** Bestehende Installationen behalten das heutige Verhalten (`timer` / 2 h). `schedule` ist nur der Default für **neu eingerichtete** Zonen.
+> **Migration:** existing installs keep today's behaviour (`timer` / 2 h). `schedule` is only the default for **newly created** zones.
 
-### Geräteseitige Eingriffe (Adoption)
+### Device-side interventions (adoption)
 
-Wird **am Gerät selbst** verstellt (TRV-Rad, IR-Fernbedienung, Hersteller-App), übernimmt Poise das als denselben Hold wie einen Eingriff in der Poise-UI — mit der Rückkehrregel der Zone, statt beim nächsten Tick zurückzuschreiben. Standardmäßig an, je Zone abschaltbar (*Optionen → „Manuelle Eingriffe"*).
+A change made **on the device itself** (TRV wheel, IR remote, vendor app) is adopted as the same hold as a change in the Poise UI — with the zone's return rule — instead of being written back on the next tick. Default on, opt-out per zone (*Options → "Manual interventions"*).
 
-**Die Übernahme ist bedingt, nicht bedingungslos.** Poise sieht an der `climate`-Entität nur einen neuen Wert — nicht, *wer* ihn gesetzt hat. Übernommen wird deshalb nur, was sich sicher vom Echo des eigenen Schreibvorgangs unterscheiden lässt. Im Zweifel gilt: **nicht übernehmen** — ein verworfener Eingriff kostet eine Wiederholung, eine falsche Übernahme friert die Regelung auf einem Phantom-Sollwert ein.
+**Adoption is conditional, not unconditional.** On the `climate` entity Poise only sees a new value — not *who* set it. It therefore adopts only what can be safely told apart from the echo of its own write. When in doubt: **do not adopt** — a discarded intervention costs one repetition, a false adoption freezes control on a phantom setpoint.
 
-| Wird **nicht** übernommen, wenn … | Grund (Diagnose) |
+| **Not** adopted when … | reason (diagnostics) |
 | --- | --- |
-| die Zone die Übernahme abgeschaltet hat | `opt_out` |
-| Poise den Wert selbst geschrieben hat (erkannt am HA-`Context`) | `own_echo` |
-| Poise in dieser Zone noch nie selbst geschrieben hat — es fehlt der Vergleichswert (**seit v0.174.0 neustartfest**: er wird mitgespeichert, betrifft also nur Neuinstallationen bzw. die Zeit bis zum ersten eigenen Schreibvorgang) | `no_baseline` |
-| die Änderung **binnen 120 s** auf einen eigenen Schreibvorgang folgt und nicht nachweislich auch vom Wert *davor* abweicht | `echo_window` |
-| die Abweichung unter der Geräteschrittweite liegt | `command_echo` |
-| der gemeldete Wert sich seit der letzten Ablesung nicht bewegt hat (ein stehender Versatz — Rundung / interne Kompensation — wird nie erneut übernommen) | `stable_offset` |
-| beim **Modus**: der gemeldete Modus sich seit der letzten Ablesung nicht bewegt hat | `stable_prev` |
-| beim **Sollwert**: die geräteeigene Zeitschaltuhr läuft (eine auf dem Aktor-Gerät automatisch erkannte Zeitplan-`switch`-Entität ist `on`) — dann stellt das Programm, nicht der Mensch | `schedule_active` |
-| beim **Sollwert**: der gemeldete Wert liegt auf/unter dem Frostschutz-Boden (7 °C) — kein plausibler Nutzerwunsch, sondern Geräte-Reset/Frostmodus | `implausible_frost` |
-| bei **Sollwert und Modus**: Fenster offen oder Sensorik eingefroren — Sicherheit schlägt Eingriff | `safety_window`, `safety_frozen` |
-| beim **Modus**: das Gerät kann den Modus nicht oder er ist `heat_cool` | `unsupported` |
+| the zone has adoption switched off | `opt_out` |
+| Poise wrote the value itself (recognised by the HA `Context`) | `own_echo` |
+| Poise has never written in this zone — the comparison baseline is missing (**restart-safe since v0.174.0**: the baseline is persisted, so this only affects fresh installs or the time before the first own write) | `no_baseline` |
+| the change follows an own write **within 120 s** and does not demonstrably differ from the value *before* it too | `echo_window` |
+| the deviation is below the device step | `command_echo` |
+| the reported value has not moved since the last reading (a standing offset — rounding / internal compensation — is never re-adopted) | `stable_offset` |
+| for the **mode**: the reported mode has not moved since the last reading | `stable_prev` |
+| for the **setpoint**: the device's own schedule is running (an auto-detected schedule `switch` entity on the actuator device is `on`) — then the program is setting, not a person | `schedule_active` |
+| for the **setpoint**: the reported value sits at/below the frost floor (7 °C) — not a plausible user wish but a device reset / frost mode | `implausible_frost` |
+| for **setpoint and mode**: window open or sensor frozen — safety beats intervention | `safety_window`, `safety_frozen` |
+| for the **mode**: the device cannot do the mode, or it is `heat_cool` | `unsupported` |
 
-Ein übernommener Sollwert ist ein normaler Hold und steht damit **unter** der Prioritätenkette oben: Fenster, Frost und Schimmelschutz klemmen ihn weiterhin, und ein Wert außerhalb des Komfortbands wird auf die Bandkante geklemmt und als `override_clamped` ausgewiesen.
+An adopted setpoint is an ordinary hold and therefore sits **below** the precedence chain above: window, frost and mould protection keep clamping it, and a value outside the comfort band is clamped to the band edge and flagged as `override_clamped`.
 
-**Modalitätsgrenze:** übernommen werden **Sollwert und HVAC-Modus**. *Nicht* übernommen werden Lüfterstufe, Swing, geräteseitige Presets und `heat_cool`-Doppelsollwerte — diese Verstellungen lässt Poise unangetastet stehen, sie erzeugen aber auch keinen Hold.
+**Modality limit:** adopted are **setpoint and HVAC mode**. *Not* adopted are fan speed, swing, device-side presets and `heat_cool` dual setpoints — Poise leaves those changes untouched, but they create no hold either.
 
-**Nachvollziehbarkeit:** die Herkunft eines Holds steht als `override_reason` an der `climate`-Entität (`ui_setpoint`, `device_adopt_setpoint`, `device_adopt_mode`, `frost_rescue`); die Card zeigt sie als „Gerät" / „App" an der Hold-Pille. Der Grund **je Tick** — auch der einer *unterdrückten* Übernahme aus der Tabelle oben — steht als `sp_adopt_reason` / `mode_adopt_reason` in den Attributen der `climate`-Entität und im Debug-Log.
+**Traceability:** a hold's origin is exposed as `override_reason` on the `climate` entity (`ui_setpoint`, `device_adopt_setpoint`, `device_adopt_mode`, `frost_rescue`); the card shows it as "device" / "app" on the hold pill. The **per-tick** reason — including that of a *suppressed* adoption from the table above — is exposed as `sp_adopt_reason` / `mode_adopt_reason` in the `climate` entity's attributes and in the debug log.
 
 ## Use cases
 
@@ -201,7 +201,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Outdoor-humidity sensor | no | — | Dedicated outdoor-RH sensor for the ventilation advice (else the weather entity's `humidity` attribute is used, ADR-0066). |
 | Presence (home) · occupancy sensor · absence delay | no | — · — · 30 min | ADR-0058 presence coupling: person/tracker entities gate the house, a motion/occupancy sensor gates the room. **Inside** a comfort window, occupancy extends comfort — the band only relaxes (Eco widening) after the room has been empty for the absence delay, and returning restores it immediately. Occupancy does **not** raise the band outside the window(s) (use Boost or another window for spontaneous use; ADR-0058 N2). A dead sensor fails safe to *present*. |
 | Room profile | no | office | met/clo assumption for the PMV evaluation (`office` / `living` / `bedroom` / `kitchen` / `bathroom`, ADR-0054). |
-| Aktive Behaglichkeit | no | off | Opt-in fan-first cooling + comfort actuation building blocks (ADR-0069). |
+| Active comfort | no | off | Opt-in fan-first cooling + comfort actuation building blocks (ADR-0069). |
 | Ventilation notification | no | off | Opt-in self-clearing notification for the ventilation advice (the bus event always fires, ADR-0066). |
 | Suggestion learning | no | on | ADR-0060 override-pattern suggestions as fixable repair issues; the toggle is the per-zone opt-out. |
 | Window sensor | no | — | Door/window contact for the open-window reaction (else the slope detector is used). |
@@ -209,7 +209,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | External-temperature input | no | — | TRV `number` entity Poise feeds the true room temperature to (operative mode). Re-pushed at least every 10 min even when unchanged, so TRVs that time out an external input (e.g. Danfoss ~30 min, Sonoff TRVZB ~1 h) never fall back to their own mounted sensor. |
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
 | Adaptive cooling edge | no | auto | Active by default on cool-capable devices (`auto`): lifts the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band. `off` forces the fixed summer band; heat-only TRVs are unaffected either way (ADR-0023 §1). |
-| Compressor guard · min-off · mode-hold | no | auto · 300 s · 300 s | Single-AC anti-short-cycle (*Optionen → Erweitert*): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
+| Compressor guard · min-off · mode-hold | no | auto · 300 s · 300 s | Single-AC anti-short-cycle (*Options → Advanced*): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
 | Actuator dynamics | no | auto | Controller time constants per actuator class — `auto` (classify from the learned model) or force `fast_air` / `slow_hydronic` / `very_slow`; faster profiles retune the PI/MPC and throttle setpoint nudges for self-regulating climate entities (ADR-0052). |
 | Field-trace recording | no | off | Advanced/diagnostic: append one compact JSONL line per tick to `config/poise_traces/<id>.jsonl` (EKF drive inputs + model snapshot + decision + the humidity/dehumidification axis and real device mode — schema v2, versioned `v` with a v1-backward-compatible loader), rotated at ~20 MB. For offline golden-file replay analysis (ADR-0011); pure observation, never touches control. |
 | Outdoor cooling / heating lockout | no | on, 16 / 22 °C | Suppress cooling below / heating above these outdoor temperatures; each direction has its own enable toggle (ADR-0047). |
@@ -299,6 +299,12 @@ The **weather forecast** behind optimal start is not polled on the tick: it come
 The optional **Poise System hub** deliberately runs *without* a coordinator update interval (`update_interval=None`). It is driven by its own 60-second timer registered at setup, so boiler keep-alive and the minimum on/off cycling keep running even when no zone is publishing.
 
 Learned model and user intent are written to Home Assistant's `.storage`, and flushed on Home Assistant shutdown rather than only periodically.
+
+### Recorder / database load
+
+The climate entity carries ~150 live attributes, most of which change every tick — recorded naively that would be a multi-KB database row per zone per minute. Poise therefore puts the attribute set on a **recorder diet built in**: only the headline series keep history (`operative_temperature`, the comfort band `comfort_low`/`comfort_high` and `heat_sp`/`cool_sp`, `pmv`/`ppd`, `window_open`, the safety verdicts `sensor_frozen`/`heating_failure`/`cooling_failure`, the hold lifecycle `override_active`/`override_expires_at`, and `mould_floor`); everything else is excluded from the database via Home Assistant's unrecorded-attributes mechanism while staying fully readable as a live attribute (the bundled card and your templates read the state machine, not the recorder). The card's 24 h chart uses only recorded attributes, so it keeps working.
+
+No `recorder:` YAML is needed for a default install. If you enable the **default-off instrumentation sensors** (`mpc_setpoint`, `tpi_valve_percent`, `pi_*`, `ref_offset`) remember they exist precisely to build long-term statistics — do **not** add them to a `recorder -> exclude` block, or the evidence campaign records nothing. Conversely, if you run many zones and want the database minimal, the diagnostic sensors you never look at can be excluded per entity or left registry-disabled (their registry default).
 
 
 ## Examples
@@ -490,7 +496,7 @@ Everything under *Shadow / diagnostic* is computed every tick against the live l
 - **`heat_cool`-only actuators are rejected.** Poise writes exactly one target temperature per actuator, so a device whose only conditioning mode is the dual-setpoint `heat_cool` cannot be driven. A device that *also* offers plain `heat` or `cool` is fine.
 - **Single writer per actuator.** One thermostat belongs to exactly one Poise zone, and Poise assumes it is the only thing writing that setpoint. A second controller — another automation, a Generic Thermostat, the device's own weekly program or its internal adaptive/smart-temperature loop — will fight it. Poise *detects* the device-side cases and raises a repair issue, but it deliberately does not switch them off for you.
 - **One actuator per zone.** Multi-actuator arbitration is designed (ADR-0046) but a zone still writes a single climate entity.
-- **Only setpoint and HVAC mode are adopted from the device.** Fan speed, swing, device-side presets and `heat_cool` dual setpoints are left alone and create no hold. Adoption is also conditional — see [Geräteseitige Eingriffe (Adoption)](#geräteseitige-eingriffe-adoption) for every reason a device-side change is *not* taken over.
+- **Only setpoint and HVAC mode are adopted from the device.** Fan speed, swing, device-side presets and `heat_cool` dual setpoints are left alone and create no hold. Adoption is also conditional — see [Device-side interventions (adoption)](#device-side-interventions-adoption) for every reason a device-side change is *not* taken over.
 - **Home Assistant 2025.10 or newer** (enforced by HACS); the integration is UI-configured only — there are no YAML keys.
 
 ### It has to learn first
@@ -566,7 +572,7 @@ These come from the override-pattern learning and are gated on the per-zone *Sug
 | Symptom | Explanation |
 | --- | --- |
 | The setpoint I typed was changed | A value outside the comfort band is **clamped to the band edge** and flagged as `override_clamped` rather than silently accepted. Frost, mould and the open-window reaction outrank a manual hold entirely. |
-| My change on the TRV wheel "didn't stick" | Device-side adoption is conditional. The per-tick reason is on the climate entity as `sp_adopt_reason` / `mode_adopt_reason` (`own_echo`, `echo_window`, `stable_offset`, `schedule_active`, `safety_window`, …); the table under [Geräteseitige Eingriffe (Adoption)](#geräteseitige-eingriffe-adoption) explains each one. |
+| My change on the TRV wheel "didn't stick" | Device-side adoption is conditional. The per-tick reason is on the climate entity as `sp_adopt_reason` / `mode_adopt_reason` (`own_echo`, `echo_window`, `stable_offset`, `schedule_active`, `safety_window`, …); the table under [Device-side interventions (adoption)](#device-side-interventions-adoption) explains each one. |
 | Optimal start does nothing | It is gated on an *identified* model. Check `sensor.<room>_learning_phase` and `sensor.<room>_model_confidence`. |
 | The `mpc_*` / `tpi_*` / `pi_*` sensors are missing | They ship **disabled by default**; enable them under *Settings → Devices & Services → Entities*. Only four diagnostic sensors are enabled on a fresh install. |
 | There is no `sensor.<room>_pmv` | The comfort index and most shadow values are **attributes on the climate entity**, not separate sensors — see [Entities created](#entities-created). |
