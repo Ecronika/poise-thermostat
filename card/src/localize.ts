@@ -48,6 +48,9 @@ const EN: Dict = {
   ca_warn: "Reduced",
   ca_alert: "Poor",
   pmv_not_validated: "not validated (outside ISO 7730)",
+  // ADR-0049 N1: the comfort band collapsed onto a binding protection
+  // floor -- a real state over a real measurement, not missing data.
+  no_band: "no band verdict (protection floor binding)",
   // ADR-0069 E7: active-comfort measure line.
   ac_active: "Comfort active",
   ac_fan: "fan first",
@@ -88,6 +91,9 @@ const EN: Dict = {
   vent_moisture_out: "moisture",
   vent_co2: "CO₂",
   vent_heat_out: "cooler outside",
+  // ADR-0066 N2: the one CLOSE advice worth a chip.
+  vent_close: "Close window",
+  vent_mold_guard: "mould protection",
 };
 const DE: Dict = {
   in_band: "Im Komfortband",
@@ -137,6 +143,7 @@ const DE: Dict = {
   ca_warn: "Eingeschränkt",
   ca_alert: "Schlecht",
   pmv_not_validated: "nicht validiert (außerhalb ISO 7730)",
+  no_band: "Bandurteil nicht möglich (Schutz-Boden bindet)",
   // ADR-0069 E7: Maßnahmen-Zeile der Aktiven Behaglichkeit.
   ac_active: "Behaglichkeit aktiv",
   ac_fan: "Lüfter zuerst",
@@ -177,6 +184,8 @@ const DE: Dict = {
   vent_moisture_out: "Feuchte",
   vent_co2: "CO₂",
   vent_heat_out: "draußen kühler",
+  vent_close: "Fenster schließen",
+  vent_mold_guard: "Schimmelschutz",
 };
 
 export function t(lang: string | undefined, key: string): string {
