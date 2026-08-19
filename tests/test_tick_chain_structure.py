@@ -297,10 +297,18 @@ _RATCHET: tuple[_Entry, ...] = (
     # relocation record, not a new allowance.
     _Entry(
         identifier="custom_components/poise/ha/phase_prepare.py",
-        baseline_total=1112,
-        baseline_code=780,
+        baseline_total=1131,
+        baseline_code=796,
         headroom=50,
-        note="1200/900 total/code - plan DoD cap, effective from O.5",
+        note=(
+            "1200/900 total/code - plan DoD cap, effective from O.5. "
+            "Raised 1112/780 -> 1131/796 by ADR-0066 N2: the emission edge "
+            "grew a REASON half (mold_guard travels under the shared 'close' "
+            "token) and the notification text a lead-in for the one advice "
+            "that asks for the opposite action. Feature growth, measured "
+            "after the fact - not refactoring drift, and 69/104 lines short "
+            "of the DoD cap."
+        ),
     ),
     _Entry(
         identifier="custom_components/poise/ha/phase_actuate.py",

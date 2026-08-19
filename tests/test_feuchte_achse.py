@@ -9,6 +9,7 @@ from custom_components.poise.comfort.mold import (
     mold_min_air_temperature,
 )
 from custom_components.poise.comfort.ventilation import (
+    AdviceEmission,
     VentilationAdvice,
     advice_transition,
     ewma_step,
@@ -289,6 +290,135 @@ def test_rule3t_precedence_yields_to_mold_dry_and_thermal_floor() -> None:
         occupied=True,
     )
     assert (keep.action, keep.reason) == ("open", "moisture_out")
+
+
+# --- N2: protection-floor guard + the mold_guard close advice ---------------
+
+
+def _bound_edge(**kw: object) -> VentilationAdvice:
+    """The live case (kitchen, 2026-08-19), which rule 3t got wrong.
+
+    Window open, outside 17.1 °C, the mould floor 22.1 °C holds BOTH the
+    setpoint and the effective cooling edge (the published band collapsed onto
+    a point), surface RH 77 % over a 69.6 % safe ceiling, outside absolutely
+    DRIER (12.2 vs 13.8 g/m³) — so the risk driver is the surfaces cooling
+    down behind the open window, not imported vapour.
+    """
+    base: dict[str, object] = {
+        "w_in_gm3": 13.8,
+        "w_out_gm3": 12.2,
+        "room_c": 23.0,
+        "cool_edge_c": 22.1,
+        "t_out_c": 17.1,
+        "cool_capable": False,
+        "fan_capable": False,
+        "occupied": False,
+        "window_open": True,
+        "cool_edge_protected": True,
+        "surface_rh_pct": 77.0,
+        "rh_max_safe_pct": 69.6,
+        "surface_rh_mean_pct": 72.0,
+    }
+    base.update(kw)
+    return _advise(**base)
+
+
+def test_the_defect_reproduces_without_the_new_guards() -> None:
+    """Non-vacuity: with both guard inputs absent the OLD advice comes back —
+    3t reads the protection-bound edge as a comfort target and advises airing
+    the room down onto the mould floor."""
+    old = _bound_edge(
+        cool_edge_protected=False, surface_rh_mean_pct=None, rh_max_safe_pct=None
+    )
+    assert (old.action, old.reason) == ("open", "heat_out")
+
+
+def test_guard5_bound_cooling_edge_blocks_free_cooling() -> None:
+    # the edge alone (no surface data at all) is enough to veto heat_out
+    a = _free_cool(cool_edge_protected=True)
+    assert a.reason == "no_gain"
+    # ... and the veto is the ONLY reason it is gone
+    assert _free_cool().reason == "heat_out"
+
+
+def test_guard5_surface_rh_margin_blocks_free_cooling() -> None:
+    # smoothed surface RH within 2 pp of the safe ceiling -> no free cooling
+    near = _free_cool(surface_rh_mean_pct=68.0, rh_max_safe_pct=69.6)
+    assert near.reason == "no_gain"
+    # 2.6 pp below the ceiling is outside the margin -> unchanged advice
+    clear = _free_cool(surface_rh_mean_pct=67.0, rh_max_safe_pct=69.6)
+    assert clear.reason == "heat_out"
+
+
+def test_mold_guard_advises_closing_before_the_air_floor_is_reached() -> None:
+    a = _bound_edge()
+    assert (a.action, a.reason, a.level) == ("close", "mold_guard", "warn")
+    # building protection: NOT occupancy-gated, and no drier-outside condition
+    assert _bound_edge(occupied=True).reason == "mold_guard"
+    assert _bound_edge(w_out_gm3=15.0).reason == "mold_guard"
+
+
+def test_mold_guard_needs_open_window_bound_edge_and_unsafe_surface() -> None:
+    # closed window: nothing to close
+    assert _bound_edge(window_open=False).reason != "mold_guard"
+    # edge not protection-bound: an ordinary cool edge is a legitimate target
+    assert _bound_edge(cool_edge_protected=False).reason != "mold_guard"
+    # surface still below the safe ceiling: no acute risk yet
+    assert _bound_edge(surface_rh_pct=69.0).reason == "no_gain"
+    # no ceiling published (no outdoor temperature) -> silent, never guessed
+    assert _bound_edge(rh_max_safe_pct=None).reason == "no_gain"
+
+
+def test_mold_guard_precedence_below_rule1_and_above_the_rest() -> None:
+    # rule 1 wins: drier outside + an acute 48-h mean means airing still helps
+    assert _bound_edge(surface_rh_mean_pct=76.0).reason == "mold_risk"
+    # ... over the dryness veto (rule 2)
+    assert _bound_edge(w_in_gm3=6.0, w_out_gm3=3.0).reason == "mold_guard"
+    # ... over the thermal floor (rule 5a), which only fires once the AIR
+    # reaches the floor — too late when the WALLS are already over the limit
+    assert _bound_edge(room_at_thermal_floor=True).reason == "mold_guard"
+    # ... and over the comfort rules
+    assert _bound_edge(occupied=True, w_out_gm3=5.0).reason == "mold_guard"
+
+
+def test_advice_transition_tracks_the_mold_guard_episode() -> None:
+    # entering the guard: event + the opt-in notification
+    em = advice_transition(
+        "idle", "close", notify_opt_in=True, prev_reason="", reason="mold_guard"
+    )
+    assert (em.fire_event, em.notify_create, em.notify_dismiss) == (True, True, False)
+    # a harmless close ESCALATING into the guard is an edge although the
+    # ACTION token does not move
+    em = advice_transition(
+        "close",
+        "close",
+        notify_opt_in=True,
+        prev_reason="target_reached",
+        reason="mold_guard",
+    )
+    assert (em.fire_event, em.notify_create) == (True, True)
+    # ... and leaving it clears the notification again
+    em = advice_transition(
+        "close",
+        "close",
+        notify_opt_in=True,
+        prev_reason="mold_guard",
+        reason="target_reached",
+    )
+    assert (em.fire_event, em.notify_dismiss) == (True, True)
+    # harmless close reasons among themselves stay silent (no event storm)
+    em = advice_transition(
+        "close",
+        "close",
+        notify_opt_in=True,
+        prev_reason="target_reached",
+        reason="cooled_off",
+    )
+    assert not em.fire_event
+    # without the new arguments the edge is bit-identical to before
+    assert advice_transition("idle", "open", notify_opt_in=True) == AdviceEmission(
+        True, True, False
+    )
 
 
 def test_ventilation_verdict_never_enters_the_control_path() -> None:

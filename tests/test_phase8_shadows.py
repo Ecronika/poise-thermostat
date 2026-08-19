@@ -554,6 +554,14 @@ def _climate_band(
     t_forecast_day: float | None = None,
     room_profile: str | None = None,
     clo_offset: float = 0.0,
+    # ADR-0066 humidity axis: absent by default, exactly like every caller
+    # before N2 — without an outdoor source the advice stays ``no_data``.
+    room: float = 22.0,
+    eff_cool: float = 26.5,
+    window_open: bool = False,
+    t_out_eff: float | None = None,
+    rh_out: float | None = None,
+    surface_rh_mean_prev: float | None = None,
 ) -> dict[str, object]:
     return compose_climate_band(
         t_forecast_day=t_forecast_day,
@@ -561,14 +569,18 @@ def _climate_band(
         clo_offset=clo_offset,
         heat_sp=21.0,
         cool_sp=26.0,
-        room=22.0,
+        room=room,
         room_decide=22.0,
         t_rm_eff=18.0,
         t_mrt=22.5,
         rh=rh,
-        eff_cool=26.5,
+        eff_cool=eff_cool,
         mode="idle",
-        window_open=False,
+        window_open=window_open,
+        t_out_eff=t_out_eff,
+        rh_out=rh_out,
+        surface_rh_mean_prev=surface_rh_mean_prev,
+        surface_elapsed_min=1.0,
         occupied=True,
         presence_level="present",
         absent_min=3.21,
@@ -583,6 +595,50 @@ def _climate_band(
         fan_mode=fan_mode,
         hvac_action=hvac_action,
     )
+
+
+def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
+    """ADR-0066 N2 at the seam (live kitchen case, 2026-08-19).
+
+    23.0 °C room at 66 % RH over a 14 °C outside: the mould floor lands at
+    22.37 °C, i.e. ON the effective cooling edge (22.4) — the published band
+    collapsed onto the protection value. Surface RH 77.8 % is already past the
+    67.8 % safe ceiling. Rule 3t used to read that bound edge as a comfort
+    target and advise airing the room down onto the mould floor.
+    """
+    diag = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],  # window-only zone: no cool, no fan
+        rh=66.0,
+        room=23.0,
+        eff_cool=22.4,
+        window_open=True,
+        t_out_eff=14.0,
+        rh_out=70.0,  # absolutely drier outside — airing would not import water
+        surface_rh_mean_prev=72.0,  # 48-h mean still under the rule-1 line
+    )
+    assert (diag["vent_action"], diag["vent_reason"], diag["vent_level"]) == (
+        "close",
+        "mold_guard",
+        "warn",
+    )
+    surface, ceiling = diag["surface_rh"], diag["rh_max_safe"]
+    assert isinstance(surface, float) and isinstance(ceiling, float)
+    assert surface > ceiling  # the published pair is what drove the advice
+    # Control — BOTH halves of the guard matter: lift the edge off the floor
+    # AND put the 48-h mean back below the margin, and the old advice returns.
+    free = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],
+        rh=66.0,
+        room=23.0,
+        eff_cool=22.8,
+        window_open=True,
+        t_out_eff=14.0,
+        rh_out=70.0,
+        surface_rh_mean_prev=60.0,
+    )
+    assert (free["vent_action"], free["vent_reason"]) == ("open", "heat_out")
 
 
 def test_compose_climate_band_key_order_is_the_published_contract() -> None:
