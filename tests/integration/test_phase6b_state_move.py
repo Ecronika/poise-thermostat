@@ -56,7 +56,7 @@ ADAPTER_OWNED = (
     "_store",
     "_climate_entity_id",
     "_tick_budget",
-    "_active_issues",
+    "_issues",
     "_save_failures",
     "_tick_failures",
     "_unavailable_logged",
