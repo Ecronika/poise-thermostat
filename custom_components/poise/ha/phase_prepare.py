@@ -130,7 +130,16 @@ _VENT_REASON_TEXT = {
     "mold_risk": "sustained surface humidity, mould risk",
     "moisture_out": "outside air is drier, airing removes moisture",
     "co2": "CO₂ is elevated",
+    "heat_out": "outside is cooler, airing cools the room",
+    # ADR-0066 N2: the only CLOSE reason on the notification rail.
+    "mold_guard": (
+        "the surfaces are already over the mould-safe humidity and a "
+        "protection floor holds the setpoint"
+    ),
 }
+# The lead-in belongs to the ADVICE, not to the reason: mold_guard is the one
+# episode that asks for the opposite action (ADR-0066 N2).
+_VENT_NOTIFY_LEAD = {"mold_guard": "Close the window (mould protection)"}
 
 
 class PreparePhase:
@@ -727,23 +736,33 @@ class PreparePhase:
         action = str(diag.get("vent_action") or "")
         if not action:
             return  # composition failed or produced no advice — nothing moved
+        reason = str(diag.get("vent_reason") or "")
         prev = self._runtime.humidity.vent_last_action
+        prev_reason = self._runtime.humidity.vent_last_reason
         self._runtime.humidity.vent_last_action = action
+        self._runtime.humidity.vent_last_reason = reason
         try:
-            em = advice_transition(prev, action, notify_opt_in=config.vent_notify)
+            em = advice_transition(
+                prev,
+                action,
+                notify_opt_in=config.vent_notify,
+                prev_reason=prev_reason,
+                reason=reason,
+            )
             if not em.fire_event:
                 return
             payload: dict[str, Any] = {
                 "zone": bindings.zone_name,
                 "entry_id": bindings.entry_id,
                 "action": action,
-                "reason": str(diag.get("vent_reason") or ""),
+                "reason": reason,
                 "delta_gm3": diag.get("vent_delta_gm3"),
             }
             self._hass.bus.async_fire(EVENT_VENT_ADVICE, payload)
             notification_id = f"poise_vent_{bindings.entry_id}"
             if em.notify_create:
-                reason_txt = _VENT_REASON_TEXT.get(payload["reason"], payload["reason"])
+                reason_txt = _VENT_REASON_TEXT.get(reason, reason)
+                lead = _VENT_NOTIFY_LEAD.get(reason, "Airing recommended")
                 delta = payload["delta_gm3"]
                 delta_txt = (
                     f" (inside {delta:+.1f} g/m³ vs outside)"
@@ -752,7 +771,7 @@ class PreparePhase:
                 )
                 persistent_notification.async_create(
                     self._hass,
-                    f"Airing recommended — {reason_txt}{delta_txt}.",
+                    f"{lead} — {reason_txt}{delta_txt}.",
                     title=f"Poise · {bindings.zone_name}",
                     notification_id=notification_id,
                 )
