@@ -42,16 +42,14 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
     (double load / race) — warning since 2026.6, error from 2026.12 — and the
     listener is the half we must keep: hot-applying tuning without a reload is
     what preserves the learned model for a mere comfort tweak. So the flow now
-    only stores (``async_update_entry`` + ``async_abort`` written out —
-    ``ConfigFlow.async_update_and_abort`` only exists from HA 2025.12, above
-    our minimum; see ``config_flow.py``) and the decision lives here:
+    only stores (see ``config_flow.py``) and the decision lives here:
 
     * ``entry.data`` unchanged -> options-only -> hot-apply in place;
     * ``entry.data`` changed (a reconfigure rewired the zone) -> reload, which
       rebuilds the coordinator from the new wiring.
 
-    Hub entries carry no coordinator state worth preserving, so a structural
-    change reloads them the same way.
+    Hub entries make the same decision minus the hot-apply half: reload on a
+    structural change, ignore everything else (F9 guard below).
     """
     if _is_system(entry):
         # The hub has no hot-applyable tuning (F9), so a structural change can
@@ -68,10 +66,10 @@ async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> Non
         return
     # Structural change: the coordinator in runtime_data is about to be
     # discarded, so do NOT hot-apply onto it — rebuild the entry instead.
-    # SCHEDULE, never await: we are inside the entry-update that HA is still
-    # processing (the flow has not returned yet), and awaiting the reload from
-    # here tears the entry down mid-update. ``async_schedule_reload`` is what
-    # HA's own reloading flow methods use.
+    # SCHEDULE, never await: HA's deprecation text prescribes the listener
+    # "scheduling a reload", and ``async_schedule_reload`` also cancels a
+    # pending setup retry before reloading in its own task — it is what HA's
+    # own reloading flow methods use.
     hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
@@ -271,7 +269,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             translation_placeholders={"entities": ", ".join(missing)},
         )
 
-    coordinator = PoiseCoordinator(hass, entry)
+    from .trace.recorder import salted_trace_slug
+
+    # ADR-0022 decision 3: the trace file (the artifact users share for
+    # offline replay) is named by a salted hash, not the raw entry id.
+    coordinator = PoiseCoordinator(
+        hass, entry, trace_slug=await salted_trace_slug(hass, entry.entry_id)
+    )
     await coordinator.async_bootstrap()
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
@@ -294,7 +298,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             EVENT_HOMEASSISTANT_STOP, coordinator.async_flush_on_stop
         )
     )
-    # Hot-apply tuning-option changes in place (no reload -> learning kept).
+    # Single reload authority: hot-applies tuning in place (learning kept),
+    # schedules a reload on structural change — see ``_async_options_updated``.
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     return True
 
@@ -491,6 +496,7 @@ async def _remove_room_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     from homeassistant.exceptions import HomeAssistantError
 
     from .storage import PoiseStore
+    from .trace.recorder import salted_trace_slug
 
     # AR-11/AR-13: the park reads has_actuated + the live climate_mode from the
     # store, so it must run BEFORE the store is removed.
@@ -504,10 +510,14 @@ async def _remove_room_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         logging.getLogger(__name__).exception(
             "Poise: EKF store removal on delete failed"
         )
-    await hass.async_add_executor_job(
-        _remove_trace_file,
-        hass.config.path("poise_traces", f"{entry.entry_id}.jsonl"),
-    )
+    # Both names: the ADR-0022 salted slug (current) and the raw entry id
+    # (pre-salt installs), each with its rotated .1 generation.
+    salted = await salted_trace_slug(hass, entry.entry_id)
+    for slug in (salted, entry.entry_id):
+        await hass.async_add_executor_job(
+            _remove_trace_file,
+            hass.config.path("poise_traces", f"{slug}.jsonl"),
+        )
 
 
 async def _park_room_actuator(

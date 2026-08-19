@@ -129,7 +129,12 @@ class _ReaderClock:
 class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[misc]
     """One coordinator per room; capability-aware dual-setpoint each tick."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, *, trace_slug: str | None = None
+    ) -> None:
+        # ADR-0022: setup passes the salted slug (async helper, so the caller
+        # computes it); the raw-entry-id fallback keeps direct test builds.
+        self._trace_slug_override = trace_slug
         super().__init__(
             hass,
             _LOGGER,
@@ -341,7 +346,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 ports=tick_ports,
                 logger=_LOGGER,
             ),
-            trace_slug=entry.entry_id,
+            trace_slug=self._trace_slug_override or entry.entry_id,
         )
 
     # Public read-only accessors onto the injected runtime containers. Tests
@@ -1275,9 +1280,11 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
     def structural_unchanged(self, entry: ConfigEntry) -> bool:
         """True if only tuning options changed since setup.
 
-        A change to ``entry.data`` means a reconfigure is reloading the entry, so
-        the in-place options hot-apply must NOT run on this soon-to-be-discarded
-        coordinator (the reload rebuilds it with the new data anyway).
+        A change to ``entry.data`` is structural: the update listener — the
+        single reload authority (``_async_options_updated``) — schedules a
+        reload, so the in-place options hot-apply must NOT run on this
+        soon-to-be-discarded coordinator (the reload rebuilds it with the new
+        data anyway).
 
         The data-dict comparison is deliberate: a field-wise ``ZoneStructure``
         comparison is NOT equivalent — room ``entry.data`` still carries the

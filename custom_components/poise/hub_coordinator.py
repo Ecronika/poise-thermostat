@@ -269,8 +269,10 @@ class PoiseHubCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignor
             v = float(st.state)
         except (ValueError, TypeError):
             return None
-        # B.5: a NaN reading would mark EVERY sheddable zone as shed (NaN
-        # never satisfies the deficit comparison) — die at the boundary.
+        # B.5: NaN dies at the boundary — it would poison the
+        # ``available_power`` diagnostic; before the matching guard in
+        # ``resolve_load_shedding`` it silently marked every sheddable zone
+        # as shed.
         return v if math.isfinite(v) else None
 
     def _shared_resource_shadow(

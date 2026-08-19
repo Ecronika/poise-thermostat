@@ -200,6 +200,35 @@ _ATTRS = (
     "heat_demand",
 )
 
+# The recorder diet (ISO-review E1). The ~150 attributes above change nearly
+# every 60 s tick, so the recorder can never deduplicate the attribute blob —
+# multi-KB database rows per zone per minute. Only THIS headline set keeps
+# history: the card's 24 h chart reads ``operative_temperature`` (plus the
+# built-in ``temperature``) from recorded attributes, and the rest are the
+# slow-moving episode/band series users chart (comfort band, safety verdicts,
+# hold lifecycle, mould floor). Everything else stays a LIVE state attribute —
+# the card and templates read the state machine, not the database — and the
+# long-term series that matter for the shadow→live evidence have their own
+# opt-in statistics sensors (see ``sensor.py``).
+_RECORDED_ATTRS: frozenset[str] = frozenset(
+    {
+        "operative_temperature",
+        "comfort_low",
+        "comfort_high",
+        "heat_sp",
+        "cool_sp",
+        "pmv",
+        "ppd",
+        "window_open",
+        "sensor_frozen",
+        "heating_failure",
+        "cooling_failure",
+        "override_active",
+        "override_expires_at",
+        "mould_floor",
+    }
+)
+
 
 # Coordinator-driven: entities read shared data and writes go through the
 # single actuator choke-point, so updates need no per-entity throttling.
@@ -235,6 +264,12 @@ class PoiseClimate(CoordinatorEntity[PoiseCoordinator], ClimateEntity):  # type:
 
     _attr_has_entity_name = True
     _attr_name = None
+    # Recorder diet: every extra attribute is either in ``_RECORDED_ATTRS``
+    # (keeps history) or excluded here — the set difference makes the
+    # partition total, so a new ``_ATTRS`` key defaults to unrecorded and
+    # must OPT IN to writing database history (pinned by
+    # ``tests/integration/test_entity_defaults.py``).
+    _unrecorded_attributes = frozenset(_ATTRS) - _RECORDED_ATTRS
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE

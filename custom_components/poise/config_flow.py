@@ -1152,11 +1152,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     state = self.hass.states.get(act)
                     data[CONF_NAME] = (state.name if state else None) or act
                 await self.async_set_unique_id(act)
-                # E.13d: reload_on_update=False — the default (True) makes this
-                # a reloading flow method, which HA forbids next to an update
-                # listener from 2026.12. Nothing is lost: this call only aborts
-                # a duplicate, it never updates an existing entry here.
-                self._abort_if_unique_id_configured(reload_on_update=False)
+                # Bare duplicate-abort: with no ``updates`` this call can
+                # neither update nor reload an entry, so the 2026.12
+                # listener-vs-reload rule does not apply here (its real scope
+                # is pinned by test_ha_deprecations).
+                self._abort_if_unique_id_configured()
                 # Structure -> data, the two tuning values -> options. Reads are
                 # merged either way ({**data, **options}); what changes is the
                 # MEANING of entry.data, which the reload-vs-hot-apply predicate
@@ -1174,8 +1174,7 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
     ) -> ConfigFlowResult:
         # singleton hub entry (ADR-0038)
         await self.async_set_unique_id("poise_system")
-        # E.13d: see async_step_room — abort-only, never reload.
-        self._abort_if_unique_id_configured(reload_on_update=False)
+        self._abort_if_unique_id_configured()
         errors: dict[str, str] = {}
         if user_input is not None:
             errors = _validate_boiler_actions(user_input)  # F11
@@ -1280,12 +1279,11 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     and old_actuator != new_data.get(CONF_ACTUATOR)
                 ):
                     await self._park_replaced_actuator(entry, old_actuator)
-                # E.13d: store only — the update listener reloads (it is the
-                # single reload authority; a reloading flow method next to a
-                # listener is an error from HA 2026.12). Written out instead of
-                # ``async_update_and_abort`` on purpose: that helper only
-                # reaches ConfigFlow in HA 2025.12, and these two calls are
-                # exactly what it does, on every version we support.
+                # Store only — the update listener is the single reload
+                # authority (see ``_async_options_updated``). Written out
+                # instead of ``async_update_and_abort`` on purpose: that
+                # helper only reaches ConfigFlow in HA 2025.12, and these two
+                # calls are exactly what it does, on every version we support.
                 self.hass.config_entries.async_update_entry(
                     entry, unique_id=self.unique_id, data=new_data, options=new_options
                 )
@@ -1319,12 +1317,12 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
         A LOADED entry carries the update listener from ``async_setup_entry``,
         and that listener is the single reload authority — the flow must not
         reload as well (HA turns listener + reloading flow method into an
-        error in 2026.12). An entry that is NOT loaded has no listener: the
-        common case is a zone that failed setup (missing actuator, so
-        ``ConfigEntryNotReady``) and is being repaired via Reconfigure. Nobody
-        would apply the corrected wiring, and a pending schema migration would
-        not run either, so here the flow schedules the reload itself — with no
-        listener present, this is not the deprecated combination.
+        error in 2026.12). An entry that is NOT loaded has no listener, so the
+        flow schedules the reload itself — with no listener present this is
+        not the deprecated combination. For a zone stuck in SETUP_ERROR (e.g.
+        the corrupt-entry guard) nothing else would ever apply the corrected
+        wiring or run a pending schema migration; for SETUP_RETRY the schedule
+        merely applies it now instead of waiting out HA's retry backoff.
         """
         from homeassistant.config_entries import ConfigEntryState
 

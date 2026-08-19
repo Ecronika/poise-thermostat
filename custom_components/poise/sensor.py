@@ -182,11 +182,14 @@ SENSORS: tuple[PoiseSensorDescription, ...] = (
         suggested_display_precision=0,
         value_fn=_scaled("mpc_weight", 100.0, 0),
     ),
-    # September instrumentation: the remaining winter-gate time series
-    # (ADR-0033b mpc_setpoint-vs-static, ADR-0036 valve duty, ADR-0037
-    # droop compensation, ADR-0056 frame offset) as measurement sensors —
-    # like the ca_* trio their long-term statistics carry the pre-flip
-    # evidence the climate attributes' ~10-day recorder history cannot.
+    # Winter-gate instrumentation: the remaining flip-evidence time series
+    # (ADR-0033 flip criterion (b) mpc_setpoint-vs-static, ADR-0036 valve
+    # duty, ADR-0037 droop compensation, ADR-0056 frame offset) as
+    # measurement sensors — like the ca_* trio their long-term statistics
+    # carry the pre-flip evidence the climate attributes' ~10-day recorder
+    # history cannot. Shipped disabled: statistics only accumulate once the
+    # operator enables them, so the evidence campaign stays an explicit
+    # opt-in and regular installs pay no recorder cost.
     PoiseSensorDescription(
         key="mpc_setpoint",
         translation_key="mpc_setpoint",
