@@ -93,6 +93,12 @@ if TYPE_CHECKING:
     from ..multi.resolvers import DeviceRuntime
     from ..multi.shadow import ThermalShadow
 
+# ADR-0066 N2: how close the mould floor must come to the effective cooling
+# edge before that edge counts as protection-BOUND [K]. Half a display step:
+# the edge travels on the published 0.1 grid while the floor is continuous, so
+# an exact ">=" would miss the very case the guard exists for.
+_PROTECTED_EDGE_TOL_K = 0.05
+
 
 class PredictPeakOperativeFn(Protocol):
     """Call shape of ``control.cover_shading.predict_peak_operative``."""
@@ -491,6 +497,16 @@ def compose_climate_band(
         cool_capable="cool" in hvac_modes,
         fan_capable=has_fan_modes,
         prev_heat_out=prev_vent_reason == "heat_out",
+        # N2: the mould guard. The EDGE is what matters, not which value the
+        # floor happened to raise: a floor under the setpoint (the winter
+        # normal case, floor 22.1 / edge 25.0) leaves free-cooling perfectly
+        # sound, while a floor that has reached the cooling edge turns that
+        # edge into a protection value nobody should air the room down to.
+        surface_rh_pct=surface_pct,
+        rh_max_safe_pct=rh_max,
+        cool_edge_protected=(
+            mold_min is not None and mold_min >= eff_cool - _PROTECTED_EDGE_TOL_K
+        ),
     )
     return {
         "abs_humidity_gm3": round(w_in, 1) if w_in is not None else None,
