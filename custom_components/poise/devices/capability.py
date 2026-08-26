@@ -72,6 +72,37 @@ def select_path(caps: DeviceCapabilities) -> ActuatorPath:
     return ActuatorPath.PI_SETPOINT
 
 
+def reliable_heat_mode_from(hvac_modes: list[str]) -> bool:
+    """ADR-0015 path 2, literally: calibration requires a device that can be
+    HELD in ``heat``. ``can_heat`` is not enough — ``auto`` counts as
+    heat-capable there, but the mode nudge only writes literally supported
+    modes (supported = desired in act_modes)."""
+    return "heat" in {m.lower() for m in hvac_modes}
+
+
+def select_live_path(
+    caps: DeviceCapabilities,
+    *,
+    ext_temp_reserved: bool,
+    calibration_enabled: bool,
+    valve_live: bool = False,
+) -> ActuatorPath:
+    """The ONE live path choice (D6). ``select_path`` stays the pure
+    ADR-0015 classification (diagnostics); this adds the runtime gates: a
+    structurally present external-temperature input (ADR-0029) displaces any
+    calibration — even while it is briefly unavailable, so the compensations
+    never flip-flop; the valve path is never live until the ADR-0036 release
+    (``valve_live`` is only set by P3); calibration needs the opt-in AND
+    ``reliable_heat_mode``. Everything else is the plain setpoint path."""
+    if ext_temp_reserved:
+        return ActuatorPath.SETPOINT
+    if valve_live and caps.writable_valve:
+        return ActuatorPath.TPI_VALVE
+    if calibration_enabled and caps.writable_calibration and caps.reliable_heat_mode:
+        return ActuatorPath.CALIBRATION
+    return ActuatorPath.SETPOINT
+
+
 def climate_capability(hvac_modes: list[str]) -> tuple[bool, bool]:
     """(can_heat, can_cool) from a climate entity's hvac_modes (ADR-0023).
 
