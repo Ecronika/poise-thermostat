@@ -48,7 +48,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0012](ADR-0012-Fehlerbehandlung-Logging-Repair-Issues.md) | Fehler-Taxonomie, Repair-Issues, Logging, Diagnostics | Implementiert |
 | [0013](ADR-0013-Mehrzonen-Ausfuehrung-und-Koordination.md) | Zwei-Phasen-Mehrzonen + Smallest-Gap-Shedding | In Arbeit (70 %) |
 | [0014](ADR-0014-Determinismus-und-Referenzfaelle.md) | Determinismus + Norm-Referenz-Fixtures | Implementiert |
-| [0015](ADR-0015-Aktorpfad-Capability-Matrix.md) | Exklusive Capability-Matrix + coef_ext | In Arbeit (70 %) |
+| [0015](ADR-0015-Aktorpfad-Capability-Matrix.md) | Exklusive Capability-Matrix + coef_ext | In Arbeit (85 %) |
 | [0016](ADR-0016-Entity-Modell-und-Card-Vertrag.md) | Entity-Modell + climate-Attribut-Card-Vertrag | Implementiert |
 | [0017](ADR-0017-Operativ-zu-Luft-Transformation.md) | Operativ→Luft-Transformation (eine Stelle, geglättet) | Implementiert |
 | [0018](ADR-0018-Versionierung-Semver-Deprecation.md) | SemVer + kumulative Migration + Deprecation | In Arbeit (60 %) |
