@@ -146,6 +146,7 @@
       "sensor_on_actuator": "Der Raumsensor sitzt am selben Gerät wie das Thermostat — das ist dessen eingebauter Fühler, der den Heizkörper misst, nicht den Raum. Wähle einen separaten, freistehenden Raumsensor, damit Poise den Raum korrekt lernt.",
       "invalid_boiler_action": "Diese Kessel-Aktion konnte nicht gelesen werden. Format: entity_id/domain.service[/attr:value], z. B. switch.boiler/switch.turn_on — oder leer lassen für reinen Diagnosebetrieb.",
       "heat_cool_only": "Dieses Gerät unterstützt nur den kombinierten Heiz-/Kühl-Modus (Dual-Sollwert). Poise schreibt einen Sollwert pro Aktor und kann es nicht steuern — wähle ein Gerät mit einzelnem Heiz- oder Kühl-Ziel.",
+      "calibration_restore_failed": "Der Kalibrier-Offset des bisherigen TRV konnte nicht wiederhergestellt werden: Entity nicht lesbar oder das Gerät hat den Wert nicht bestätigt. Es wurde nichts übernommen — Gerät aufwecken und erneut absenden (ein bereits wiederhergestellter Offset wird dann sofort erkannt) oder den Offset manuell wiederherstellen.",
       "invalid_boiler_action_fields": "Diese Kessel-Aktion ist unvollständig. Sie braucht eine Entität und einen Dienst in der Form domain.service (z. B. switch.turn_on); zusätzliche Dienstdaten müssen als Schlüssel/Wert-Paare angegeben werden. Aktion ganz entfernen für reinen Diagnosebetrieb."
     },
     "abort": {
@@ -317,6 +318,33 @@
       "title": "Poise: Ventil möglicherweise blockiert",
       "description": "Die Kalibrier-Schrittzahl des Heizkörperventils (`{entity}`) ist nahe null — das deutet auf eine fehlgeschlagene Kalibrierung oder ein mechanisch klemmendes Ventil hin. Der Raum heizt evtl. nicht korrekt. TRV neu kalibrieren/koppeln; der Hinweis verschwindet, sobald wieder eine normale Schrittzahl gemeldet wird."
     },
+    "calibration_available": {
+      "title": "Poise: TRV-Offset-Kalibrierung verfügbar",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: TRV-Offset-Kalibrierung aktivieren?",
+            "description": "{name}: Dieses TRV besitzt einen beschreibbaren lokalen Temperatur-Offset und es ist kein Externtemperatur-Eingang konfiguriert — Poise könnte die Raummessung per Offset-Kalibrierung kompensieren (ein konfigurierter Externtemperatur-Eingang hätte Vorrang). Absenden aktiviert die Opt-in-Option für diese Zone. Zum Ablehnen dieses Problem einfach ignorieren."
+          }
+        }
+      }
+    },
+    "calibration_restore_failed": {
+      "title": "Poise: TRV-Kalibrier-Offset nicht zurückgegeben",
+      "description": "Poise hat einen Kalibrier-Offset auf `{entity}` geschrieben und muss jetzt den ursprünglichen Wert wiederherstellen, aber der Offset konnte nicht wiederhergestellt werden: die Entity ist nicht verfügbar oder verschwunden. Solange die Entity noch existiert, aber unlesbar ist, bleibt der nächste Kompensationspfad blockiert, bis das Gerät den wiederhergestellten Offset bestätigt; eine strukturell entfernte Entity blockiert nichts. Der Hinweis verschwindet automatisch."
+    },
+    "calibration_restore_clipped": {
+      "title": "Poise: Kalibrier-Offset beschnitten wiederhergestellt",
+      "description": "Der gespeicherte ursprüngliche Offset für `{entity}` passt nicht mehr in die aktuellen Grenzen der Entity; Poise hat stattdessen den nächstmöglichen erlaubten Wert wiederhergestellt. Nur zur Information."
+    },
+    "calibration_entity_unsafe": {
+      "title": "Poise: Kalibrier-Entity nicht nutzbar",
+      "description": "Die TRV-Kalibrierung ist aktiviert, aber `{entity}` meldet keine sicheren Metadaten (Wert, Min/Max oder Schrittweite fehlen oder sind ungültig). Poise schreibt keinen Offset, bis die Metadaten wieder lesbar sind."
+    },
+    "calibration_unapplied": {
+      "title": "Poise: Kalibrier-Offset nicht übernommen",
+      "description": "Das TRV meldet Poises letzten Kalibrier-Offset auf `{entity}` seit längerem nicht. Die Schreibbefehle erreichen das Gerät evtl. nicht — Verbindung oder Kindersicherung prüfen. Der Hinweis verschwindet, sobald der Offset gemeldet wird."
+    },
     "frost_zone_not_boiler": {
       "title": "Poise: frierender Raum steuert den geteilten Kessel nicht",
       "description": "Diese Räume sind auf Frostschutz-Temperatur, steuern aber den geteilten Kessel nicht — er springt also nicht an, um sie zu schützen: {zones}. Wird ein solcher Raum vom geteilten Kessel beheizt, aktiviere unter Reconfigure → Anlagen-Anbindung (Mehrzonen) die Option 'Dieser Raum darf den gemeinsamen Kessel anfordern' (ein reiner Kühlraum kann aus bleiben). Der Hinweis verschwindet automatisch, sobald kein solcher Raum mehr friert."
@@ -328,6 +356,10 @@
     "persistence_failed": {
       "title": "Poise: Gelerntes Modell kann nicht gespeichert werden",
       "description": "Poise konnte sein gelerntes Modell und die Einstellungen wiederholt nicht speichern — Lernfortschritt und jüngste Änderungen können beim nächsten Neustart verloren gehen. Prüfe den Speicherplatz und das Home-Assistant-Verzeichnis `.storage`. Der Hinweis verschwindet automatisch, sobald ein Speichern gelingt."
+    },
+    "schedule_days_invalid": {
+      "title": "Poise: ungültige Komfortfenster-Wochentage",
+      "description": "Die Wochentagsauswahl eines Komfortfensters für `{zone}` enthält keinen erkannten Tag ({tokens}) — dieses Fenster gilt daher aktuell als dauerhafte Absenkung (nie Komfort) statt an den vorgesehenen Tagen zu laufen. Korrigiere die Tagesauswahl unter den Zonenoptionen → Zeitplan; der Hinweis verschwindet automatisch, sobald mindestens ein gültiger Tag gesetzt ist."
     },
     "tick_failing": {
       "title": "Poise: Regelungs-Tick schlägt wiederholt fehl",
@@ -393,7 +425,7 @@
         "step": {
           "init": {
             "title": "Poise: Komfortfenster früher beginnen?",
-            "description": "{name}: Während der Absenkung wurde der Sollwert binnen 14 Tagen {count}× manuell angehoben. Komfortfenster {step} min früher beginnen? Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
+            "description": "{name}: Während der Absenkung wurde der Sollwert binnen 14 Tagen {count}× manuell angehoben. Komfortfenster {step} min früher beginnen? Das ändert nur die Startzeit des Basis-Komfortfensters; sofern für dieses Fenster keine bestimmten Wochentage eingestellt sind, gilt es an allen Tagen. Annehmen ändert die Zonen-Optionen sichtbar; Ablehnen unterdrückt dieses Muster 30 Tage.",
             "menu_options": {
               "apply": "Vorgeschlagene Änderung übernehmen",
               "dismiss": "Ablehnen (Muster 30 Tage stummschalten)"
@@ -469,25 +501,34 @@
             "data": {
               "comfort_start": "Komfortfenster Beginn",
               "comfort_end": "Komfortfenster Ende",
+              "comfort_days": "Komfortfenster Wochentage",
               "comfort_start_2": "Fenster 2 Beginn",
               "comfort_end_2": "Fenster 2 Ende",
+              "comfort_days_2": "Fenster 2 Wochentage",
               "comfort_start_3": "Fenster 3 Beginn",
               "comfort_end_3": "Fenster 3 Ende",
+              "comfort_days_3": "Fenster 3 Wochentage",
               "comfort_start_4": "Fenster 4 Beginn",
               "comfort_end_4": "Fenster 4 Ende",
+              "comfort_days_4": "Fenster 4 Wochentage",
               "comfort_start_5": "Fenster 5 Beginn",
               "comfort_end_5": "Fenster 5 Ende",
+              "comfort_days_5": "Fenster 5 Wochentage",
               "comfort_start_6": "Fenster 6 Beginn",
               "comfort_end_6": "Fenster 6 Ende",
+              "comfort_days_6": "Fenster 6 Wochentage",
               "comfort_start_7": "Fenster 7 Beginn",
               "comfort_end_7": "Fenster 7 Ende",
+              "comfort_days_7": "Fenster 7 Wochentage",
               "comfort_start_8": "Fenster 8 Beginn",
               "comfort_end_8": "Fenster 8 Ende",
+              "comfort_days_8": "Fenster 8 Wochentage",
               "setback_delta": "Nachtabsenkung (K)",
               "optimal_start": "Optimal-Start (Vorheizen)"
             },
             "data_description": {
               "comfort_start": "Beginn und Ende beide setzen = tägliches Komfortfenster; beide leer = ganztägig.",
+              "comfort_days": "Wochentage, an denen dieses Fenster aktiv ist. Alle Tage ausgewählt lassen für ein Fenster, das die ganze Woche läuft; werden alle Tage abgewählt, wird das Fenster zur Dauerabsenkung (nie Komfort) statt entfernt zu werden — zum Entfernen stattdessen beide Zeiten leeren.",
               "comfort_start_2": "Fenster ausfüllen und speichern — das Formular bietet dann das nächste an (bis 8). Beide Zeiten eines Fensters leeren entfernt es; überlappende Fenster werden zusammengeführt. Optimal-Start heizt für jedes Fenster vor.",
               "setback_delta": "Wie weit das Band außerhalb der Komfortfenster gelockert wird."
             }
@@ -532,6 +573,7 @@
               "compressor_guard": "Kompressorschutz (Einzel-AC)",
               "compressor_min_off_s": "Kompressor-Mindest-Aus-Zeit (s)",
               "compressor_mode_hold_s": "Kompressor-Modus-Haltezeit (s)",
+              "trv_calibration": "TRV-Offset-Kalibrierung",
               "trace_recording": "Feld-Trace-Aufzeichnung (fortgeschritten)",
               "vent_notify": "Lüftungs-Hinweis als Benachrichtigung"
             },
@@ -542,6 +584,7 @@
               "compressor_guard": "Hält Kühl-/Trocken-Starts und -Wechsel zurück, die den Kompressor kurzschließen würden.",
               "compressor_min_off_s": "Nach einem Stopp vor dem Neustart warten (leer = 300).",
               "compressor_mode_hold_s": "Vor einem Kühlen↔Trocknen-Wechsel warten (leer = 300).",
+              "trv_calibration": "Opt-in: gleicht den lokalen Temperatur-Offset des TRV laufend an den Raumsensor an — für TRVs ohne Externtemperatur-Eingang. Ein konfigurierter Externtemperatur-Eingang hat immer Vorrang.",
               "trace_recording": "Eine JSONL-Zeile je Tick für die Offline-Replay-Analyse (fortgeschritten).",
               "vent_notify": "Selbstlöschende Benachrichtigung, solange Lüften empfohlen ist; das Bus-Event poise_ventilation_advice feuert unabhängig davon."
             }
@@ -583,10 +626,22 @@
       "hub_no_options": "Der System-Hub hat keine Optionen; nutze Neu konfigurieren."
     },
     "error": {
-      "comfort_window_pair": "Für das Komfortfenster Beginn und Ende beide setzen, oder beide leer lassen."
+      "comfort_window_pair": "Für das Komfortfenster Beginn und Ende beide setzen, oder beide leer lassen.",
+      "schedule_days_empty": "Mindestens einen Wochentag für das Komfortfenster wählen, oder die Tagesauswahl unverändert lassen (alle Tage)."
     }
   },
   "selector": {
+    "comfort_days": {
+      "options": {
+        "mon": "Montag",
+        "tue": "Dienstag",
+        "wed": "Mittwoch",
+        "thu": "Donnerstag",
+        "fri": "Freitag",
+        "sat": "Samstag",
+        "sun": "Sonntag"
+      }
+    },
     "climate_mode": {
       "options": {
         "auto": "Automatisch (Heizen & Kühlen)",

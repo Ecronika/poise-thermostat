@@ -152,6 +152,7 @@
       "sensor_on_actuator": "The room sensor is on the same device as the thermostat — that's its built-in sensor, which reads the radiator, not the room. Pick a separate, free-standing room sensor so Poise learns the room correctly.",
       "invalid_boiler_action": "That boiler action could not be read. Use the format entity_id/domain.service[/attr:value], e.g. switch.boiler/switch.turn_on — or leave it empty to stay diagnostic-only.",
       "heat_cool_only": "This device only supports the combined heat/cool (dual-setpoint) mode. Poise writes one setpoint per actuator and can't drive it — pick a device with a single heat or cool target.",
+      "calibration_restore_failed": "The previous TRV's calibration offset could not be restored: the entity is unreadable or the device did not confirm the restored value. Nothing was changed — wake the device up and submit again (an already-restored offset is then recognized immediately), or restore the offset manually.",
       "invalid_boiler_action_fields": "That boiler action is incomplete. It needs an entity and a service written as domain.service (e.g. switch.turn_on); any extra service data must be given as key/value pairs. Remove the action entirely to stay diagnostic-only."
     }
   },
@@ -197,25 +198,34 @@
             "data": {
               "comfort_start": "Comfort window start",
               "comfort_end": "Comfort window end",
+              "comfort_days": "Comfort window days",
               "comfort_start_2": "Window 2 start",
               "comfort_end_2": "Window 2 end",
+              "comfort_days_2": "Window 2 days",
               "comfort_start_3": "Window 3 start",
               "comfort_end_3": "Window 3 end",
+              "comfort_days_3": "Window 3 days",
               "comfort_start_4": "Window 4 start",
               "comfort_end_4": "Window 4 end",
+              "comfort_days_4": "Window 4 days",
               "comfort_start_5": "Window 5 start",
               "comfort_end_5": "Window 5 end",
+              "comfort_days_5": "Window 5 days",
               "comfort_start_6": "Window 6 start",
               "comfort_end_6": "Window 6 end",
+              "comfort_days_6": "Window 6 days",
               "comfort_start_7": "Window 7 start",
               "comfort_end_7": "Window 7 end",
+              "comfort_days_7": "Window 7 days",
               "comfort_start_8": "Window 8 start",
               "comfort_end_8": "Window 8 end",
+              "comfort_days_8": "Window 8 days",
               "setback_delta": "Night setback (K)",
               "optimal_start": "Optimal start (pre-heat)"
             },
             "data_description": {
               "comfort_start": "Set both start and end to enable a daily comfort window; leave both empty for all-day comfort.",
+              "comfort_days": "Weekdays this window is active on. Leave every day selected for a window that runs all week; clearing all days turns the window into a setback (never comfort) instead of removing it — clear both times instead to remove the window.",
               "comfort_start_2": "Fill a window and save — the form then offers the next one (up to 8). Clear both times of a window to remove it; overlapping windows are merged. Optimal start pre-heats for every window.",
               "setback_delta": "How far to relax the band outside the comfort windows."
             }
@@ -260,6 +270,7 @@
               "compressor_guard": "Compressor guard (single AC)",
               "compressor_min_off_s": "Compressor min-off (s)",
               "compressor_mode_hold_s": "Compressor mode-hold (s)",
+              "trv_calibration": "TRV offset calibration",
               "trace_recording": "Field-trace recording",
               "vent_notify": "Ventilation-advice notification"
             },
@@ -270,6 +281,7 @@
               "compressor_guard": "Hold cool/dry starts and flips that would short-cycle the compressor.",
               "compressor_min_off_s": "Wait after a stop before a restart (blank = 300).",
               "compressor_mode_hold_s": "Wait before a cool↔dry flip (blank = 300).",
+              "trv_calibration": "Opt-in: continuously trims the TRV's local temperature offset toward the room sensor — for TRVs without an external-temperature input. A configured external-temperature input always takes precedence.",
               "trace_recording": "One JSONL line per tick for offline replay analysis (advanced).",
               "vent_notify": "Self-clearing notification while airing is recommended; the bus event poise_ventilation_advice fires either way."
             }
@@ -311,10 +323,22 @@
       "hub_no_options": "The system hub has no options; use Reconfigure instead."
     },
     "error": {
-      "comfort_window_pair": "Set both a start and end time for the comfort window, or leave both empty."
+      "comfort_window_pair": "Set both a start and end time for the comfort window, or leave both empty.",
+      "schedule_days_empty": "Pick at least one day for the comfort window, or leave the day selection alone to keep every day."
     }
   },
   "selector": {
+    "comfort_days": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
     "climate_mode": {
       "options": {
         "auto": "Automatic (heat & cool)",
@@ -541,6 +565,33 @@
       "title": "Poise: valve may be stuck",
       "description": "The radiator valve's calibration step count (`{entity}`) is near zero, which usually means the valve failed to calibrate or is mechanically jammed. The room may not heat correctly. Re-pair or re-calibrate the TRV; the issue clears once a normal step count is reported."
     },
+    "calibration_available": {
+      "title": "Poise: TRV offset calibration available",
+      "fix_flow": {
+        "step": {
+          "init": {
+            "title": "Poise: enable TRV offset calibration?",
+            "description": "{name}: this TRV exposes a writable local-temperature offset and no external-temperature input is configured, so Poise could compensate the room reading via offset calibration (a configured external-temperature input would take precedence). Submit to enable the opt-in option for this zone. To decline, just ignore this issue."
+          }
+        }
+      }
+    },
+    "calibration_restore_failed": {
+      "title": "Poise: TRV calibration offset not handed back",
+      "description": "Poise wrote a calibration offset to `{entity}` and now needs to restore the original value, but the offset could not be restored: the entity is unavailable or gone. While the entity still exists but is unreadable, the next compensation path stays blocked until the device confirms the restored offset; a structurally removed entity does not block anything. The issue clears automatically."
+    },
+    "calibration_restore_clipped": {
+      "title": "Poise: calibration offset restored clipped",
+      "description": "The saved original offset for `{entity}` no longer fits the entity's current limits, so Poise restored the closest allowed value instead. Informational only."
+    },
+    "calibration_entity_unsafe": {
+      "title": "Poise: calibration entity not usable",
+      "description": "TRV calibration is enabled, but `{entity}` reports no safe metadata (value, min/max or step missing or invalid). Poise writes no offset until the metadata is readable again."
+    },
+    "calibration_unapplied": {
+      "title": "Poise: calibration offset not applied",
+      "description": "The TRV has not reported Poise's last calibration offset on `{entity}` for an extended time. The writes may not be reaching the device — check its connection or child lock. The issue clears once the offset is reported."
+    },
     "frost_zone_not_boiler": {
       "title": "Poise: freezing room not controlling the shared boiler",
       "description": "These rooms are at frost-protection temperature but are not set to control the shared boiler, so it will not fire to protect them: {zones}. If such a room is heated by the shared boiler, enable 'This room may request the shared boiler' under Reconfigure → Shared plant (multi-zone) (a cooling-only room can be left off). This issue clears automatically once no such room is freezing."
@@ -552,6 +603,10 @@
     "persistence_failed": {
       "title": "Poise: cannot save learned model",
       "description": "Poise has repeatedly failed to write its learned model and settings to storage, so learning and your recent changes may be lost on the next restart. Check the disk and the Home Assistant `.storage` directory. This issue clears automatically once a save succeeds."
+    },
+    "schedule_days_invalid": {
+      "title": "Poise: invalid comfort-window days",
+      "description": "A comfort window's weekday selection for `{zone}` has no recognised day ({tokens}), so that window is currently treated as an always-active setback (never comfort) instead of running on the days you intended. Fix the day selection under the zone's options → Schedule; this issue clears automatically once at least one valid day is set."
     },
     "tick_failing": {
       "title": "Poise: control tick repeatedly failing",
@@ -613,7 +668,7 @@
         "step": {
           "init": {
             "title": "Poise: start the comfort window earlier?",
-            "description": "{name}: during setback the setpoint was manually raised {count}x within 14 days. Start the comfort window {step} min earlier? Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
+            "description": "{name}: during setback the setpoint was manually raised {count}x within 14 days. Start the comfort window {step} min earlier? This changes only the base comfort window's start time; unless you've restricted that window to specific days, it applies on all days. Applying changes the zone options visibly; dismissing mutes this pattern for 30 days.",
             "menu_options": {
               "apply": "Apply the suggested change",
               "dismiss": "Dismiss (mute this pattern for 30 days)"
