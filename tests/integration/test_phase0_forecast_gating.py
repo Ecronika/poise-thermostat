@@ -42,6 +42,8 @@ from custom_components.poise.const import (
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_END,
+    CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
     CONF_CONTROLS_BOILER,
     CONF_NAME,
@@ -84,6 +86,10 @@ def _base(**extra: Any) -> dict[str, Any]:
         CONF_COMFORT_WEIGHT: 70,
         CONF_SETBACK_DELTA: 3.0,
         CONF_OPTIMAL_START: True,
+        # P2.1: a real comfort window so the schedule has an edge -- an
+        # edgeless (always-comfort) zone deliberately requests no forecast.
+        CONF_COMFORT_START: "00:00",
+        CONF_COMFORT_END: "23:59",
         CONF_OPERATIVE_INPUT: False,
         CONF_CONTROLS_BOILER: False,
         CONF_WEATHER: "weather.home",

@@ -106,6 +106,11 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "ca_ppd",
     "ca_ppd_minutes",
     "ca_time_in_band",
+    # P1.4: opt-in TRV calibration diagnostics (segments H/W report keys)
+    "cal_diverged",
+    "cal_handoff_pending",
+    "cal_offset",
+    "cal_target",
     "category",
     "clo_offset",
     "clo_source",
