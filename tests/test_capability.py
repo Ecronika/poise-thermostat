@@ -5,6 +5,8 @@ from custom_components.poise.devices.capability import (
     DeviceCapabilities,
     capabilities_from_numbers,
     classify_number_entity,
+    reliable_heat_mode_from,
+    select_live_path,
     select_path,
 )
 
@@ -68,6 +70,79 @@ def test_climate_capability_from_hvac_modes() -> None:
     # cool-capable (Sonoff TRVZB finding): auto implies heating only
     assert climate_capability(["off", "auto", "heat"]) == (True, False)
     assert climate_capability(["off", "auto"]) == (True, False)
+
+
+def test_reliable_heat_mode_requires_literal_heat() -> None:
+    # auto-only can heat (can_heat), but cannot be HELD in "heat"
+    # (ha/phase_actuate.py: supported = desired in act_modes)
+    assert reliable_heat_mode_from(["heat", "off"])
+    assert reliable_heat_mode_from(["HEAT", "auto"])
+    assert not reliable_heat_mode_from(["auto", "off"])
+    assert not reliable_heat_mode_from(["heat_cool", "off"])
+
+
+def test_live_path_ext_temp_reserved_beats_calibration() -> None:
+    caps = DeviceCapabilities(writable_calibration=True, reliable_heat_mode=True)
+    assert (
+        select_live_path(caps, ext_temp_reserved=True, calibration_enabled=True)
+        is ActuatorPath.SETPOINT
+    )
+    # top precedence rung: ext_temp_reserved beats the valve path too
+    valve_caps = DeviceCapabilities(writable_valve=True, reliable_heat_mode=True)
+    assert (
+        select_live_path(
+            valve_caps,
+            ext_temp_reserved=True,
+            calibration_enabled=True,
+            valve_live=True,
+        )
+        is ActuatorPath.SETPOINT
+    )
+
+
+def test_live_path_calibration_requires_opt_in_and_heat() -> None:
+    caps = DeviceCapabilities(writable_calibration=True, reliable_heat_mode=True)
+    assert (
+        select_live_path(caps, ext_temp_reserved=False, calibration_enabled=False)
+        is ActuatorPath.SETPOINT
+    )
+    assert (
+        select_live_path(caps, ext_temp_reserved=False, calibration_enabled=True)
+        is ActuatorPath.CALIBRATION
+    )
+    no_heat = DeviceCapabilities(writable_calibration=True, reliable_heat_mode=False)
+    assert (
+        select_live_path(no_heat, ext_temp_reserved=False, calibration_enabled=True)
+        is ActuatorPath.SETPOINT
+    )
+
+
+def test_live_path_valve_requires_valve_live() -> None:
+    caps = DeviceCapabilities(
+        writable_valve=True, writable_calibration=True, reliable_heat_mode=True
+    )
+    assert (
+        select_live_path(caps, ext_temp_reserved=False, calibration_enabled=True)
+        is ActuatorPath.CALIBRATION
+    )
+    assert (
+        select_live_path(
+            caps, ext_temp_reserved=False, calibration_enabled=True, valve_live=True
+        )
+        is ActuatorPath.TPI_VALVE
+    )
+    # defensive half of the guard: valve_live=True alone is not enough without
+    # a writable valve — falls through to the calibration path
+    no_valve = DeviceCapabilities(writable_calibration=True, reliable_heat_mode=True)
+    assert (
+        select_live_path(
+            no_valve,
+            ext_temp_reserved=False,
+            calibration_enabled=True,
+            valve_live=True,
+        )
+        is ActuatorPath.CALIBRATION
+    )
 
 
 def test_looks_like_valve_steps() -> None:

@@ -94,8 +94,16 @@ _RATCHET: tuple[_Entry, ...] = (
         # to the plan's target (1200/900) and the extraction budget is gone -
         # this was the step it was declared to expire at, and it expired by
         # doing its job: lines finally left the file.
-        baseline_total=931,
-        baseline_code=436,
+        # P1.4 (feature growth, measured after the fact — not refactoring
+        # drift): the two calibration segments entered the sequencer's
+        # program (segment H between setpoint and ext-temp with the
+        # handoff_pending skip, segment W after ext-temp, their two F19
+        # health emissions and the display-latch stamps). 931/436 -> 964/453
+        # against the unchanged 1200/900 cap; P1.4b +1 comment line.
+        # P2.1 +1 comment line (the forecast-handshake condition now names
+        # the None-transition half of the iff).
+        baseline_total=966,
+        baseline_code=453,
         headroom=50,
         note="1200/900 total/code, reached at step O.5",
         # Plan defect found while landing O.1 (see plan section 18): O.0 froze
@@ -142,8 +150,13 @@ _RATCHET: tuple[_Entry, ...] = (
     # relocation record, not a new allowance.
     _Entry(
         identifier="custom_components/poise/ha/phase_prepare.py",
-        baseline_total=1131,
-        baseline_code=796,
+        # P2.1 +9/+4 (feature growth, measured after the fact): the
+        # None-transition guard on the predictive branch — has_comfort_edge/
+        # has_setback_edge feeding the existing plan_preheat enable gates,
+        # plus the stage-is-never-skipped rationale comment.
+        # 1131/796 -> 1140/800.
+        baseline_total=1140,
+        baseline_code=800,
         headroom=50,
         note=(
             "1200/900 total/code - plan DoD cap, effective from O.5. "
@@ -157,8 +170,16 @@ _RATCHET: tuple[_Entry, ...] = (
     ),
     _Entry(
         identifier="custom_components/poise/ha/phase_actuate.py",
-        baseline_total=765,
-        baseline_code=424,
+        # Raised 765/424 -> 1043/646 by P1.4 (feature growth, measured after
+        # the fact — the phase_prepare ADR-0066 precedent): the two
+        # calibration segments (fail-closed ownership handoff H, regulation
+        # write W), the shared _calibration_live_path capability build and
+        # their D3/D4 proof docstrings; P1.4b/P1.4c +75/+38 for the UNIFORM
+        # issue-hygiene rule (_cal_inactive_edges helper carrying the ONE
+        # rationale comment + the inactive edges on every concluded path,
+        # quality review Important 1). 216 code lines short of the DoD cap.
+        baseline_total=1118,
+        baseline_code=684,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -177,8 +198,16 @@ _RATCHET: tuple[_Entry, ...] = (
         # lesson of plan section 18.6 restated). 738/549 -> 802/570 against an
         # unchanged 1200/900 cap. The baseline follows the measurement so the
         # row keeps tracking reality; the ceiling does not move.
-        baseline_total=802,
-        baseline_code=570,
+        # P1.4 added +14/+7 (post-format measurement, P1.4b): the four
+        # calibration shadow keys (cal_offset/cal_target/cal_diverged/
+        # cal_handoff_pending) and the tri-state metadata read they display.
+        # 802/570 -> 816/577. P1.5 +8/+4: the fourth suggestion-mirror call
+        # (``sync_calibration_available_issue``) at the established sync
+        # position. 816/577 -> 824/581. P2.1 +3/0: the fixed-fallback
+        # rationale comment at the ``model_expected_minutes`` seam
+        # (``float(x or 0.0)``, plan §0.6 p.3). 824/581 -> 827/581.
+        baseline_total=827,
+        baseline_code=581,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -208,12 +237,21 @@ _RATCHET: tuple[_Entry, ...] = (
         # works inside _stage_outcome_diag, O.7 only finalises the table).
         # The code metric is the complexity signal (plan 18.5): 101 is well
         # under the plan's 110 target - the 180 total is a 79-line docstring.
-        baseline_total=180,
-        baseline_code=101,
+        #
+        # P1.4 (feature growth, NOT the drift the re-freeze guarded against):
+        # the tick's actuation program itself grew by two segments — the
+        # calibration handoff (H, with the handoff_pending ext-temp skip) and
+        # the calibration write (W), plus their health emissions and the
+        # display-latch stamps on both branches. 180/101 -> 212/117. The O.5
+        # "110 target" described the pre-P1 program; a longer program is
+        # allowed to cost sequencer lines, and the call sites the re-freeze
+        # protected are untouched. P1.4b +1 comment line.
+        baseline_total=213,
+        baseline_code=117,
         headroom=10,
         note=(
-            "180/101 - re-frozen at O.5 (code 101 undercuts the plan's 110 "
-            "target; the total is proof docstring, plan section 18.5)"
+            "213/117 - re-frozen after the P1.4 program extension (was "
+            "180/101 at O.5; the total is proof docstring, plan section 18.5)"
         ),
     ),
     _Entry(
@@ -240,10 +278,14 @@ _RATCHET: tuple[_Entry, ...] = (
         # Moved byte-identically to phase_report.py. Same re-freeze as above:
         # 331+1 / 258+1 was the declared effective cap, and it is now the
         # ceiling. This is the plan's ONE named permanent size exception.
-        baseline_total=332,
-        baseline_code=259,
+        # P1.4 added +14/+7 (post-format measurement, P1.4b; the four
+        # calibration shadow keys and the tri-state metadata read);
+        # 332/259 -> 346/266. P1.5 +8/+4: the calibration opt-in mirror call
+        # inside the existing suggestion-sync try block; 346/266 -> 354/270.
+        baseline_total=354,
+        baseline_code=270,
         headroom=10,
-        note="332/259 - approved permanent exception, no lowering step",
+        note="354/270 - approved permanent exception, no lowering step",
     ),
     _Entry(
         identifier="custom_components/poise/ha/phase_prepare.py::_stage_write_target",
@@ -293,11 +335,17 @@ _RATCHET: tuple[_Entry, ...] = (
         # ha/phase_*.py, which would have left this file unguarded until O.5.
         # O.5: MonolithTickPorts is gone, so both values ratchet DOWN by the
         # measured amount (405/148 -> 397/145).
+        # P1.5 (feature growth, measured after the fact): the fourth
+        # ReportPorts capability ``sync_calibration_available_issue`` —
+        # protocol stub, adapter forward and the docstring census update
+        # (20 -> 21 capabilities). 397/145 -> 418/154. The "should shrink"
+        # guard below still holds for everything that is not a deliberate
+        # new port: a port is capability, not coupling drift.
         identifier="custom_components/poise/ha/tick_ports.py",
-        baseline_total=397,
-        baseline_code=145,
+        baseline_total=418,
+        baseline_code=154,
         headroom=50,
-        note="397/145 - growth guard; it should shrink, never grow",
+        note="418/154 - growth guard; it should shrink, never grow",
     ),
     _Entry(
         # Added with O.5 (see plan section 18.7). coordinator.py is the
@@ -323,9 +371,28 @@ _RATCHET: tuple[_Entry, ...] = (
         # (_sync_clo_suggestion_issue / _sync_suggestion_issue /
         # _sync_season_hint_issue) moved to the HealthReporter — the owner of
         # the repair-issue surface — leaving thin port-named facades here.
+        # +72/+30 for P1.5: ``async_prepare_actuator_handoff`` (the D3
+        # reconfigure lifecycle port under the tick lock, carrying the
+        # re-acquisition-invariant documentation of plan reviews Rev. 2.4/2.5
+        # — proof docstring, not complexity) plus the fourth suggestion-mirror
+        # facade and the two lifecycle imports. 1311/697 -> 1383/727; the code
+        # metric stays far inside the 900 cap. P1.5b -4/-3: the port's
+        # corrupt-shape branch moved into the shared
+        # ``actuator_lifecycle.resolve_restore`` (one rule, three callers);
+        # baseline pulled down to the measurement, 1383/727 -> 1379/724.
+        # P2.2 +6/0 (feature growth, measured after the fact): the atomic
+        # out-of-tick schedule clock -- _local_schedule_time_now replaces
+        # _local_minute_now with a wider docstring naming the midnight-
+        # rollover hazard it closes; code lines unchanged (one read, one
+        # return, same shape). 1379/724 -> 1385/724.
+        # P2.3 +14/+9 (feature growth): _apply_hot_tuning mirrors
+        # schedule_days_invalid (the fail-closed comfort_days mask report)
+        # into the schedule_days_invalid_{entry_id} repair issue -- one
+        # health.issue() call at the ONE existing tuning-applied write path,
+        # shared by __init__ and async_apply_options. 1385/724 -> 1399/733.
         identifier="custom_components/poise/coordinator.py",
-        baseline_total=1311,
-        baseline_code=697,
+        baseline_total=1399,
+        baseline_code=733,
         headroom=50,
         note=(
             "growth guard only, no lowering target - the code metric is "
@@ -350,7 +417,13 @@ _RATCHET: tuple[_Entry, ...] = (
         identifier="custom_components/poise/control/pipeline_prepare.py",
         # +26 total from the module-level "HA-free synchronous, not pure"
         # definition and the P.2b decision docstring; code unchanged at 597.
-        baseline_total=917,
+        # P2.1 +5/0: the interim-weekday comment and the None-lead rationale
+        # in stage_schedule_gate (no forecast for a transition that does not
+        # exist); code unchanged at 597. 917/597 -> 922/597.
+        # P2.2 -2/0: the interim-weekday comment is gone -- stage_schedule_gate
+        # now reads inputs.local_weekday directly; code unchanged at 597.
+        # 922/597 -> 920/597.
+        baseline_total=920,
         baseline_code=597,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from P.1",
@@ -386,17 +459,35 @@ _RATCHET: tuple[_Entry, ...] = (
     # allowances.
     _Entry(
         identifier="tests/structure_support.py",
-        baseline_total=278,
-        baseline_code=166,
+        baseline_total=279,
+        baseline_code=167,
         headroom=50,
         # +13/+6 in S.3: ``_component_sources``/``_rel`` became shared the
         # moment the ports gate needed to enumerate the package too - the
         # split's own rule (used by more than one gate -> support) applied.
+        # +1/+1 in P1.5: the fourth ReportPorts member in _PORT_VIEWS.
         note="1200/900 total/code - the S.2 gate split; the gate measures itself",
     ),
     _Entry(
         identifier="tests/test_structure_ratchet.py",
-        baseline_total=597,
+        # +39/0 across P1.4/P1.4b for the feature-growth annotations on six
+        # rows and their re-measurements — the self-measuring lesson below,
+        # again: the reasons are part of what this file measures (P1.4b
+        # measured this row LAST, after every other edit).
+        # +20/0 in P1.5: six feature-growth annotations plus these two
+        # lines, all comments — this row measured LAST, after every other
+        # edit stood (the baseline is taken AFTER this note existed).
+        # +4/0 in P1.5b: the coordinator row's resolve_restore re-measure
+        # note plus this line; measured LAST again.
+        # +16/0 in P2.1: four feature-growth annotations (phase_prepare /
+        # phase_report / pipeline_prepare / tick_orchestrator None-guards)
+        # plus these three lines, all comments — this row measured LAST,
+        # after every other edit stood.
+        # +8/0 in P2.2: two feature-growth annotations (coordinator.py's
+        # atomic schedule clock, pipeline_prepare.py's dropped interim-
+        # weekday comment) plus this line, all comments — this row measured
+        # LAST, after every other edit stood.
+        baseline_total=692,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight
@@ -417,16 +508,21 @@ _RATCHET: tuple[_Entry, ...] = (
         # its own anti-vacuum control (one test now carries both), and the
         # read boundary - true since the phase-4 split, enforced by nothing -
         # became a rule with its allowlist of four reasons.
+        # +5/+3 in P1.5: the port-census test carries the rationale for the
+        # 21st capability (the deliberate ReportPorts addition).
         identifier="tests/test_structure_ports.py",
-        baseline_total=322,
-        baseline_code=170,
+        baseline_total=327,
+        baseline_code=173,
         headroom=50,
         note="1200/900 total/code - the S.2 gate split; the gate measures itself",
     ),
     _Entry(
         identifier="tests/test_structure_phases.py",
-        baseline_total=683,
-        baseline_code=388,
+        # +14/+7 for P1.4: the sanctioned-await-count mechanism
+        # (_NORMAL_PATH_AWAIT_COUNTS) that lets run_calibration dispatch at
+        # exactly its two reviewed sites.
+        baseline_total=697,
+        baseline_code=395,
         headroom=50,
         note="1200/900 total/code - the S.2 gate split; the gate measures itself",
     ),

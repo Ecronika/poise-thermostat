@@ -26,9 +26,10 @@ def test_service_call_for_setpoint() -> None:
 
 
 def test_service_call_for_unsupported_path_raises() -> None:
-    # CALIBRATION is not wired yet -> must raise (TPI_VALVE is now supported)
+    # PI_SETPOINT is not wired yet (D2/ADR-0037) -> must raise
+    # (TPI_VALVE and CALIBRATION are now supported)
     with pytest.raises(NotImplementedError):
-        service_call_for(_cmd(path=ActuatorPath.CALIBRATION))
+        service_call_for(_cmd(path=ActuatorPath.PI_SETPOINT))
 
 
 class _FakeServices:
@@ -80,3 +81,18 @@ def test_service_call_for_tpi_valve() -> None:
     domain, service, data = service_call_for(cmd)
     assert (domain, service) == ("number", "set_value")
     assert data == {"entity_id": "number.trvzb_valve_opening_degree", "value": 65.0}
+
+
+def test_service_call_for_calibration() -> None:
+    cmd = ActuatorCommand(
+        actuator_id="number.trv_local_temperature_calibration",
+        path=ActuatorPath.CALIBRATION,
+        value=-1.5,
+        hvac_mode=None,
+        reason="calibration",
+    )
+    assert service_call_for(cmd) == (
+        "number",
+        "set_value",
+        {"entity_id": "number.trv_local_temperature_calibration", "value": -1.5},
+    )

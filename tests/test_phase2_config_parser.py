@@ -21,7 +21,12 @@ import pytest
 
 from custom_components.poise.comfort.en16798 import Category
 from custom_components.poise.comfort.presence import PresenceConfig
-from custom_components.poise.comfort.schedule import ComfortSchedule, ComfortWindow
+from custom_components.poise.comfort.schedule import (
+    ALL_DAYS,
+    ComfortSchedule,
+    ComfortWindow,
+)
+from custom_components.poise.const import COMFORT_DAY_KEYS
 from custom_components.poise.control.dynamics import DeviceDynamics
 from custom_components.poise.control.hdh_savings import HdhConfig
 from custom_components.poise.control.mpc import MpcParams
@@ -35,6 +40,7 @@ from custom_components.poise.runtime.config import (
     ZoneConfig,
     ZoneStructure,
     ZoneTuning,
+    _days_mask,
 )
 
 
@@ -120,6 +126,7 @@ def _options() -> dict[str, Any]:
         "optimal_start": False,
         "adopt_external_setpoint": False,
         "adopt_external_mode": False,
+        "trv_calibration": True,
         "operative_input": True,
         # Store-owned user intent (AR-04): must be ignored by the parser.
         "climate_mode": "heat",
@@ -220,6 +227,7 @@ def test_realistic_tuning_parse() -> None:
     assert tuning.optimal_stop is False  # coupled to optimal_start
     assert tuning.adopt_external_setpoint is False
     assert tuning.adopt_external_mode is False
+    assert tuning.trv_calibration is True  # ADR-0015 / D6, explicit opt-in
     assert tuning.operative_input is True
     assert tuning.room_profile == "bedroom"  # ADR-0054 V2
     assert tuning.override_suggestions is True  # ADR-0060 L2, explicit opt-in
@@ -302,6 +310,10 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         # ADR-0069: the mechanism toggle default-off — enabling is the user's
         # standing zone decision; the tier gates then release piecewise.
         active_comfort=False,
+        # ADR-0015 / D6: opt-in TRV local-offset calibration, literal default.
+        trv_calibration=False,
+        # P2.3: no comfort_days configured at all -> nothing to report.
+        schedule_days_invalid=(),
     )
 
 
@@ -482,10 +494,10 @@ def test_schedule_collects_numbered_extra_windows() -> None:
         ],
         3.0,
     )
-    st = tuning.schedule.state_at(18 * 60)  # 18:00 -> inside window 2
+    st = tuning.schedule.state_at(18 * 60, 0)  # 18:00 -> inside window 2
     assert st.is_comfort
     # 14:00 -> next start is window 2 at 17:00 (optimal-start deadline source)
-    assert tuning.schedule.state_at(14 * 60).minutes_to_comfort == 180
+    assert tuning.schedule.state_at(14 * 60, 0).minutes_to_comfort == 180
 
 
 def test_schedule_extra_window_invalid_pair_is_ignored() -> None:
@@ -503,6 +515,148 @@ def test_schedule_extra_window_invalid_pair_is_ignored() -> None:
     assert tuning.schedule == ComfortSchedule.from_windows(
         [ComfortWindow(5 * 60, 9 * 60)], 3.0
     )
+
+
+# ---------------------------------------------------------------------------
+# P2.3: _days_mask — fail-closed weekday-mask parse (review Rev. 2.2/2.5:
+# a present-but-unusable value must NEVER fail open to ALL_DAYS)
+# ---------------------------------------------------------------------------
+
+
+def test_days_mask_missing_key_is_all_days() -> None:
+    """The default call (no argument) mirrors the old maskless window: a
+    pre-P2.3 store never had this key at all."""
+    assert _days_mask() == (ALL_DAYS, ())
+
+
+def test_days_mask_none_is_all_days() -> None:
+    assert _days_mask(None) == (ALL_DAYS, ())
+
+
+def test_days_mask_partial_valid_reports_unknown_and_keeps_known_bits() -> None:
+    mask, bad = _days_mask(["mon", "xyz"])
+    assert mask == 0b0000001  # mon = bit 0
+    assert bad == ("xyz",)
+
+
+def test_days_mask_all_unknown_is_zero_never_all_days() -> None:
+    """The BLOCKER this guards: an explicit, unusable value must fail
+    CLOSED (mask 0, window inactive), never open to seven days."""
+    mask, bad = _days_mask(["xyz"])
+    assert mask == 0
+    assert bad == ("xyz",)
+
+
+def test_days_mask_empty_list_is_zero_with_report() -> None:
+    """The bracket-free, language-neutral em-dash marker (review P2.3b
+    Important-1, refined P2.3c): it flows unchanged into the
+    schedule_days_invalid repair-issue description, which HA renders
+    through ha-markdown + an HTML sanitizer — a bare ``<...>`` token there
+    is syntactically a tag and gets stripped. It is also UNPARENTHESISED
+    and non-English on purpose: the EN/DE templates already wrap
+    ``{tokens}`` in their own parentheses, so a marker like ``"(none)"``
+    rendered as the double-parenthesised, untranslated ``"((none))"`` in
+    the German sentence — "—" instead renders naturally as "(—)" in both
+    locales, no translation needed."""
+    assert _days_mask([]) == (0, ("—",))
+
+
+def test_days_mask_not_a_list_is_zero_with_report() -> None:
+    # A bare string, not a list/tuple of tokens -> same "—" marker as the
+    # empty-list case: both are "nothing usable was submitted".
+    assert _days_mask("mon") == (0, ("—",))
+
+
+@pytest.mark.parametrize("i, key", list(enumerate(COMFORT_DAY_KEYS)))
+def test_days_mask_pins_every_bit_position(i: int, key: str) -> None:
+    """Review P2.3b Minor-3: today only mon/tue are incidentally pinned by
+    the other tests. Walk the FULL COMFORT_DAY_KEYS tuple so a reordering of
+    the const (mon/tue/wed/... -> some other order) cannot silently scramble
+    which weekday a stored mask bit means."""
+    mask, bad = _days_mask([key])
+    assert mask == 1 << i
+    assert bad == ()
+
+
+def test_days_mask_full_week_round_trips() -> None:
+    assert _days_mask(list(("mon", "tue", "wed", "thu", "fri", "sat", "sun"))) == (
+        ALL_DAYS,
+        (),
+    )
+
+
+# ---------------------------------------------------------------------------
+# P2.3: comfort_days(_N) wired into the window parse
+# ---------------------------------------------------------------------------
+
+
+def test_window_with_days_gets_the_parsed_mask() -> None:
+    opts = {
+        "comfort_start": "06:00",
+        "comfort_end": "22:00",
+        "comfort_days": ["tue"],
+        "setback_delta": 3.0,
+    }
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule.windows == (ComfortWindow(6 * 60, 22 * 60, 1 << 1),)
+    assert tuning.schedule_days_invalid == ()
+
+
+def test_window_without_days_key_defaults_to_all_days() -> None:
+    """A store predating P2.3 never wrote comfort_days at all."""
+    opts = {"comfort_start": "06:00", "comfort_end": "22:00", "setback_delta": 3.0}
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule.windows == (ComfortWindow(6 * 60, 22 * 60, ALL_DAYS),)
+    assert tuning.schedule_days_invalid == ()
+
+
+def test_window_with_invalid_days_degrades_to_setback_and_reports() -> None:
+    """The BEHAVIOR row (plan §6, P2.3): an explicitly invalid/empty day
+    selection turns that window into setback, never silent all-week comfort,
+    and the bad tokens surface on the tuning for the health-issue mirror."""
+    opts = {
+        "comfort_start": "06:00",
+        "comfort_end": "22:00",
+        "comfort_days": [],
+        "setback_delta": 3.0,
+    }
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule.windows == (ComfortWindow(6 * 60, 22 * 60, 0),)
+    assert not tuning.schedule.state_at(12 * 60, 0).is_comfort  # always-setback
+    assert tuning.schedule_days_invalid == ("—",)
+
+
+def test_numbered_window_days_and_base_window_days_are_independent() -> None:
+    opts = {
+        "comfort_start": "05:00",
+        "comfort_end": "09:00",
+        "comfort_days": ["mon"],
+        "comfort_start_2": "17:00",
+        "comfort_end_2": "22:00",
+        "comfort_days_2": ["tue", "bogus"],
+        "setback_delta": 3.0,
+    }
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule.windows == (
+        ComfortWindow(5 * 60, 9 * 60, 1 << 0),
+        ComfortWindow(17 * 60, 22 * 60, 1 << 1),
+    )
+    assert tuning.schedule_days_invalid == ("bogus",)
+
+
+def test_days_key_on_a_half_pair_is_ignored_like_the_pair_itself() -> None:
+    """A days key attached to an invalid/half numbered pair must not leak
+    into schedule_days_invalid — the window itself never gets built."""
+    opts = {
+        "comfort_start": "05:00",
+        "comfort_end": "09:00",
+        "comfort_start_2": "17:00",  # end_2 missing -> pair ignored
+        "comfort_days_2": ["bogus"],
+        "setback_delta": 3.0,
+    }
+    tuning = ZoneConfig.from_mappings(_minimal_data(), opts).tuning
+    assert tuning.schedule.windows == (ComfortWindow(5 * 60, 9 * 60, ALL_DAYS),)
+    assert tuning.schedule_days_invalid == ()
 
 
 # ---------------------------------------------------------------------------

@@ -80,6 +80,7 @@ def _inputs() -> TickInputs:
         now_mono=1000.0,
         now_wall=1_753_000_000.0,
         local_minute=8 * 60 + 30,
+        local_weekday=2,
         local_day_ordinal=739_450,
         sun_elevation=12.5,
         room=SensorValue(21.2, age_s=30.0, entity_id="sensor.room"),
@@ -182,6 +183,7 @@ def test_tick_inputs_assembles_all_groups() -> None:
     assert inputs.now_mono == 1000.0
     assert inputs.now_wall == 1_753_000_000.0
     assert inputs.local_minute == 510
+    assert inputs.local_weekday == 2
     assert inputs.local_day_ordinal == 739_450
     assert inputs.sun_elevation == 12.5
     assert inputs.room.value == 21.2

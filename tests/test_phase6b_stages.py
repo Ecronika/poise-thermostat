@@ -104,6 +104,7 @@ def _inputs(**over: Any) -> TickInputs:
         "now_mono": NOW,
         "now_wall": 1_750_000_000.0,
         "local_minute": 600,
+        "local_weekday": 0,
         "local_day_ordinal": 738_000,
         "sun_elevation": None,
         "room": SensorValue(21.0, age_s=10.0, entity_id="sensor.room"),
@@ -467,6 +468,65 @@ def test_stage_schedule_gate_predictive_requests_tick_current_lead() -> None:
     assert gate.forecast_request is not None
     assert gate.forecast_request.horizon_min == 720.0  # minutes to setback
     assert gate.forecast_request.fallback == ing.t_out_eff
+
+
+def test_stage_schedule_gate_none_transition_requests_no_forecast() -> None:
+    # P2.1 guard 1: an identified model with a schedule whose upcoming
+    # transition DOES NOT EXIST (always-comfort -> minutes_to_setback is
+    # None) must not fetch a forecast -- the same no-request path as an
+    # unidentified model, not a 7-day horizon from a sentinel.
+    rt = _runtime()
+    inputs = _inputs()
+    ing = _stage_ingest(rt, inputs)
+    obs = _stage_observe(rt, inputs, ing)
+    rt.learning.ekf = _IdentifiedEkf()  # type: ignore[assignment]
+    gate = rt.stage_schedule_gate(
+        inputs,
+        ing,
+        obs,
+        schedule=ComfortSchedule.always_comfort(),
+        optimal_start=True,
+        optimal_stop=True,
+    )
+    assert gate.sched.is_comfort is True
+    assert gate.sched.minutes_to_setback is None
+    assert gate.forecast_request is None
+
+
+def test_stage_schedule_gate_always_setback_requests_no_forecast() -> None:
+    # P2.1 guard 1, setback side: windows configured but never active
+    # (days=0) -> always-setback, minutes_to_comfort is None -> no forecast.
+    rt = _runtime()
+    inputs = _inputs()
+    ing = _stage_ingest(rt, inputs)
+    obs = _stage_observe(rt, inputs, ing)
+    rt.learning.ekf = _IdentifiedEkf()  # type: ignore[assignment]
+    schedule = ComfortSchedule.from_windows([ComfortWindow(360, 1320, days=0)])
+    gate = rt.stage_schedule_gate(
+        inputs, ing, obs, schedule=schedule, optimal_start=True, optimal_stop=True
+    )
+    assert gate.sched.is_comfort is False
+    assert gate.sched.minutes_to_comfort is None
+    assert gate.forecast_request is None
+
+
+def test_stage_schedule_gate_wires_the_real_weekday() -> None:
+    # P2.2: the REAL weekday reaches the schedule through TickInputs, not the
+    # sanctioned interim weekday=0. Saturday 08:00 against a Mo-Fr window is
+    # setback with the next comfort start 46h away (Monday 06:00) -- only
+    # provable end to end if the tick's local_weekday is actually consumed.
+    rt = _runtime()
+    inputs = _inputs(local_minute=8 * 60, local_weekday=5)  # Saturday 08:00
+    ing = _stage_ingest(rt, inputs)
+    obs = _stage_observe(rt, inputs, ing)
+    schedule = ComfortSchedule.from_windows(
+        [ComfortWindow(6 * 60, 22 * 60, days=0b0011111)]  # Mo-Fr 06:00-22:00
+    )
+    gate = rt.stage_schedule_gate(
+        inputs, ing, obs, schedule=schedule, optimal_start=True, optimal_stop=False
+    )
+    assert gate.sched.is_comfort is False
+    assert gate.sched.minutes_to_comfort == 46 * 60
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +899,7 @@ def test_build_finalize_context_carries_the_stage_values() -> None:
     band = ClimateBandResult(climate_diag={}, hum_action="idle")
     intents = rt.stage_intents(ing, obs, wt)
     res = _mode_res(rt, ing, obs)
-    sched = ComfortSchedule.always_comfort().state_at(inputs.local_minute)
+    sched = ComfortSchedule.always_comfort().state_at(inputs.local_minute, 0)
     state = PreparedState(
         inputs=inputs,
         ingest=ing,

@@ -243,6 +243,7 @@ _PORT_VIEWS: dict[str, frozenset[str]] = {
             "sync_suggestion_issue",
             "sync_clo_suggestion_issue",
             "sync_season_hint_issue",
+            "sync_calibration_available_issue",  # P1.5 D1 opt-in mirror
         }
     ),
 }

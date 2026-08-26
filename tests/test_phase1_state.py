@@ -70,7 +70,8 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
             "prev_device_fan",
         }
     ),
-    ActuatorRuntime: frozenset({"has_actuated"}),
+    # P1.4: the D3 calibration ownership pair persists with the park gate.
+    ActuatorRuntime: frozenset({"has_actuated", "cal_baseline", "cal_entity"}),
     LearningRuntime: frozenset(
         {"ekf", "trm_tracker", "seasonless", "ref_offset", "tau_settle"}
     ),

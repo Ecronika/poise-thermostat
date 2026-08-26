@@ -102,9 +102,17 @@ _NORMAL_PATH_AWAITS = frozenset(
         "run_fan_write",
         "run_setpoint_write",
         "run_ext_temp",
+        "run_calibration",
         "run_frost_rescue",
     }
 )
+
+
+# P1.4 exception to "each sequence awaited exactly once": ``run_calibration``
+# is ONE boundary dispatched at exactly TWO mutually exclusive sites — the
+# segment-H restore (ownership handoff, D3) and the segment-W regulation
+# write (live calibration path). A third site would be an unreviewed dispatch.
+_NORMAL_PATH_AWAIT_COUNTS: dict[str, int] = {"run_calibration": 2}
 
 
 _UNAVAILABLE_PATH_METHOD = "write_unavailable_safe_state"
@@ -252,7 +260,7 @@ def test_await_detector_is_not_vacuous() -> None:
     """
     assert _awaits(_ACTUATE_MODULE), (
         f"{_ACTUATE_MODULE} reports no await at all - the matcher is broken "
-        f"(this module holds all six executor awaits)."
+        f"(this module holds all eight executor awaits)."
     )
     assert _awaits(_ORCHESTRATOR_MODULE), (
         f"{_ORCHESTRATOR_MODULE} reports no await at all - the matcher is broken."
@@ -283,10 +291,11 @@ def test_prepare_shadow_report_are_await_free(rel_path: str) -> None:
 
 def test_actuate_phase_await_topology() -> None:
     """Plan O.0 invariant (active from O.5): ``phase_actuate.py`` awaits the
-    executor exactly 5 times on the normal tick path and exactly once on the
+    executor exactly 7 times on the normal tick path (P1.4: ``run_calibration``
+    at its two sanctioned sites) and exactly once on the
     unavailable path, and awaits nothing else.
 
-    Formulated semantically rather than as a count of 6, because a count alone
+    Formulated semantically rather than as a count of 8, because a count alone
     would not notice an await MOVED between the two paths - and the unavailable
     path is precisely the one the plan had to re-decide (Review round 4). Every
     await must be an ``self._executor.<run_*>`` call, and the named sets must
@@ -312,10 +321,15 @@ def test_actuate_phase_await_topology() -> None:
         f"{sorted(_UNAVAILABLE_PATH_AWAITS)} (inside "
         f"{_UNAVAILABLE_PATH_METHOD!r})."
     )
-    multiples = {k: v for k, v in {**normal, **unavailable}.items() if len(v) != 1}
+    multiples = {
+        k: v
+        for k, v in {**normal, **unavailable}.items()
+        if len(v) != _NORMAL_PATH_AWAIT_COUNTS.get(k, 1)
+    }
     assert not multiples, (
-        f"an executor sequence is awaited more than once: {multiples}. Each "
-        f"segment dispatches exactly once per tick."
+        f"an executor sequence is awaited at an unreviewed number of sites: "
+        f"{multiples}. Each segment dispatches exactly once per tick "
+        f"(sanctioned exceptions: {_NORMAL_PATH_AWAIT_COUNTS})."
     )
 
 

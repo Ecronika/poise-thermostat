@@ -114,6 +114,8 @@ EXPECTED_PAYLOAD_KEYS = (
     "prev_device_fan",
     "climate_mode",
     "has_actuated",
+    "cal_baseline",
+    "cal_entity",
 )
 
 ALL_STATE_CLASSES: tuple[type[Any], ...] = (
@@ -236,6 +238,8 @@ def _rich_state() -> codec.PersistedZoneState:
         prev_device_mode="heat",
         last_commanded_fan="low",
         prev_device_fan="auto",
+        cal_baseline=-0.5,  # P1.4 D3 ownership pair
+        cal_entity="number.trv_local_temperature_calibration",
     )
 
 
@@ -252,7 +256,8 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 42  # +0066 +0067 +0060 +0068/0069
+    # +0066 +0067 +0060 +0068/0069, +P1.4 cal_baseline/cal_entity
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 44
 
 
 def test_encode_values_match_save_payload_transforms() -> None:
@@ -302,6 +307,8 @@ def test_encode_values_match_save_payload_transforms() -> None:
     assert payload["prev_device_fan"] == "auto"
     assert payload["climate_mode"] == "heat_only"
     assert payload["has_actuated"] is True
+    assert payload["cal_baseline"] == -0.5  # P1.4
+    assert payload["cal_entity"] == "number.trv_local_temperature_calibration"
 
 
 def test_encode_optional_models_serialise_as_none() -> None:
@@ -350,6 +357,8 @@ def test_roundtrip_decode_encode_semantic_identity() -> None:
     assert user.window_bypass is True
     assert user.climate_mode == "heat_only"
     assert user.has_actuated is True
+    assert user.cal_baseline == -0.5  # P1.4 roundtrip
+    assert user.cal_entity == "number.trv_local_temperature_calibration"
 
     ovr = decoded.override_lifecycle
     assert ovr.override == 21.5
@@ -787,3 +796,31 @@ def test_migrate_v0_bare_ekf_structural_corruption_raises() -> None:
     CALLER's decision (today: the coordinator's broad restore boundary)."""
     with pytest.raises(AttributeError):
         migrate_v0_bare_ekf(["not", "a", "dict"])
+
+
+# --------------------------------------------- P1.4 calibration ownership ---
+
+
+def test_cal_ownership_missing_keys_decode_to_none() -> None:
+    """An old store (no calibration keys) decodes to None — no ownership."""
+    user = codec.decode(_v1(), now_wall=NOW_WALL).user_state
+    assert user.cal_baseline is None
+    assert user.cal_entity is None
+
+
+def test_cal_ownership_ill_typed_keys_decode_to_none() -> None:
+    """Wrong-typed calibration keys decode defensively to None (same
+    robustness style as ``has_actuated``'s pre-model path)."""
+    user = codec.decode(
+        _v1(cal_baseline="garbage", cal_entity=1.5), now_wall=NOW_WALL
+    ).user_state
+    assert user.cal_baseline is None
+    assert user.cal_entity is None
+
+
+def test_cal_ownership_valid_pair_decodes() -> None:
+    user = codec.decode(
+        _v1(cal_baseline=0, cal_entity="number.cal"), now_wall=NOW_WALL
+    ).user_state
+    assert user.cal_baseline == 0.0  # 0.0 is a legitimate baseline (D3)
+    assert user.cal_entity == "number.cal"

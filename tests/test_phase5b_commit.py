@@ -8,7 +8,8 @@ effect, ctx registration, EndHold teardown) is exercised end-to-end in
 ``tests/integration/test_phase5b_sequences.py``. THIS module pins everything
 the pure py310 gate can construct: the report transport the fold relies on —
 
-* the full 8-id effect vocabulary travels ordered and unaggregated,
+* the full effect vocabulary (11 ids since P1.4) travels ordered and
+  unaggregated,
 * ``attempted=False`` transports a skipped/aborted planned effect
   (unavailable-safe abort, ext-feed settle skip),
 * the mode-string/M2 transport added for 5B (``commanded_mode``,
@@ -41,6 +42,8 @@ EFFECT_IDS = (
     "safe_mode",
     "safe_setpoint",
     "fan_write",  # ADR-0068 U3: the fan-stage write (stage string, F-gated ts)
+    "cal_write",  # P1.4: calibration regulation write (offset baseline stamp)
+    "cal_restore",  # P1.4: handoff restore dispatch (throttle stamp ONLY, D3)
 )
 
 
@@ -55,6 +58,8 @@ def _execution(
     commanded_mode: str | None = None,
     mode_changed: bool = False,
     fan_changed: bool = False,
+    entity_id: str | None = None,
+    dispatch_wall_ts: float | None = None,
 ) -> EffectExecution:
     return EffectExecution(
         effect_id=effect_id,
@@ -66,6 +71,8 @@ def _execution(
         commanded_mode=commanded_mode,
         mode_changed=mode_changed,
         fan_changed=fan_changed,
+        entity_id=entity_id,
+        dispatch_wall_ts=dispatch_wall_ts,
     )
 
 
@@ -83,10 +90,12 @@ def test_report_preserves_full_vocabulary_in_call_order() -> None:
         for effect_id in (
             "rescue_write",
             "mode_nudge",
+            "cal_restore",
             "fan_write",
             "safe_setpoint",
             "ext_feed",
             "setpoint_write",
+            "cal_write",
             "ext_select",
             "safe_mode",
             "rescue_nudge",
@@ -239,9 +248,9 @@ def test_post_actions_tuple_is_ordered() -> None:
 
 
 def test_effect_ids_are_distinct() -> None:
-    # Nine distinct commit rules — an id collision would silently merge two
+    # Eleven distinct commit rules — an id collision would silently merge two
     # rules in the fold's dispatch.
-    assert len(set(EFFECT_IDS)) == 9
+    assert len(set(EFFECT_IDS)) == 11
 
 
 # ---------------------------------------------------------------------------
@@ -317,3 +326,215 @@ def test_fan_write_change_commit_requires_now() -> None:
                 )
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# P1.4: the cal_write / cal_restore commit rules and the two pre-I/O
+# calibration observe folds (pure, via ZoneRuntime like the fan_write block).
+# ---------------------------------------------------------------------------
+
+CAL = "number.trv_local_temperature_calibration"
+
+
+def _cal_write(**kw):  # type: ignore[no-untyped-def]
+    defaults = dict(
+        pre_write_value=0.0,
+        commanded_value=-1.5,
+        entity_id=CAL,
+        dispatch_wall_ts=1_768_000_000.0,
+    )
+    defaults.update(kw)
+    return _execution("cal_write", **defaults)
+
+
+def test_cal_write_first_success_stamps_baseline_entity_and_anchors() -> None:
+    rt = _runtime()
+    rt.dirty = False
+    rt.commit_execution(ExecutionReport(executions=(_cal_write(),)), now=1000.0)
+    # The FIRST successful write persists the D3 ownership pair...
+    assert rt.actuator.cal_baseline == 0.0
+    assert rt.actuator.cal_entity == CAL
+    assert rt.dirty is True  # ownership flip is persist-dirty
+    # ...and stamps all three evidence anchors.
+    assert rt.actuator.last_cal_value == -1.5
+    assert rt.actuator.last_cal_write_ts == 1000.0
+    assert rt.actuator.last_cal_dispatch_wall_ts == 1_768_000_000.0
+    # An offset write is not a thermal actuation (fan_write reasoning).
+    assert rt.actuator.has_actuated is False
+
+
+def test_cal_write_second_success_never_moves_the_baseline() -> None:
+    rt = _runtime()
+    rt.commit_execution(ExecutionReport(executions=(_cal_write(),)), now=1000.0)
+    rt.commit_execution(
+        ExecutionReport(
+            executions=(
+                _cal_write(
+                    pre_write_value=-1.5,
+                    commanded_value=-2.0,
+                    dispatch_wall_ts=1_768_000_600.0,
+                ),
+            )
+        ),
+        now=1600.0,
+    )
+    # The baseline is the pre-Poise state, never a moving echo.
+    assert rt.actuator.cal_baseline == 0.0
+    assert rt.actuator.cal_entity == CAL
+    assert rt.actuator.last_cal_value == -2.0
+    assert rt.actuator.last_cal_write_ts == 1600.0
+    assert rt.actuator.last_cal_dispatch_wall_ts == 1_768_000_600.0
+
+
+def test_cal_write_failure_stamps_nothing() -> None:
+    rt = _runtime()
+    rt.dirty = False
+    rt.commit_execution(
+        ExecutionReport(executions=(_cal_write(success=False),)), now=1000.0
+    )
+    assert rt.actuator.cal_baseline is None
+    assert rt.actuator.cal_entity is None
+    assert rt.actuator.last_cal_value is None
+    assert rt.dirty is False
+
+
+def test_cal_write_success_requires_now() -> None:
+    import pytest
+
+    rt = _runtime()
+    with pytest.raises(ValueError, match="cal_write commit needs now="):
+        rt.commit_execution(ExecutionReport(executions=(_cal_write(),)))
+
+
+def test_cal_restore_stamps_only_the_throttle_ts() -> None:
+    rt = _runtime()
+    # Standing ownership, as a real handoff tick has it.
+    rt.actuator.cal_baseline = 0.0
+    rt.actuator.cal_entity = CAL
+    rt.actuator.last_cal_value = -1.5
+    rt.commit_execution(
+        ExecutionReport(
+            executions=(
+                _execution(
+                    "cal_restore",
+                    pre_write_value=-1.5,
+                    commanded_value=0.0,
+                    entity_id=CAL,
+                    dispatch_wall_ts=1_768_000_000.0,
+                ),
+            )
+        ),
+        now=2000.0,
+    )
+    # ONLY the redispatch throttle — success is dispatch, not adoption (D3):
+    # ownership and every evidence anchor stay untouched.
+    assert rt.actuator.last_cal_restore_ts == 2000.0
+    assert rt.actuator.cal_baseline == 0.0
+    assert rt.actuator.cal_entity == CAL
+    assert rt.actuator.last_cal_value == -1.5
+
+
+def test_cal_restore_success_requires_now() -> None:
+    import pytest
+
+    rt = _runtime()
+    with pytest.raises(ValueError, match="cal_restore commit needs now="):
+        rt.commit_execution(ExecutionReport(executions=(_execution("cal_restore"),)))
+
+
+# --- observe_calibration_restore (state-confirmed handoff, D3) --------------
+
+
+def test_observe_restore_no_ownership_short_circuits_true() -> None:
+    rt = _runtime()
+    assert (
+        rt.observe_calibration_restore(reported=0.0, step=0.5, restore_target=0.0)
+        is True
+    )
+
+
+def test_observe_restore_confirms_and_clears_everything() -> None:
+    rt = _runtime()
+    rt.actuator.cal_baseline = 0.0
+    rt.actuator.cal_entity = CAL
+    rt.actuator.last_cal_value = -1.5
+    rt.actuator.last_cal_write_ts = 900.0
+    rt.actuator.last_cal_dispatch_wall_ts = 1_768_000_000.0
+    rt.actuator.last_cal_restore_ts = 950.0
+    rt.dirty = False
+    assert (
+        rt.observe_calibration_restore(reported=0.2, step=0.5, restore_target=0.0)
+        is True  # within step/2 of the written target
+    )
+    assert rt.actuator.cal_baseline is None
+    assert rt.actuator.cal_entity is None
+    assert rt.actuator.last_cal_value is None
+    assert rt.actuator.last_cal_write_ts is None
+    assert rt.actuator.last_cal_dispatch_wall_ts is None
+    assert rt.actuator.last_cal_restore_ts is None
+    assert rt.dirty is True  # the ownership clear persists
+
+
+def test_clear_calibration_ownership_is_the_one_clearing_site() -> None:
+    # P1.5: the lifecycle port and the observe fold share THIS clearing —
+    # baseline, entity, every evidence anchor, and the persisted flip.
+    rt = _runtime()
+    rt.actuator.cal_baseline = 0.0
+    rt.actuator.cal_entity = CAL
+    rt.actuator.last_cal_value = -1.5
+    rt.actuator.last_cal_write_ts = 900.0
+    rt.actuator.last_cal_dispatch_wall_ts = 1_768_000_000.0
+    rt.actuator.last_cal_restore_ts = 950.0
+    rt.dirty = False
+    rt.clear_calibration_ownership()
+    assert rt.actuator.cal_baseline is None
+    assert rt.actuator.cal_entity is None
+    assert rt.actuator.last_cal_value is None
+    assert rt.actuator.last_cal_write_ts is None
+    assert rt.actuator.last_cal_dispatch_wall_ts is None
+    assert rt.actuator.last_cal_restore_ts is None
+    assert rt.dirty is True
+
+
+def test_observe_restore_unconfirmed_keeps_ownership() -> None:
+    rt = _runtime()
+    rt.actuator.cal_baseline = 0.0
+    rt.actuator.cal_entity = CAL
+    assert (
+        rt.observe_calibration_restore(reported=-1.5, step=0.5, restore_target=0.0)
+        is False
+    )
+    assert rt.actuator.cal_baseline == 0.0
+    assert rt.actuator.cal_entity == CAL
+
+
+def test_observe_restore_confirms_against_clipped_target_not_baseline() -> None:
+    # Review point 6: baseline 5.0, entity max shrank to 4.5 — the comparison
+    # runs against the actually written (clipped) restore_target, or the
+    # handoff could never confirm.
+    rt = _runtime()
+    rt.actuator.cal_baseline = 5.0
+    rt.actuator.cal_entity = CAL
+    assert (
+        rt.observe_calibration_restore(reported=4.5, step=0.5, restore_target=4.5)
+        is True
+    )
+    assert rt.actuator.cal_baseline is None
+
+
+# --- observe_calibration_resume (restart quarantine, D4) --------------------
+
+
+def test_observe_resume_engages_only_on_baseline_without_anchor() -> None:
+    rt = _runtime()
+    # First-ever activation (no baseline): untouched — the first write may
+    # proceed immediately.
+    assert rt.observe_calibration_resume(reported=0.0, wall_now=1.0) is False
+    # Restored baseline + lost anchors = fresh process: quarantine.
+    rt.actuator.cal_baseline = 0.0
+    assert rt.observe_calibration_resume(reported=-1.5, wall_now=2.0) is True
+    assert rt.actuator.last_cal_value == -1.5  # reported adopted as command
+    assert rt.actuator.last_cal_dispatch_wall_ts == 2.0  # anchor = now
+    # Anchors present again: the quarantine never re-engages.
+    assert rt.observe_calibration_resume(reported=-1.5, wall_now=3.0) is False
+    assert rt.actuator.last_cal_dispatch_wall_ts == 2.0

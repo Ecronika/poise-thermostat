@@ -9,8 +9,11 @@ module exercises the pure functions directly: expiry paths (timer/schedule/
 permanent/presence), the §1 switchpoint-accuracy flag, Boost freeze/re-arm
 (VT#1961), the §5 statistic gates and cap, the Defekt-2 event gate and the
 ``CommandResult`` event contents — plus the clock-injection contract: the
-injected ``now_utc_fn``/``minutes_to_switchpoint_fn``/``local_minute_fn``
-callables are evaluated ONLY on the paths that historically read the clock.
+injected ``now_utc_fn``/``minutes_to_switchpoint_fn``/``local_schedule_time_fn``
+callables are evaluated ONLY on the paths that historically read the clock,
+and (P2.2) ``local_schedule_time_fn`` is read at most ONCE per decision — the
+atomic ``(weekday, minute)`` pair from a single out-of-tick clock read, never
+a minute from one read paired with a weekday from another.
 """
 
 from __future__ import annotations
@@ -107,19 +110,41 @@ def test_set_climate_mode_and_window_bypass() -> None:
 
 
 def test_minutes_to_switchpoint_always_comfort_is_none() -> None:
-    assert ovr.minutes_to_switchpoint(ComfortSchedule.always_comfort(), 600) is None
+    assert (
+        ovr.minutes_to_switchpoint(ComfortSchedule.always_comfort(), (0, 600)) is None
+    )
+
+
+def test_minutes_to_switchpoint_always_setback_is_none() -> None:
+    # P2.1 guard: both transitions None (windows configured, all masks
+    # days=0 -> always-setback) takes the existing "no switchpoint" path.
+    sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320, days=0)])
+    assert ovr.minutes_to_switchpoint(sched, (0, 600)) is None
 
 
 def test_minutes_to_switchpoint_inside_window_counts_to_setback() -> None:
     sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320)])  # 06:00-22:00
-    # 10:00 -> 12h to the 22:00 window end (the setback edge)
-    assert ovr.minutes_to_switchpoint(sched, 600) == 720.0
+    # Monday 10:00 -> 12h to the 22:00 window end (the setback edge)
+    assert ovr.minutes_to_switchpoint(sched, (0, 600)) == 720.0
 
 
 def test_minutes_to_switchpoint_in_setback_counts_to_comfort() -> None:
     sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320)])
-    # 23:00 -> 7h to the 06:00 comfort start
-    assert ovr.minutes_to_switchpoint(sched, 1380) == 420.0
+    # Monday 23:00 -> 7h to the 06:00 comfort start
+    assert ovr.minutes_to_switchpoint(sched, (0, 1380)) == 420.0
+
+
+def test_minutes_to_switchpoint_unpacks_weekday_then_minute() -> None:
+    # P2.2: the tuple is (weekday, minute) -- a Mo-Fr-only window is a real
+    # switchpoint Monday 10:00 but has NO switchpoint on Saturday (weekday 5,
+    # always-setback for that day), proving the weekday half is not ignored.
+    sched = ComfortSchedule.from_windows(
+        [ComfortWindow(360, 1320, days=0b0011111)]  # Mo-Fr 06:00-22:00
+    )
+    assert ovr.minutes_to_switchpoint(sched, (0, 600)) == 720.0  # Monday, in window
+    assert ovr.minutes_to_switchpoint(sched, (5, 600)) is not None  # Saturday setback
+    # Saturday 10:00 -> next comfort start is Monday 06:00 (44h away)
+    assert ovr.minutes_to_switchpoint(sched, (5, 600)) == 44 * 60.0
 
 
 # --- set_override: set path ----------------------------------------------------
@@ -511,6 +536,7 @@ def _record(
     window_open: bool = False,
     comfort_base: float = 21.0,
     minute: int = 600,
+    weekday: int = 0,
     now: float = 1_234.0,
     schedule: ComfortSchedule | None = None,
 ) -> None:
@@ -522,7 +548,7 @@ def _record(
         comfort_base=comfort_base,
         override_cfg=OverrideConfig(),
         schedule=schedule or ComfortSchedule.always_comfort(),
-        local_minute_fn=lambda: minute,
+        local_schedule_time_fn=lambda: (weekday, minute),
         now_utc_fn=lambda: now,
     )
 
@@ -538,13 +564,38 @@ def test_stat_gates_skip_away_and_window_without_clock_reads() -> None:
         comfort_base=21.0,
         override_cfg=OverrideConfig(),
         schedule=ComfortSchedule.always_comfort(),
-        local_minute_fn=lambda: (_ for _ in ()).throw(AssertionError("gated")),
+        local_schedule_time_fn=lambda: (_ for _ in ()).throw(AssertionError("gated")),
         now_utc_fn=_no_clock,
     )
     user.preset = OverrideMode.NONE
     _record(user, 24.0, presence_level="away")  # presence-level gate
     _record(user, 24.0, window_open=True)  # window gate
     assert user.override_stats == []
+
+
+def test_stat_reads_the_schedule_clock_exactly_once() -> None:
+    # P2.2: local_schedule_time_fn is the single out-of-tick clock read for
+    # this decision -- a counting fake pins it at exactly one call, matching
+    # the module's other clock-injection call-count assertions.
+    user = UserControlState()
+    calls: list[int] = []
+
+    def _fn() -> tuple[int, int]:
+        calls.append(1)
+        return (0, 600)
+
+    ovr.record_override_stat(
+        user,
+        24.0,
+        presence_level="comfort",
+        window_open=False,
+        comfort_base=21.0,
+        override_cfg=OverrideConfig(),
+        schedule=ComfortSchedule.always_comfort(),
+        local_schedule_time_fn=_fn,
+        now_utc_fn=lambda: 1_234.0,
+    )
+    assert len(calls) == 1
 
 
 def test_stat_appends_direction_delta_phase_and_level() -> None:
@@ -562,10 +613,23 @@ def test_stat_appends_direction_delta_phase_and_level() -> None:
         }
     ]
     sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320)])
-    _record(user, 17.0, minute=1_380, schedule=sched)  # 23:00 -> setback
+    _record(user, 17.0, minute=1_380, schedule=sched)  # Monday 23:00 -> setback
     entry: dict[str, Any] = user.override_stats[-1]
     assert entry["direction"] == -1
     assert entry["phase"] == "setback"
+
+
+def test_stat_phase_follows_the_real_weekday() -> None:
+    # P2.2: a Mo-Fr-only window is "comfort" on Monday 10:00 but "setback" at
+    # the SAME minute-of-day on Saturday -- the weekday half of the tuple is
+    # not ignored (the sanctioned weekday=0 interim would have called this
+    # comfort on every day of the week).
+    user = UserControlState()
+    sched = ComfortSchedule.from_windows([ComfortWindow(360, 1320, days=0b0011111)])
+    _record(user, 21.0, minute=600, weekday=0, schedule=sched)  # Monday 10:00
+    assert user.override_stats[-1]["phase"] == "comfort"
+    _record(user, 21.0, minute=600, weekday=5, schedule=sched)  # Saturday 10:00
+    assert user.override_stats[-1]["phase"] == "setback"
 
 
 def test_stat_log_caps_at_last_50() -> None:

@@ -93,8 +93,11 @@ def test_tick_config_snapshot_carries_no_entity_id_field() -> None:
 
 
 # The parser contract as of the O.0 baseline, frozen so "unchanged" is a
-# measurement rather than a claim. 32 fields; git confirms runtime/config.py
-# was not touched by any commit of this refactor.
+# measurement rather than a claim. 34 fields (P1.3b added trv_calibration,
+# ADR-0015 / D6; P2.3 added schedule_days_invalid, the fail-closed
+# comfort_days mask report — both intentional, unrelated to the tick chain,
+# updated in the same commit); git confirms runtime/config.py was otherwise
+# not touched by any commit of this refactor.
 _ZONE_TUNING_FIELDS = frozenset(
     {
         "active_comfort",
@@ -125,8 +128,10 @@ _ZONE_TUNING_FIELDS = frozenset(
         "priority",
         "room_profile",
         "schedule",
+        "schedule_days_invalid",
         "thermal_shock_delta",
         "trace_enabled",
+        "trv_calibration",
         "vent_notify",
         "window_auto_cfg",
     }

@@ -139,10 +139,6 @@ _UNWIRED_BY_DESIGN: dict[str, str] = {
         "ADR-0006/0014 reference tick skeleton - exercised by the pure core "
         "and the closed-loop harness, deliberately not the production path"
     ),
-    "control.calibration": (
-        "ADR-0015 TRV calibration - implemented ahead of its wiring, covered "
-        "by tests/test_calibration.py"
-    ),
     "multi.schema": (
         "ADR-0046 section 12 capability-driven field selection - implemented "
         "ahead of its wiring"
@@ -213,9 +209,10 @@ def test_orphan_detector_is_not_vacuous() -> None:
     """The detector must actually resolve imports.
 
     Without this, a broken resolver would report "no orphans" for every tree,
-    including one full of debris. Positive control: the three declared unwired
+    including one full of debris. Positive control: the declared unwired
     modules exist and really are unimported - if the resolver started matching
-    everything, this set would come back empty.
+    everything, this set would come back empty (control.calibration left the
+    list with P1.4: the calibration segments import it now).
     """
     modules, imported = _component_module_graph()
     assert len(modules) > 100, f"only {len(modules)} modules found - resolver broken?"

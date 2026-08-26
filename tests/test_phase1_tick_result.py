@@ -27,6 +27,9 @@ from custom_components.poise.runtime.tick_inputs import (
 from custom_components.poise.runtime.tick_result import (
     ActuatorPlan,
     AvailableTickData,
+    CalibrationHandoffResult,
+    CalibrationPlan,
+    CalibrationStageResult,
     ClimateBandResult,
     CommandResult,
     CommitResult,
@@ -85,6 +88,7 @@ def _tick_inputs() -> TickInputs:
         now_mono=1000.0,
         now_wall=1_753_000_000.0,
         local_minute=8 * 60 + 30,
+        local_weekday=2,
         local_day_ordinal=739_450,
         sun_elevation=12.5,
         room=SensorValue(21.2, age_s=30.0, entity_id="sensor.room"),
@@ -531,6 +535,9 @@ def test_stage_result_field_sets_are_pinned() -> None:
             "valve_health",
             "health_updates",
         ],
+        # P1.4: the two calibration segments (handoff + regulation write).
+        CalibrationHandoffResult: ["handoff_pending", "health_updates", "plan"],
+        CalibrationStageResult: ["plan", "health_updates", "diverged"],
     }
     for cls, fields in expected.items():
         assert [f.name for f in dataclasses.fields(cls)] == fields, cls.__name__
@@ -806,6 +813,35 @@ def test_tick_plan_unavailable_shape() -> None:
     assert plan.external_temperature_plan is None
     assert plan.persistence is PersistencePhase.DIRTY_ONLY
     assert plan.finalize_context is None
+    # P1.4: additive field — the unavailable short-circuit (and every legacy
+    # construction site) carries no calibration record by default.
+    assert plan.calibration_plan is None
+
+
+def test_calibration_plan_and_tick_plan_field() -> None:
+    # P1.4: the calibration record — value None = "planned, not due";
+    # restore=True marks the segment-H handoff dispatch.
+    plan = CalibrationPlan(value=-1.5)
+    assert plan.value == -1.5
+    assert plan.restore is False
+    restore = CalibrationPlan(value=0.0, restore=True)
+    assert restore.restore is True
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        plan.value = 0.0  # type: ignore[misc]
+    carried = dataclasses.replace(_tick_plan(), calibration_plan=plan)
+    assert carried.calibration_plan == plan
+
+
+def test_calibration_stage_results_defaults() -> None:
+    # P1.4: both segment results must construct empty (the gates' early
+    # returns) and carry the typed payloads when set.
+    handoff = CalibrationHandoffResult(handoff_pending=True)
+    assert handoff.health_updates == ()
+    assert handoff.plan is None
+    stage = CalibrationStageResult()
+    assert stage.plan is None
+    assert stage.health_updates == ()
+    assert stage.diverged is False
 
 
 # ---------------------------------------------------------------------------

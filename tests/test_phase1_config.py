@@ -84,6 +84,8 @@ def _tuning(*, comfort_base: float = 21.0) -> ZoneTuning:
         override_suggestions=False,
         clo_offset=0.0,
         active_comfort=False,
+        trv_calibration=False,
+        schedule_days_invalid=(),
     )
 
 
@@ -108,8 +110,8 @@ def test_zone_config_construction_roundtrip() -> None:
     assert cfg.tuning.category is Category.II
     assert cfg.tuning.comfort_base == 21.0
     # The embedded schedule is live-usable, not just carried along.
-    assert cfg.tuning.schedule.state_at(12 * 60).is_comfort
-    assert not cfg.tuning.schedule.state_at(2 * 60).is_comfort
+    assert cfg.tuning.schedule.state_at(12 * 60, 0).is_comfort
+    assert not cfg.tuning.schedule.state_at(2 * 60, 0).is_comfort
 
 
 def test_structure_field_contract_is_exactly_the_plan_table() -> None:
@@ -137,7 +139,9 @@ def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
     # Plan section 3, ZoneTuning row: 27 fields (climate_mode removed, rev. 3),
     # +vent_notify (ADR-0066) +room_profile (ADR-0054 V2)
     # +override_suggestions (ADR-0060 L2) +clo_offset (ADR-0067)
-    # +active_comfort (ADR-0069 Mechanismus-Schalter) = 32.
+    # +active_comfort (ADR-0069 Mechanismus-Schalter)
+    # +trv_calibration (ADR-0015 / D6, P1.3b)
+    # +schedule_days_invalid (P2.3, fail-closed comfort_days mask report) = 34.
     assert _field_names(ZoneTuning) == (
         "window_auto_cfg",
         "override_policy",
@@ -171,8 +175,10 @@ def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
         "override_suggestions",
         "clo_offset",
         "active_comfort",
+        "trv_calibration",
+        "schedule_days_invalid",
     )
-    assert len(dataclasses.fields(ZoneTuning)) == 32  # see comment above
+    assert len(dataclasses.fields(ZoneTuning)) == 34  # see comment above
 
 
 def test_tuning_has_no_climate_mode_field() -> None:

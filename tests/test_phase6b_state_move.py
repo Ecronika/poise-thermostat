@@ -235,6 +235,20 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # classification to the command it judges (transient, process-local ids).
     ("external", "last_sp_ctx_id"): "C.8f newest setpoint-write context id",
     ("external", "last_cmd_sp"): "C.8f un-rebaselined command baseline",
+    # P1.4 (ADR-0015 / D3-D4): calibration ownership + evidence anchors —
+    # born on the group, persisted pair encoded straight off zone_runtime
+    # (no coordinator proxy ever existed); the anchors are transient by
+    # design (their absence after a restart arms the resume quarantine).
+    ("actuator", "cal_baseline"): "P1.4 D3 ownership baseline (persisted)",
+    ("actuator", "cal_entity"): "P1.4 D3 ownership entity (persisted)",
+    ("actuator", "last_cal_value"): "P1.4 evidence anchor (transient)",
+    ("actuator", "last_cal_write_ts"): "P1.4 due/divergence anchor (transient)",
+    ("actuator", "last_cal_dispatch_wall_ts"): "P1.4 dispatch anchor (transient)",
+    ("actuator", "last_cal_restore_ts"): "P1.4 restore throttle (transient)",
+    # P1.4 display latches (transient diagnosis; stamped by the SEQUENCER
+    # from the typed stage results — the stages stay report-pure).
+    ("diagnostics", "cal_diverged"): "P1.4 divergence display latch (transient)",
+    ("diagnostics", "cal_handoff_pending"): "P1.4 handoff display latch (transient)",
 }
 
 

@@ -11,7 +11,7 @@ import — the module under test keeps ``PoiseCoordinator`` under
    against a stand-in coordinator; ``windows`` as ``tuple(...)`` of the live
    list).
 2. **Writer allowlist per field group.** An AST scan over
-   ``custom_components/poise/**`` collects, for every one of the 39 source
+   ``custom_components/poise/**`` collects, for every one of the 40 source
    attributes, which qualified function assigns it. Each group has its own
    permitted-writer set; a new writer anywhere else fails the suite. Plus the
    pin that ``HealthReporter.validate_configured_ext_temp`` — the one writer
@@ -52,9 +52,9 @@ def sample_tick_config() -> TickConfigSnapshot:
 
     Shared helper (imported by ``test_phase1_tick_result`` and
     ``test_phase6b_stages``, which carry the ``PreparedState`` /
-    ``FinalizeContext`` pins): all 30 snapshot fields are also
+    ``FinalizeContext`` pins): all 31 snapshot fields are also
     ``runtime.config.ZoneTuning`` fields, so the parser's defaults give a
-    value-realistic object without spelling 30 literals out.
+    value-realistic object without spelling 31 literals out.
     """
     tuning = ZoneTuning.from_merged({})
     return TickConfigSnapshot(
@@ -160,12 +160,12 @@ def test_every_field_maps_to_exactly_one_coordinator_attribute(
         )
 
 
-def test_config_snapshot_has_thirty_fields_and_copies_their_values() -> None:
-    """Proof 1b (config): 30 fields, each equal to its source after the build."""
+def test_config_snapshot_has_thirtyone_fields_and_copies_their_values() -> None:
+    """Proof 1b (config): 31 fields, each equal to its source after the build."""
     stub = _CoordinatorStub()
     snap = TickConfigSnapshot.from_coordinator(stub)  # type: ignore[arg-type]
     mapping = _from_coordinator_map("TickConfigSnapshot")
-    assert len(fields(TickConfigSnapshot)) == 30
+    assert len(fields(TickConfigSnapshot)) == 31
     for field_name, attr in mapping.items():
         assert getattr(snap, field_name) == getattr(stub, attr)
 
@@ -245,6 +245,7 @@ _BINDINGS_INIT_ONLY = (
 _INIT = "PoiseCoordinator.__init__"
 _HOT = "PoiseCoordinator._apply_hot_tuning"
 _BOOTSTRAP = "PoiseCoordinator.async_bootstrap"
+_HANDOFF = "PoiseCoordinator.async_prepare_actuator_handoff"
 # S.3: the reporter keeps its OWN ``_entry_id``/``_actuator`` slots. The
 # scan below is receiver-agnostic on purpose (that is how it once caught
 # ``self._c._trv_ext_temp = ...``), so those constructor assignments show
@@ -268,6 +269,14 @@ _WRITER_ALLOWLIST: dict[str, frozenset[str]] = {
     # write is the COORDINATOR's: the reporter reports a verdict, the owner
     # acts on it, and the field keeps exactly one writer per scope.
     "_trv_ext_temp": frozenset({_INIT, _BOOTSTRAP}),
+    # ADR-0015 / D6: hot-applied tuning gate (P1.3b) with ONE sanctioned
+    # extra writer since P1.5 — the reconfigure lifecycle port disarms the
+    # calibration path of the old coordinator instance UNDER the tick lock
+    # (``self._trv_calibration = False``) before the actuator swap, so no
+    # tick between handoff and reload can re-acquire ownership (plan review
+    # Rev. 2.4 point 1 / Rev. 2.5 point 1). Live-instance-only: the entry
+    # option is never written from the coordinator.
+    "_trv_calibration": frozenset({_INIT, _HOT, _HANDOFF}),
 }
 
 
@@ -479,11 +488,57 @@ _PORTS: frozenset[str] = frozenset(
 )
 
 
+# Frozen at the same O.2-time cardinality as ``_PRE_O2_BACKREFERENCE_NAMES``
+# (30) — deliberately NOT ``{f"_{f.name}" for f in fields(TickConfigSnapshot)}``.
+# That live form was fine while the dataclass and the historical census grew
+# together, but ``TickConfigSnapshot`` legitimately gains fields after O.2
+# (e.g. ``trv_calibration``, P1.3b) that never rode in the pre-O.2
+# ``self._c`` census being partitioned here. Per the module docstring, Proof
+# 3 is a ONE-OFF migration gate — ongoing correctness is Proof 1/2's job — so
+# this set must stay pinned to what ``fields(TickConfigSnapshot)`` returned
+# at O.2 time instead of re-deriving live and spuriously failing on every
+# later, legitimate field addition.
+_SNAPSHOT_SOURCES_AT_O2: frozenset[str] = frozenset(
+    {
+        "_active_comfort",
+        "_adaptive_cool_cfg",
+        "_adopt_external_mode",
+        "_adopt_external_setpoint",
+        "_category",
+        "_clo_offset",
+        "_comfort_base",
+        "_comp_min_off_opt",
+        "_comp_mode_hold_opt",
+        "_compressor_guard",
+        "_cool_hard_cap",
+        "_cool_lockout_enabled",
+        "_cool_min_outdoor",
+        "_dynamics_override",
+        "_hdh_cfg",
+        "_heat_lockout_enabled",
+        "_heat_max_outdoor",
+        "_operative_input",
+        "_optimal_start",
+        "_optimal_stop",
+        "_override_cfg",
+        "_override_policy",
+        "_presence_cfg",
+        "_priority",
+        "_room_profile",
+        "_schedule",
+        "_thermal_shock_delta",
+        "_trace_enabled",
+        "_vent_notify",
+        "_window_auto_cfg",
+    }
+)
+
+
 def test_pre_o2_backreference_partitions_into_the_four_categories() -> None:
     """Proof 3: the frozen 62-name set splits disjointly and completely into
     snapshot sources (30), bindings sources (9), stable collaborators (3) and
     ports (20)."""
-    snapshot_sources = {f"_{f.name}" for f in fields(TickConfigSnapshot)}
+    snapshot_sources = set(_SNAPSHOT_SOURCES_AT_O2)
     bindings_sources = {attr for attr in _from_coordinator_map("ZoneBindings").values()}
     groups = {
         "snapshot": snapshot_sources,
