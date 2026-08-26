@@ -3,11 +3,12 @@
 # against HA API drift. Same shape as requirements-test.txt (see there for the
 # frontend-wheel rationale); bump both files deliberately.
 #
-# pytest-hacc 0.13.356 pins homeassistant==2026.8.2 — the CURRENT HA stable —
+# pytest-hacc 0.13.357 pins homeassistant==2026.8.3 — the CURRENT HA stable —
 # and requires Python >= 3.14 (HA itself declares >=3.14.2), so the latest job
 # in ci.yml runs on 3.14. The MIN job runs on 3.13 only (since E.13: HA
 # 2025.10.1 requires >= 3.13.2); the 3.12 floor survives solely in the HA-free
-# quality job. The frontend build is the one HA 2026.8.2's manifest declares.
+# quality job. The frontend build is the one HA 2026.8.3's manifest
+# declares (the 2026.8.3 patch kept 20260729.7 — re-read, not assumed).
 #
 # KEEPING THIS HONEST (the E.11b lesson): a pin that is never bumped silently
 # degrades from "current stable" to "some old release" — this file sat on HA
@@ -17,7 +18,7 @@
 # When bumping: raise the pin, re-read the frontend requirement from
 # `homeassistant/components/frontend/manifest.json` of the new HA, and check
 # whether the harness needs a newer Python than the latest job requests.
-pytest-homeassistant-custom-component==0.13.356
+pytest-homeassistant-custom-component==0.13.357
 home-assistant-frontend==20260729.7
 
 pytest-cov
