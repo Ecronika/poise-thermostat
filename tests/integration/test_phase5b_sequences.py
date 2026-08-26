@@ -484,6 +484,111 @@ async def test_unavailable_safe_partial_plans(hass: HomeAssistant) -> None:
 
 
 # =============================================================================
+# Site 7 — run_calibration (P1.4: EINE Grenze, untagged, Dispatch-Wall-Anker)
+# =============================================================================
+
+CAL = "number.trv_local_temperature_calibration"
+
+
+def _cal_cmd(value: float, *, reason: str = "calibration") -> ActuatorCommand:
+    return ActuatorCommand(
+        actuator_id=CAL,
+        path=ActuatorPath.CALIBRATION,
+        value=value,
+        hvac_mode=None,  # non-climate path: no device mode travels (P1.4)
+        reason=reason,
+    )
+
+
+async def test_calibration_write_success_report_shape(hass: HomeAssistant) -> None:
+    """Erfolg: exakter Choke-Point-Dispatch (number.set_value, blocking=False,
+    untagged); Report traegt cal_write mit pre_write_value, commanded_value,
+    entity_id und einem Dispatch-Wall-Anker unmittelbar vor dem Dispatch."""
+    from homeassistant.util import dt as dt_util
+
+    calls = async_mock_service(hass, "number", "set_value")
+    before = dt_util.utcnow().timestamp()
+    report = await _executor(hass).run_calibration(_cal_cmd(-1.5), pre_write_value=0.0)
+    after = dt_util.utcnow().timestamp()
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    assert dict(calls[0].data) == {"entity_id": CAL, "value": -1.5}
+    (execution,) = report.executions
+    assert execution.effect_id == "cal_write"
+    assert execution.attempted is True
+    assert execution.success is True
+    assert execution.context_id is None  # untagged site (bis F-CONTEXT)
+    assert execution.pre_write_value == 0.0
+    assert execution.commanded_value == -1.5
+    assert execution.entity_id == CAL
+    assert execution.dispatch_wall_ts is not None
+    assert before <= execution.dispatch_wall_ts <= after  # Anker = Dispatch-Zeit
+
+
+async def test_calibration_restore_success_reports_cal_restore(
+    hass: HomeAssistant,
+) -> None:
+    """restore=True meldet denselben Dispatch als cal_restore (Segment H);
+    commanded_value ist der restore_target, pre_write_value der Ist-Offset."""
+    calls = async_mock_service(hass, "number", "set_value")
+    report = await _executor(hass).run_calibration(
+        _cal_cmd(0.0, reason="calibration_restore"),
+        pre_write_value=-1.5,
+        restore=True,
+    )
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    assert dict(calls[0].data) == {"entity_id": CAL, "value": 0.0}
+    (execution,) = report.executions
+    assert execution.effect_id == "cal_restore"
+    assert execution.success is True
+    assert execution.pre_write_value == -1.5
+    assert execution.commanded_value == 0.0
+    assert execution.entity_id == CAL
+    assert execution.dispatch_wall_ts is not None
+
+
+async def test_calibration_write_failure_keeps_attempt_state_and_logs(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Fehlender Service -> synchroner Wurf INNERHALB der Grenze: success
+    False, Attempt-Felder (inkl. Anker) bleiben, Log-Record auf dem
+    Coordinator-Kanal mit dem "write"-Zweig des Formats."""
+    assert not hass.services.has_service("number", "set_value")
+    report = await _executor(hass).run_calibration(_cal_cmd(-2.0), pre_write_value=-1.5)
+
+    (execution,) = report.executions
+    assert execution.effect_id == "cal_write"
+    assert execution.attempted is True
+    assert execution.success is False
+    assert execution.pre_write_value == -1.5
+    assert execution.entity_id == CAL
+    assert execution.dispatch_wall_ts is not None  # Anker vor dem Wurf erzeugt
+    _assert_boundary_record(caplog, f"Poise: calibration write failed for {CAL}")
+
+
+async def test_calibration_restore_failure_logs_restore_branch(
+    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Der Restore-Zweig loggt "restore" statt "write" (gleicher Kanal/Level/TB)."""
+    with patch.object(
+        actuator_mod, "write", side_effect=HomeAssistantError("injected")
+    ):
+        report = await _executor(hass).run_calibration(
+            _cal_cmd(0.0, reason="calibration_restore"),
+            pre_write_value=-1.5,
+            restore=True,
+        )
+
+    (execution,) = report.executions
+    assert execution.effect_id == "cal_restore"
+    assert execution.success is False
+    _assert_boundary_record(caplog, f"Poise: calibration restore failed for {CAL}")
+
+
+# =============================================================================
 # commit_execution — Fold-Ordnung, Attempt/Success-Regeln, EndHold-Teardown
 # =============================================================================
 

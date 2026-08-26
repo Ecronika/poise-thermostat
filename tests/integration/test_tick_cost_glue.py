@@ -57,22 +57,24 @@ from custom_components.poise.const import (
 # The read budget of ONE steady-state tick for the zone below. Measured, then
 # pinned, and the breakdown is part of the record because it is the point:
 #
-#     climate.trv      9    <- the actuator, NINE times
+#     climate.trv     10    <- the actuator, TEN times
 #     sensor.room_temp 3
 #     sun.sun          1
 #     sensor.outdoor   1
 #     sensor.rh        1
 #     sensor.trm       1
 #
-# The nine is a finding, not a target. ``phase_prepare`` documents ONE
+# The ten is a finding, not a target. ``phase_prepare`` documents ONE
 # positioned actuator read whose State object every later attribute access
-# shares - and that holds for the phase bodies. The other eight come from
+# shares - and that holds for the phase bodies. The other nine come from
 # InputReader methods that each fetch the actuator again for their own
-# question (capability, device_min, guard discovery, ...). Folding them onto
-# one read per tick is a real, separate change with its own proof obligation;
-# this gate exists so that change SHOWS UP as a number instead of being
-# invisible. Until then the number stands as measured.
-_EXPECTED_READS = 16
+# question (capability, device_min, guard discovery, ...; the tenth is P1.5's
+# ``sync_calibration_available_issue`` capability build in the health
+# reporter, routed through the reader on purpose - the S.4a read boundary).
+# Folding them onto one read per tick is a real, separate change with its
+# own proof obligation; this gate exists so that change SHOWS UP as a number
+# instead of being invisible. Until then the number stands as measured.
+_EXPECTED_READS = 17
 # Writes: a steady-state tick that has nothing new to say writes nothing. The
 # first tick after setup does (it adopts the device), which is why this test
 # measures the SECOND one.

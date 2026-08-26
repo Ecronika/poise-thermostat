@@ -37,6 +37,7 @@ from custom_components.poise.clock import ManualClock
 from custom_components.poise.ha.input_reader import (
     _GUARD_MAX_ATTEMPTS,
     _GUARD_RETRY_SPACING_S,
+    CalibrationMeta,
     InputReader,
     actuator_snapshot,
     parse_attr_number,
@@ -118,6 +119,9 @@ async def test_snapshot_bundles_pre_first_await_reads(hass: HomeAssistant) -> No
         local.hour * 60 + local.minute,
         (local.hour * 60 + local.minute - 1) % 1440,  # minute rollover tolerance
     )
+    # P2.2: local_weekday is the SAME local_now instant as local_minute (one
+    # read) -- tolerate only the same day-rollover edge as local_day_ordinal.
+    assert inputs.local_weekday in (local.weekday(), (local.weekday() - 1) % 7)
     assert inputs.local_day_ordinal in (local.toordinal(), local.toordinal() - 1)
     assert inputs.sun_elevation == 30.0
 
@@ -326,7 +330,13 @@ async def test_tristate_f8_and_positioned_presence_read(hass: HomeAssistant) -> 
 # --- device-guard discovery ----------------------------------------------------
 
 
-def _register_trv_device(hass: HomeAssistant, *, extra_steps_pair: bool = False) -> str:
+def _register_trv_device(
+    hass: HomeAssistant,
+    *,
+    extra_steps_pair: bool = False,
+    with_calibration: bool = False,
+    with_valve: bool = True,
+) -> str:
     """A mock TRV device owning the actuator + its sibling entities."""
     dev_entry = MockConfigEntry(domain="demo", title="TRV Device")
     dev_entry.add_to_hass(hass)
@@ -354,12 +364,15 @@ def _register_trv_device(hass: HomeAssistant, *, extra_steps_pair: bool = False)
     _reg("number", "trv_external_temperature", "ext")
     _reg("select", "trv_mode", "mode")  # no options state -> NOT the sensor select
     _reg("select", "trv_sensor", "sel")
-    _reg("number", "trv_valve_opening_degree", "valve")
+    if with_valve:
+        _reg("number", "trv_valve_opening_degree", "valve")
     _reg("sensor", "trv_closing_steps", "close")
     _reg("sensor", "trv_idle_steps", "idle")
     if extra_steps_pair:
         _reg("sensor", "trv_closing_steps_2", "close2")
         _reg("sensor", "trv_idle_steps_2", "idle2")
+    if with_calibration:
+        _reg("number", "trv_local_temperature_calibration", "cal")
     return act
 
 
@@ -444,6 +457,40 @@ async def test_guard_discovery_valve_steps_first_match_wins(
     reader.resolve_device_guards()
     assert reader.valve_closing_steps == "sensor.trv_closing_steps"
     assert reader.valve_idle_steps == "sensor.trv_idle_steps"
+
+
+async def test_guard_discovery_finds_calibration_entity(hass: HomeAssistant) -> None:
+    """The calibration-number role (P1.1) is discovered like every other
+    guard role, in the same single scan pass."""
+    act = _register_trv_device(hass, with_calibration=True)
+    reader = _reader(hass, actuator=act)
+    reader.resolve_device_guards()
+    assert reader.guards_resolved
+    assert reader.calibration_entity == "number.trv_local_temperature_calibration"
+
+
+async def test_guard_discovery_valve_and_calibration_are_independent(
+    hass: HomeAssistant,
+) -> None:
+    """A device exposing BOTH a valve-position number and a calibration-offset
+    number gets both roles filled — ``classify_number_entity``'s disjoint
+    max_limit -> valve -> calibration ordering means a valve match can never
+    be consumed by the calibration branch."""
+    act = _register_trv_device(hass, with_valve=True, with_calibration=True)
+    reader = _reader(hass, actuator=act)
+    reader.resolve_device_guards()
+    assert reader.valve_entity == "number.trv_valve_opening_degree"
+    assert reader.calibration_entity == "number.trv_local_temperature_calibration"
+
+
+async def test_guard_discovery_calibration_only_device(hass: HomeAssistant) -> None:
+    """The real-world P1 scenario: a TRV with a calibration offset number but
+    NO writable valve-position number gets only the calibration role filled."""
+    act = _register_trv_device(hass, with_valve=False, with_calibration=True)
+    reader = _reader(hass, actuator=act)
+    reader.resolve_device_guards()
+    assert reader.calibration_entity == "number.trv_local_temperature_calibration"
+    assert reader.valve_entity is None
 
 
 async def test_guard_discovery_failure_is_swallowed(hass: HomeAssistant) -> None:
@@ -764,6 +811,91 @@ async def test_positioned_feed_select_and_valve_reads(hass: HomeAssistant) -> No
     hass.states.async_set("sensor.trv_closing_steps", "0")
     hass.states.async_set("sensor.trv_idle_steps", "5")
     assert reader.valve_steps() == (0.0, 5.0)
+
+
+# --- calibration tri-state metadata (P1.1) --------------------------------------
+
+
+async def test_calibration_meta_unreadable_when_unavailable(
+    hass: HomeAssistant,
+) -> None:
+    reader = _reader(hass)
+    reader.calibration_entity = "number.trv_cal"
+    hass.states.async_set(
+        "number.trv_cal", "unavailable", {"min": -5, "max": 5, "step": 0.5}
+    )
+    assert reader.calibration_meta() == "unreadable"
+
+
+async def test_calibration_meta_unreadable_when_step_missing(
+    hass: HomeAssistant,
+) -> None:
+    reader = _reader(hass)
+    reader.calibration_entity = "number.trv_cal"
+    hass.states.async_set("number.trv_cal", "0.5", {"min": -5, "max": 5})
+    assert reader.calibration_meta() == "unreadable"
+
+
+async def test_calibration_meta_unreadable_when_min_is_nan(
+    hass: HomeAssistant,
+) -> None:
+    """A non-finite bound must fail closed exactly like a missing one (C1/Ü2):
+    NaN parses fine via ``float()`` but must never reach the safety math."""
+    reader = _reader(hass)
+    reader.calibration_entity = "number.trv_cal"
+    hass.states.async_set(
+        "number.trv_cal", "0.5", {"min": float("nan"), "max": 5, "step": 0.5}
+    )
+    assert reader.calibration_meta() == "unreadable"
+
+
+async def test_calibration_meta_unreadable_when_step_is_zero(
+    hass: HomeAssistant,
+) -> None:
+    """A zero step is finite but structurally unsafe (would poison any
+    step-based adjustment logic downstream) — fail closed, not just NaN."""
+    reader = _reader(hass)
+    reader.calibration_entity = "number.trv_cal"
+    hass.states.async_set("number.trv_cal", "0.5", {"min": -5, "max": 5, "step": 0})
+    assert reader.calibration_meta() == "unreadable"
+
+
+async def test_calibration_meta_gone_when_structurally_removed(
+    hass: HomeAssistant,
+) -> None:
+    """An explicit ``entity_id`` with neither a registry entry nor a State is
+    ``"gone"`` — the lifecycle special case, distinct from ``"unreadable"``."""
+    reader = _reader(hass)
+    assert reader.calibration_meta("number.long_gone") == "gone"
+    # the same holds for the discovered role and for a plain None target
+    reader.calibration_entity = None
+    assert reader.calibration_meta() == "gone"
+
+
+async def test_calibration_meta_explicit_entity_id_beats_discovered_role(
+    hass: HomeAssistant,
+) -> None:
+    """The handoff automaton asks about the STORED ``cal_entity``, which may
+    differ from the discovered role after an actuator swap."""
+    reader = _reader(hass)
+    reader.calibration_entity = "number.discovered_cal"
+    hass.states.async_set(
+        "number.discovered_cal", "0.0", {"min": -5, "max": 5, "step": 0.5}
+    )
+    hass.states.async_set(
+        "number.stored_cal", "1.0", {"min": -5, "max": 5, "step": 0.5}
+    )
+    meta = reader.calibration_meta("number.stored_cal")
+    assert isinstance(meta, CalibrationMeta)
+    assert meta.reported == 1.0
+
+
+async def test_calibration_meta_happy_path(hass: HomeAssistant) -> None:
+    reader = _reader(hass)
+    reader.calibration_entity = "number.trv_cal"
+    hass.states.async_set("number.trv_cal", "0.5", {"min": -5, "max": 5, "step": 0.5})
+    meta = reader.calibration_meta()
+    assert meta == CalibrationMeta(reported=0.5, lo=-5.0, hi=5.0, step=0.5)
 
 
 # --- configured ext-temp signature (bootstrap read half) -----------------------

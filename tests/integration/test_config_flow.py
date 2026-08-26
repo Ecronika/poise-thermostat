@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, section
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import selector as ha_selector
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -18,6 +19,7 @@ from custom_components.poise.config_schema import (
     _OPTIONS_SECTIONS,
     _options_schema,
     _options_sections,
+    _schedule_window_fields,
 )
 from custom_components.poise.const import (
     CONF_ACTUATOR,
@@ -29,6 +31,7 @@ from custom_components.poise.const import (
     CONF_CATEGORY,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_DAYS,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
@@ -715,3 +718,233 @@ async def test_options_sections_match_rendered_schema(hass: HomeAssistant) -> No
     assert "comfort_start_4" not in with_two
     # The static map stays the fallback contract for every non-schedule section.
     assert set(_options_sections({})) == set(_OPTIONS_SECTIONS)
+
+
+# ---------------------------------------------------------------------------
+# P2.3: per-window weekday selection — typed n+1 builder, fail-closed
+# _days_mask parse (tested purely, tests/test_phase2_config_parser.py),
+# orphan-safe renumbering (this file, HA-runtime: config_flow.py/
+# config_schema.py both import homeassistant.helpers.selector at module
+# level, so they cannot be exercised by the pure suite at all).
+# ---------------------------------------------------------------------------
+
+
+def test_schedule_window_fields_carry_a_days_sibling() -> None:
+    """Every triple (base + every CONFIGURED numbered pair + the ONE empty
+    n+1 pair) carries a ``comfort_days(_N)`` field alongside start/end."""
+    assert _schedule_window_fields({}) == (
+        CONF_COMFORT_START,
+        CONF_COMFORT_END,
+        CONF_COMFORT_DAYS,
+        f"{CONF_COMFORT_START}_2",
+        f"{CONF_COMFORT_END}_2",
+        f"{CONF_COMFORT_DAYS}_2",
+    )
+    with_two = _schedule_window_fields(
+        {f"{CONF_COMFORT_START}_2": "06:00:00", f"{CONF_COMFORT_END}_2": "09:00:00"}
+    )
+    assert f"{CONF_COMFORT_DAYS}_2" in with_two  # the configured window
+    assert f"{CONF_COMFORT_DAYS}_3" in with_two  # the n+1 empty pair's days field
+    assert f"{CONF_COMFORT_DAYS}_4" not in with_two  # only ONE empty pair offered
+    # F30: a day-only key (no start/end_N pair) must never grow the window
+    # set on its own — the builder is still driven off _extra_window_ns.
+    days_only = _schedule_window_fields({f"{CONF_COMFORT_DAYS}_5": ["mon"]})
+    assert days_only == _schedule_window_fields({})
+
+
+async def test_window_selector_maps_days_to_multiselect_and_times_to_time(
+    hass: HomeAssistant,
+) -> None:
+    """F14 regression + P2.3: comfort_days(_N) renders as a multi-select
+    weekday picker; every start/end field (base or numbered) keeps the plain
+    time selector — the exact mapping ``_window_selector`` must produce."""
+    current = {
+        f"{CONF_COMFORT_START}_2": "06:00:00",
+        f"{CONF_COMFORT_END}_2": "09:00:00",
+    }
+    top = _options_schema(hass, current).schema
+    schedule_marker = next(k for k in top if k.schema == "schedule")
+    inner = {k.schema: v for k, v in top[schedule_marker].schema.schema.items()}
+    days_fields = (
+        CONF_COMFORT_DAYS,
+        f"{CONF_COMFORT_DAYS}_2",
+        f"{CONF_COMFORT_DAYS}_3",
+    )
+    for field in days_fields:
+        assert isinstance(inner[field], ha_selector.SelectSelector), field
+        assert inner[field].config["multiple"] is True
+    for field in (
+        CONF_COMFORT_START,
+        CONF_COMFORT_END,
+        f"{CONF_COMFORT_START}_2",
+        f"{CONF_COMFORT_END}_2",
+    ):
+        assert isinstance(inner[field], ha_selector.TimeSelector), field
+
+
+async def test_options_empty_days_on_configured_window_errors(
+    hass: HomeAssistant,
+) -> None:
+    """An explicit empty day selection on a window WITH times is a save-time
+    error (UI nudge) — the runtime parser stays defensive independently."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(
+                **{
+                    CONF_COMFORT_START: "06:00:00",
+                    CONF_COMFORT_END: "22:00:00",
+                    CONF_COMFORT_DAYS: [],
+                }
+            ),
+        )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "schedule_days_empty"}
+
+
+async def test_options_base_window_days_round_trip(hass: HomeAssistant) -> None:
+    """The unnumbered base pair's days field passes through renumbering
+    untouched — it is never part of the numbered-window compaction loop."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, unique_id="climate.trv", data=ROOM_INPUT, title="Test Room"
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(
+                **{
+                    CONF_COMFORT_START: "06:00:00",
+                    CONF_COMFORT_END: "22:00:00",
+                    CONF_COMFORT_DAYS: ["mon", "tue"],
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_COMFORT_DAYS] == ["mon", "tue"]
+
+
+async def test_options_renumber_moves_days_with_its_window(hass: HomeAssistant) -> None:
+    """Deleting window 2 (Mo) lets window 3 (Di) take its place — the DAYS
+    key must move WITH it, at the new index (review Rev. 2.2/2.3 blocker)."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={
+            f"{CONF_COMFORT_START}_2": "06:00:00",
+            f"{CONF_COMFORT_END}_2": "08:00:00",
+            f"{CONF_COMFORT_DAYS}_2": ["mon"],
+            f"{CONF_COMFORT_START}_3": "17:00:00",
+            f"{CONF_COMFORT_END}_3": "21:00:00",
+            f"{CONF_COMFORT_DAYS}_3": ["tue"],
+        },
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(
+                **{
+                    f"{CONF_COMFORT_START}_3": "17:00:00",
+                    f"{CONF_COMFORT_END}_3": "21:00:00",
+                    f"{CONF_COMFORT_DAYS}_3": ["tue"],
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[f"{CONF_COMFORT_START}_2"] == "17:00:00"
+    assert entry.options[f"{CONF_COMFORT_DAYS}_2"] == ["tue"]
+    assert f"{CONF_COMFORT_START}_3" not in entry.options
+    assert f"{CONF_COMFORT_DAYS}_3" not in entry.options
+
+
+async def test_options_renumber_keeps_legacy_window_maskless(
+    hass: HomeAssistant,
+) -> None:
+    """A legacy window that never had a comfort_days key still doesn't get
+    one materialized by renumbering — ALL_DAYS is never written explicitly."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={
+            f"{CONF_COMFORT_START}_2": "06:00:00",
+            f"{CONF_COMFORT_END}_2": "08:00:00",
+            # no comfort_days_2 at all -> pre-P2.3 window
+            f"{CONF_COMFORT_START}_3": "17:00:00",
+            f"{CONF_COMFORT_END}_3": "21:00:00",
+        },
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(
+                **{
+                    f"{CONF_COMFORT_START}_3": "17:00:00",
+                    f"{CONF_COMFORT_END}_3": "21:00:00",
+                }
+            ),
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[f"{CONF_COMFORT_START}_2"] == "17:00:00"
+    assert f"{CONF_COMFORT_DAYS}_2" not in entry.options
+
+
+async def test_options_renumber_pops_orphan_days_when_pair_cleared(
+    hass: HomeAssistant,
+) -> None:
+    """F30 / review Rev. 2.3 point 4: clearing a window's start/end but
+    leaving its days multi-select untouched in the SAME submit orphans the
+    days key (``_extra_window_ns`` never indexes it, since it matches only
+    start/end) — the separate ``day_ns`` scan must still pop it, and it must
+    never be rewritten under a new index."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.trv",
+        data=ROOM_INPUT,
+        options={
+            f"{CONF_COMFORT_START}_2": "06:00:00",
+            f"{CONF_COMFORT_END}_2": "08:00:00",
+            f"{CONF_COMFORT_DAYS}_2": ["mon"],
+        },
+        title="Test Room",
+    )
+    entry.add_to_hass(hass)
+
+    with patch("custom_components.poise.async_setup_entry", return_value=True):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        # start_2/end_2 cleared (absent from the submit); comfort_days_2's
+        # prior selection rides along untouched, exactly as a real form
+        # submit would carry a multi-select the user never touched.
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            _options_submit(**{f"{CONF_COMFORT_DAYS}_2": ["mon"]}),
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert f"{CONF_COMFORT_START}_2" not in entry.options
+    assert f"{CONF_COMFORT_DAYS}_2" not in entry.options
