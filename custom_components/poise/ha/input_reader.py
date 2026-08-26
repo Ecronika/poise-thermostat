@@ -29,9 +29,9 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import entity_registry as er
@@ -175,6 +175,16 @@ _GUARD_RETRY_SPACING_S: Final[tuple[float, ...]] = (60.0, 300.0)
 _GUARD_MAX_ATTEMPTS: Final = len(_GUARD_RETRY_SPACING_S) + 1
 
 
+@dataclass(frozen=True, slots=True)
+class CalibrationMeta:
+    """Readable, safe metadata of a calibration number entity."""
+
+    reported: float
+    lo: float
+    hi: float
+    step: float
+
+
 class InputReader:
     """Owns all state reads + guard discovery for one zone.
 
@@ -205,6 +215,7 @@ class InputReader:
         self.valve_entity: str | None = None
         self.valve_closing_steps: str | None = None
         self.valve_idle_steps: str | None = None
+        self.calibration_entity: str | None = None
 
     def set_presence_entities(
         self, home: Sequence[str], occupancy: Sequence[str]
@@ -315,6 +326,11 @@ class InputReader:
 
         Registry errors are not classified here at all; they propagate to
         :meth:`resolve_device_guards`, which treats them as transient.
+
+        Every role found here (including ``calibration_entity``) is cached
+        until ``guards_resolved`` latches; a calibration entity that only
+        appears on the device LATER (e.g. a firmware update that adds the
+        number, or a zigbee re-pair) is not picked up without a reload.
         """
         reg = er.async_get(self._hass)
         ent = reg.async_get(self._structure.actuator)
@@ -374,6 +390,12 @@ class InputReader:
                 self.valve_idle_steps is None and looks_like_valve_steps(eid) == "idle"
             ):
                 self.valve_idle_steps = eid
+            elif (
+                self.calibration_entity is None
+                and eid.startswith("number.")
+                and classify_number_entity(eid) == "calibration"
+            ):
+                self.calibration_entity = eid
         return True
 
     def configured_ext_temp_signature(
@@ -606,6 +628,7 @@ class InputReader:
             now_mono=now_mono,
             now_wall=now_wall_dt.timestamp(),
             local_minute=int(local_now.hour * 60 + local_now.minute),
+            local_weekday=local_now.weekday(),
             local_day_ordinal=local_now.toordinal(),
             sun_elevation=self.sun_elevation(),
             room=room,
@@ -687,3 +710,57 @@ class InputReader:
         AFTER the save checkpoint await, so they stay positioned reads.
         """
         return self.read(self.valve_closing_steps), self.read(self.valve_idle_steps)
+
+    def calibration_meta(
+        self, entity_id: str | None = None
+    ) -> CalibrationMeta | Literal["unreadable", "gone"]:
+        """Metadata of the calibration number (default: the discovered role;
+        an explicit ``entity_id`` serves the handoff automaton, which asks
+        about the STORED ``cal_entity`` — after an actuator swap that differs
+        from the discovered role).
+
+        * ``"gone"``       — the entity no longer exists structurally
+                             (no registry entry AND no state object):
+                             lifecycle special case, never a permanent block.
+        * ``"unreadable"`` — the entity exists but is unavailable/unknown or
+                             its bounds are not finite/safe: FAIL-CLOSED for
+                             the handoff (D3) — a briefly sleeping Zigbee
+                             number is no licence to start the next
+                             compensation path.
+        * ``CalibrationMeta`` — readable and safe.
+        """
+        target = entity_id or self.calibration_entity
+        if target is None:
+            return "gone"
+        return read_calibration_meta(self._hass, target)
+
+
+def read_calibration_meta(
+    hass: HomeAssistant, entity_id: str
+) -> CalibrationMeta | Literal["unreadable", "gone"]:
+    """The ONE tri-state metadata read (P1.1 semantics, shared body).
+
+    Module-level so the lifecycle restore (``ha.actuator_lifecycle.
+    restore_trv_calibration``, P1.5) reads EXACTLY the same tri-state the
+    handoff automaton does — a second implementation would let the two
+    ``"gone"``/``"unreadable"`` boundaries drift. ``InputReader.
+    calibration_meta`` resolves the target entity (discovered role vs. the
+    stored ``cal_entity``) and delegates here.
+    """
+    state = hass.states.get(entity_id)
+    if state is None:
+        reg = er.async_get(hass)
+        if reg.async_get(entity_id) is None:
+            return "gone"
+        return "unreadable"
+    if state.state in _INVALID:
+        return "unreadable"
+    reported = parse_finite(state.state)
+    lo = parse_finite(state.attributes.get("min"))
+    hi = parse_finite(state.attributes.get("max"))
+    step = parse_finite(state.attributes.get("step"))
+    if reported is None or lo is None or hi is None or step is None:
+        return "unreadable"
+    if step <= 0 or lo >= hi:
+        return "unreadable"
+    return CalibrationMeta(reported=reported, lo=lo, hi=hi, step=step)

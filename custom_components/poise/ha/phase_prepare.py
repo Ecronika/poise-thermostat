@@ -312,12 +312,21 @@ class PreparePhase:
         _comfort_target = mode_comfort_base(
             _base_preset, config.comfort_base, config.override_cfg
         )
+        # P2.1 None-contract: a transition that DOES NOT EXIST (always-comfort/
+        # always-setback) disables only the predictive branch via the existing
+        # enable gates -- this stage itself is NEVER skipped (presence read,
+        # expire_timed_states and away/preset resolution above must run every
+        # tick). ``float(x or 0)`` feeds a neutral 0 into the disabled plan.
+        has_comfort_edge = sched.minutes_to_comfort is not None
+        has_setback_edge = sched.minutes_to_setback is not None
         plan = optimal_start.plan_preheat(
             comfort_base=_comfort_target,
             is_comfort=sched.is_comfort,
             setback_offset=sched.setback_offset,
-            minutes_to_comfort=float(sched.minutes_to_comfort),
-            optimal_start_enabled=config.optimal_start and not _is_away,
+            minutes_to_comfort=float(sched.minutes_to_comfort or 0),
+            optimal_start_enabled=(
+                config.optimal_start and not _is_away and has_comfort_edge
+            ),
             can_heat=can_heat,
             identified=self._runtime.learning.ekf.identified,
             model=model,
@@ -325,8 +334,8 @@ class PreparePhase:
             t_out_lead=t_out_lead,
             heat_lower=lo,
             heat_upper=hi,
-            optimal_stop_enabled=config.optimal_stop,
-            minutes_to_setback=float(sched.minutes_to_setback),
+            optimal_stop_enabled=config.optimal_stop and has_setback_edge,
+            minutes_to_setback=float(sched.minutes_to_setback or 0),
             coast_lower=lo,
             was_preheating=self._runtime.latches.was_preheating,
             was_coasting=self._runtime.latches.was_coasting,

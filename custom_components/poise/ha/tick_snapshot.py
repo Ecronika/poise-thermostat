@@ -1,6 +1,6 @@
 """Per-tick read-only views of the coordinator (plan step O.2).
 
-The tick program reads 39 coordinator attributes purely for information: 30
+The tick program reads 40 coordinator attributes purely for information: 31
 policy/config values and 9 entity bindings. Reading them one by one through
 the transitional ``TickOrchestrator._c`` backreference makes every stage
 depend on the whole ``PoiseCoordinator`` type. The two frozen objects here
@@ -19,7 +19,7 @@ replace that with an explicit, narrow contract:
   would be stale for every tick that follows.
 
 Why a snapshot is legitimate at all (the load-bearing argument, pinned by
-``tests/test_o2_tick_snapshot.py``): the 30 config attributes are written
+``tests/test_o2_tick_snapshot.py``): the 31 config attributes are written
 only by ``PoiseCoordinator.__init__`` and ``PoiseCoordinator._apply_hot_tuning``
 (two of them by ``__init__`` alone), and ``_apply_hot_tuning`` runs only from
 ``__init__`` and from ``async_apply_options``, which takes the SAME tick lock
@@ -60,10 +60,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, avoids the import cycle
 
 @dataclass(frozen=True, slots=True)
 class TickConfigSnapshot:
-    """The tick's read-only policy/config view (30 fields).
+    """The tick's read-only policy/config view (31 fields).
 
     Field name == coordinator attribute without the leading underscore. Every
-    field is either hot-applyable tuning (28, written by ``_apply_hot_tuning``)
+    field is either hot-applyable tuning (29, written by ``_apply_hot_tuning``)
     or deliberately init-only (2: ``window_auto_cfg``, ``override_cfg`` — both
     default-constructed constants the parser never config-reads). Both groups
     are constant for the duration of a tick — see the module docstring.
@@ -101,12 +101,13 @@ class TickConfigSnapshot:
     schedule: ComfortSchedule
     thermal_shock_delta: float
     trace_enabled: bool
+    trv_calibration: bool
     vent_notify: bool
     window_auto_cfg: WindowAutoConfig
 
     @classmethod
     def from_coordinator(cls, coordinator: PoiseCoordinator) -> TickConfigSnapshot:
-        """Copy the 30 config attributes off the live coordinator.
+        """Copy the 31 config attributes off the live coordinator.
 
         Called ONCE per tick, right after the availability gate has passed.
         Every keyword below names exactly one coordinator attribute (bijection
@@ -141,6 +142,7 @@ class TickConfigSnapshot:
             schedule=coordinator._schedule,
             thermal_shock_delta=coordinator._thermal_shock_delta,
             trace_enabled=coordinator._trace_enabled,
+            trv_calibration=coordinator._trv_calibration,
             vent_notify=coordinator._vent_notify,
             window_auto_cfg=coordinator._window_auto_cfg,
         )

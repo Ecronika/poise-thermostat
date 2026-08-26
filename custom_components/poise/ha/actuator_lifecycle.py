@@ -22,17 +22,111 @@ this module.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from enum import Enum
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
 from ..const import FROST_FLOOR_C
+from ..control.calibration import snap_offset
 from ..control.lifecycle import ParkPlan, resolve_park_command
 from ..devices.model_fixes import is_external_sensor_select
+from .input_reader import CalibrationMeta, read_calibration_meta
 
 _LOGGER = logging.getLogger(__name__)
+
+# AR-24 precedent (`__init__` boiler OFF, `hub_coordinator` boiler actions,
+# both 10 s): a blocking service call at a lifecycle position must be bounded,
+# because a hung number integration would otherwise freeze exactly the paths
+# that cannot afford it — the coordinator's reconfigure handoff port awaits
+# the restore INSIDE the tick lock (a hang would stall the zone's tick loop),
+# and the config-flow/teardown callers would hang the dialog or the entry
+# removal. Same magnitude as the boiler constant; a dedicated name because
+# this module must not import the hub.
+_CALIBRATION_RESTORE_TIMEOUT_S = 10.0
+
+
+class CalibrationRestoreResult(Enum):
+    """Outcome of the D3 lifecycle restore (P1.5, review Rev. 2.3 point 3)."""
+
+    RESTORED = "restored"  # device REPORTS the restore_target (state-confirmed)
+    GONE = "gone"  # entity structurally removed — nothing an offset acts on
+    FAILED = "failed"  # unreadable / dispatch error / read-back not at target
+
+
+async def restore_trv_calibration(
+    hass: HomeAssistant, *, entity_id: str, baseline: float
+) -> CalibrationRestoreResult:
+    """D3 lifecycle restore: blocking write + FRESH read-back.
+
+    ``blocking=True`` only makes service errors synchronously visible (F15) —
+    the D3 confirmation is the read-back afterwards: when the entity reports
+    ``restore_target ± step/2`` it is restored. No polling: a slow device
+    yields a conservative FAILED, and the next attempt recognizes
+    already_at_target immediately. Registry AND state both gone -> GONE.
+    The target is the SNAPPED baseline (never a blanket 0.0, D3): a baseline
+    outside the entity's current grid restores clipped, best-possible.
+    """
+    meta = read_calibration_meta(hass, entity_id)  # P1.1 tri-state, shared
+    if meta == "gone":
+        return CalibrationRestoreResult.GONE
+    if not isinstance(meta, CalibrationMeta):  # "unreadable" -> fail-closed
+        return CalibrationRestoreResult.FAILED
+    restore_target = snap_offset(
+        baseline, step=meta.step, min_value=meta.lo, max_value=meta.hi
+    )
+    if abs(meta.reported - restore_target) <= meta.step / 2 + 1e-9:
+        return CalibrationRestoreResult.RESTORED  # already_at_target
+    try:
+        # AR-24: bound the blocking write (see _CALIBRATION_RESTORE_TIMEOUT_S)
+        # — a TimeoutError lands in the same boundary as any dispatch error
+        # and maps onto the existing fail-closed semantics: FAILED, ownership
+        # kept, form error on reconfigure / warning on teardown.
+        async with asyncio.timeout(_CALIBRATION_RESTORE_TIMEOUT_S):
+            await hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": entity_id, "value": restore_target},
+                blocking=True,
+            )
+    except Exception:  # noqa: BLE001 - any dispatch error is a FAILED restore
+        _LOGGER.exception("Poise: calibration restore failed for %s", entity_id)
+        return CalibrationRestoreResult.FAILED
+    # FRESH re-read after the write — no cached meta: only the device
+    # actually showing the target counts as restored (D3, review point 2).
+    meta_after = read_calibration_meta(hass, entity_id)
+    if (
+        isinstance(meta_after, CalibrationMeta)
+        and abs(meta_after.reported - restore_target) <= meta_after.step / 2 + 1e-9
+    ):
+        return CalibrationRestoreResult.RESTORED
+    return CalibrationRestoreResult.FAILED
+
+
+async def resolve_restore(
+    hass: HomeAssistant, *, entity_id: object, baseline: object
+) -> CalibrationRestoreResult:
+    """The ONE corrupt-shape rule in front of the restore (P1.5b review).
+
+    A persisted ownership pair whose entity is missing/empty or whose
+    baseline is not a number is structurally ``GONE`` — the commit stamps
+    both together, so such a shape can only be store corruption, and there is
+    nothing a restore could act on (same rule segment H applies). A valid
+    pair delegates to :func:`restore_trv_calibration`. Shared by the
+    coordinator handoff port, the config flow's unloaded store path and the
+    entry teardown, so the rule cannot fork; the FAILED/GONE POLICY (form
+    error vs. WARN vs. teardown log) stays with each caller.
+    """
+    if not isinstance(baseline, (int, float)) or not (
+        isinstance(entity_id, str) and entity_id
+    ):
+        return CalibrationRestoreResult.GONE
+    return await restore_trv_calibration(
+        hass, entity_id=entity_id, baseline=float(baseline)
+    )
 
 
 async def park_actuator(

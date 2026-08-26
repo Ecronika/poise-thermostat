@@ -54,6 +54,12 @@ from ..const import DOMAIN
 if TYPE_CHECKING:
     from ..control.feedback import CloSuggestion
     from ..control.suggestion import OverrideSuggestion
+from ..contracts import ActuatorPath
+from ..devices.capability import (
+    DeviceCapabilities,
+    reliable_heat_mode_from,
+    select_live_path,
+)
 from ..devices.model_fixes import (
     ext_temp_number_is_implausible,
 )
@@ -298,6 +304,56 @@ class HealthReporter:
                 "direction": suggestion.direction,
                 "key": suggestion.key,
             },
+        )
+
+    def sync_calibration_available_issue(
+        self, *, ext_temp_reserved: bool, enabled: bool
+    ) -> None:
+        """P1.5 D1: mirror "this zone COULD calibrate if you opted in" into a
+        fixable repair issue (kind ``trv_calibration``).
+
+        Active exactly when the D6 path choice WOULD pick calibration were
+        the option on (``calibration_enabled=True`` forced through the same
+        ``select_live_path`` the segments use — an external-temp input still
+        wins) AND the option is currently off. The capability build mirrors
+        ``ActuatePhase._calibration_live_path`` (null-safe hvac_modes, F29);
+        the actuator read goes through the reader, keeping the S.4a read
+        boundary. Bypasses the ledger like the other suggestion mirrors
+        (idempotent per-tick create/delete). Its fix flow is Apply-ONLY (D1):
+        no ``direction``, no cool-down stamp — rejection is HA's built-in
+        "ignore issue", so the mirror keeps re-creating idempotently and HA
+        keeps it hidden.
+        """
+        issue_id = f"calibration_available_{self._entry_id}"
+        act_state = self._reader.actuator_state()
+        hvac_modes = (
+            [str(m) for m in (act_state.attributes.get("hvac_modes") or [])]
+            if act_state is not None
+            else []
+        )
+        caps = DeviceCapabilities(
+            writable_valve=self._reader.valve_entity is not None,
+            writable_calibration=self._reader.calibration_entity is not None,
+            reliable_heat_mode=reliable_heat_mode_from(hvac_modes),
+        )
+        capable = (
+            select_live_path(
+                caps, ext_temp_reserved=ext_temp_reserved, calibration_enabled=True
+            )
+            is ActuatorPath.CALIBRATION
+        )
+        if not (capable and not enabled):
+            ir.async_delete_issue(self._hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self._hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=True,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="calibration_available",
+            translation_placeholders={"name": self._zone_name},
+            data={"entry_id": self._entry_id, "kind": "trv_calibration"},
         )
 
     def sync_season_hint_issue(

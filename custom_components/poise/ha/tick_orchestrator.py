@@ -8,8 +8,8 @@ O.5 the STAGE BODIES live in four phase modules and this class is only their
 sequencer:
 
     ha/phase_prepare.py   PreparePhase   17 stages, await-free
-    ha/phase_actuate.py   ActuatePhase   12 stages + the unavailable safe-state
-                                         body; ALL six executor awaits
+    ha/phase_actuate.py   ActuatePhase   14 stages + the unavailable safe-state
+                                         body; ALL eight executor awaits
     ha/phase_shadow.py    ShadowPhase     9 segments, await-free
     ha/phase_report.py    ReportPhase     2 assembly stages, await-free
 
@@ -120,6 +120,7 @@ from ..estimation.thermal_ekf import ThermalModel
 from ..runtime.tick_result import (
     ActuatorPlan,
     AvailableTickData,
+    CalibrationPlan,
     ClimateBandResult,
     ExternalTemperaturePlan,
     FinalizeContext,
@@ -355,7 +356,8 @@ class TickOrchestrator:
                 return await self._run_unavailable_tick(prep, bindings)
             # Forecast handshake: the await runs under the tick lock, under
             # exactly the condition ``forecast_request`` exists iff the
-            # ``predictive`` gate held -- and with the tick-current lead
+            # ``predictive`` gate held and the upcoming schedule transition
+            # exists (P2.1 None-contract) -- and with the tick-current lead
             # horizon plus the fallback value. The await stays in the adapter
             # so the prepare phase itself performs no I/O; F-FORECAST
             # (phase 10) is the only place this may ever move.
@@ -713,6 +715,7 @@ class TickOrchestrator:
         sp_adopt_reason = routing.sp_adopt_reason
         actuator_plan: ActuatorPlan | None = None
         ext_plan: ExternalTemperaturePlan | None = None
+        cal_plan: CalibrationPlan | None = None
         if self._runtime.user.enabled and not routing.off_held:
             adoption = self._actuate._stage_mode_adoption(
                 ing, obs, wt, res, routing, config
@@ -745,7 +748,33 @@ class TickOrchestrator:
             self._ports.notify_convergence(
                 self._runtime.safety.convergence.escalated(now=ing.now)
             )
-            ext_plan = await self._actuate._stage_ext_temp_feed(ing, op)
+            # Segment H (P1.4): the fail-closed calibration ownership handoff
+            # sits BETWEEN the setpoint write and the ext-temp feed (D3). Its
+            # health updates are emitted right after the stage call (F19).
+            handoff = await self._actuate._stage_calibration_handoff(
+                ing, op, wt, bindings, config
+            )
+            self._ports.emit_health(handoff.health_updates)
+            if not handoff.handoff_pending:
+                # While the handoff is pending the successor compensation
+                # must not start on the still-active offset — the ext-temp
+                # feed (and later the P3 valve segment, which must honour
+                # the same handoff_pending skip) waits this tick out.
+                ext_plan = await self._actuate._stage_ext_temp_feed(ing, op)
+            # Segment W (P1.4): the calibration regulation write, after the
+            # ext-temp segment (mutually exclusive with a handoff dispatch —
+            # W runs only when calibration IS the live path).
+            calw = await self._actuate._stage_calibration_write(
+                ing, op, wt, bindings, config
+            )
+            self._ports.emit_health(calw.health_updates)
+            cal_plan = handoff.plan if handoff.plan is not None else calw.plan
+            # Display latches for the report phase: the verdicts travel in
+            # the typed stage results and the SEQUENCER stamps the latches —
+            # the calibration stages themselves stay report-pure (their only
+            # domain mutations are the commit and the two pre-I/O folds).
+            self._runtime.diagnostics.cal_handoff_pending = handoff.handoff_pending
+            self._runtime.diagnostics.cal_diverged = calw.diverged
         else:
             # C.8: the disabled/off-hold/rescue path regulates nothing — the
             # rescue writes are safety floors, never folded as convergence
@@ -756,6 +785,11 @@ class TickOrchestrator:
             # ~CONV_FAIL_WRITES ticks + CONV_FAIL_MIN_S after re-enable.
             self._runtime.safety.convergence.reset()
             self._ports.notify_convergence(False)
+            # P1.4: the calibration segments run only on the enabled path —
+            # reset the per-tick display latches so a stale verdict from the
+            # last enabled tick never survives into the disabled display.
+            self._runtime.diagnostics.cal_handoff_pending = False
+            self._runtime.diagnostics.cal_diverged = False
             actuator_plan = await self._actuate._stage_frost_rescue(
                 ing, obs, floors, wt, routing, bindings
             )
@@ -792,6 +826,7 @@ class TickOrchestrator:
             persistence=PersistencePhase.ALWAYS,
             control_data={},
             finalize_context=ctx,
+            calibration_plan=cal_plan,
         )
 
     def _build_finalize_context(

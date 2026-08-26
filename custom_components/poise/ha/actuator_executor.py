@@ -3,9 +3,10 @@
 ``ActuatorExecutor`` owns the effect-call PRIMITIVES of the coordinator tick
 (one named method per write-site class, each a character-exact passthrough of
 the dispatch — payload shape, ``blocking=False``, context handling; they make
-NO decisions, hold NO try boundaries and stamp NO state) and the six
+NO decisions, hold NO try boundaries and stamp NO state) and the seven
 SEQUENCE methods (``run_mode_nudge``, ``run_fan_write``,
-``run_setpoint_write``, ``run_ext_temp``, ``run_frost_rescue``,
+``run_setpoint_write``, ``run_ext_temp``, ``run_calibration``,
+``run_frost_rescue``,
 ``run_unavailable_safe``) that own the per-effect TRY BOUNDARIES and return
 an ordered ``ExecutionReport``.  The sequences still make
 no domain decisions and stamp no domain state — every gate (throttle, guard,
@@ -31,9 +32,12 @@ all stamps are folded afterwards by the coordinator's ``commit_execution``.
   ``blocking=True`` service calls in the integration are the forecast READ
   (``forecast_provider``, ``return_response`` — not an effect write), the
   deliberate teardown writes in ``__init__.py`` (boiler OFF / actuator park /
-  TRV sensor-source restore) and the hub's boiler actions
-  (``hub_coordinator``, blocking so a failed action is observable
-  synchronously) — documented exceptions outside this class.
+  TRV sensor-source restore), the hub's boiler actions (``hub_coordinator``,
+  blocking so a failed action is observable synchronously) and the P1.5 D3
+  calibration restore (``actuator_lifecycle.restore_trv_calibration``,
+  AR-24-bounded; reachable from the coordinator's reconfigure handoff port,
+  the config flow's unloaded store path and the entry teardown) — documented
+  exceptions outside this class.
 
 * **Sequence semantics** — owned by the sequence methods, preserved exactly:
 
@@ -80,6 +84,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.core import Context
+from homeassistant.util import dt as dt_util
 
 from .. import actuator as actuator_mod
 from ..contracts import ActuatorCommand, ActuatorPath
@@ -378,6 +383,58 @@ class ActuatorExecutor:
                 )
             )
         return ExecutionReport(executions=tuple(executions))
+
+    async def run_calibration(
+        self,
+        command: ActuatorCommand,
+        *,
+        pre_write_value: float,
+        restore: bool = False,
+    ) -> ExecutionReport:
+        """Site 7 — the TRV offset-calibration write/restore (P1.4, untagged).
+
+        ONE boundary around the choke-point dispatch (``actuator_mod.write``,
+        the CALIBRATION branch -> ``number.set_value``). ``pre_write_value``
+        is the offset the device reported just before this write (the
+        one-time ``cal_baseline`` stamp of the first write); ``restore=True``
+        reports the segment-H handoff dispatch as ``cal_restore`` instead of
+        ``cal_write``. Untagged (no Context) like the other number-entity
+        sites, until F-CONTEXT.
+
+        ``dispatch_wall_ts`` is taken IMMEDIATELY before the dispatch. The
+        tick's early central actuator read (``wt.act_state``, F23) cannot
+        serve as the evidence anchor: it happens BEFORE the mode/fan/setpoint
+        awaits, so its wall instant predates this dispatch by the duration of
+        those service calls — an actuator report landing in that window would
+        wrongly count as post-dispatch evidence and re-open the accumulation
+        gate on stale data (D4). The anchor must be the dispatch instant.
+        """
+        assert command.path is ActuatorPath.CALIBRATION
+        dispatch_wall_ts = dt_util.utcnow().timestamp()
+        success = False
+        try:
+            await actuator_mod.write(self._hass, command)
+            success = True
+        except Exception:  # noqa: BLE001 - calibration write is best-effort
+            self._log.exception(
+                "Poise: calibration %s failed for %s",
+                "restore" if restore else "write",
+                command.actuator_id,
+            )
+        return ExecutionReport(
+            executions=(
+                EffectExecution(
+                    effect_id="cal_restore" if restore else "cal_write",
+                    attempted=True,
+                    success=success,
+                    context_id=None,
+                    pre_write_value=pre_write_value,
+                    commanded_value=command.value,
+                    entity_id=command.actuator_id,
+                    dispatch_wall_ts=dispatch_wall_ts,
+                ),
+            )
+        )
 
     async def run_frost_rescue(
         self, entity_id: str, rescue_value: float, *, nudge: bool

@@ -37,11 +37,14 @@ measured from the actual call sites per method group, not designed:
     ActuatePorts    5  end_hold, fire_override_ended, set_mode_override,
                        set_override, commit_execution
     ShadowPorts     1  mpc_params (read only)
-    ReportPorts     3  sync_suggestion_issue, sync_clo_suggestion_issue,
-                       sync_season_hint_issue
+    ReportPorts     4  sync_suggestion_issue, sync_clo_suggestion_issue,
+                       sync_season_hint_issue, sync_calibration_available_issue
+                       (the fourth added by P1.5 — the calibration opt-in
+                       suggestion mirror, emitted at the same report position
+                       as its three siblings)
 
 ``end_hold`` and ``fire_override_ended`` appear in two views each, so the union
-is 22 - 2 = 20 distinct capabilities.
+is 23 - 2 = 21 distinct capabilities (20 at the O.2 census + the P1.5 mirror).
 
 LATE BINDING (binding, plan section 4.4). Six targets must resolve through the
 coordinator INSTANCE on every call, because tests replace them there after the
@@ -221,7 +224,12 @@ class ShadowPorts(Protocol):
 
 
 class ReportPorts(Protocol):
-    """What the REPORT phase invokes: the three suggestion-issue facades."""
+    """What the REPORT phase invokes: the four suggestion-issue facades."""
+
+    def sync_calibration_available_issue(
+        self, *, ext_temp_reserved: bool, enabled: bool
+    ) -> None:
+        """Raise/clear the calibration opt-in suggestion issue (P1.5 D1)."""
 
     def sync_clo_suggestion_issue(self, suggestion: CloSuggestion | None) -> None:
         """Raise/clear the clothing-offset suggestion issue."""
@@ -368,6 +376,13 @@ class CoordinatorTickPorts:
         return self._c._mpc_params
 
     # --- ReportPorts -------------------------------------------------------
+
+    def sync_calibration_available_issue(
+        self, *, ext_temp_reserved: bool, enabled: bool
+    ) -> None:
+        self._c._sync_calibration_available_issue(
+            ext_temp_reserved=ext_temp_reserved, enabled=enabled
+        )
 
     def sync_clo_suggestion_issue(self, suggestion: CloSuggestion | None) -> None:
         self._c._sync_clo_suggestion_issue(suggestion)

@@ -74,7 +74,7 @@ from ..estimation.tau_settle import update_settle
 from ..ingestion import parse_finite
 from ..runtime.tick_result import FinalizeContext, ShadowStageResult, ValveHealthResult
 from ..runtime.zone_runtime import ZoneRuntime
-from .input_reader import InputReader
+from .input_reader import CalibrationMeta, InputReader
 from .presenter import iso_utc as _iso_utc
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids the import cycle
@@ -209,7 +209,10 @@ class ReportPhase:
                 target=decision.heat_sp,
                 t_out=t_out_eff,
                 q_solar=q_solar,
-                fallback=float(sched.minutes_to_comfort),
+                # P2.1: ``None`` = no upcoming comfort start; always-comfort
+                # previously yielded 0 here, so 0.0 is the fixed,
+                # regression-free fallback (plan §0.6 p.3).
+                fallback=float(sched.minutes_to_comfort or 0.0),
             ),
             q_solar=q_solar,
             outdoor=t_out_eff,
@@ -581,8 +584,20 @@ class ReportPhase:
             self._ports.sync_suggestion_issue(_sugg, _sugg_suppressed or not _emit_l2)
             self._ports.sync_clo_suggestion_issue(_fb_sugg if _emit_clo else None)
             self._ports.sync_season_hint_issue(_season_hint)
+            # P1.5 D1: "this zone COULD calibrate if you opted in" — the
+            # condition itself is evaluated in the HealthReporter with the
+            # segments' capability build; the tick contributes its two
+            # per-tick facts (the reserved successor input, the opt-in gate).
+            self._ports.sync_calibration_available_issue(
+                ext_temp_reserved=ext_num is not None,
+                enabled=config.trv_calibration,
+            )
         except Exception:  # noqa: BLE001 - suggestion glue must never break the tick
             self._log.debug("Poise suggestion issue sync failed", exc_info=True)
+        # P1.4: the calibration number's tri-state metadata for the cal_offset
+        # attribute — cheap (None target short-circuits to "gone") and safe on
+        # every path, calibration configured or not.
+        _cal_meta = self._reader.calibration_meta()
         _tick_data: dict[str, Any] = {
             "available": True,
             **outcome_diag,
@@ -777,6 +792,16 @@ class ReportPhase:
             "valve_health": valve_health,
             "valve_closing_steps": closing_steps,
             "valve_idle_steps": idle_steps,
+            # P1.4 calibration diagnosis (shadow keys, deliberately NOT in
+            # climate._RECORDED_ATTRS): reported offset when the number is
+            # readable, last commanded offset, and the two per-tick verdicts
+            # the sequencer stamped onto the diagnostics latches.
+            "cal_offset": (
+                _cal_meta.reported if isinstance(_cal_meta, CalibrationMeta) else None
+            ),
+            "cal_target": self._runtime.actuator.last_cal_value,
+            "cal_diverged": self._runtime.diagnostics.cal_diverged,
+            "cal_handoff_pending": self._runtime.diagnostics.cal_handoff_pending,
             **shadow_objs,
             "tpi_valve_entity": self._reader.valve_entity,
             "seasonless_phase": self._runtime.learning.seasonless.phase,

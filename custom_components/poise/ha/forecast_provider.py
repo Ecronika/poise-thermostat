@@ -33,7 +33,10 @@ This is the only ``blocking=True`` service call in the TICK path — and it is
 a READ (``return_response=True``), not an effect write; every effect write
 (``actuator_executor``) stays ``blocking=False``.  The remaining
 ``blocking=True`` calls live outside the tick (``__init__.py`` teardown,
-``hub_coordinator`` boiler actions).
+``hub_coordinator`` boiler actions, and the P1.5 calibration restore in
+``actuator_lifecycle`` — AR-24-bounded, reachable from the coordinator's
+reconfigure handoff port, the config flow and the teardown, never from a
+tick).
 
 Semantics (unchanged by the decoupling):
 

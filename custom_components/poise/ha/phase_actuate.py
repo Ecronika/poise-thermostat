@@ -10,9 +10,12 @@ WHY THIS MODULE EXISTS AS ITS OWN FILE.  The split follows the AWAIT TOPOLOGY.
 This is the ONLY tick module that awaits the actuator and the ONLY one that
 commits, and the structure gate pins exactly that:
 
-    normal tick path : exactly 5 executor awaits -- run_mode_nudge,
+    normal tick path : exactly 7 executor awaits -- run_mode_nudge,
                        run_fan_write, run_setpoint_write, run_ext_temp,
-                       run_frost_rescue
+                       run_frost_rescue, and run_calibration at exactly TWO
+                       sites (the P1.4 segment-H restore dispatch and the
+                       segment-W regulation write -- one boundary, two
+                       mutually exclusive positions)
     unavailable path : exactly 1 executor await -- run_unavailable_safe
     anything else    : 0 awaits
 
@@ -55,8 +58,21 @@ from homeassistant.core import State
 from homeassistant.util import dt as dt_util
 
 from ..comfort.operative import operative_temperature
-from ..const import EXTERNAL_FEED_KEEPALIVE_S, FROST_FLOOR_C, WRITE_DEADBAND_C
+from ..const import (
+    CALIBRATION_MIN_INTERVAL_S,
+    EXTERNAL_FEED_KEEPALIVE_S,
+    FROST_FLOOR_C,
+    WRITE_DEADBAND_C,
+)
 from ..contracts import ActuatorCommand, ActuatorPath
+from ..control.calibration import (
+    calibration_accumulation_allowed,
+    calibration_converged,
+    calibration_diverged,
+    calibration_write_due,
+    local_calibration,
+    snap_offset,
+)
 from ..control.lifecycle import resolve_safe_state
 from ..control.override import mode_adopt_reason, setpoint_adopt_reason
 from ..control.tick_resolve import (
@@ -65,13 +81,22 @@ from ..control.tick_resolve import (
     needs_mode_nudge,
     resolve_desired_mode,
 )
+from ..devices.capability import (
+    DeviceCapabilities,
+    reliable_heat_mode_from,
+    select_live_path,
+)
 from ..multi import lifecycle as _lifecycle
 from ..runtime.tick_result import (
     ActuatorPlan,
+    CalibrationHandoffResult,
+    CalibrationPlan,
+    CalibrationStageResult,
     ClimateBandResult,
     EndHold,
     ExternalTemperaturePlan,
     FanFirstStageResult,
+    HealthUpdate,
     HoldRoutingResult,
     IngestResult,
     ModeAdoptionResult,
@@ -86,7 +111,7 @@ from ..runtime.tick_result import (
 from ..runtime.zone_runtime import ZoneRuntime
 from ..safety.write_convergence import convergence_tolerance
 from .actuator_executor import ActuatorExecutor
-from .input_reader import InputReader, parse_attr_number
+from .input_reader import CalibrationMeta, InputReader, parse_attr_number
 from .tick_snapshot import TickConfigSnapshot, ZoneBindings
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, avoids the import cycle
@@ -529,6 +554,334 @@ class ActuatePhase:
             )
             self._ports.commit_execution(report, now=now)
         return plan
+
+    @staticmethod
+    def _cal_inactive_edges(
+        entry_id: str, entity: str | None, *keys: str
+    ) -> tuple[HealthUpdate, ...]:
+        """Inactive edges for calibration issues that CAN NO LONGER BE TRUE.
+
+        THE uniform hygiene rule (P1.4c): every calibration-segment path that
+        concludes "this issue's condition cannot currently hold" emits the
+        inactive edge for exactly those issues — the transition ledger makes
+        repeated inactive emissions free, so no raised issue can outlive its
+        condition. Concretely:
+
+        * Segment W, calibration not the live path: ``calibration_unapplied``
+          and ``calibration_entity_unsafe`` — no regulation writes happen on
+          a path that is not live, so neither divergence nor unsafe metadata
+          is a live claim any more.
+        * Segment H, calibration IS the live path (no handoff needed) and
+          segment H without ownership (nothing to hand off): both handoff
+          issues, ``calibration_restore_failed`` and
+          ``calibration_restore_clipped``.
+
+        ONE deliberate one-tick exception: the tick that CONFIRMS a clipped
+        handoff still raises ``calibration_restore_clipped`` as the
+        "restored, but clipped" record; the no-ownership edge above then
+        clears it on the following tick — the clip evidence is visible for
+        exactly the pending phase plus the confirming tick (pinned by the
+        clipped glue test). Deliberately NOT cleared anywhere:
+        ``calibration_restore_failed`` while the stored entity is
+        structurally ``"gone"`` (the standing issue IS the evidence, and
+        gone never blocks), and nothing is cleared on gates whose condition
+        is merely UNKNOWN (actuator offline, entity unreadable).
+        """
+        return tuple(
+            HealthUpdate(
+                issue_id=f"{key}_{entry_id}",
+                active=False,
+                translation_key=key,
+                placeholders={"entity": entity or "—"},
+            )
+            for key in keys
+        )
+
+    def _calibration_live_path(
+        self,
+        op: OperativeResult,
+        wt: WriteTargetResult,
+        config: TickConfigSnapshot,
+    ) -> ActuatorPath:
+        """The ONE live path choice (D6) with the null-safe capability build
+        (F29: ``act_state`` may be None — an offline device then reports no
+        ``hvac_modes`` and calibration is simply not the live path).
+
+        Shared by both calibration segments so H and W can never disagree on
+        whose path it is; ``select_live_path`` stays the single decision site.
+        """
+        hvac_modes = (
+            list(wt.act_state.attributes.get("hvac_modes") or [])
+            if wt.act_state is not None
+            else []
+        )
+        caps = DeviceCapabilities(
+            writable_valve=self._reader.valve_entity is not None,
+            writable_calibration=self._reader.calibration_entity is not None,
+            reliable_heat_mode=reliable_heat_mode_from(hvac_modes),
+        )
+        return select_live_path(
+            caps,
+            ext_temp_reserved=op.ext_num is not None,
+            calibration_enabled=config.trv_calibration,
+        )
+
+    async def _stage_calibration_handoff(
+        self,
+        ing: IngestResult,
+        op: OperativeResult,
+        wt: WriteTargetResult,
+        bindings: ZoneBindings,
+        config: TickConfigSnapshot,
+    ) -> CalibrationHandoffResult:
+        """Segment H — the fail-closed calibration ownership handoff (D3).
+
+        Position: between the setpoint write and the ext-temp feed. While a
+        persisted calibration ownership stands and calibration is NOT the
+        live path any more (option off, ext-temp configured, capability
+        lost), the previously written offset may still be physically active —
+        the successor compensation must not start on top of it. Every
+        decision is made BEFORE the one optional dispatch; ownership is
+        cleared ONLY by the state-confirmed pre-I/O fold
+        ``observe_calibration_restore`` (never by dispatch success, F15).
+
+        Tri-state on the STORED entity (P1.1): ``"gone"`` (structurally
+        removed — device swapped/deleted) keeps ownership as the log/issue
+        evidence but never blocks (there is nothing an offset could still act
+        on); ``"unreadable"`` is FAIL-CLOSED — the offset may still be live,
+        so ``handoff_pending`` blocks the ext-temp feed and nothing is
+        dispatched (the entity would not accept it anyway).
+        """
+        now = ing.now
+        act = self._runtime.actuator
+        baseline = act.cal_baseline
+        if baseline is None:
+            # No ownership — nothing to hand off; both handoff issues can no
+            # longer be true (uniform rule, see _cal_inactive_edges).
+            return CalibrationHandoffResult(
+                handoff_pending=False,
+                health_updates=self._cal_inactive_edges(
+                    bindings.entry_id,
+                    act.cal_entity,
+                    "calibration_restore_failed",
+                    "calibration_restore_clipped",
+                ),
+            )
+        if self._calibration_live_path(op, wt, config) is ActuatorPath.CALIBRATION:
+            # No handoff needed — the path is ours again (e.g. the successor
+            # input was removed, or the option came back mid-fail-closed);
+            # same uniform inactive edges (see _cal_inactive_edges).
+            return CalibrationHandoffResult(
+                handoff_pending=False,
+                health_updates=self._cal_inactive_edges(
+                    bindings.entry_id,
+                    act.cal_entity,
+                    "calibration_restore_failed",
+                    "calibration_restore_clipped",
+                ),
+            )
+        entity = act.cal_entity
+        # A baseline without an entity is a corrupt store shape — the commit
+        # stamps both together; treat it as structurally gone.
+        meta: CalibrationMeta | str = (
+            "gone" if entity is None else self._reader.calibration_meta(entity)
+        )
+        failed_issue = HealthUpdate(
+            issue_id=f"calibration_restore_failed_{bindings.entry_id}",
+            active=not isinstance(meta, CalibrationMeta),
+            translation_key="calibration_restore_failed",
+            placeholders={"entity": entity or "—"},
+        )
+        if meta == "gone" or entity is None:
+            # Structurally removed: keep the ownership record as evidence,
+            # surface the issue, but never block the successor path.
+            self._log.debug(
+                "Poise: calibration entity %s gone; baseline %.2f kept as "
+                "evidence, handoff not blocking",
+                entity,
+                baseline,
+            )
+            return CalibrationHandoffResult(
+                handoff_pending=False, health_updates=(failed_issue,)
+            )
+        if not isinstance(meta, CalibrationMeta):  # "unreadable" -> fail-closed
+            return CalibrationHandoffResult(
+                handoff_pending=True, health_updates=(failed_issue,)
+            )
+        pending_updates: list[HealthUpdate] = [failed_issue]  # active=False here
+        restore_target = snap_offset(
+            baseline, step=meta.step, min_value=meta.lo, max_value=meta.hi
+        )
+        # Best-possible restoration: a baseline outside the CURRENT grid can
+        # only be restored clipped (review point 6) — diagnosed, not fatal.
+        clipped = abs(restore_target - baseline) > meta.step / 2 + 1e-9
+        pending_updates.append(
+            HealthUpdate(
+                issue_id=f"calibration_restore_clipped_{bindings.entry_id}",
+                active=clipped,
+                translation_key="calibration_restore_clipped",
+                placeholders={"entity": entity or "—"},
+            )
+        )
+        if self._runtime.observe_calibration_restore(
+            reported=meta.reported, step=meta.step, restore_target=restore_target
+        ):
+            # State-confirmed: ownership cleared by the fold, handoff done.
+            return CalibrationHandoffResult(
+                handoff_pending=False, health_updates=tuple(pending_updates)
+            )
+        plan: CalibrationPlan | None = None
+        if (
+            act.last_cal_restore_ts is None
+            or now - act.last_cal_restore_ts >= CALIBRATION_MIN_INTERVAL_S
+        ):
+            plan = CalibrationPlan(value=restore_target, restore=True)
+            report = await self._executor.run_calibration(
+                ActuatorCommand(
+                    actuator_id=entity,
+                    path=ActuatorPath.CALIBRATION,
+                    value=restore_target,
+                    hvac_mode=None,
+                    reason="calibration_restore",
+                ),
+                pre_write_value=meta.reported,
+                restore=True,
+            )
+            self._ports.commit_execution(report, now=now)
+        return CalibrationHandoffResult(
+            handoff_pending=True, health_updates=tuple(pending_updates), plan=plan
+        )
+
+    async def _stage_calibration_write(
+        self,
+        ing: IngestResult,
+        op: OperativeResult,
+        wt: WriteTargetResult,
+        bindings: ZoneBindings,
+        config: TickConfigSnapshot,
+    ) -> CalibrationStageResult:
+        """Segment W — the calibration regulation write (P1.4, ADR-0015).
+
+        Position: after the ext-temp segment, on the enabled path only (the
+        same position that guarantees no frost-rescue/unavailable-safe tick
+        runs it). Every gate is decided BEFORE the sequence, in order: live
+        path (D6) -> actuator online (write-storm/safety guard, mirrors the
+        setpoint gate) -> metadata safe (P1.1) -> device temperature present
+        -> resume quarantine (D4 pre-I/O fold) -> evidence gate (convergence
+        AND a device report NEWER than the dispatch anchor) -> deadband/
+        interval due gate. The target is ``op.room_decide`` — with operative
+        mode and no external input, calibration compensates toward the same
+        control variable the solver decided on (one truth per tick).
+        """
+        now = ing.now
+        if self._calibration_live_path(op, wt, config) is not ActuatorPath.CALIBRATION:
+            # Not the live path: neither divergence nor unsafe metadata is a
+            # live claim any more (uniform rule, see _cal_inactive_edges).
+            return CalibrationStageResult(
+                health_updates=self._cal_inactive_edges(
+                    bindings.entry_id,
+                    self._reader.calibration_entity,
+                    "calibration_unapplied",
+                    "calibration_entity_unsafe",
+                )
+            )
+        if not wt.actuator_online or wt.act_state is None:
+            # Offline: the conditions are UNKNOWN, not concluded — no edges.
+            return CalibrationStageResult()
+        cal_entity = self._reader.calibration_entity
+        meta = self._reader.calibration_meta()  # the discovered role
+        pending: list[HealthUpdate] = [
+            HealthUpdate(
+                issue_id=f"calibration_entity_unsafe_{bindings.entry_id}",
+                active=not isinstance(meta, CalibrationMeta),
+                translation_key="calibration_entity_unsafe",
+                placeholders={"entity": cal_entity or "—"},
+            )
+        ]
+        if not isinstance(meta, CalibrationMeta) or cal_entity is None:
+            return CalibrationStageResult(health_updates=tuple(pending))
+        trv_temp = parse_attr_number(wt.act_state, "current_temperature")
+        if trv_temp is None:
+            return CalibrationStageResult(health_updates=tuple(pending))
+        # Resume quarantine (D4): first tick after a restart with restored
+        # ownership adopts the reported offset as the anchor and never writes.
+        wall_now = dt_util.utcnow().timestamp()
+        if self._runtime.observe_calibration_resume(
+            reported=meta.reported, wall_now=wall_now
+        ):
+            return CalibrationStageResult(health_updates=tuple(pending))
+        act = self._runtime.actuator
+        # Evidence (D4): accumulate only on a device report NEWER than the
+        # dispatch anchor AND a reported offset converged onto the last
+        # command (± half a grid step).
+        updated_after = (
+            act.last_cal_dispatch_wall_ts is None
+            or wt.act_state.last_updated.timestamp() > act.last_cal_dispatch_wall_ts
+        )
+        converged = calibration_converged(
+            reported_offset=meta.reported,
+            last_cal_value=act.last_cal_value,
+            step=meta.step,
+        )
+        diverged = calibration_diverged(
+            converged=converged, last_write_ts=act.last_cal_write_ts, now=now
+        )
+        pending.append(
+            HealthUpdate(
+                issue_id=f"calibration_unapplied_{bindings.entry_id}",
+                active=diverged,
+                translation_key="calibration_unapplied",
+                placeholders={"entity": cal_entity},
+            )
+        )
+        if not calibration_accumulation_allowed(
+            reported_offset=meta.reported,
+            last_cal_value=act.last_cal_value,
+            step=meta.step,
+            actuator_updated_after_write=updated_after,
+        ):
+            return CalibrationStageResult(
+                health_updates=tuple(pending), diverged=diverged
+            )
+        new = snap_offset(
+            local_calibration(
+                op.room_decide,
+                trv_temp,
+                meta.reported,
+                min_offset=meta.lo,
+                max_offset=meta.hi,
+            ),
+            step=meta.step,
+            min_value=meta.lo,
+            max_value=meta.hi,
+        )
+        plan = CalibrationPlan(
+            value=(
+                new
+                if calibration_write_due(
+                    new_offset=new,
+                    reported_offset=meta.reported,
+                    last_write_ts=act.last_cal_write_ts,
+                    now=now,
+                )
+                else None
+            )
+        )
+        if plan.value is not None:
+            report = await self._executor.run_calibration(
+                ActuatorCommand(
+                    actuator_id=cal_entity,
+                    path=ActuatorPath.CALIBRATION,
+                    value=plan.value,
+                    hvac_mode=None,
+                    reason="calibration",
+                ),
+                pre_write_value=meta.reported,
+            )
+            self._ports.commit_execution(report, now=now)
+        return CalibrationStageResult(
+            plan=plan, health_updates=tuple(pending), diverged=diverged
+        )
 
     async def _stage_ext_temp_feed(
         self, ing: IngestResult, op: OperativeResult
