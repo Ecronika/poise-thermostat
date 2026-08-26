@@ -785,7 +785,7 @@ def stage_schedule_gate(
     # schedule: night setback + optimal-start preheat (ADR-0025).
     # Resolve the forecast outdoor (I/O) here, then let the pure planner
     # decide the effective base — the decision is unit-tested without HA.
-    sched = schedule.state_at(inputs.local_minute)
+    sched = schedule.state_at(inputs.local_minute, inputs.local_weekday)
     # A model is needed for the predictive plan in BOTH phases: preheat during
     # setback (lead = minutes to comfort) and coast/optimal-stop during comfort
     # (lead = minutes to setback).  Build it whenever the EKF is identified and
@@ -793,14 +793,17 @@ def stage_schedule_gate(
     predictive = (
         can_heat and rt.learning.ekf.identified and (optimal_start or optimal_stop)
     )
-    if predictive:
-        lead_minutes = (
-            sched.minutes_to_setback if sched.is_comfort else sched.minutes_to_comfort
-        )
+    lead_minutes = (
+        sched.minutes_to_setback if sched.is_comfort else sched.minutes_to_comfort
+    )
+    if predictive and lead_minutes is not None:
         # The prepare phase ENDS at the predictive decision.  The request only
         # NAMES the horizon -- ``float(lead_minutes)`` as the tick-current
         # horizon, ``t_out_eff`` as the provider fallback; ``_run_once``
-        # resolves it under the lock.
+        # resolves it under the lock.  ``lead_minutes is None`` means the
+        # upcoming transition DOES NOT EXIST (always-comfort/always-setback,
+        # P2.1) -- same no-request path as an unidentified model: no forecast
+        # is fetched and optimal start/stop stays inactive.
         forecast_request: ForecastRequest | None = ForecastRequest(
             horizon_min=float(lead_minutes), fallback=t_out_eff
         )

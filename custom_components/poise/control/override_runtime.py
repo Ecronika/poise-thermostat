@@ -13,10 +13,14 @@ and translates ``dirty`` into its store-dirty flag.
 
 Clock injection: this module never imports Home Assistant.  Wall-clock reads
 (``dt_util.utcnow``/``dt_util.now``) arrive as injected callables
-(``now_utc_fn``/``local_minute_fn``/``minutes_to_switchpoint_fn``) evaluated
-INSIDE these functions at their call positions and under their conditions — a
-clear (``value=None``) path never reads the clock, a gated-out statistic never
-reads it either, so call counts and error paths stay well-defined.
+(``now_utc_fn``/``local_schedule_time_fn``/``minutes_to_switchpoint_fn``)
+evaluated INSIDE these functions at their call positions and under their
+conditions — a clear (``value=None``) path never reads the clock, a gated-out
+statistic never reads it either, so call counts and error paths stay
+well-defined. ``local_schedule_time_fn`` returns the atomic ``(weekday,
+minute)`` pair from ONE ``dt_util.now()`` read (``coordinator.
+_local_schedule_time_now``) — never two separate reads, which could straddle
+a midnight rollover and pair one day's weekday with the other's minute.
 """
 
 from __future__ import annotations
@@ -62,20 +66,26 @@ def set_window_bypass(user: UserControlState, on: bool) -> CommandResult:
 
 
 def minutes_to_switchpoint(
-    schedule: ComfortSchedule, local_minute: int
+    schedule: ComfortSchedule, local_schedule_time: tuple[int, int]
 ) -> float | None:
     """Minutes to the next schedule switchpoint for a hold's expiry.
 
     The nearer of the upcoming setback/comfort edges; None when there is no
-    upcoming switchpoint (always-comfort) -> the timer fallback applies.
+    upcoming switchpoint -> the timer fallback applies. ``None`` edges from
+    the schedule (P2.1: the transition does not exist — always-comfort has
+    no next comfort start, always-setback no next comfort end) are filtered
+    like the in-phase 0 values; both ``None`` -> None.
 
     This is the plain set-time switchpoint for the *announced* expiry.
     ADR-0059 §3 (end the hold already at the optimal-start preheat-start, so
     the room is warm at comfort time) is resolved in the tick -- where the
     model/forecast preheat decision lives -- by ``hold_ends_at_preheat``.  The
-    caller supplies the local minute-of-day.
+    caller supplies ``local_schedule_time`` as the atomic ``(weekday,
+    minute)`` pair from ONE clock read (P2.2) -- never a minute from one read
+    paired with a weekday from another.
     """
-    sched = schedule.state_at(local_minute)
+    weekday, local_minute = local_schedule_time
+    sched = schedule.state_at(local_minute, weekday)
     cands = [
         float(m)
         for m in (sched.minutes_to_setback, sched.minutes_to_comfort)
@@ -337,7 +347,7 @@ def record_override_stat(
     comfort_base: float,
     override_cfg: OverrideConfig,
     schedule: ComfortSchedule,
-    local_minute_fn: Callable[[], int],
+    local_schedule_time_fn: Callable[[], tuple[int, int]],
     now_utc_fn: Callable[[], float],
 ) -> None:
     """Append one L1 override observation (ADR-0059 §5; diagnostic only).
@@ -361,7 +371,9 @@ def record_override_stat(
         return
     base = mode_comfort_base(user.preset, comfort_base, override_cfg)
     delta = clamped - base
-    phase = "comfort" if schedule.state_at(local_minute_fn()).is_comfort else "setback"
+    weekday, local_minute = local_schedule_time_fn()
+    _st = schedule.state_at(local_minute, weekday)
+    phase = "comfort" if _st.is_comfort else "setback"
     user.override_stats.append(
         {
             "ts": now_utc_fn(),
