@@ -121,6 +121,8 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "prev_device_fan",
     "climate_mode",
     "has_actuated",
+    "cal_baseline",
+    "cal_entity",
 )
 
 # State-group field name -> storage key, where they differ (documented in the
@@ -204,6 +206,13 @@ class PersistedZoneState:
     clo_suggestion_rejected_at: float | None = None
     # ADR-0060 §3 season-gate floor stamp (defaulted: additive)
     season_hint_last_active_ts: float | None = None
+    # P1.4 calibration ownership pair (ActuatorRuntime; defaulted: additive).
+    # The persisted D3 ownership record — the found offset and the entity it
+    # must be restored to; the transient evidence anchors are deliberately
+    # NOT in schema (their absence after a restart triggers the resume
+    # quarantine, D4).
+    cal_baseline: float | None = None
+    cal_entity: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """The v1 store dict (key set, transforms, values).
@@ -265,6 +274,8 @@ class PersistedZoneState:
             "prev_device_fan": self.prev_device_fan,
             "climate_mode": self.climate_mode,
             "has_actuated": self.has_actuated,  # teardown-park gate
+            "cal_baseline": self.cal_baseline,  # P1.4 D3 ownership pair
+            "cal_entity": self.cal_entity,
         }
 
 
@@ -277,8 +288,11 @@ def encode(state: PersistedZoneState) -> dict[str, Any]:
 class UserStateSection:
     """Cheap user-intent keys, restored FIRST and each defensively.
 
-    ``has_actuated`` (ActuatorRuntime) is decoded here on the same robust
-    pre-model path.  ``climate_mode`` is the one no-fallback key: a non-``str``
+    ``has_actuated`` and the P1.4 calibration ownership pair
+    ``cal_baseline``/``cal_entity`` (all ActuatorRuntime) are decoded here on
+    the same robust pre-model path — missing or ill-typed keys decode to the
+    ``None``/``False`` defaults (an old store simply has no ownership).
+    ``climate_mode`` is the one no-fallback key: a non-``str``
     payload value decodes to ``None`` = "leave the ``__init__``/config value
     in place" (never a reset).
     """
@@ -288,6 +302,8 @@ class UserStateSection:
     window_bypass: bool = False
     climate_mode: str | None = None  # None: keep the __init__/config value
     has_actuated: bool = False
+    cal_baseline: float | None = None  # P1.4 D3 ownership pair
+    cal_entity: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,12 +443,18 @@ def _decode_user_state(data: dict[Any, Any]) -> UserStateSection:
     except ValueError:
         preset = OverrideMode.NONE
     cm = data.get("climate_mode")
+    cb = data.get("cal_baseline")
+    ce = data.get("cal_entity")
     return UserStateSection(
         enabled=bool(data.get("enabled", True)),
         preset=preset,
         window_bypass=bool(data.get("window_bypass", False)),
         climate_mode=cm if isinstance(cm, str) else None,
         has_actuated=bool(data.get("has_actuated", False)),
+        # P1.4: missing key / wrong type -> None (same robustness style as
+        # has_actuated — an old store carries no calibration ownership).
+        cal_baseline=float(cb) if isinstance(cb, (int, float)) else None,
+        cal_entity=ce if isinstance(ce, str) else None,
     )
 
 
