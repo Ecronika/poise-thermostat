@@ -5,6 +5,25 @@
 import type { HomeAssistant } from "./ha-types.ts";
 import { t } from "./localize.ts";
 
+const MINUTES_PER_DAY = 1440;
+const MINUTES_PER_HOUR = 60;
+
+// P2.4: chip minute values (preheating/coasting) come straight from
+// ``minutes_to_comfort``/``minutes_to_setback``, which is now the horizon to
+// a schedule edge on the cyclic weekly timeline — an ``always_setback`` zone
+// with a single short window can be days out. A raw four-digit minute count
+// ("2760 min") is unreadable, so >= 1 day renders as "<d> d <h> h" instead;
+// below that the existing "<n> min" is unchanged. Rounding the leftover
+// remainder up to a full day (e.g. 1439.6 min of the last day) must not
+// print "1 d 24 h" — the overflow folds into the day count.
+export function formatMinutesLabel(lang: string | undefined, minutes: number): string {
+  const total = Math.round(minutes);
+  if (total < MINUTES_PER_DAY) return `${total} ${t(lang, "min_left")}`;
+  const days = Math.floor(total / MINUTES_PER_DAY);
+  const hours = Math.round((total % MINUTES_PER_DAY) / MINUTES_PER_HOUR);
+  return hours >= 24 ? `${days + 1} d 0 h` : `${days} d ${hours} h`;
+}
+
 // Whole minutes until an ISO-8601 instant, clamped at 0; null when absent/unparseable.
 export function minutesUntil(iso: unknown, now: number = Date.now()): number | null {
   if (typeof iso !== "string") return null;

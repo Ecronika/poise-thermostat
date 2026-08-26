@@ -33,6 +33,7 @@ import {
   airHint,
   clampLabel,
   clockLabel,
+  formatMinutesLabel,
   heldSetpoint,
   holdView,
   minutesUntil,
@@ -649,7 +650,7 @@ export class PoiseCard extends LitElement implements LovelaceCard {
     const m = num(minutes);
     return html`<div class="chip ${alert ? "chip-alert" : ""}">
       <ha-icon icon=${icon}></ha-icon><span>${label}</span>
-      ${m != null ? html`<em>${Math.round(m)} ${t(lang, "min_left")}</em>` : nothing}
+      ${m != null ? html`<em>${formatMinutesLabel(lang, m)}</em>` : nothing}
     </div>`;
   }
 
