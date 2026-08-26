@@ -185,11 +185,18 @@ class ExternalOverrideRuntime:
 class ActuatorRuntime:
     """Last actuator write results and the external-temperature feed anchor.
 
-    Persisted: only ``has_actuated`` (the teardown-park gate); the write/feed
-    anchors are transient success-state rebuilt by the next tick's commit.
+    Persisted: ``has_actuated`` (the teardown-park gate) plus the P1.4
+    calibration ownership pair ``cal_baseline``/``cal_entity`` (D3 — the
+    found offset and the entity it must be restored to must survive a
+    restart, or the handoff would have nothing to give back); the write/feed
+    anchors and the calibration evidence anchors are transient success-state
+    rebuilt by the next tick's commit (the anchors deliberately so: their
+    absence after a restart IS the resume-quarantine trigger, D4).
     """
 
-    PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset({"has_actuated"})
+    PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {"has_actuated", "cal_baseline", "cal_entity"}
+    )
 
     last_target: float | None = None
     last_written_mode: str | None = None
@@ -198,6 +205,28 @@ class ActuatorRuntime:
     has_actuated: bool = False
     last_fed: float | None = None
     last_fed_ts: float = 0.0  # external-feed keep-alive (monotonic)
+    # --- TRV offset calibration (P1.4, ADR-0015 / D3-D4) -------------------
+    # PERSISTED ownership pair. Stamped ONCE by the cal_write commit fold on
+    # the FIRST successful write (from pre_write_value / entity_id); consumed
+    # by the handoff automaton (segment H) and the P1.5 lifecycle restores;
+    # cleared ONLY by the state-confirmed observe_calibration_restore fold
+    # (or the P1.5 lifecycle restores after confirmed success).
+    cal_baseline: float | None = None
+    cal_entity: str | None = None
+    # Transient evidence anchors (never persisted — see class docstring).
+    # last_cal_value: stamped by the cal_write commit (success) OR the resume
+    # quarantine fold; consumed by the evidence gate (convergence).
+    last_cal_value: float | None = None
+    # last_cal_write_ts (monotonic): stamped by the cal_write commit
+    # (success); consumed by the due gate and the D4 divergence predicate.
+    last_cal_write_ts: float | None = None
+    # last_cal_dispatch_wall_ts (UTC): stamped by the cal_write commit
+    # (success, from dispatch_wall_ts) OR the resume quarantine fold;
+    # consumed by the evidence gate ("report after dispatch/resume").
+    last_cal_dispatch_wall_ts: float | None = None
+    # last_cal_restore_ts (monotonic): stamped by the cal_restore commit
+    # (success = dispatch, F15); consumed by the restore redispatch throttle.
+    last_cal_restore_ts: float | None = None
 
 
 @dataclass(slots=True)
@@ -412,6 +441,14 @@ class DiagnosticsRuntime:
     # the card; transient (recomputed every tick, worst case one tick of
     # "paused" after a restart).
     tier2_dwelling: str = ""
+    # P1.4 calibration display latches (transient diagnosis keys like
+    # fan_first_reason above, but with a different WRITER: the verdicts
+    # travel in the typed stage results and the SEQUENCER stamps the
+    # latches, keeping the calibration stages report-pure). cal_diverged is
+    # the D4 divergence predicate, cal_handoff_pending the D3 handoff
+    # block; both feed the report phase, never a control input.
+    cal_diverged: bool = False
+    cal_handoff_pending: bool = False
 
 
 @dataclass(slots=True)

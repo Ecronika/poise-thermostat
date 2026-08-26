@@ -40,10 +40,11 @@ from typing import Any, Protocol
 
 from ..comfort.en16798 import Category
 from ..comfort.presence import PresenceConfig
-from ..comfort.schedule import ComfortSchedule, ComfortWindow, parse_hhmm
+from ..comfort.schedule import ALL_DAYS, ComfortSchedule, ComfortWindow, parse_hhmm
 from ..comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from ..const import (
     CLO_OFFSET_MAX,
+    COMFORT_DAY_KEYS,
     COMPRESSOR_GUARD_AUTO,
     CONF_ABSENCE_AFTER_MIN,
     CONF_ACTIVE_COMFORT,
@@ -56,6 +57,7 @@ from ..const import (
     CONF_CATEGORY,
     CONF_CLO_OFFSET,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_DAYS,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
@@ -91,6 +93,7 @@ from ..const import (
     CONF_THERMAL_SHOCK_DELTA,
     CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
+    CONF_TRV_CALIBRATION,
     CONF_TRV_EXTERNAL_TEMP,
     CONF_VENT_NOTIFY,
     CONF_WEATHER,
@@ -202,6 +205,69 @@ def _parse_dynamics_override(raw: Any) -> DeviceDynamics | None:
         return None
 
 
+_DAY_BITS: dict[str, int] = {k: 1 << i for i, k in enumerate(COMFORT_DAY_KEYS)}
+# Distinct from the config-flow module's own ``_MISSING`` (config_flow.py):
+# that one marks "no days_N key was submitted on this form", a UI-renumbering
+# concern; this one marks "the merged config mapping has no such key at all",
+# the fail-closed-parse concern below. Both are private, module-local
+# sentinels for the same "absent, not merely None/empty" idea — kept separate
+# on purpose so this pure module never imports the HA-coupled config_flow.
+_MISSING = object()
+
+
+def _days_mask(value: object = _MISSING) -> tuple[int, tuple[str, ...]]:
+    """Fail-closed weekday-mask parse for one ``comfort_days`` value (P2.3).
+
+    Three cases, deliberately NOT collapsed into one "coerce or default":
+
+    * ``value`` is ``_MISSING`` (the key is absent from the merged mapping —
+      a pre-P2.3/legacy store) or ``None`` -> ``(ALL_DAYS, ())``. A maskless
+      window keeps behaving exactly as before P2.3.
+    * ``value`` is present but not a list/tuple, or an empty list/tuple ->
+      ``(0, ("—",))`` (a bare em-dash). The marker is deliberately:
+      bracket-free — it flows unchanged into the ``schedule_days_invalid``
+      repair-issue description, which HA renders through ha-markdown + an
+      HTML sanitizer, and a bare ``<...>`` token is syntactically a tag
+      there and gets stripped (the user would see "no recognised day ()");
+      AND unparenthesised, non-English — the EN/DE description templates
+      already wrap ``{tokens}`` in their OWN parentheses
+      (``"...no recognised day ({tokens})..."`` /
+      ``"...keinen erkannten Tag ({tokens})..."``), so a marker spelled
+      ``"(none)"`` rendered as the double-parenthesised, untranslated
+      ``"((none))"`` in the German sentence (review P2.3c) — the bare
+      em-dash instead renders naturally as ``"(—)"`` in both locales, no
+      translation needed. It covers BOTH shapes of "nothing usable was
+      submitted" (empty selection and wrong-type value) under one label —
+      they are the same user-facing situation ("you cleared/broke the day
+      selection"), not two.
+    * ``value`` is a non-empty list/tuple but every entry is an unrecognised
+      token -> ``(0, (<the bad tokens>,))`` — the real, distinct tokens are
+      reported so the user can see exactly what did not parse.
+      Either way the window stays CONFIGURED (it still has real start/end
+      times) but is never ACTIVE — ``ComfortSchedule.from_windows`` already
+      turns an all-``days == 0`` schedule into always-setback (P2.1), so
+      this is the correct fail-closed degradation. An explicit, unusable
+      value must NEVER fail open to seven days — that would silently
+      override the user's intent to restrict the window.
+    * Otherwise: accumulate the known bits, collect the unrecognised tokens.
+      The returned mask legitimately CAN be 0 here (every token unknown) —
+      this function must never substitute ``ALL_DAYS`` for it.
+    """
+    if value is _MISSING or value is None:
+        return ALL_DAYS, ()
+    if not isinstance(value, (list, tuple)) or not value:
+        return 0, ("—",)
+    mask = 0
+    bad: list[str] = []
+    for token in value:
+        bit = _DAY_BITS.get(token)
+        if bit is None:
+            bad.append(str(token))
+        else:
+            mask |= bit
+    return mask, tuple(bad)
+
+
 @dataclass(frozen=True, slots=True)
 class ZoneStructure:
     """Entity wiring of one zone (the structural ``entry.data`` reads).
@@ -309,6 +375,12 @@ class ZoneTuning:
     override_suggestions: bool  # ADR-0060 L2 suggestion emission (opt-in, §3)
     clo_offset: float  # ADR-0067 learned household clo bias, clamped +-0.3
     active_comfort: bool  # ADR-0069 mechanism toggle (tier gates release)
+    trv_calibration: bool  # ADR-0015 / D6 opt-in TRV local-offset calibration
+    # P2.3: unrecognised comfort_days(_N) tokens across every window, in scan
+    # order (never ALL_DAYS-materialized) — empty when every mask parsed
+    # clean or was legitimately absent. Surfaced as the schedule_days_invalid
+    # repair issue (HealthReporter, via coordinator._apply_hot_tuning).
+    schedule_days_invalid: tuple[str, ...] = ()
 
     @classmethod
     def from_merged(cls, merged: Mapping[str, Any]) -> ZoneTuning:
@@ -344,11 +416,19 @@ class ZoneTuning:
         # but a suggestion writer or hand-edited store must not break the
         # schedule). A half/invalid pair degrades to "that window absent";
         # overlap merging stays in ``ComfortSchedule.from_windows``.
+        # P2.3: each valid window also gets a fail-closed weekday mask — the
+        # sibling ``comfort_days(_N)`` key, absent on every pre-P2.3 window
+        # (-> ALL_DAYS, unchanged behaviour). ``_days_mask`` never fails open
+        # on a present-but-unusable value, so the bad tokens it reports are
+        # collected across every window into one config-quality field.
         windows: list[ComfortWindow] = []
+        bad_days: list[str] = []
         start = parse_hhmm(merged.get(CONF_COMFORT_START))
         end = parse_hhmm(merged.get(CONF_COMFORT_END))
         if start is not None and end is not None:
-            windows.append(ComfortWindow(start, end))
+            mask, bad = _days_mask(merged.get(CONF_COMFORT_DAYS, _MISSING))
+            bad_days.extend(bad)
+            windows.append(ComfortWindow(start, end, mask))
         extra_ns = sorted(
             int(m.group(1))
             for key in merged
@@ -358,7 +438,9 @@ class ZoneTuning:
             s_n = parse_hhmm(merged.get(f"{CONF_COMFORT_START}_{n}"))
             e_n = parse_hhmm(merged.get(f"{CONF_COMFORT_END}_{n}"))
             if s_n is not None and e_n is not None:
-                windows.append(ComfortWindow(s_n, e_n))
+                mask, bad = _days_mask(merged.get(f"{CONF_COMFORT_DAYS}_{n}", _MISSING))
+                bad_days.extend(bad)
+                windows.append(ComfortWindow(s_n, e_n, mask))
         # An empty/invalid HH:MM parses to None -> window absent; no windows at
         # all (or zero depth) -> always_comfort (guard identical on both paths,
         # including the error path).
@@ -446,6 +528,9 @@ class ZoneTuning:
             active_comfort=bool(
                 merged.get(CONF_ACTIVE_COMFORT, DEFAULT_ACTIVE_COMFORT)
             ),
+            # ADR-0015 / D6: opt-in, no DEFAULT_ constant (literal False, like
+            # trace_enabled/vent_notify above).
+            trv_calibration=bool(merged.get(CONF_TRV_CALIBRATION, False)),
             # Defensive clamp: the fix flow writes inside +-0.3 already, but a
             # hand-edited entry must not exceed the ADR-0067 bounds either.
             clo_offset=max(
@@ -455,6 +540,7 @@ class ZoneTuning:
                     float(merged.get(CONF_CLO_OFFSET, DEFAULT_CLO_OFFSET)),
                 ),
             ),
+            schedule_days_invalid=tuple(bad_days),
         )
 
 

@@ -98,6 +98,57 @@ class ActuatorPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class CalibrationPlan:
+    """The decided TRV offset-calibration write of this tick (P1.4, ADR-0015).
+
+    ``value`` is the snapped offset that went on the wire (``None`` = the
+    segment ran but decided not to write — deadband/interval not due).
+    ``restore=True`` marks the ownership-handoff restore dispatch (segment H)
+    rather than a regulation write (segment W); the restore target is the
+    baseline snapped onto the CURRENT entity grid, which may differ from the
+    raw baseline when the grid shrank (``calibration_restore_clipped``).
+    """
+
+    value: float | None
+    restore: bool = False
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CalibrationHandoffResult:
+    """Segment H — the fail-closed calibration ownership handoff (D3).
+
+    ``handoff_pending=True`` blocks the successor compensation path for this
+    tick (the orchestrator skips the ext-temp feed; the P3 valve segment will
+    honour the same skip): the previously written offset may still be
+    physically active, so two compensations must never overlap.  ``plan`` is
+    the restore dispatch record (None when nothing was dispatched — confirmed,
+    throttled, unreadable or gone).  ``health_updates`` follow the F19 pattern
+    (emitted by the orchestrator right after the stage call).
+    """
+
+    handoff_pending: bool
+    health_updates: tuple[HealthUpdate, ...] = ()
+    plan: CalibrationPlan | None = None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CalibrationStageResult:
+    """Segment W — the calibration regulation write (P1.4).
+
+    ``plan`` is None when a gate before the plan point ended the segment (not
+    the live path, actuator offline, metadata unsafe, resume quarantine,
+    evidence gate); a ``CalibrationPlan(value=None)`` records "planned, not
+    due".  ``diverged`` is the tick's D4 divergence verdict (>= 900 s without
+    the device showing the last command) — carried here so the orchestrator
+    can stamp the display latch without the stage mutating runtime state.
+    """
+
+    plan: CalibrationPlan | None = None
+    health_updates: tuple[HealthUpdate, ...] = ()
+    diverged: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ExternalTemperaturePlan:
     """TRV external-temperature select/feed sequence.
 
@@ -310,7 +361,8 @@ class ScheduleGateResult:
     """Schedule state + predictive decision.
 
     The forecast seam: ``forecast_request`` is set iff the ``predictive`` gate
-    held, with the tick-current lead horizon.
+    held AND the upcoming transition exists (P2.1: a ``None`` lead means there
+    is no edge to preheat/coast toward), with the tick-current lead horizon.
     """
 
     sched: ScheduleState
@@ -740,6 +792,12 @@ class TickPlan:
     ``SafeStatePlan`` decision is positioned AFTER the BEFORE_EXECUTION save
     (no reorder proof exists for moving the outage clock read / actuator read
     into the prepare phase).
+
+    ``calibration_plan`` (P1.4, defaulted — additive) records the tick's
+    calibration dispatch: segment W's regulation plan on the live calibration
+    path, segment H's restore plan during an ownership handoff (the two are
+    mutually exclusive per tick), ``None`` when no calibration segment
+    dispatched or planned anything.
     """
 
     actuator_plan: ActuatorPlan | None
@@ -749,6 +807,7 @@ class TickPlan:
     persistence: PersistencePhase
     control_data: Mapping[str, object]
     finalize_context: FinalizeContext | None
+    calibration_plan: CalibrationPlan | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +833,8 @@ class EffectExecution:
 
     ``effect_id`` vocabulary (one id per commit rule): ``mode_nudge``,
     ``fan_write``, ``setpoint_write``, ``ext_select``, ``ext_feed``,
-    ``rescue_nudge``, ``rescue_write``, ``safe_mode``, ``safe_setpoint``. The
+    ``rescue_nudge``, ``rescue_write``, ``safe_mode``, ``safe_setpoint``,
+    ``cal_write``, ``cal_restore``. The
     rescue nudge is deliberately NOT the tick ``mode_nudge``: it stamps
     ``last_hvac_cmd_ts`` unconditionally, while the tick nudge is gated via
     ``mode_changed``. ``fan_write`` is not a thermal actuation: it stamps the
@@ -787,6 +847,20 @@ class EffectExecution:
     ``safe_setpoint`` -> the resolved safe floor (-> ``last_target``);
     ``ext_feed`` -> the fed value (-> ``last_fed``); ``rescue_write`` -> the
     rescue floor (diagnosis only — the commit sets ``last_written_sp=None``).
+
+    Calibration semantics (P1.4, ADR-0015 / D3-D4): ``cal_write`` carries the
+    snapped offset in ``commanded_value`` (-> ``last_cal_value``) and the
+    device's reported offset just before the write in ``pre_write_value``
+    (-> the one-time ``cal_baseline`` stamp of the FIRST successful write);
+    ``cal_restore`` carries the restore target in ``commanded_value`` and the
+    pre-write reported offset likewise.  Both populate ``entity_id`` (the
+    calibration number entity, -> ``cal_entity``) and ``dispatch_wall_ts``
+    (UTC wall clock taken IMMEDIATELY before the dispatch — the D4 evidence
+    anchor "actuator reported after the dispatch").  The ``cal_restore``
+    commit clears NOTHING: success is dispatch, not device adoption (D3) —
+    ownership is cleared solely by the state-confirmed
+    ``observe_calibration_restore`` fold; the commit stamps only the
+    redispatch throttle ``last_cal_restore_ts``.
 
     ``commanded_mode`` carries the mode STRING an effect stamps (a float field
     cannot): ``mode_nudge`` -> desired hvac (-> ``last_commanded_hvac``);
@@ -826,6 +900,12 @@ class EffectExecution:
     # ADR-0068 U3: the fan_write change gate (mirrors mode_changed for the
     # fan channel — the tick mode nudge's flag stays mode-nudge-only).
     fan_changed: bool = False
+    # P1.4 calibration transport (optional, following the commanded_mode
+    # precedent): the written number entity (-> ``cal_entity``) and the UTC
+    # wall instant taken immediately before the dispatch (-> the D4 evidence
+    # anchor ``last_cal_dispatch_wall_ts``). None on every other effect.
+    entity_id: str | None = None
+    dispatch_wall_ts: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

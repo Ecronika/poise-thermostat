@@ -203,10 +203,16 @@ class TickInputs:
     the epoch wall-clock at snapshot time (also the sensor-age anchor) — one
     read each, so every pre-await consumer shares the same instant; clock calls
     AFTER the first await stay untouched. ``local_minute`` is minutes since
-    local midnight for the comfort schedule; ``local_day_ordinal`` is the local
-    calendar day's ordinal for the running-mean and seasonless observers
-    (``dt_util.now().toordinal()``); ``sun_elevation`` comes from ``sun.sun``
-    for the solar estimate.
+    local midnight for the comfort schedule; ``local_weekday`` is the SAME
+    local instant's ISO weekday (0 = Monday .. 6 = Sunday, ``local_now.
+    weekday()``) that ``ComfortSchedule.state_at`` requires alongside it — a
+    snapshot input, not a second clock read: pairing ``local_minute`` from one
+    read with ``local_weekday`` from another could straddle a midnight
+    rollover mid-tick and hand the schedule Sunday's minute with Monday's
+    weekday (or vice versa), which is two truths for one instant.
+    ``local_day_ordinal`` is the local calendar day's ordinal for the
+    running-mean and seasonless observers (``dt_util.now().toordinal()``);
+    ``sun_elevation`` comes from ``sun.sun`` for the solar estimate.
 
     Boundary (see the module docstring): presence, the central actuator read
     and the select/valve reads are NOT fields here — they happen after awaits
@@ -216,6 +222,7 @@ class TickInputs:
     now_mono: float
     now_wall: float
     local_minute: int
+    local_weekday: int
     local_day_ordinal: int
     sun_elevation: float | None
     room: SensorValue

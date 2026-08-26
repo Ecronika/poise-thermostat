@@ -185,6 +185,69 @@ class ZoneRuntime:
             self.dirty = True
         self.actuator.has_actuated = True
 
+    def observe_calibration_restore(
+        self, *, reported: float, step: float, restore_target: float
+    ) -> bool:
+        """State-confirmed calibration ownership handoff (D3) — pure pre-I/O
+        fold (precedent: the convergence observe folds).
+
+        Compares the device's REPORTED offset against the actually written
+        ``restore_target`` (± half a grid step): a baseline that was clipped
+        onto a shrunken entity grid would otherwise never confirm (plan
+        review Rev. 2.2 point 6). On confirmation the whole calibration
+        ownership — baseline, entity and every evidence anchor — is cleared
+        and the flip persisted; only then may a successor compensation path
+        take over. Returns True when no ownership stands (nothing to hand
+        off) or the handoff just confirmed; False while the device has not
+        yet shown the restore target.
+        """
+        if self.actuator.cal_baseline is None:
+            return True
+        if abs(reported - restore_target) <= step / 2 + 1e-9:
+            self.clear_calibration_ownership()
+            return True
+        return False
+
+    def clear_calibration_ownership(self) -> None:
+        """THE one clearing site for the calibration ownership (P1.5).
+
+        Baseline, entity and every evidence anchor go together, and the flip
+        persists (``dirty``). Exactly two callers: the state-confirmed
+        pre-I/O fold :meth:`observe_calibration_restore` and the
+        coordinator's lifecycle port ``async_prepare_actuator_handoff`` —
+        a second clearing implementation would let the two field sets drift.
+        """
+        self.actuator.cal_baseline = None
+        self.actuator.cal_entity = None
+        self.actuator.last_cal_value = None
+        self.actuator.last_cal_write_ts = None
+        self.actuator.last_cal_dispatch_wall_ts = None
+        self.actuator.last_cal_restore_ts = None
+        self.dirty = True  # persist the ownership clear
+
+    def observe_calibration_resume(self, *, reported: float, wall_now: float) -> bool:
+        """Restart quarantine (D4) — pure pre-I/O fold, second of the pair.
+
+        ``cal_baseline`` restored but ``last_cal_value`` gone means the
+        transient evidence anchors were lost: the process is fresh. The
+        REPORTED offset is adopted as the last command and the dispatch
+        anchor set to "now" — this tick must not write, and accumulation
+        resumes only once the actuator reports NEWER than this anchor
+        (otherwise a stale ``current_temperature`` could compound the offset,
+        e.g. −1.5 → −3.0). First-ever activation (baseline ``None``) is
+        untouched: without a baseline there never was a Poise command to be
+        stale against. Returns True while the quarantine engages (the caller
+        ends the segment).
+        """
+        if (
+            self.actuator.cal_baseline is None
+            or self.actuator.last_cal_value is not None
+        ):
+            return False
+        self.actuator.last_cal_value = reported
+        self.actuator.last_cal_dispatch_wall_ts = wall_now
+        return True
+
     def commit_execution(
         self,
         report: ExecutionReport,
@@ -309,6 +372,35 @@ class ZoneRuntime:
                             raise ValueError("fan_write commit needs now=")
                         self.external.last_fan_cmd_ts = now
                     self.external.last_commanded_fan = execution.commanded_mode
+            elif effect_id == "cal_write":
+                if execution.success:
+                    if now is None:
+                        raise ValueError("cal_write commit needs now=")
+                    if self.actuator.cal_baseline is None:
+                        # FIRST successful write: the offset the device
+                        # reported just before it becomes the persisted D3
+                        # baseline, the written entity the ownership anchor.
+                        # Never overwritten by later writes — the baseline is
+                        # the pre-Poise state, not a moving echo.
+                        self.actuator.cal_baseline = execution.pre_write_value
+                        self.actuator.cal_entity = execution.entity_id
+                        self.dirty = True  # persist the ownership flip
+                    self.actuator.last_cal_value = execution.commanded_value
+                    self.actuator.last_cal_write_ts = now
+                    self.actuator.last_cal_dispatch_wall_ts = execution.dispatch_wall_ts
+                    # No has_actuated flip: an offset write is a sensor-side
+                    # compensation, not a thermal actuation — the teardown
+                    # park gate stays untouched (fan_write reasoning; the
+                    # handoff automaton owns the calibration teardown, D3).
+            elif effect_id == "cal_restore":
+                if execution.success:
+                    if now is None:
+                        raise ValueError("cal_restore commit needs now=")
+                    # ONLY the redispatch throttle. Ownership is cleared
+                    # solely by the state-confirmed observe_calibration_restore
+                    # fold (D3): success here is dispatch semantics (F15),
+                    # never device adoption.
+                    self.actuator.last_cal_restore_ts = now
             else:
                 raise ValueError(f"commit_execution: unknown effect_id {effect_id!r}")
         events: list[OverrideEnded] = []
@@ -432,6 +524,12 @@ class ZoneRuntime:
             self.user.climate_mode = user.climate_mode
         # The actuation latch keeps the teardown-park gate across the restart.
         self.actuator.has_actuated = user.has_actuated
+        # P1.4: the D3 calibration ownership pair survives the restart; the
+        # transient evidence anchors deliberately do NOT — their absence with
+        # a restored baseline is exactly what arms the resume quarantine
+        # (observe_calibration_resume, D4) on the first tick.
+        self.actuator.cal_baseline = user.cal_baseline
+        self.actuator.cal_entity = user.cal_entity
         # Heavier learned models AFTER the user intent. ``None`` (key
         # absent/non-dict, or undecoded because the sequential model parse
         # stopped at an earlier key -- surfaced via ``decoded.model_error``)
