@@ -31,6 +31,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Open-window reaction (sensor *or* sensorless)** — a configured window sensor or the **slope detector** (open threshold adapted to the learned time constant τ) drops the room to the frost/mould floor through the solver and pauses learning; a per-zone **bypass switch** overrides it. The sensor wins when present.
 - **Comfort presets & timed override** — Eco / Comfort / Boost / Away as **norm-clamped offsets on the comfort base** (surfaced as HA preset modes, not free temperatures); a manual setpoint **auto-reverts** to the schedule/preset after a window so it never sticks, and a value pushed outside the comfort band is clamped to it and flagged (`override_clamped`) rather than limited silently. A setpoint or HVAC mode changed **on the device itself** (TRV wheel / IR remote / vendor app) is adopted as such a hold — with the zone's return rule — *once Poise can tell it apart from an echo of its own write*; the preconditions and the modality limits are spelled out under [Device-side interventions (adoption)](#device-side-interventions-adoption) (default on, opt-out per zone; ADR-0059).
 - **Active comfort (opt-in)** — with the per-zone `active_comfort` toggle ON (default off), a fan-capable AC uses the **fan as the first cooling stage** (echo-gated fan-first sequence with dwell/anti-flap, ADR-0068) plus the ADR-0053 idle circulation; the tier-2 comfort measures (fan-CE credit on the cooling edge, capped PMV band shift) additionally wait for the ADR-0055 maturity gates (ADR-0069).
+- **TRV offset calibration (opt-in)** — for a TRV with only a local-offset calibration `number` (no external-temperature input, no writable valve), the per-zone *TRV calibration* toggle (default off) writes and periodically re-corrects that offset so the device's own control loop sees the true room temperature. An external-temperature input always takes precedence when configured (ADR-0015, D6). See [TRV offset calibration](#trv-offset-calibration-fallback).
 - **Bundled Lovelace cards** — Poise ships its own cards inside the integration and **auto-registers** them (no separate HACS plugin, no manual resource URL). `poise-card` puts the **EN 16798 comfort band** front and centre — operative temperature & setpoint as markers in the live band, a 24 h history graph, clickable status chips, learning confidence and a **shadow pill that shows what the engine *would* do** (TPI %/PI/MPC). `poise-system-card` surfaces the multi-zone hub (boiler demand, heating zones, flow target, load shedding). Self-contained Lit/TS, only `lit` bundled (ADR-0040).
 - **Robust by design** — degradation ladder (measured → derived → estimated → default), repair issues, redacted diagnostics, a change-aware setpoint write-throttle (compares against the device's real setpoint, snapped to its step), and learning + user intent (enable/override/mode) persisted across restarts (and flushed on Home Assistant shutdown, not only periodically). While enabled, Poise also keeps a heat-capable actuator in its `heat` mode so it follows Poise's setpoint instead of running its own `auto`/schedule.
 
@@ -49,7 +50,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 
 ### 🗺️ Roadmap (built or designed, not in the active path)
 
-- **Direct valve / TPI control (live actuation)** — auto-detected for devices with a writable valve-open number (Sonoff TRVZB `valve_opening_degree`, FW v1.1.4+) and harness-validated; today it runs as a diagnostic shadow (above), with live valve writing gated on cold-season validation. `valve_closing_degree` is never written (TRVZB firmware bug). A generic `pi_heating_demand` path exists; the TRV-offset **calibration** helpers (`control/calibration.py`) are written and unit-tested but **not yet wired into the tick** — operative mode instead feeds the true room temperature to the TRV's own external-input `number` (below), and **without that input Poise performs no live TRV compensation**.
+- **Direct valve / TPI control (live actuation)** — auto-detected for devices with a writable valve-open number (Sonoff TRVZB `valve_opening_degree`, FW v1.1.4+) and harness-validated; today it runs as a diagnostic shadow (above), with live valve writing gated on cold-season validation. `valve_closing_degree` is never written (TRVZB firmware bug). A generic `pi_heating_demand` path exists.
 - **KNX expose** — operative temperature, setpoints, comfort band and heat demand on group addresses (designed, optional).
 - **Multi-zone resource coordination** — via the *Poise System* hub (ADR-0038/0039): boiler-demand aggregate + opt-in boiler actuation, plus **load-shedding, compressor-group protection and a flow-temperature allocator computed as diagnostic shadows** (smallest-gap shedding, per-group min-run/off, highest-request-wins flow with anti-hunt hysteresis — the last harness-validated against oscillation, ADR-0013). Zone-side / generator-side enforcement is the next stage.
 
@@ -159,7 +160,7 @@ If the actuator's device also exposes any of these, Poise detects and uses them;
 | Detected on the device | What Poise does with it |
 | --- | --- |
 | a writable valve-position `number` — id containing `valve_position`, `pi_heating_demand`, `heating_demand` or `valve_opening_degree` | selects the direct-valve (TPI) actuation path and publishes the duty as `tpi_*` (**shadow** today, see [Known limitations](#known-limitations)). `valve_closing_degree` is explicitly excluded and never written. |
-| a writable calibration `number` — `local_temperature_calibration`, `temperature_offset`, `temperature_calibration` | the calibration path; built and unit-tested, **not yet wired into the tick**. |
+| a writable calibration `number` — `local_temperature_calibration`, `temperature_offset`, `temperature_calibration` | on a reliably heat-capable device, raises the **TRV offset calibration available** repair suggestion; live only once the opt-in *TRV calibration* option is on (see [TRV offset calibration](#trv-offset-calibration-fallback)). |
 | a `number` whose id contains `external` (temperature device class or none) | feeds the fused room temperature into the TRV and switches its sensor-source `select` to `external`; re-pushed at least every 10 min so a device that times the input out never falls back to its own sensor. Restored to `internal` when the zone is deleted. |
 | a `switch` whose id contains `schedule` | detects the device's own weekly program and raises a repair issue. Poise never flips that switch for you — a second program is yours to end — but it does hold a heat-capable actuator in `heat`, so the device follows the written setpoint instead of its own `auto`. |
 | a `switch`/`select` containing `adaptive` or `smart_temperature` | detects a second control loop running on the device itself and raises a repair issue. |
@@ -196,7 +197,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Comfort weight | yes | 70 % | Comfort-vs-energy priority used by preheat / band widening. |
 | Setback delta | yes | 3 K | Night / away setback below the comfort base. |
 | Optimal start | yes | on | Forecast-aware preheat to the comfort deadline. |
-| Comfort start / end (+ windows 2–8) | no | — | Daily comfort window(s) (enables scheduled setback when set). The options form offers one additional empty window once the previous one is filled (n+1 pattern, up to 8; clear both times to remove one). Overlapping windows merge; optimal start preheats to **every** window start (ADR-0070). |
+| Comfort start / end (+ windows 2–8) | no | — | Daily comfort window(s) (enables scheduled setback when set). The options form offers one additional empty window once the previous one is filled (n+1 pattern, up to 8; clear both times to remove one). Overlapping windows merge; optimal start preheats to **every** window start (ADR-0070). Each window also has its own weekday selection — see [Weekday-specific comfort windows](#weekday-specific-comfort-windows) below. |
 | Outdoor / humidity / MRT / T_rm sensors | no | — | Improve accuracy (mould floor, operative temperature, running mean). |
 | Outdoor-humidity sensor | no | — | Dedicated outdoor-RH sensor for the ventilation advice (else the weather entity's `humidity` attribute is used, ADR-0066). |
 | Presence (home) · occupancy sensor · absence delay | no | — · — · 30 min | ADR-0058 presence coupling: person/tracker entities gate the house, a motion/occupancy sensor gates the room. **Inside** a comfort window, occupancy extends comfort — the band only relaxes (Eco widening) after the room has been empty for the absence delay, and returning restores it immediately. Occupancy does **not** raise the band outside the window(s) (use Boost or another window for spontaneous use; ADR-0058 N2). A dead sensor fails safe to *present*. |
@@ -207,6 +208,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Window sensor | no | — | Door/window contact for the open-window reaction (else the slope detector is used). |
 | Weather / irradiance | no | — | Forecast for optimal-start; measured solar gain. |
 | External-temperature input | no | — | TRV `number` entity Poise feeds the true room temperature to (operative mode). Re-pushed at least every 10 min even when unchanged, so TRVs that time out an external input (e.g. Danfoss ~30 min, Sonoff TRVZB ~1 h) never fall back to their own mounted sensor. |
+| TRV calibration | no | off (*Options → Advanced*) | Opt-in local-offset compensation for a TRV that has only a calibration `number` (no external-temperature input, no writable valve). See [TRV offset calibration](#trv-offset-calibration-fallback) below. |
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
 | Adaptive cooling edge | no | auto | Active by default on cool-capable devices (`auto`): lifts the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band. `off` forces the fixed summer band; heat-only TRVs are unaffected either way (ADR-0023 §1). |
 | Compressor guard · min-off · mode-hold | no | auto · 300 s · 300 s | Single-AC anti-short-cycle (*Options → Advanced*): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
@@ -219,6 +221,29 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Compressor group · declared power · design flow temp · source policy | no | — | Multi-zone resource-coordination hints (shadow stage). |
 
 > **Climate mode is set on the thermostat, not in the options.** A zone's heat/cool mode (internally `auto` / `heat_only` / `cool_only`) is chosen on the Poise `climate` entity via its HVAC mode (`heat` / `cool` / `auto` / `off`, per device capability); it is store-owned and persists across restarts — it is not a config-flow field. A heat-only TRV only ever exposes `heat` / `off`.
+
+#### Weekday-specific comfort windows
+
+Every comfort window (the base pair and windows 2–8) has its own weekday selector — a **mon…sun multi-select** shown alongside its start/end time. Leaving it untouched keeps a window running **every day**, exactly as before this option existed: a missing selection means "all days", so existing configurations are unchanged.
+
+- **Overnight windows belong to their start day.** A window like `22:00–06:00` set on Saturday is active from Saturday 22:00 through Sunday 06:00 — the end time never re-triggers a day check of its own. This also covers the **Sunday→Monday seam**: a Sunday-overnight window spills into Monday's first minutes, and a Monday window starting at `00:00` merges seamlessly with it if they touch.
+- **An explicitly invalid or emptied day selection deactivates the window** — it does **not** fail open to "all days". The zone falls back to setback (never comfort) for that window, and a repair issue, **invalid comfort-window days** (`schedule_days_invalid`), points at the zone and the unrecognised selection so it's never a silent behaviour change. Fix the day selection under the zone's options to clear it.
+
+#### TRV offset calibration (fallback)
+
+Some TRVs expose only a local-offset **calibration** `number` (e.g. `local_temperature_calibration`) — no external-temperature input, no writable valve position. For those, Poise can still get the device to see the true room temperature: with the *TRV calibration* option on, it writes a small offset onto the calibration entity and periodically re-corrects it, so the device's own internal control loop reads the real room temperature instead of its own (radiator-adjacent) sensor.
+
+The option is **opt-in** — off by default. Once Poise detects a writable calibration entity on a reliably heat-capable device, the zone gets a fixable repair suggestion (**TRV offset calibration available**, Apply/Ignore) rather than switching itself on.
+
+**Precedence (ADR-0015, D6):** a configured external-temperature input always wins — even during a brief `unavailable` blip, so the two compensation paths never flip-flop against each other. The direct-valve path (where available) comes next; calibration only becomes the live path when neither of those applies and the option is on.
+
+Safety properties:
+- The offset is snapped to the device's own reported grid (min/max/step) before every write — never a value the device would silently clamp or reject.
+- An evidence gate withholds further correction until the device has actually reported the previous offset, so a restart or a stalled write can't run away.
+- Handing the offset back — option turned off, actuator swapped, zone removed — is **state-confirmed** against a fresh read-back, never a blanket `0.0`; `0.0` is only ever written when it *is* the restored value.
+- While the calibration entity exists but cannot be read, the compensation path stays blocked (fail-closed) rather than guessing.
+
+Four repair issues track its health: **TRV calibration offset not handed back** (`calibration_restore_failed`), **calibration offset restored clipped** (`calibration_restore_clipped`, informational), **calibration entity not usable** (`calibration_entity_unsafe`), and **calibration offset not applied** (`calibration_unapplied`) — see [Troubleshooting](#troubleshooting).
 
 ### System (optional multi-zone hub)
 
@@ -276,6 +301,8 @@ sections:
 Only four are enabled on a fresh install — `operative_temperature`, `confidence` (*Model confidence*), `learning_phase` and `override_expires_at` — plus the climate entity, the bypass switch and the two feedback buttons. The other 19 sensors are registered but disabled; enable the ones you want under *Settings → Devices & Services → Entities*.
 
 Everything else Poise exposes for transparency lives as **attributes on the `climate` entity — not as standalone sensors** — so read them from `climate.<room>`'s state attributes rather than looking for a `sensor.<room>_…`: the comfort index (`pmv` / `ppd`), the cooling / humidity shadows (`cool_sp_eff`, `dry_active`, `abs_humidity_gkg`, `fr_*`, `fan_ce_k`, `fan_velocity_ms`), the reference-frame details (`ref_offset_dev`, `ref_offset_trusted`, `cool_sp_compensated`), the transparency flags (`override_clamped`, `mould_floor`, `dewpoint`), the hold lifecycle (`override_active`, `override_reason`, `sp_adopt_reason`, `mode_adopt_reason`), the savings estimate (`savings_*`) and this zone's `heat_demand`. (For example there is no `sensor.<room>_pmv`; read the `pmv` attribute from the climate entity instead. The four `tpi_*`/`pi_*`/`ref_offset` values above are the exception — they exist *both* as attributes and as the disabled-by-default statistics sensors listed earlier.)
+
+> **Attribute contract — `minutes_to_comfort` / `minutes_to_setback` can be `null`.** These two attributes count down to the next schedule edge (preheat/coasting); a zone that is permanently in one state — no comfort window configured (`always_comfort`) or every window deactivated (`always_setback`, e.g. by an invalid day selection) — has no such edge, so the attribute is `null` rather than a number. Automations and templates reading these should handle `null` (e.g. Jinja's `| int(0)` or a guard before arithmetic) instead of assuming a number is always present; the bundled card already does.
 
 **System hub** — one boiler-demand `binary_sensor` aggregate (with zone counts, flow target and load-shedding attributes).
 
@@ -479,12 +506,11 @@ Poise is **Alpha**. The list below is the honest counterpart to the [Capability 
 
 ### The predictive machinery does not drive yet
 
-Everything under *Shadow / diagnostic* is computed every tick against the live learned model and published, but **writes nothing**. That is enforced structurally, not by convention: within the tick exactly one adapter module may dispatch service calls (pinned by a test), and the only actuation path it ever constructs is the plain setpoint write.
+Everything under *Shadow / diagnostic* is computed every tick against the live learned model and published, but **writes nothing**. That is enforced structurally, not by convention: within the tick exactly one adapter module may dispatch service calls (pinned by a test), and the only actuation paths it ever constructs are the plain setpoint write and — only for a zone with the opt-in *TRV calibration* option on — the calibration-offset write ([TRV offset calibration](#trv-offset-calibration-fallback)).
 
 - **MPC** (`mpc_*`) never commands the actuator; live authority is gated on cold-season validation (ADR-0033).
 - **Direct-valve TPI** (`tpi_*`) is computed for devices with a writable valve opening but the valve is not written (ADR-0036). `valve_closing_degree` is never written at all.
 - **PI setpoint compensation** (`pi_*`) is computed for setpoint-only TRVs and not applied (ADR-0037).
-- **TRV offset calibration** (`control/calibration.py`) is written and unit-tested but **not wired into the tick**. Without a TRV external-temperature input, Poise performs no live TRV offset compensation.
 - **Multi-zone load shedding, compressor-group protection and the flow-temperature allocator** are shadow computations; only the boiler-demand aggregate (and, opt-in, the boiler switch itself) actuates.
 - **Fan cooling-effect credit** (`fan_ce_k`) and the **PMV band shift** stay diagnostic until the ADR-0055/0069 maturity gates release them.
 - **The efficiency report** (`savings_*`) and the **humidity/ventilation axis** are observe-only by design — no fan, no window, no humidifier is ever commanded.
@@ -513,7 +539,7 @@ Poise does not manage ventilation-system hygiene (VDI 6022), does not act on CO�
 
 ## Troubleshooting
 
-Poise reports problems as Home Assistant **repair issues** (*Settings → System → Repairs*) rather than log noise. Almost all of them are transition-based: they appear when the condition starts and disappear on their own when it ends. Three are *fixable* — they offer an **Apply / Ignore** choice instead of just text.
+Poise reports problems as Home Assistant **repair issues** (*Settings → System → Repairs*) rather than log noise. Almost all of them are transition-based: they appear when the condition starts and disappear on their own when it ends. Four are *fixable* — they offer an **Apply / Ignore** choice instead of just text.
 
 ### Inputs and sensors
 
@@ -525,6 +551,7 @@ Poise reports problems as Home Assistant **repair issues** (*Settings → System
 | **Window sensor unavailable** | The configured window contact(s) cannot be read; Poise falls back to slope-based auto-detection. | Check the contact. Clears automatically. |
 | **Mould protection inactive** | The humidity sensor is unavailable, so the mould-avoidance minimum temperature cannot be computed. Frost protection still applies. | Check the humidity sensor. Clears automatically. |
 | **A required entity is disabled** | The room sensor or the thermostat is *disabled* in the entity registry, so it will never publish a state and a retry loop would never end. | Re-enable it under *Settings → Devices & Services → Entities*, then reload Poise. |
+| **Invalid comfort-window days** | A comfort window's weekday selection has no recognised day; that window is currently treated as an always-active setback (never comfort) instead of running on the days you intended. | Fix the day selection under the zone's options → Schedule. Clears automatically once at least one valid day is set. |
 
 ### The thermostat / actuator
 
@@ -539,6 +566,18 @@ Poise reports problems as Home Assistant **repair issues** (*Settings → System
 | **Actuator not applying commands** | Writes are dispatched but the device keeps reporting a different setpoint or mode — the write-convergence watchdog escalated. | Check the Zigbee/Wi-Fi link, the device's child lock, or an internal smart mode overriding external commands. Clears when a command finally lands. |
 | **External-temperature input implausible** | The `number` entity configured as the TRV's external-temperature input does not look like a temperature input. Poise stopped feeding it and handed the TRV's sensor source back to `internal`. | Pick a different entity in the zone's *Reconfigure*, or clear the field. |
 | **Operative input not available** | Operative TRV input is enabled but no usable external-temperature input exists for this thermostat; Poise fell back to air-side control. | Configure a valid external-temperature `number`, or switch operative input off. |
+
+### TRV calibration
+
+Five issues track the health of the [opt-in offset-calibration path](#trv-offset-calibration-fallback). The first four are informational (three of them transition-based); the last one is **fixable**.
+
+| Repair issue | What it means | What to do |
+| --- | --- | --- |
+| **TRV calibration offset not handed back** | Turning calibration off (or swapping the actuator, or removing the zone) needs to hand the offset back to its original value, but the calibration entity is unavailable or gone. | If the entity still exists, wake the device — the issue clears once it confirms the restored value. A structurally removed entity does not block anything further. |
+| **Calibration offset restored clipped** *(informational)* | The saved original offset no longer fits the entity's current min/max/step, so Poise restored the closest allowed value instead. | Nothing to do — informational only. |
+| **Calibration entity not usable** | TRV calibration is enabled, but the entity reports no safe metadata (value, min/max or step missing or invalid). Poise writes no offset while this holds. | Check the entity/device; clears once its metadata is readable again. |
+| **Calibration offset not applied** | The TRV hasn't reported Poise's last calibration offset for an extended time — the writes may not be reaching the device. | Check the Zigbee/Wi-Fi link or the device's child lock. Clears once the offset is reported. |
+| **TRV offset calibration available** *(fixable)* | This TRV exposes a writable calibration offset and no external-temperature input is configured — Poise could compensate the room reading via offset calibration, but the opt-in option is currently off. | *Apply* enables *TRV calibration* for the zone; *Ignore* leaves it off (the suggestion reappears while the condition still holds). |
 
 ### Control and safety
 
