@@ -147,12 +147,18 @@ class ControlRequest:
 
 @dataclass(frozen=True, slots=True)
 class ActuatorCommand:
-    """The single arbitrated command written to exactly one actuator (ADR-0013)."""
+    """The single arbitrated command written to exactly one actuator (ADR-0013).
+
+    ``hvac_mode`` is diagnostics only — it is never sent on the wire (the mode
+    travels via its own ``climate.set_hvac_mode`` dispatch, ADR-0046 §8).
+    ``None`` for non-climate paths such as calibration, where no device mode
+    accompanies the number write (P1.4).
+    """
 
     actuator_id: str
     path: ActuatorPath
     value: float
-    hvac_mode: str
+    hvac_mode: str | None
     reason: str = ""
     clamped_by: str | None = None
 

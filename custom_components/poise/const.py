@@ -32,6 +32,12 @@ WRITE_DEADBAND_C: Final = 0.2
 # would otherwise let the feed go stale. 0 disables the time-based re-push.
 EXTERNAL_FEED_KEEPALIVE_S: Final = 600.0
 
+# TRV calibration (local-offset path, ADR-0015 / D6): write gate deadband +
+# minimum interval, and the divergence limit (x MIN_INTERVAL until cal_diverged).
+CALIBRATION_DEADBAND_K: Final = 0.3
+CALIBRATION_MIN_INTERVAL_S: Final = 300.0
+CALIBRATION_UNCONVERGED_LIMIT: Final = 3  # x MIN_INTERVAL until cal_diverged
+
 # ADR-0059 §8: adopt a device-side setpoint change (TRV wheel / vendor app) as a manual
 # hold instead of overwriting it. ``ECHO_WINDOW`` suppresses adoption right after
 # Poise's own write, while the device may still report its pre-write value (lag).
@@ -96,12 +102,19 @@ CONF_COMFORT_END: Final = "comfort_end"
 # N (suggestion writers may exceed the UI); the options UI offers the n+1
 # progressive pattern up to this cap (i18n labels are static per index).
 COMFORT_WINDOWS_UI_MAX: Final = 8
+# P2.3: per-window weekday selection, sibling of comfort_start(_N)/
+# comfort_end(_N) (unnumbered base pair + comfort_days_N, N >= 2). Index
+# position == ComfortWindow bit position (mon=bit 0 .. sun=bit 6).
+CONF_COMFORT_DAYS: Final = "comfort_days"
+COMFORT_DAY_KEYS: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 CONF_SETBACK_DELTA: Final = "setback_delta"
 CONF_OPTIMAL_START: Final = "optimal_start"
 CONF_WEATHER: Final = "weather_entity"
 CONF_IRRADIANCE: Final = "irradiance_sensor"
 CONF_TRV_EXTERNAL_TEMP: Final = "trv_external_temp_input"
 CONF_OPERATIVE_INPUT: Final = "operative_input"
+# TRV calibration (local-offset path, ADR-0015 / D6)
+CONF_TRV_CALIBRATION: Final = "trv_calibration"
 DEFAULT_COMFORT_BASE: Final = 21.0
 DEFAULT_COMFORT_WEIGHT: Final = 70
 DEFAULT_SETBACK_DELTA: Final = 3.0

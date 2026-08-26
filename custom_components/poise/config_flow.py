@@ -7,6 +7,8 @@ be edited in place without removing the entry (so learning is preserved).
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -41,6 +43,7 @@ from .const import (
     CONF_BOILER_ON_ACTION,
     CONF_CLIMATE_MODE,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_DAYS,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_ENTRY_TYPE,
@@ -55,27 +58,83 @@ from .const import (
 from .control.hub_aggregate import parse_service_action
 from .migration import SETUP_TUNING_KEYS
 
+_LOGGER = logging.getLogger(__name__)
+
+# Sentinel for "no comfort_days_N key was submitted on this form" — distinct
+# from the runtime parser's OWN ``_MISSING`` (runtime/config.py), which marks
+# "the merged config mapping has no such key at all" for the fail-closed mask
+# parse. Both are private, module-local stand-ins for the same "absent, not
+# merely None/empty/falsy" idea, kept as two definitions on purpose: this
+# module is HA-coupled (imports homeassistant.config_entries) and must not
+# become an import dependency of the pure runtime/config.py, or vice versa.
+_MISSING = object()
+
 
 def _renumber_windows(flat: dict[str, Any]) -> str | None:
-    """Validate + compact the numbered window pairs in a submitted flat form.
+    """Validate + compact the numbered window TRIPLES in a submitted flat form.
 
     Per pair both bounds or neither (one alone is ambiguous — same rule as the
-    base pair); valid extra pairs are renumbered gaplessly from 2 so deleting a
-    middle window never strands later ones. Returns an error key or None; the
+    base pair); valid extra windows are renumbered gaplessly from 2 so deleting
+    a middle window never strands later ones. Returns an error key or None; the
     submitted options replace every form-owned key wholesale (window fields are
     always form-owned), so dropped keys vanish without explicit deletion —
-    only non-form keys are carried over by the submit (review A.3)."""
-    pairs: list[tuple[Any, Any]] = []
-    for n in _extra_window_ns(flat):
-        s_key, e_key = f"{CONF_COMFORT_START}_{n}", f"{CONF_COMFORT_END}_{n}"
-        s_val, e_val = flat.pop(s_key, None), flat.pop(e_key, None)
+    only non-form keys are carried over by the submit (review A.3).
+
+    P2.3 / review Rev. 2.3 point 4: ``comfort_days_N`` rides along with its
+    window as a TRIPLE, not just the start/end pair. ``_extra_window_ns``
+    matches ONLY start/end keys (F30, deliberately unchanged) — a day-only
+    key must never conjure a UI window on its own — so an orphaned
+    ``comfort_days_N`` (its start/end pair already gone) would never be
+    reached by the pairs loop below and would keep drifting under a stale
+    index forever. The separate ``day_ns`` regex scan pops EVERY
+    ``comfort_days_*`` key up front (orphans included) and only real windows
+    get one rewritten back, at the new index. A missing ``days_N`` for a
+    window stays missing after renumbering — legacy ALL_DAYS is never
+    materialized onto a window that never had a mask.
+    """
+    window_ns = _extra_window_ns(flat)
+    day_ns = {
+        int(m.group(1))
+        for key in list(flat)
+        if (m := re.fullmatch(rf"{CONF_COMFORT_DAYS}_(\d+)", str(key)))
+    }
+    days_by_n = {n: flat.pop(f"{CONF_COMFORT_DAYS}_{n}") for n in day_ns}
+    triples: list[tuple[Any, Any, Any]] = []
+    for n in window_ns:
+        s_val = flat.pop(f"{CONF_COMFORT_START}_{n}", None)
+        e_val = flat.pop(f"{CONF_COMFORT_END}_{n}", None)
         if bool(s_val) != bool(e_val):
             return "comfort_window_pair"
         if s_val and e_val:
-            pairs.append((s_val, e_val))
-    for i, (s_val, e_val) in enumerate(pairs, start=2):
+            triples.append((s_val, e_val, days_by_n.get(n, _MISSING)))
+    for i, (s_val, e_val, d_val) in enumerate(triples, start=2):
         flat[f"{CONF_COMFORT_START}_{i}"] = s_val
         flat[f"{CONF_COMFORT_END}_{i}"] = e_val
+        if d_val is not _MISSING:
+            flat[f"{CONF_COMFORT_DAYS}_{i}"] = d_val
+    return None
+
+
+def _empty_days_error(flat: Mapping[str, Any]) -> str | None:
+    """UI-only guard (review Rev. 2.2/2.3): reject an explicit EMPTY weekday
+    selection on a window that has real times.
+
+    The runtime parser stays defensive regardless (an empty/invalid
+    ``comfort_days`` fail-closes to mask 0 -> that window degrades to
+    always-setback, never silently to all-week comfort) — this is purely a
+    save-time nudge, because an empty multi-select on an otherwise-filled
+    window is almost certainly a UI mis-click, not intent. Checked BEFORE
+    ``_renumber_windows`` pops the keys it inspects, so it sees the form
+    exactly as submitted (base pair plus every still-numbered window,
+    including ones about to be renumbered or dropped)."""
+    for n in (None, *_extra_window_ns(flat)):
+        suffix = "" if n is None else f"_{n}"
+        has_times = bool(flat.get(f"{CONF_COMFORT_START}{suffix}")) and bool(
+            flat.get(f"{CONF_COMFORT_END}{suffix}")
+        )
+        days_key = f"{CONF_COMFORT_DAYS}{suffix}"
+        if has_times and days_key in flat and not flat[days_key]:
+            return "schedule_days_empty"
     return None
 
 
@@ -338,17 +397,31 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     and old_actuator
                     and old_actuator != new_data.get(CONF_ACTUATOR)
                 ):
-                    await self._park_replaced_actuator(entry, old_actuator)
-                # Store only — the update listener is the single reload
-                # authority (see ``_async_options_updated``). Written out
-                # instead of ``async_update_and_abort`` on purpose: that
-                # helper only reaches ConfigFlow in HA 2025.12, and these two
-                # calls are exactly what it does, on every version we support.
-                self.hass.config_entries.async_update_entry(
-                    entry, unique_id=self.unique_id, data=new_data, options=new_options
-                )
-                self._schedule_reload_if_unloaded(entry)
-                return self.async_abort(reason="reconfigure_successful")
+                    # P1.5/D3: a live calibration offset is handed back BEFORE
+                    # the park — the old device must report its original
+                    # offset again before it leaves Poise's ownership. FAILED
+                    # is a form error, nothing is written: the old config
+                    # stays intact and the submit can simply be retried
+                    # (already_at_target then confirms a slow device).
+                    if not await self._handoff_calibration_before_swap(entry):
+                        errors["base"] = "calibration_restore_failed"
+                    else:
+                        await self._park_replaced_actuator(entry, old_actuator)
+                if not errors:
+                    # Store only — the update listener is the single reload
+                    # authority (see ``_async_options_updated``). Written out
+                    # instead of ``async_update_and_abort`` on purpose: that
+                    # helper only reaches ConfigFlow in HA 2025.12, and these
+                    # two calls are exactly what it does, on every version we
+                    # support.
+                    self.hass.config_entries.async_update_entry(
+                        entry,
+                        unique_id=self.unique_id,
+                        data=new_data,
+                        options=new_options,
+                    )
+                    self._schedule_reload_if_unloaded(entry)
+                    return self.async_abort(reason="reconfigure_successful")
         current = {**entry.data, **entry.options}
         suggested = nest_by_section(current, _RECONFIGURE_SECTIONS)
         # the structural fields live at the top level (not in a section), so carry
@@ -418,6 +491,60 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
             self.hass, actuator, climate_mode=mode, setback_setpoint=setback
         )
 
+    async def _handoff_calibration_before_swap(self, entry: ConfigEntry) -> bool:
+        """P1.5/D3: restore a live calibration offset before the actuator swap.
+
+        Loaded entry: the runtime is the truth — the coordinator lifecycle
+        port runs under the tick lock, clears the runtime ownership and
+        disarms the old instance's calibration path before releasing the lock
+        (F27 + §0.6/§0.6a re-acquisition race); a bare store write would be
+        overwritten by that coordinator's final save. Unloaded entry: the
+        store IS the truth (§0.5 point 1) — restore, then clear the two
+        ownership keys on success.
+
+        ``cal_entity``/``cal_baseline`` are SNAPSHOTTED FIRST: a successful
+        port clears them before returning, and the WARN policy stays with the
+        flow (§0.6a point 2) — ``GONE`` (entity structurally removed: whoever
+        swaps the actuator because the old device is gone must not be
+        blocked) logs the snapshot and continues. Returns False exactly on
+        ``FAILED``; the caller then shows the form error and writes nothing.
+        """
+        from .ha import actuator_lifecycle
+        from .ha.actuator_lifecycle import CalibrationRestoreResult
+        from .storage import PoiseStore
+
+        coordinator = getattr(entry, "runtime_data", None)
+        if coordinator is not None:
+            runtime_act = coordinator.runtime.actuator
+            snap_entity = runtime_act.cal_entity
+            snap_baseline = runtime_act.cal_baseline
+            result = await coordinator.async_prepare_actuator_handoff()
+        else:
+            store = PoiseStore(self.hass, entry.entry_id)
+            stored = await store.load() or {}
+            snap_baseline = stored.get("cal_baseline")
+            snap_entity = stored.get("cal_entity")
+            if snap_baseline is None:
+                return True  # no ownership — nothing to hand back
+            # resolve_restore owns the corrupt-shape rule (missing entity or
+            # non-numeric baseline -> structurally GONE).
+            result = await actuator_lifecycle.resolve_restore(
+                self.hass, entity_id=snap_entity, baseline=snap_baseline
+            )
+            if result is not CalibrationRestoreResult.FAILED:
+                stored["cal_baseline"] = None
+                stored["cal_entity"] = None
+                await store.save(stored)
+        if result is CalibrationRestoreResult.GONE:
+            _LOGGER.warning(
+                "Poise: calibration entity %s is structurally gone; the "
+                "written offset (baseline %s) cannot be restored on the "
+                "actuator swap — ownership released, reconfigure continues",
+                snap_entity,
+                snap_baseline,
+            )
+        return result is not CalibrationRestoreResult.FAILED
+
 
 class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
     """Edit volatile tuning in place — no reload, so learning is preserved."""
@@ -445,6 +572,8 @@ class PoiseOptionsFlow(OptionsFlow):  # type: ignore[misc]
             # drop out (non-form keys are carried over below, review A.3).
             if bool(flat.get(CONF_COMFORT_START)) != bool(flat.get(CONF_COMFORT_END)):
                 errors["base"] = "comfort_window_pair"
+            elif (days_error := _empty_days_error(flat)) is not None:
+                errors["base"] = days_error
             elif (pair_error := _renumber_windows(flat)) is not None:
                 errors["base"] = pair_error
             else:

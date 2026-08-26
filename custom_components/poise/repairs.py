@@ -8,6 +8,10 @@ listener — never a silent store mutation), **dismiss** stamps the 30-day
 suppression for exactly this pattern key. The cool-down is stamped on BOTH
 paths — after an apply too, because the old evidence stays in the L1
 statistic and would otherwise immediately re-raise the just-applied pattern.
+
+P1.5 adds a second, deliberately simpler kind: ``trv_calibration``
+(``CalibrationOptInFixFlow``) — apply-only, no cool-down, no dismiss step
+(rejection is HA's built-in "ignore issue").
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from .const import (
     CONF_CLO_OFFSET,
     CONF_COMFORT_BASE,
     CONF_COMFORT_START,
+    CONF_TRV_CALIBRATION,
 )
 from .control.feedback import CLO_SUGGEST_STEP
 from .control.suggestion import SUGGEST_EARLIER_MIN, SUGGEST_STEP_K
@@ -96,12 +101,51 @@ class OverrideSuggestionFixFlow(RepairsFlow):  # type: ignore[misc]
             coordinator.record_suggestion_decision(self._data["key"])
 
 
+class CalibrationOptInFixFlow(RepairsFlow):  # type: ignore[misc]
+    """P1.5 D1: the ``trv_calibration`` fix kind — a confirm/apply step ONLY.
+
+    Deliberately unlike the three learning kinds above: no ``direction``, no
+    ``record_suggestion_decision`` and no learning cool-down (there is no L1
+    statistic behind this issue that would re-raise it), and explicitly NO
+    ``async_step_dismiss`` — rejection is Home Assistant's built-in "ignore
+    issue" on the repair itself, which keeps the idempotent per-tick mirror
+    (``HealthReporter.sync_calibration_available_issue``) hidden for good.
+    Apply writes the option over the OPTIONS path, so the update listener
+    hot-applies it like any options submit.
+    """
+
+    def __init__(self, hass: HomeAssistant, data: dict[str, Any]) -> None:
+        self._hass = hass
+        self._data = data
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> data_entry_flow.FlowResult:
+        if user_input is not None:
+            entry = self._hass.config_entries.async_get_entry(self._data["entry_id"])
+            if entry is not None:
+                options = dict(entry.options)
+                options[CONF_TRV_CALIBRATION] = True
+                self._hass.config_entries.async_update_entry(entry, options=options)
+            return self.async_create_entry(title="", data={})
+        return self.async_show_form(step_id="init", data_schema=vol.Schema({}))
+
+
 async def async_create_fix_flow(
     hass: HomeAssistant,
     issue_id: str,
     data: dict[str, Any] | None,
 ) -> RepairsFlow:
-    """HA repairs hook — every fixable Poise issue today is an L2 suggestion."""
+    """HA repairs hook — the three L2 suggestion kinds plus the P1.5 opt-in."""
+    if (data or {}).get("kind") == "trv_calibration":
+        schema = vol.Schema(
+            {
+                vol.Required("entry_id"): str,
+                vol.Required("kind"): "trv_calibration",
+            },
+            extra=vol.ALLOW_EXTRA,
+        )
+        return CalibrationOptInFixFlow(hass, schema(data or {}))
     schema = vol.Schema(
         {
             vol.Required("entry_id"): str,

@@ -56,7 +56,9 @@ from .control.window_auto import (
     WindowAutoConfig,
 )
 from .diagnostics.collector import DiagnosticsCollector
+from .ha import actuator_lifecycle
 from .ha.actuator_executor import ActuatorExecutor
+from .ha.actuator_lifecycle import CalibrationRestoreResult
 from .ha.forecast_provider import ForecastProvider
 from .ha.health_reporter import HealthReporter
 from .ha.input_reader import InputReader
@@ -99,12 +101,18 @@ def _utcnow_ts() -> float:
     return float(dt_util.utcnow().timestamp())
 
 
-def _local_minute_now() -> int:
-    """Local minute-of-day (the ``dt_util.now()`` read of the switchpoint
-    lookup and the ADR-0059 §5 stat's schedule phase), evaluated at call
-    time."""
+def _local_schedule_time_now() -> tuple[int, int]:
+    """Atomic out-of-tick schedule clock: ``(weekday, minute-of-day)`` from
+    ONE ``dt_util.now()`` read, evaluated at call time.
+
+    Feeds the switchpoint lookup and the ADR-0059 §5 stat's schedule phase
+    (P2.2). Two separate reads -- weekday, then minute -- could straddle a
+    midnight rollover mid-call and pair Sunday 23:59's weekday with Monday's
+    minute (or vice versa); reading both from the same ``local_now`` instant
+    keeps the pair internally consistent, mirroring the in-tick
+    ``TickInputs.local_weekday``/``local_minute`` snapshot pairing."""
     _lnow = dt_util.now()
-    return int(_lnow.hour * 60 + _lnow.minute)
+    return (_lnow.weekday(), int(_lnow.hour * 60 + _lnow.minute))
 
 
 class _ReaderClock:
@@ -505,6 +513,20 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._cool_lockout_enabled = tuning.cool_lockout_enabled
         self._priority = tuning.priority
         self._schedule = tuning.schedule
+        # P2.3: mirror unrecognised comfort_days(_N) tokens as a transition-
+        # only repair issue — config-derived (not tick-derived), so this is
+        # the one write path (like everything else in this method) rather
+        # than a per-tick check. ``issue()`` is idempotent on an unchanged
+        # flag, so a no-op options submit stays a no-op here too.
+        self._health.issue(
+            f"schedule_days_invalid_{self._entry_id}",
+            bool(tuning.schedule_days_invalid),
+            translation_key="schedule_days_invalid",
+            placeholders={
+                "zone": self.zone_name,
+                "tokens": ", ".join(tuning.schedule_days_invalid),
+            },
+        )
         self._optimal_start = tuning.optimal_start
         # optimal-stop coasts to the lower comfort edge before window end; for
         # now coupled to optimal-start (predictive scheduling), splittable later.
@@ -519,6 +541,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         # is untouched (nor did the reload this replaces end one).
         self._adopt_external_setpoint = tuning.adopt_external_setpoint
         self._adopt_external_mode = tuning.adopt_external_mode
+        # ADR-0015 / D6: opt-in TRV local-offset calibration gate (P1.3b
+        # plumbing only — nothing reads this yet; P1.4 wires the behavior).
+        self._trv_calibration = tuning.trv_calibration
 
     def set_climate_entity_id(self, entity_id: str) -> None:
         """Record the room's climate entity_id for the ended-event payload."""
@@ -532,7 +557,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         commands / the restore recompute).
         """
         return override_runtime.minutes_to_switchpoint(
-            self._schedule, _local_minute_now()
+            self._schedule, _local_schedule_time_now()
         )
 
     def _record_override_stat(self, clamped: float) -> None:
@@ -552,7 +577,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 comfort_base=self._comfort_base,
                 override_cfg=self._override_cfg,
                 schedule=self._schedule,
-                local_minute_fn=_local_minute_now,
+                local_schedule_time_fn=_local_schedule_time_now,
                 now_utc_fn=_utcnow_ts,
             )
         except Exception:  # noqa: BLE001 - a diagnostic stat must never break a set
@@ -756,6 +781,19 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 else self._cool_min_outdoor
             ),
             t_rm=(self.data or {}).get("t_rm"),
+        )
+
+    def _sync_calibration_available_issue(
+        self, *, ext_temp_reserved: bool, enabled: bool
+    ) -> None:
+        """P1.5 D1 facade — body in ``HealthReporter``.
+
+        The two coordinator-owned inputs travel per call like the other
+        mirrors' gates: whether an external-temp input structurally reserves
+        the path this tick, and the current opt-in state.
+        """
+        self._health.sync_calibration_available_issue(
+            ext_temp_reserved=ext_temp_reserved, enabled=enabled
         )
 
     @property
@@ -1114,6 +1152,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 prev_device_mode=self._zone_runtime.external.prev_device_mode,
                 last_commanded_fan=self._zone_runtime.external.last_commanded_fan,
                 prev_device_fan=self._zone_runtime.external.prev_device_fan,
+                cal_baseline=self._zone_runtime.actuator.cal_baseline,
+                cal_entity=self._zone_runtime.actuator.cal_entity,
             )
         )
 
@@ -1155,6 +1195,54 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             self._save_failures >= 5,
             translation_key="persistence_failed",
         )
+
+    async def async_prepare_actuator_handoff(self) -> CalibrationRestoreResult:
+        """D3 hand-back before an actuator swap (reconfigure, P1.5).
+
+        Under the tick lock: restore + state confirmation + runtime ownership
+        clear + calibration disarm of THIS instance. The WARN-vs-form-error
+        decision is the calling flow's, made from the returned enum (§0.6
+        point 2); the flow also snapshots ``cal_entity``/``cal_baseline``
+        BEFORE this call, because a successful port clears them (§0.6a
+        point 2). Awaiting the restore INSIDE the lock is intended — it
+        blocks a concurrent tick for the duration, which is the point.
+
+        The later final save of this coordinator then automatically persists
+        the cleared state — a bare store write would be overwritten by the
+        final save of the still-running runtime (F27).
+        """
+        # INVARIANT (review Rev. 2.5 / §0.6a point 1): EVERY successful call
+        # of this port (RESTORED/GONE, including "no ownership present")
+        # disarms the calibration path of this old coordinator instance
+        # BEFORE the lock is released — otherwise a tick between handoff and
+        # reload re-acquires (first or new) ownership that the final save
+        # then persists. Live-instance-only: the entry option stays
+        # untouched (this instance is about to be replaced anyway).
+        async with self._lock:
+            act = self._zone_runtime.actuator
+            if act.cal_baseline is None:
+                self._trv_calibration = False  # disarm even without ownership
+                return CalibrationRestoreResult.RESTORED  # nothing to hand off
+            # resolve_restore owns the corrupt-shape rule (baseline without
+            # an entity -> structurally GONE, same as segment H treats it).
+            result = await actuator_lifecycle.resolve_restore(
+                self.hass, entity_id=act.cal_entity, baseline=act.cal_baseline
+            )
+            if result in (
+                CalibrationRestoreResult.RESTORED,
+                CalibrationRestoreResult.GONE,
+            ):
+                # THE one clearing site, shared with the observe fold — sets
+                # runtime.dirty, so the final save persists the clear.
+                self._zone_runtime.clear_calibration_ownership()
+                # Re-acquisition lock (§0.6 point 1): between lock release
+                # and reload, listeners/refreshes of the OLD coordinator keep
+                # running — with trv_calibration=True and an empty baseline
+                # segment W would immediately stamp new ownership.
+                self._trv_calibration = False
+            # FAILED: ownership and _trv_calibration stay untouched — the
+            # flow shows a form error and the old config remains intact.
+            return result
 
     async def async_persist_and_cleanup(self) -> None:
         """Final save + repair-issue/notification cleanup on unload.

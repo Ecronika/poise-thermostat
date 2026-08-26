@@ -1,8 +1,8 @@
 """Actuator choke-point — the single writer per device (ADR-0013).
 
 Every ``ActuatorCommand`` produced by arbitration is written here and nowhere
-else. The setpoint and direct-valve (tpi_valve) paths are wired; calibration
-and pi_setpoint still raise (ADR-0015/0036).
+else. The setpoint, direct-valve (tpi_valve) and calibration paths are wired;
+pi_setpoint still raises (ADR-0037).
 """
 
 from __future__ import annotations
@@ -26,6 +26,15 @@ def service_call_for(command: ActuatorCommand) -> tuple[str, str, dict[str, Any]
     if command.path is ActuatorPath.TPI_VALVE:
         # direct valve: actuator_id is the writable valve-opening number entity,
         # value is the open percentage 0..100 (ADR-0036). Never valve_closing_*.
+        return (
+            "number",
+            "set_value",
+            {"entity_id": command.actuator_id, "value": command.value},
+        )
+    if command.path is ActuatorPath.CALIBRATION:
+        # calibration (ADR-0015: offset-calibration row of the capability
+        # matrix): actuator_id is the writable offset number entity, value
+        # the offset snapped to the entity's own grid/limits (P1.2 snap_offset).
         return (
             "number",
             "set_value",

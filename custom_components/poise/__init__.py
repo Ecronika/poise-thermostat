@@ -543,10 +543,39 @@ async def _park_room_actuator(
         DEFAULT_COMFORT_BASE,
         DEFAULT_SETBACK_DELTA,
     )
-    from .ha.actuator_lifecycle import park_actuator
+    from .ha import actuator_lifecycle
+    from .ha.actuator_lifecycle import CalibrationRestoreResult, park_actuator
     from .storage import PoiseStore
 
-    stored = await PoiseStore(hass, entry.entry_id).load() or {}
+    store = PoiseStore(hass, entry.entry_id)
+    stored = await store.load() or {}
+    # P1.5/D3: OWN gate, deliberately BEFORE the has_actuated return — a
+    # persisted calibration ownership means a Poise offset may still be
+    # physically active on the device, and this teardown (removal AND
+    # disable) is the last chance to restore it. RESTORED/GONE release the
+    # ownership in the store; FAILED keeps it and logs unmistakably, because
+    # a final removal has no retry. (Option-off and same-actuator cases stay
+    # with the in-tick handoff automaton — no extra restores there.)
+    cal_baseline = stored.get("cal_baseline")
+    if cal_baseline is not None:
+        cal_entity = stored.get("cal_entity")
+        # resolve_restore owns the corrupt-shape rule (missing entity or
+        # non-numeric baseline -> structurally GONE, so cleanup still runs).
+        result = await actuator_lifecycle.resolve_restore(
+            hass, entity_id=cal_entity, baseline=cal_baseline
+        )
+        if result is CalibrationRestoreResult.FAILED:
+            logging.getLogger(__name__).warning(
+                "Poise: TRV calibration offset NOT restored on teardown — "
+                "entity %s still carries a Poise-written offset (original "
+                "baseline %s). Restore it manually on the device.",
+                cal_entity,
+                cal_baseline,
+            )
+        else:
+            stored["cal_baseline"] = None
+            stored["cal_entity"] = None
+            await store.save(stored)
     # AR-11: never actuated -> nothing to hand back; skip park AND select-restore.
     if not stored.get("has_actuated", False):
         return

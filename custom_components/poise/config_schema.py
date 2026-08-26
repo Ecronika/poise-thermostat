@@ -27,6 +27,7 @@ from homeassistant.helpers import selector
 from .comfort.pmv import ROOM_PROFILES
 from .comfort.thermal_shock import DEFAULT_HARD_CAP_C, DEFAULT_SHOCK_DELTA_K
 from .const import (
+    COMFORT_DAY_KEYS,
     COMFORT_WINDOWS_UI_MAX,
     COMPRESSOR_GUARD_AUTO,
     COMPRESSOR_GUARD_OFF,
@@ -48,6 +49,7 @@ from .const import (
     CONF_BOOST_DURATION_MIN,
     CONF_CATEGORY,
     CONF_COMFORT_BASE,
+    CONF_COMFORT_DAYS,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
     CONF_COMFORT_WEIGHT,
@@ -93,6 +95,7 @@ from .const import (
     CONF_THERMAL_SHOCK_DELTA,
     CONF_TRACE_RECORDING,
     CONF_TRM_SENSOR,
+    CONF_TRV_CALIBRATION,
     CONF_TRV_EXTERNAL_TEMP,
     CONF_VENT_NOTIFY,
     CONF_WEATHER,
@@ -201,6 +204,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_COMPRESSOR_GUARD,
         CONF_COMPRESSOR_MIN_OFF,
         CONF_COMPRESSOR_MODE_HOLD,
+        CONF_TRV_CALIBRATION,
         CONF_TRACE_RECORDING,
         CONF_VENT_NOTIFY,
     ),
@@ -226,14 +230,27 @@ def _extra_window_ns(current: Mapping[str, Any]) -> list[int]:
 def _schedule_window_fields(current: Mapping[str, Any]) -> tuple[str, ...]:
     """ADR-0070 n+1 pattern: the base pair, every CONFIGURED numbered pair,
     plus exactly ONE empty pair (next free index) up to the UI cap — the form
-    never offers more than one unconfigured window at a time."""
-    fields: list[str] = [CONF_COMFORT_START, CONF_COMFORT_END]
+    never offers more than one unconfigured window at a time.
+
+    P2.3: each triple additionally carries its ``comfort_days(_N)`` weekday
+    selector, sibling of the start/end pair — ``_extra_window_ns`` (which
+    this still drives the numbering off) stays START/END-only (F30): a
+    day-only key must never conjure up a UI window on its own."""
+    fields: list[str] = [CONF_COMFORT_START, CONF_COMFORT_END, CONF_COMFORT_DAYS]
     ns = _extra_window_ns(current)
     for n in ns:
-        fields += [f"{CONF_COMFORT_START}_{n}", f"{CONF_COMFORT_END}_{n}"]
+        fields += [
+            f"{CONF_COMFORT_START}_{n}",
+            f"{CONF_COMFORT_END}_{n}",
+            f"{CONF_COMFORT_DAYS}_{n}",
+        ]
     nxt = (max(ns) + 1) if ns else 2
     if nxt <= COMFORT_WINDOWS_UI_MAX:
-        fields += [f"{CONF_COMFORT_START}_{nxt}", f"{CONF_COMFORT_END}_{nxt}"]
+        fields += [
+            f"{CONF_COMFORT_START}_{nxt}",
+            f"{CONF_COMFORT_END}_{nxt}",
+            f"{CONF_COMFORT_DAYS}_{nxt}",
+        ]
     return tuple(fields)
 
 
@@ -267,6 +284,31 @@ _RECONFIGURE_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_SOURCE_POLICY,
     ),
 }
+
+
+def _window_selector(field: str) -> selector.Selector:
+    """The per-field selector for one dynamic schedule-window field (P2.3).
+
+    ``field == CONF_COMFORT_DAYS`` covers the base pair's weekday selector;
+    ``field.startswith(CONF_COMFORT_DAYS + "_")`` covers every numbered
+    ``comfort_days_N``. The explicit ``+ "_"`` guards against a hypothetical
+    future field name merely sharing the ``comfort_days`` PREFIX (a bare
+    ``.startswith(CONF_COMFORT_DAYS)`` would also match e.g. a
+    ``comfort_days_of_week`` typo-key) — there is no such collision today,
+    but the exact-or-numbered check costs nothing and stays correct if one is
+    ever added. Every other window field (start/end, base or numbered) keeps
+    the plain time selector.
+    """
+    if field == CONF_COMFORT_DAYS or field.startswith(f"{CONF_COMFORT_DAYS}_"):
+        return selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=list(COMFORT_DAY_KEYS),
+                multiple=True,
+                translation_key="comfort_days",
+                mode=selector.SelectSelectorMode.LIST,
+            )
+        )
+    return selector.TimeSelector()
 
 
 def _temp(exclude: list[str] | None = None) -> selector.EntitySelector:
@@ -632,7 +674,7 @@ def _options_schema(hass: HomeAssistant, current: Mapping[str, Any]) -> vol.Sche
     reg = er.async_get(hass)
     own = [e.entity_id for e in reg.entities.values() if e.platform == DOMAIN]
     window_fields: dict[Any, Any] = {
-        vol.Optional(field): selector.TimeSelector()
+        vol.Optional(field): _window_selector(field)
         for field in _schedule_window_fields(current)
     }
     return vol.Schema(
@@ -938,6 +980,13 @@ def _options_schema(hass: HomeAssistant, current: Mapping[str, Any]) -> vol.Sche
                                 mode=box,
                             )
                         ),
+                        # ADR-0015 / P1.5 D1: opt-in TRV local-offset
+                        # calibration (default OFF; tuning, hot-applied — no
+                        # reconfigure field). An external-temperature input
+                        # always takes precedence (D6).
+                        vol.Optional(
+                            CONF_TRV_CALIBRATION, default=False
+                        ): selector.BooleanSelector(),
                         # ADR-0011: opt-in field-trace recorder (one JSONL/tick).
                         vol.Optional(
                             CONF_TRACE_RECORDING, default=False
