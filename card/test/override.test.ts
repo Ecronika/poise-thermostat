@@ -4,6 +4,7 @@ import {
   airHint,
   clampLabel,
   clockLabel,
+  formatMinutesLabel,
   heldSetpoint,
   holdDirection,
   holdOrigin,
@@ -164,6 +165,25 @@ test("airHint: shows air temperature only when it diverges from operative (V3a/D
   // absent values -> null (never invents a hint)
   assert.equal(airHint(null, 22.1), null);
   assert.equal(airHint(21.4, null), null);
+});
+
+test("formatMinutesLabel: below 1 day stays a plain minute count", () => {
+  assert.equal(formatMinutesLabel("en", 45), "45 min");
+  assert.equal(formatMinutesLabel("de", 45), "45 Min");
+  assert.equal(formatMinutesLabel("en", 1439), "1439 min");
+  assert.equal(formatMinutesLabel("en", 45.4), "45 min"); // rounds first
+});
+
+test("formatMinutesLabel: >= 1 day renders as days + hours (P2.4, plan example)", () => {
+  assert.equal(formatMinutesLabel("en", 2760), "1 d 22 h"); // plan §4 P2.4 example
+  assert.equal(formatMinutesLabel("en", 1440), "1 d 0 h");
+  assert.equal(formatMinutesLabel("en", 10080), "7 d 0 h"); // a full week horizon
+});
+
+test("formatMinutesLabel: leftover-hour rounding never overflows into '24 h'", () => {
+  // 2879 min = 1 day + 1439 min remainder -> 23.98 h rounds to 24, which must
+  // fold into the day count instead of printing "1 d 24 h".
+  assert.equal(formatMinutesLabel("en", 2879), "2 d 0 h");
 });
 
 test("clampLabel: explains the clamp from request vs effective setpoint", () => {
