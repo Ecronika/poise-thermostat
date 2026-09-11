@@ -23,7 +23,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Operative temperature / MRT** — controls what the room *feels* like (air + mean radiant), via a virtual-MRT estimator that a real MRT/globe sensor overrides when present.
 - **Self-learning physics** — mode-gated Extended Kalman Filter learns each room's time constant, losses and solar/heating response; confidence and identification are real sensor entities.
 - **Optimal Start & Optimal Stop** — forecast-aware pre-heating to the comfort deadline and coast-down to the lower comfort edge at window end; advisory (re-entry-free) and gated on an *identified* model.
-- **Mould & frost protection** — surface-humidity model (DIN 4108-2) and unconditional safety floors.
+- **Mould & frost protection** — dose-based mould-risk model (VTT mould index, ASHRAE 160 Addendum e) and unconditional safety floors.
 - **Solar accounting** — measured global irradiance as a learned disturbance feeding the MRT/comfort path — counted once.
 - **Precedence constraint solver** — every bound (frost/mould/ASR cap/device max) is composed with explicit precedence into exactly one safe command per actuator.
 - **Cooling decision & modes** — capability-aware dual setpoints; `COOL` is surfaced as an HVAC mode **only when the actuator supports cooling** (heat-only TRVs stay HEAT/OFF).
@@ -107,7 +107,7 @@ Poise is for rooms whose heating or cooling already lives in Home Assistant and 
 
 - **Make a radiator valve behave like a room thermostat.** A TRV regulates against its own body — bolted to the radiator, metres from where you sit. Point Poise at a free-standing room sensor and it writes the setpoint the valve needs so that the *room*, not the valve, lands in the comfort band. Where the TRV has an external-temperature input, Poise feeds the true room temperature into the device as well and hands the sensor source back to `internal` when you remove the zone.
 - **Stop hand-tuning the night setback and the morning start.** Configure a comfort *window* instead of a temperature schedule. Poise learns the room's time constant and heat-up rate and starts early enough to be at comfort *when the window opens* (optimal start), then coasts down to the lower comfort edge before it closes (optimal stop) instead of heating into an empty room.
-- **Heat to a norm band instead of a number.** The target is an EN 16798-1 comfort band around your comfort base, with an unconditional frost floor and a DIN 4108-2 mould floor underneath it and an ASR A3.5 ceiling above. You pick the category and the comfort-vs-energy weight; the precedence solver composes every bound into exactly one safe command per actuator.
+- **Heat to a norm band instead of a number.** The target is an EN 16798-1 comfort band around your comfort base, with an unconditional frost floor and a dose-based mould floor underneath it and an ASR A3.5 ceiling above. You pick the category and the comfort-vs-energy weight; the precedence solver composes every bound into exactly one safe command per actuator.
 - **Keep a manual change from sticking forever.** A setpoint set on the card, in the HA UI or on the TRV's own wheel becomes a *temporary hold* with a defined end (next switch point / timer / permanent — your choice per zone), never a silent permanent override.
 - **Don't fight an open window.** With a window contact, or without one via the slope detector, the room drops to the safety floor and learning pauses. A per-zone bypass switch covers the "yes, I really do want to heat with the window open" case.
 - **Give a shared boiler one demand signal.** The optional *Poise System* hub aggregates the call-for-heat of the zones that opt in into one frost-safe `binary_sensor` you can automate off — or let it switch the boiler itself with activation delay, keep-alive and minimum on/off times.
@@ -121,7 +121,7 @@ Poise controls heating/cooling **setpoints** and protects against **surface cond
 2. **Manage CO₂-based or burst ("Stoßlüften") ventilation, nor size/rate ventilation.** Poise *displays* CO₂ for awareness but never acts on it; CO₂ → fresh air belongs in a dedicated ventilation device or a separate HA automation (the standard `air_quality` trigger → `fan` pattern).
 3. **Actively humidify.** An AC / heat pump / TRV can only *remove* moisture (cooling / `dry`), never add it — raising humidity needs a separate appliance, which HA models as its own `humidifier` domain. Poise only **lowers** humidity.
 
-Poise's mould protection (`mold.py`, surface-RH / condensation per **DIN 4108-2 / EN ISO 13788**) is **building physics** and stays — it is **not** a substitute for **VDI 6022** ventilation-system hygiene.
+Poise's mould protection (`mould_risk.py`, VTT mould index on the surface humidity from `mold.py` / **EN ISO 13788** psychrometry) is **building physics** and stays — it is **not** a substitute for **VDI 6022** ventilation-system hygiene.
 
 **Monitoring vs. control.** Poise may *read and display* any indoor-environment metric (temperature, humidity, CO₂) and may *nudge* you (e.g. "CO₂ high — open a window"); it only *acts* on quantities it can move with the actuators it owns: setpoint / heat / cool, and humidity *downward* via cooling / `dry`. CO₂ and active humidification are monitor / inform-only. (ADR-0048)
 
@@ -243,7 +243,7 @@ Safety properties:
 - Handing the offset back — option turned off, actuator swapped, zone removed — is **state-confirmed** against a fresh read-back, never a blanket `0.0`; `0.0` is only ever written when it *is* the restored value.
 - While the calibration entity exists but cannot be read, the compensation path stays blocked (fail-closed) rather than guessing.
 
-Four repair issues track its health: **TRV calibration offset not handed back** (`calibration_restore_failed`), **calibration offset restored clipped** (`calibration_restore_clipped`, informational), **calibration entity not usable** (`calibration_entity_unsafe`), and **calibration offset not applied** (`calibration_unapplied`) — see [Troubleshooting](#troubleshooting).
+Five repair issues track its health: **TRV calibration offset not handed back** (`calibration_restore_failed`), **calibration offset restored clipped** (`calibration_restore_clipped`, informational), **calibration entity not usable** (`calibration_entity_unsafe`), **calibration entity changed** (`calibration_entity_mismatch`), and **calibration offset not applied** (`calibration_unapplied`) — see [Troubleshooting](#troubleshooting).
 
 ### System (optional multi-zone hub)
 
@@ -569,13 +569,14 @@ Poise reports problems as Home Assistant **repair issues** (*Settings → System
 
 ### TRV calibration
 
-Five issues track the health of the [opt-in offset-calibration path](#trv-offset-calibration-fallback). The first four are informational (three of them transition-based); the last one is **fixable**.
+Six issues track the health of the [opt-in offset-calibration path](#trv-offset-calibration-fallback). The first five are informational (four of them transition-based); the last one is **fixable**.
 
 | Repair issue | What it means | What to do |
 | --- | --- | --- |
 | **TRV calibration offset not handed back** | Turning calibration off (or swapping the actuator, or removing the zone) needs to hand the offset back to its original value, but the calibration entity is unavailable or gone. | If the entity still exists, wake the device — the issue clears once it confirms the restored value. A structurally removed entity does not block anything further. |
 | **Calibration offset restored clipped** *(informational)* | The saved original offset no longer fits the entity's current min/max/step, so Poise restored the closest allowed value instead. | Nothing to do — informational only. |
 | **Calibration entity not usable** | TRV calibration is enabled, but the entity reports no safe metadata (value, min/max or step missing or invalid). Poise writes no offset while this holds. | Check the entity/device; clears once its metadata is readable again. |
+| **Calibration entity changed** | The calibration ownership is pinned to one entity, but the device now exposes a different calibration entity — and the old one still exists. Poise writes no offset while this holds. (An old entity that was removed entirely is released automatically, with a warning log, and regulation continues on the new one.) | Disable and re-enable *TRV calibration* for the zone — the old offset is handed back cleanly and a fresh ownership starts on the new entity. |
 | **Calibration offset not applied** | The TRV hasn't reported Poise's last calibration offset for an extended time — the writes may not be reaching the device. | Check the Zigbee/Wi-Fi link or the device's child lock. Clears once the offset is reported. |
 | **TRV offset calibration available** *(fixable)* | This TRV exposes a writable calibration offset and no external-temperature input is configured — Poise could compensate the room reading via offset calibration, but the opt-in option is currently off. | *Apply* enables *TRV calibration* for the zone; *Ignore* leaves it off (the suggestion reappears while the condition still holds). |
 
