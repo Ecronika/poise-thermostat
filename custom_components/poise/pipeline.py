@@ -62,13 +62,17 @@ class ZoneInputs:
 def corridor_for(zone: ZoneInputs) -> ComfortCorridor:
     """Build the comfort corridor for a zone (Phase 1 EN 16798 or Phase 0 band)."""
     if zone.t_rm is not None:
+        # ADR-0071: the mould floor is no longer derived from humidity HERE.
+        # It is computed once per tick by ``comfort.mould_risk.evaluate`` and
+        # travels as a value, exactly like the frost floor — so this reference
+        # pipeline hands the ALREADY RESOLVED ``zone.mold_min`` down instead of
+        # re-deriving a second, inconsistent one from rh/t_out.
         ctx = ComfortContext(
             t_rm=zone.t_rm,
             t_air=zone.t_air.value,
             frost_floor=zone.frost_floor,
             device_max=zone.device_max,
-            rh_percent=zone.rh_percent,
-            t_out=zone.t_out,
+            mold_min=zone.mold_min,
             t_mrt=zone.t_mrt,
             category=zone.category,
         )

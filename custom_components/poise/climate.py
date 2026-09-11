@@ -130,6 +130,11 @@ _ATTRS = (
     "surface_rh",
     "surface_rh_mean",
     "mold_capped",
+    # ADR-0071 dose model: the index itself plus why the floor is (not) on.
+    "mould_index",
+    "mould_engaged",
+    "mould_reason",
+    "mould_substrate",
     "rh_max_safe",
     "abs_max_safe",
     "fabric_conflict",

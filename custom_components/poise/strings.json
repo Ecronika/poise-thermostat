@@ -32,7 +32,7 @@
             "data_description": {
               "trm_sensor": "A precomputed running-mean outdoor temperature (T_rm). Without it, Poise derives T_rm itself from the outdoor input.",
               "outdoor_sensor": "A physical outdoor sensor. Without one, Poise falls back to the weather entity's current temperature.",
-              "humidity_sensor": "Enables the DIN 4108-2 mould-protection floor and the humidity comfort ceiling for this room.",
+              "humidity_sensor": "Enables the dose-based mould-risk floor (VTT mould index) and the humidity comfort ceiling for this room.",
               "outdoor_humidity_sensor": "Lets the ventilation advice compare indoor vs. outdoor moisture before recommending airing.",
               "mrt_sensor": "Mean radiant temperature for the operative-temperature calculation. Without it, Poise estimates MRT from the room model.",
               "window_sensor": "Open pauses heating and model learning. Even without a contact, Poise can detect an opened window from the temperature slope.",
@@ -91,7 +91,7 @@
               "comfort_base": "The temperature the comfort band is built around. Schedule and presets shift around this base — adjust the base, not the presets.",
               "category": "EN 16798-1 comfort class: I = tightest band (highest comfort demand), III = widest (most savings). II is the norm default for dwellings.",
               "outdoor_sensor": "A physical outdoor sensor. Without one, Poise falls back to the weather entity's current temperature.",
-              "humidity_sensor": "Enables the DIN 4108-2 mould-protection floor and the humidity comfort ceiling for this room.",
+              "humidity_sensor": "Enables the dose-based mould-risk floor (VTT mould index) and the humidity comfort ceiling for this room.",
               "outdoor_humidity_sensor": "Lets the ventilation advice compare indoor vs. outdoor moisture before recommending airing.",
               "window_sensor": "Open pauses heating and model learning. Even without a contact, Poise can detect an opened window from the temperature slope.",
               "weather_entity": "Forecast source for optimal start/stop (preheat and coast timing). Read through Home Assistant's forecast service and cached — Poise itself polls no cloud."
@@ -535,7 +535,7 @@
     },
     "mould_protection_inactive": {
       "title": "Poise: mould protection inactive",
-      "description": "The configured humidity sensor `{entity}` is unavailable, so Poise cannot compute the mould-avoidance minimum temperature for this room. Frost protection still applies, but mould protection is off until the sensor returns. Check the humidity sensor; this issue clears automatically."
+      "description": "The configured humidity sensor `{entity}` is unavailable, so Poise cannot advance the dose-based mould-risk floor (VTT mould index) for this room. Frost protection still applies, but mould protection is off until the sensor returns. Check the humidity sensor; this issue clears automatically."
     },
     "device_schedule": {
       "title": "Poise: thermostat's own schedule is active",
@@ -587,6 +587,10 @@
     "calibration_entity_unsafe": {
       "title": "Poise: calibration entity not usable",
       "description": "TRV calibration is enabled, but `{entity}` reports no safe metadata (value, min/max or step missing or invalid). Poise writes no offset until the metadata is readable again."
+    },
+    "calibration_entity_mismatch": {
+      "title": "Poise: calibration entity changed",
+      "description": "Calibration ownership is pinned to `{owned}`, but the device now exposes `{entity}` as its calibration entity. The previously owned entity still exists, so Poise writes no offset in this state. Disable and re-enable the TRV calibration option to hand the old offset back cleanly and start fresh on the new entity. (An old entity that was removed entirely is released automatically and regulation continues on the new one.)"
     },
     "calibration_unapplied": {
       "title": "Poise: calibration offset not applied",

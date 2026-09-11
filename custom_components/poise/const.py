@@ -19,7 +19,9 @@ FROST_FLOOR_C: Final = 7.0
 DEVICE_MAX_C: Final = 30.0
 # While a window is open, suppress the mould floor (heating toward ~24 °C
 # fights the ventilation) for this many seconds — the frost floor always remains.
-# DIN 4108-2 is a steady-state criterion, not a minute-scale window event.
+# ADR-0071: the dose model integrates over days, so half an hour of airing can
+# never be the difference between safe and unsafe — but it IS the difference
+# between heating out of an open window and not.
 WINDOW_MOULD_SUPPRESS_S: Final = 1800.0
 BANGBANG_HYSTERESIS_C: Final = 0.3
 # Only (re)write the actuator setpoint on a change of at least this much, or a

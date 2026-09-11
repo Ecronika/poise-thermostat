@@ -1118,6 +1118,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 dry_active=self._zone_runtime.humidity.dry_active,
                 vent_active=self._zone_runtime.humidity.vent_active,
                 surface_rh_mean=self._zone_runtime.humidity.surface_rh_mean,
+                mould_index=self._zone_runtime.humidity.mould_index,  # ADR-0071
+                mould_wet_hours=self._zone_runtime.humidity.mould_wet_hours,
+                mould_dry_hours=self._zone_runtime.humidity.mould_dry_hours,
                 enabled=self._zone_runtime.user.enabled,
                 preset=self._zone_runtime.user.preset,
                 climate_mode=self._zone_runtime.user.climate_mode,
@@ -1200,7 +1203,8 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """D3 hand-back before an actuator swap (reconfigure, P1.5).
 
         Under the tick lock: restore + state confirmation + runtime ownership
-        clear + calibration disarm of THIS instance. The WARN-vs-form-error
+        clear + calibration disarm + input-listener detach of THIS instance
+        (the AR-46 assessment inside). The WARN-vs-form-error
         decision is the calling flow's, made from the returned enum (§0.6
         point 2); the flow also snapshots ``cal_entity``/``cal_baseline``
         BEFORE this call, because a successful port clears them (§0.6a
@@ -1222,6 +1226,9 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
             act = self._zone_runtime.actuator
             if act.cal_baseline is None:
                 self._trv_calibration = False  # disarm even without ownership
+                # AR-46 assessment (review 2026-08-26): same listener detach
+                # as the ownership branch below — see the comment there.
+                self._detach_listeners()
                 return CalibrationRestoreResult.RESTORED  # nothing to hand off
             # resolve_restore owns the corrupt-shape rule (baseline without
             # an entity -> structurally GONE, same as segment H treats it).
@@ -1240,9 +1247,50 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
                 # running — with trv_calibration=True and an empty baseline
                 # segment W would immediately stamp new ownership.
                 self._trv_calibration = False
+                # AR-46 assessment (review 2026-08-26): the swap flow's park
+                # of the OLD actuator runs after this port and its own writes
+                # would fire the state listener — one last tick could then
+                # re-write the parked setpoint and flip the TRV sensor source
+                # back to external (the AR-12 hazard), and unlike the unload
+                # case NOTHING re-parks after the reload. A full quiesce is
+                # wrong here (this instance must keep serving until the
+                # reload replaces it), so only the IMMEDIATE listeners are
+                # detached: the same disarm class as _trv_calibration above,
+                # and the reload rebuilds the subscription on the successor.
+                # Residual, accepted: the 60 s scheduled tick can still land
+                # in the seconds-wide park->reload window; it is no longer
+                # TRIGGERED by the park itself. FAILED keeps the listeners —
+                # the entry stays live with its old config.
+                self._detach_listeners()
             # FAILED: ownership and _trv_calibration stay untouched — the
             # flow shows a form error and the old config remains intact.
             return result
+
+    async def async_quiesce(self) -> None:
+        """Make this instance inert before the final hand-back I/O (AR-46).
+
+        Order matters: (1) detach the input listeners so no state change can
+        trigger a new refresh, (2) shut the ``DataUpdateCoordinator`` down so
+        a queued/debounced refresh becomes a no-op (``_async_refresh`` gates
+        on ``_shutdown_requested`` and the debouncer swallows further calls —
+        verified against HA 2026.8), (3) drain the tick lock so a tick that
+        already passed that gate has fully finished. Only after all three may
+        the unload's final save, calibration restore and actuator park run —
+        otherwise the park's own actuator writes fire the state listener,
+        ``async_request_refresh`` runs one last tick of this dying instance,
+        and that tick re-writes setpoint/mode (undoing the park) and, on the
+        live calibration path, even a fresh offset AFTER the store's
+        calibration ownership was cleaned (the disable/unload quiescence
+        race, review 2026-08-26). Idempotent, and safe against the base
+        class's own on_unload-registered ``async_shutdown`` (it registers
+        itself for config-entry coordinators): detach and shutdown both
+        tolerate a second call. Deliberately no I/O in here — this port only
+        turns things off.
+        """
+        self._detach_listeners()
+        await self.async_shutdown()
+        async with self._lock:
+            pass
 
     async def async_persist_and_cleanup(self) -> None:
         """Final save + repair-issue/notification cleanup on unload.
