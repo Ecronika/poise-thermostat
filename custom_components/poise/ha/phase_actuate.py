@@ -111,7 +111,7 @@ from ..runtime.tick_result import (
     WriteTargetResult,
 )
 from ..runtime.zone_runtime import ZoneRuntime
-from ..safety.sensor_watchdog import sensor_source_handback_due
+from ..safety.sensor_watchdog import sensor_source_handback_target
 from ..safety.write_convergence import convergence_tolerance
 from .actuator_executor import ActuatorExecutor
 from .input_reader import CalibrationMeta, InputReader, parse_attr_number
@@ -1161,37 +1161,24 @@ class ActuatePhase:
         stamps. The actuator read below is await-relative behaviour, so the
         plan cannot be resolved in the prepare phase.
         """
-        # ADR-0029 RELEASE (the feed path's claim, undone): with the room
-        # sensor gone the TRV must fall back to its OWN sensor, or the health
-        # floor below is enforced against the value we fed last -- frozen at
-        # the instant the sensor died, so "the actuator holds the floor with
-        # its own sensor" would be false. Positioned FIRST, before the
-        # idempotent-plan early return: the handback is due on every tick of
-        # the outage, including the ones where the safe setpoint already
-        # stands. No counterpart is needed for the return path -- once the
-        # sensor is back, ``_stage_ext_temp_feed`` re-claims the select on the
-        # next tick ("switch unless already external"), which is also why the
-        # release must never fire for a select we do not drive.
-        _select = self._reader.sensor_select
-        if _select is not None and sensor_source_handback_due(
+        # ADR-0029 RELEASE -- the feed path's claim, undone (rationale and
+        # ownership gate in ``sensor_source_handback_target``). Positioned
+        # FIRST, before the idempotent-plan early return: the handback is due
+        # on EVERY tick of the outage, including the ones where the safe
+        # setpoint already stands.
+        _release = sensor_source_handback_target(
+            select_entity_id=self._reader.sensor_select,
             select_state=self._reader.ext_select_state(),
-            # Our claim: the explicitly configured feed target, or -- for an
-            # auto-detected one -- the fact that we have actually fed this
-            # device in this run. ``last_fed`` is transient by design, so a
-            # restart INSIDE an outage degrades to the old behaviour (no
-            # handback) rather than releasing a select that may be someone
-            # else's.
-            feed_owned=(
-                bindings.trv_ext_temp is not None
-                or self._runtime.actuator.last_fed is not None
-            ),
-        ):
+            configured_feed=bindings.trv_ext_temp,
+            last_fed=self._runtime.actuator.last_fed,
+        )
+        if _release is not None:
             # ``ext_select`` is a pure pass in the commit fold, so this commit
             # stamps nothing and needs no ``now=``; it keeps the release on the
             # same execution-report path as every other effect.
             self._ports.commit_execution(
                 await self._executor.run_sensor_source_handback(
-                    select_entity_id=_select
+                    select_entity_id=_release
                 )
             )
         # Positioned read: the dirty flush follows this write (F-SAVEPOINT,
