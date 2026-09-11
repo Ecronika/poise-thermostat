@@ -348,11 +348,34 @@ class SafetyFloorsResult:
     """Mould floor + dewpoint cap.
 
     ``health_updates``: mould_protection_inactive, both directions, collected
-    at its evaluation point."""
+    at its evaluation point.
+
+    ADR-0071: ``mold_min``/``mold_capped`` KEEP their names and their meaning
+    (required minimum air temperature, and "the 24 °C ceiling clipped it, so
+    heating alone cannot protect this room") but are now filled from
+    ``MouldRisk.floor``/``.capped`` instead of the retired instantaneous
+    inversion. That is deliberate: the whole downstream path
+    (``dual_setpoint.decide``, ``tick_resolve``, ``phase_actuate``,
+    ``frozen_safe_target``, ``FinalizeContext``, ``phase_report``,
+    ``hub_aggregate``) then needs no change at all. The five ``mould_*``
+    fields are the genuinely NEW information: the advanced dose state that the
+    glue writes back onto ``HumidityRuntime`` for the next tick, plus the
+    verdict the diagnostics publish."""
 
     mold_min: float | None
     mold_capped: bool
     dewpoint: float | None
+    # ADR-0071 §4.2: the ADVANCED dose state of this tick. The glue folds these
+    # three back into ``runtime.humidity`` (they are persisted) and feeds them
+    # in again on the next tick — the model itself stays pure and stateless.
+    mould_index: float = 1.0
+    mould_wet_hours: float = 0.0
+    mould_dry_hours: float = 0.0
+    # Engage verdict + why. ``mould_engaged`` also travels back onto the
+    # (transient) ``HumidityRuntime.mould_engaged`` so the engage/release
+    # hysteresis sees its own previous answer.
+    mould_engaged: bool = False
+    mould_reason: str = "clear"  # "index"|"acute"|"clear"|"no_humidity"
     health_updates: tuple[HealthUpdate, ...] = ()
 
 

@@ -307,14 +307,26 @@ class PresenceRuntime:
 class HumidityRuntime:
     """Long-lived humidity state; the dry decision itself runs live per tick.
 
-    Persisted: ``dry_active``, ``vent_active`` and ``surface_rh_mean`` — the
-    two hysteresis latches must survive a restart between their thresholds,
-    and the ~48 h surface-RH mean is days of wall history a reboot would
-    otherwise discard.
+    Persisted: ``dry_active``, ``vent_active``, ``surface_rh_mean``,
+    ``mould_index``, ``mould_wet_hours`` and ``mould_dry_hours`` — the two
+    hysteresis latches must survive a restart between their thresholds, the
+    ~48 h surface-RH mean is days of wall history a reboot would otherwise
+    discard, and the VTT mould dose (index + its wet/dry counters, ADR-0071)
+    is a multi-day accumulation that a restart must not silently reset.
+    ``mould_engaged`` is the one deliberate exception: it carries only the
+    PREVIOUS tick's engage verdict for the engage/release hysteresis and is
+    NOT persisted (see its own field comment below).
     """
 
     PERSISTED_FIELDS: ClassVar[frozenset[str]] = frozenset(
-        {"dry_active", "vent_active", "surface_rh_mean"}
+        {
+            "dry_active",
+            "vent_active",
+            "surface_rh_mean",
+            "mould_index",
+            "mould_wet_hours",
+            "mould_dry_hours",
+        }
     )
 
     dry_active: bool = False  # ADR-0050/0051 dry-active hysteresis latch
@@ -338,6 +350,23 @@ class HumidityRuntime:
     # edge). Deliberately TRANSIENT: a restart mid-episode re-applies the
     # entry threshold once, which at worst drops the advice briefly.
     vent_reason: str = ""
+    # ADR-0071 §4: VTT/Hukka&Viitanen mould-dose model (comfort/mould_risk.py
+    # ``evaluate``). Persisted (multi-day dose, must survive a restart).
+    # Warm start 1.0 mirrors ``comfort.mould_risk.WARM_START_INDEX`` — written
+    # as a LITERAL, not imported: ``runtime/`` must never import from
+    # ``comfort/`` (ADR-0005 layering). Warmstart 1.0 = "Keimung hat
+    # irgendwann stattgefunden, kein sichtbares Wachstum" (VTT-Skala) -> ab
+    # Tag 1 im responsiven k1-Zweig, ADR-0071 §4.
+    mould_index: float = 1.0
+    mould_wet_hours: float = 0.0
+    mould_dry_hours: float = 0.0
+    # Transient hysteresis carry (NOT in PERSISTED_FIELDS): the engage
+    # verdict of the PREVIOUS tick, fed back into ``evaluate(was_engaged=...)``
+    # so an already-engaged floor holds down to INDEX_RELEASE instead of
+    # flapping. Deliberately not persisted — a restart safely re-derives it
+    # within one tick from the (persisted) index/wet_hours state; unlike
+    # ``mould_index`` it carries no multi-day history of its own.
+    mould_engaged: bool = False
 
 
 @dataclass(slots=True)

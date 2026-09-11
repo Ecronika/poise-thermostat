@@ -212,10 +212,11 @@ class ZoneRuntime:
         """THE one clearing site for the calibration ownership (P1.5).
 
         Baseline, entity and every evidence anchor go together, and the flip
-        persists (``dirty``). Exactly two callers: the state-confirmed
-        pre-I/O fold :meth:`observe_calibration_restore` and the
-        coordinator's lifecycle port ``async_prepare_actuator_handoff`` —
-        a second clearing implementation would let the two field sets drift.
+        persists (``dirty``). Exactly three callers: the state-confirmed
+        pre-I/O fold :meth:`observe_calibration_restore`, the orphan-release
+        fold :meth:`observe_calibration_orphaned` and the coordinator's
+        lifecycle port ``async_prepare_actuator_handoff`` — a second clearing
+        implementation would let the field sets drift.
         """
         self.actuator.cal_baseline = None
         self.actuator.cal_entity = None
@@ -226,7 +227,7 @@ class ZoneRuntime:
         self.dirty = True  # persist the ownership clear
 
     def observe_calibration_resume(self, *, reported: float, wall_now: float) -> bool:
-        """Restart quarantine (D4) — pure pre-I/O fold, second of the pair.
+        """Restart quarantine (D4) — pure pre-I/O fold, second of the family.
 
         ``cal_baseline`` restored but ``last_cal_value`` gone means the
         transient evidence anchors were lost: the process is fresh. The
@@ -246,6 +247,28 @@ class ZoneRuntime:
             return False
         self.actuator.last_cal_value = reported
         self.actuator.last_cal_dispatch_wall_ts = wall_now
+        return True
+
+    def observe_calibration_orphaned(self, *, stored_entity_gone: bool) -> bool:
+        """Identity-drift release (review 2026-08-26) — pure pre-I/O fold,
+        third of the calibration observe family.
+
+        Ownership pinned to a STORED entity that is structurally gone while
+        discovery resolves a different one (rename/re-create across a
+        reload): there is nothing the old offset still acts on and nothing a
+        handoff could restore against, so keeping the pin would brick the
+        feature on this zone forever — the identity gate blocks every write
+        and the first-write re-stamping never runs. The caller (segment W)
+        owns the tri-state read and passes the observation; THIS fold owns
+        the release through the one clearing site, persisted via ``dirty``,
+        so the next tick's first write re-owns the discovered entity.
+        Returns True exactly when a standing ownership was just released
+        (the caller logs the evidence trail then); no ownership or a
+        still-existing stored entity releases nothing.
+        """
+        if self.actuator.cal_baseline is None or not stored_entity_gone:
+            return False
+        self.clear_calibration_ownership()
         return True
 
     def commit_execution(
@@ -567,6 +590,18 @@ class ZoneRuntime:
             self.humidity.vent_active = diag.vent_active  # ADR-0066 advice latch
         if diag.surface_rh_mean is not None:
             self.humidity.surface_rh_mean = diag.surface_rh_mean  # ~48 h EWMA
+        # ADR-0071 §4.3: the VTT mould dose. Each value is restored ONLY when
+        # the payload actually carries it -- a pre-0071 payload knows none of
+        # them, and the dataclass defaults (warm start 1.0 / 0 h / 0 h) are
+        # then exactly the right answer. Writing a ``None`` through would
+        # crash the next ``evaluate``; writing a 0.0 would claim a sterile
+        # laboratory surface for a flat somebody has lived in for years.
+        if diag.mould_index is not None:
+            self.humidity.mould_index = diag.mould_index
+        if diag.mould_wet_hours is not None:
+            self.humidity.mould_wet_hours = diag.mould_wet_hours
+        if diag.mould_dry_hours is not None:
+            self.humidity.mould_dry_hours = diag.mould_dry_hours
 
     def seed_ekf_cold_start(
         self,
@@ -670,13 +705,26 @@ class ZoneRuntime:
         entry_id: str,
         humidity_entity: str | None,
         psychro_dewpoint_fn: Callable[[float, float], float],
+        mould_state: tuple[float, float, float],
+        was_engaged: bool,
+        dt_h: float,
     ) -> SafetyFloorsResult:
-        """Mould floor + dewpoint cap from humidity."""
+        """Mould floor + dewpoint cap from humidity.
+
+        ADR-0071: the dose state travels THROUGH this wrapper rather than
+        being read off ``self.humidity`` here -- the stage stays a pure
+        function of its arguments, and the glue (``ha/phase_prepare``) keeps
+        owning the read/advance/write-back cycle, exactly as it does for
+        ``surface_rh_mean``.
+        """
         return _prepare.stage_safety_floors(
             ing,
             entry_id=entry_id,
             humidity_entity=humidity_entity,
             psychro_dewpoint_fn=psychro_dewpoint_fn,
+            mould_state=mould_state,
+            was_engaged=was_engaged,
+            dt_h=dt_h,
         )
 
     def stage_schedule_gate(
