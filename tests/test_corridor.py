@@ -50,8 +50,6 @@ def test_no_mold_bound_while_the_protection_is_not_engaged() -> None:
             t_air=20.0,
             frost_floor=7.0,
             device_max=30.0,
-            rh_percent=70.0,
-            t_out=-5.0,
         )
     )
     assert not any(b.cause == "mold" for b in corridor.lower)

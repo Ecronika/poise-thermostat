@@ -591,6 +591,13 @@ def _solve_fixtures(rt: ZoneRuntime):
         entry_id="e1",
         humidity_entity=None,
         psychro_dewpoint_fn=psychro_dewpoint,
+        # ADR-0071: the dose travels THROUGH the stage. A fresh zone at the
+        # warm start is the right fixture here — these tests are about the
+        # SOLVER seam, and a non-engaging mould state keeps ``mold_min`` out
+        # of the corridor, so the solved lower bound is the comfort one.
+        mould_state=_FRESH_DOSE,
+        was_engaged=False,
+        dt_h=_TICK_H,
     )
     sp = SchedulePresenceResult(
         home=None,

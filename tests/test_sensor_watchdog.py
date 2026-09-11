@@ -3,6 +3,7 @@ from __future__ import annotations
 from custom_components.poise.safety.sensor_watchdog import (
     is_frozen,
     sensor_source_handback_due,
+    sensor_source_handback_target,
     unavailable_safe_engaged,
 )
 
@@ -116,4 +117,74 @@ def test_sensor_source_handback_due_is_idempotent_and_write_safe() -> None:
     assert sensor_source_handback_due(select_state=None, feed_owned=True) is False
     assert (
         sensor_source_handback_due(select_state="unavailable", feed_owned=True) is False
+    )
+
+
+# ---------------------------------------------------------------------------
+# sensor_source_handback_target -- the decision node lifted out of
+# ``ha/phase_actuate`` (the dispatch stayed there). What is tested here is the
+# TRANSLATION of ownership evidence into a target, not the predicate above.
+# ---------------------------------------------------------------------------
+
+
+def test_handback_target_names_the_select_for_a_configured_feed() -> None:
+    assert (
+        sensor_source_handback_target(
+            select_entity_id="select.trv_sensor_source",
+            select_state="external",
+            configured_feed="number.trv_ext_temp",
+            last_fed=None,
+        )
+        == "select.trv_sensor_source"
+    )
+
+
+def test_handback_target_accepts_an_auto_detected_feed_we_actually_drove() -> None:
+    # No configured target, but we fed this device in this run -> ours.
+    assert (
+        sensor_source_handback_target(
+            select_entity_id="select.trv_sensor_source",
+            select_state="external",
+            configured_feed=None,
+            last_fed="number.trv_ext_temp",
+        )
+        == "select.trv_sensor_source"
+    )
+
+
+def test_handback_target_is_none_without_ownership_evidence() -> None:
+    # A restart INSIDE an outage loses the transient ``last_fed`` -> no
+    # handback, rather than releasing a select that may be someone else's.
+    assert (
+        sensor_source_handback_target(
+            select_entity_id="select.trv_sensor_source",
+            select_state="external",
+            configured_feed=None,
+            last_fed=None,
+        )
+        is None
+    )
+
+
+def test_handback_target_is_none_when_no_select_was_discovered() -> None:
+    assert (
+        sensor_source_handback_target(
+            select_entity_id=None,
+            select_state="external",
+            configured_feed="number.trv_ext_temp",
+            last_fed=None,
+        )
+        is None
+    )
+
+
+def test_handback_target_is_none_once_the_select_is_internal() -> None:
+    assert (
+        sensor_source_handback_target(
+            select_entity_id="select.trv_sensor_source",
+            select_state="internal",
+            configured_feed="number.trv_ext_temp",
+            last_fed=None,
+        )
+        is None
     )
