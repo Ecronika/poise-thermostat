@@ -140,13 +140,16 @@ def test_handback_target_names_the_select_for_a_configured_feed() -> None:
 
 
 def test_handback_target_accepts_an_auto_detected_feed_we_actually_drove() -> None:
-    # No configured target, but we fed this device in this run -> ours.
+    # No configured target, but a value was fed to this device in this run
+    # -> ours. 0.0 is deliberate: the EVIDENCE is that the field is set at
+    # all, never the magnitude, and a falsy reading must not read as "never
+    # fed".
     assert (
         sensor_source_handback_target(
             select_entity_id="select.trv_sensor_source",
             select_state="external",
             configured_feed=None,
-            last_fed="number.trv_ext_temp",
+            last_fed=0.0,
         )
         == "select.trv_sensor_source"
     )
