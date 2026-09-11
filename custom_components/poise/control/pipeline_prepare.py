@@ -63,7 +63,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from ..adaptive_cool import resolve_adaptive_cool
-from ..comfort.mold import mold_min_air_temperature_detail
+from ..comfort.mould_risk import evaluate as evaluate_mould_risk
 from ..comfort.virtual_mrt import virtual_mrt
 from ..const import (
     DEVICE_MAX_C,
@@ -721,6 +721,9 @@ def stage_safety_floors(
     entry_id: str,
     humidity_entity: str | None,
     psychro_dewpoint_fn: Callable[[float, float], float],
+    mould_state: tuple[float, float, float],
+    was_engaged: bool,
+    dt_h: float,
 ) -> SafetyFloorsResult:
     """Mould floor + dewpoint cap from humidity.
 
@@ -729,38 +732,45 @@ def stage_safety_floors(
     abort (empty-pending aborts propagate bare).  ``dewpoint``
     is read off ``estimation.psychrometrics`` at call time
     (test_phase6_health_checkpoints patch surface).
+
+    ADR-0071: the floor comes from the VTT dose model, not from the ADR-0062
+    instantaneous inversion.  That model is PURE, so state travels THROUGH the
+    stage (``mould_state`` + ``was_engaged`` in, advanced values out, glue
+    folds them back) and ``dt_h`` tells the dose how long this tick is.  With
+    ``rh is None`` it freezes the counters ITSELF rather than guessing "dry".
     """
     pending: list[HealthUpdate] = []
     try:
-        room = ing.room
-        rh = ing.rh
-        t_out_eff = ing.t_out_eff
-        # mould floor + dewpoint cap from humidity
-        mold_min = None
-        mold_capped = False
-        dewpoint = None
-        if rh is not None:
-            dewpoint = psychro_dewpoint_fn(room, rh)
-            # Keep a (conservative) mould floor even without an outdoor sensor
-            # by using the effective outdoor proxy instead of skipping it.
-            # Surface when the required floor is clipped at 24 °C -- the room
-            # really needs dehumidification there, so protection is
-            # insufficient.
-            mold_min, mold_capped = mold_min_air_temperature_detail(t_out_eff, rh, room)
-        # A configured humidity sensor that dropped out silently disables
-        # mould protection (no floor computed) -> surface it.
+        dewpoint = None if ing.rh is None else psychro_dewpoint_fn(ing.room, ing.rh)
+        risk = evaluate_mould_risk(
+            t_room=ing.room,
+            rh_room=ing.rh,
+            t_out=ing.t_out_eff,
+            index=mould_state[0],
+            wet_hours=mould_state[1],
+            dry_hours=mould_state[2],
+            dt_h=dt_h,
+            was_engaged=was_engaged,
+        )
+        # A humidity sensor that dropped out disables mould protection -> say so.
         pending.append(
             HealthUpdate(
                 issue_id=f"mould_protection_inactive_{entry_id}",
-                active=humidity_entity is not None and rh is None,
+                active=humidity_entity is not None and ing.rh is None,
                 translation_key="mould_protection_inactive",
                 placeholders={"entity": humidity_entity or ""},
             )
         )
+        # SAME names, SAME meaning, new provenance (ADR-0071 §4.2).
         return SafetyFloorsResult(
-            mold_min=mold_min,
-            mold_capped=mold_capped,
+            mold_min=risk.floor,  # MouldRisk.floor
+            mold_capped=risk.capped,  # MouldRisk.capped
             dewpoint=dewpoint,
+            mould_index=risk.index,
+            mould_wet_hours=risk.wet_hours,
+            mould_dry_hours=risk.dry_hours,
+            mould_engaged=risk.engaged,
+            mould_reason=risk.reason,
             health_updates=tuple(pending),
         )
     except BaseException as err:  # transport-only; unwrapped in _run_once
