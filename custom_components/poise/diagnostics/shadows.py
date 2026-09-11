@@ -50,9 +50,18 @@ from ..comfort.fan_cooling import fan_cool_setpoint, fan_velocity
 from ..comfort.free_running import free_running_widen
 from ..comfort.humidity import rh_high_for_category
 from ..comfort.mold import (
+    DEFAULT_F_RSI,
     max_safe_rh,
-    mold_min_air_temperature_detail,
     surface_relative_humidity,
+    surface_temperature,
+)
+from ..comfort.mould_risk import (
+    ACUTE_WET_HOURS,
+    DEFAULT_SUBSTRATE,
+    INDEX_ENGAGE,
+    SUBSTRATES,
+    critical_rh,
+    required_air_temperature,
 )
 from ..comfort.pmv import (
     clo_dynamic,
@@ -98,6 +107,34 @@ if TYPE_CHECKING:
 # the edge travels on the published 0.1 grid while the floor is continuous, so
 # an exact ">=" would miss the very case the guard exists for.
 _PROTECTED_EDGE_TOL_K = 0.05
+
+# ADR-0071: the substrate the dose model runs on. Not a configuration option in
+# this release (``mould_risk.ROOM_PROFILE_SUBSTRATE`` is the prepared map for
+# the later config step), so the diagnostics resolve the same default the
+# floors stage uses rather than inventing a second source of truth.
+_MOULD_SPEC = SUBSTRATES[DEFAULT_SUBSTRATE]
+
+
+def _mould_reason(
+    *, rh: float | None, engaged: bool, index: float, wet_hours: float
+) -> str:
+    """The tick's mould verdict label, re-derived from the advanced dose.
+
+    Mirrors the engage ladder of ``mould_risk.evaluate`` exactly — index over
+    ``INDEX_ENGAGE`` first, then the acute 48 h backstop, hysteresis holds
+    otherwise — over the THREE numbers that ladder reads. Re-deriving instead
+    of transporting ``MouldRisk.reason`` is forced, not preferred: the tick's
+    verdict object has no route into this composition (see the ``mould_*``
+    parameters of :func:`compose_climate_band`). Re-running ``evaluate`` here
+    is NOT an option — it would advance the dose a second time in one tick.
+    """
+    if rh is None:
+        return "no_humidity"
+    if not engaged:
+        return "clear"
+    if index < INDEX_ENGAGE and wet_hours >= ACUTE_WET_HOURS:
+        return "acute"
+    return "index"
 
 
 class PredictPeakOperativeFn(Protocol):
@@ -179,8 +216,7 @@ def evaluate_cover_shadow(
     t_out_eff: float,
     q_solar: float,
     cool_sp: float,
-    heat_sp: float,
-    mold_min: float | None,
+    mould_binds: bool,
     model: ThermalModel,
     identified: bool,
     temperature_std: float,
@@ -195,6 +231,18 @@ def evaluate_cover_shadow(
     The two kernels arrive as ``*_fn`` parameters; the orchestrator resolves
     ``predict_peak_operative`` off ``control.cover_shading`` at call time
     (the patched fault-injection surface) and imports the other plainly.
+
+    ADR-0071 §4.4/§4.5: ``binding`` used to be RECONSTRUCTED here, as
+    ``"mold" if mold_min and mold_min >= heat_sp else "en16798"`` — an
+    unrounded floor compared against the ROUNDED ``heat_sp``, which mislabelled
+    every case where the 0.1 K rounding moved the setpoint across the floor,
+    and which additionally read a legitimate 0.0 °C floor as "no floor" through
+    the truthiness test.  A cause cannot be recovered from a rounded result; it
+    has to be recorded where the ``max()`` is taken.  ``comfort.dual_setpoint``
+    now does exactly that and publishes ``ComfortDecision.lower_cause``, and
+    this function is simply told the answer (``mould_binds``).  Both
+    ``mold_min`` and ``heat_sp`` are gone from the signature: they existed only
+    to feed that broken reconstruction.
     """
     peak = predict_peak_operative_fn(
         operative,
@@ -211,7 +259,9 @@ def evaluate_cover_shadow(
         current_position=0.0,
         oriented_q=q_solar,
     )
-    binding = "mold" if mold_min and mold_min >= heat_sp else "en16798"
+    # The published token stays "mold" — ``control/hub_aggregate`` and the card
+    # match on it, and ADR-0071 changed the METHOD, not the vocabulary.
+    binding = "mold" if mould_binds else "en16798"
     return peak, pos, reason, binding
 
 
@@ -364,6 +414,21 @@ def compose_climate_band(
     t_forecast_day: float | None = None,
     room_profile: str | None = None,
     clo_offset: float = 0.0,
+    # --- ADR-0071 VTT mould dose (advanced by ``stage_safety_floors``) ------
+    # These arrive from ``runtime.humidity`` because the tick's ``MouldRisk``
+    # itself has no transport into this composition: ``PreparePhase`` may not
+    # grow a collaborator (its ``__slots__`` are pinned by the structure gate)
+    # and ``_stage_climate_band``'s parameter list is fixed by the orchestrator
+    # that calls it.  The floors stage writes the advanced dose back onto the
+    # humidity runtime EARLIER IN THE SAME TICK, so these are that tick's real
+    # values, not a stale copy.
+    mould_index: float = 0.0,
+    mould_wet_hours: float = 0.0,
+    mould_engaged: bool = False,
+    # ADR-0071 §4.5: the mould floor's binding verdict, decided at the source
+    # in ``dual_setpoint.decide`` (``lower_cause == "mould"``) rather than
+    # re-derived from a rounded setpoint.
+    mould_binds: bool = False,
 ) -> dict[str, object]:
     """Pure climate-band shadow composition + ``climate_diag`` assembly.
 
@@ -468,20 +533,50 @@ def compose_climate_band(
         if surface_pct is not None
         else surface_rh_mean_prev
     )
-    rh_max = max_safe_rh(room, t_out_eff) if t_out_eff is not None else None
+    # ADR-0071: the safe-RH ceiling is solved for the LIVE critical humidity of
+    # the surface, not for a fixed 80 %. ``critical_rh`` is a pure function of
+    # the surface temperature and the substrate class — no dose state enters it
+    # — so evaluating it here yields exactly the ``MouldRisk.critical_rh`` of
+    # this tick. Below ~20 °C surface it rises above 80 %, which correctly
+    # RELAXES the published ceiling on a cold wall instead of alarming on a
+    # value at which nothing can grow.
+    rh_crit = (
+        critical_rh(surface_temperature(room, t_out_eff), _MOULD_SPEC)
+        if t_out_eff is not None
+        else None
+    )
+    rh_max = (
+        max_safe_rh(room, t_out_eff, limit=rh_crit / 100.0)
+        if t_out_eff is not None and rh_crit is not None
+        else None
+    )
     abs_max = absolute_humidity(room, rh_max) if rh_max is not None else None
     # Recomputed with the SAME pure function + inputs as the floors stage
     # (pipeline_prepare), so this is by construction the undisturbed DIAGNOSTIC
     # mould value — never the window-suppressed write value (design B.2 note).
+    # ``required_air_temperature`` is stateless: the DOSE decided whether the
+    # floor applies at all (``mould_engaged``), the floor itself is pure
+    # psychrometry over the current reading and can be re-derived safely.
     mold_min: float | None = None
     mold_capped = False
-    if rh is not None and t_out_eff is not None:
-        mold_min, mold_capped = mold_min_air_temperature_detail(t_out_eff, rh, room)
+    if mould_engaged and rh is not None and t_out_eff is not None:
+        mold_min, mold_capped = required_air_temperature(
+            t_out=t_out_eff,
+            rh_room=rh,
+            t_room=room,
+            f_rsi=DEFAULT_F_RSI,
+            spec=_MOULD_SPEC,
+        )
+    mould_reason = _mould_reason(
+        rh=rh, engaged=mould_engaged, index=mould_index, wet_hours=mould_wet_hours
+    )
     vent = ventilation_advise(
         w_in_gm3=w_in,
         w_out_gm3=w_out,
         surface_rh_mean_pct=surface_mean,
-        mold_floor_binding=mold_min is not None and mold_min >= heat_sp,
+        # ADR-0071 §4.5: the SAME source-decided verdict the cover shadow
+        # gets, instead of a second unrounded-vs-rounded comparison.
+        mold_floor_binding=mould_binds,
         mold_capped=mold_capped,
         room_at_thermal_floor=mold_min is not None and room <= mold_min + 0.2,
         co2_ppm=co2,
@@ -516,6 +611,12 @@ def compose_climate_band(
             round(surface_mean, 2) if surface_mean is not None else None
         ),
         "mold_capped": mold_capped,
+        # ADR-0071: what the dose model actually knows, published so a field
+        # report can distinguish "wall is chronically wet" from "shower peak".
+        "mould_index": round(mould_index, 2),
+        "mould_engaged": mould_engaged,
+        "mould_reason": mould_reason,
+        "mould_substrate": DEFAULT_SUBSTRATE.value,
         "rh_max_safe": round(rh_max, 1) if rh_max is not None else None,
         "abs_max_safe": round(abs_max, 1) if abs_max is not None else None,
         "fabric_conflict": (abs_max is not None and abs_max < DEFAULT_DRY_WARN_GM3),
