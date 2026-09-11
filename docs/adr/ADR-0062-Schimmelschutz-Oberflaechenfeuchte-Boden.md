@@ -1,6 +1,6 @@
 # ADR-0062: Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden
 
-**Status:** Implementiert (rückwirkend dokumentiert) · **Wirkung:** Live-A · **Datum:** 2026-07-26 · **Bezug:** ADR-0023 (Dual-Setpoint), ADR-0035 (Präzedenz-Solver), ADR-0041 (Fenster), ADR-0048 (Abgrenzung VDI 6022), ADR-0050 (Dry-Pfad), ADR-0057 (Card-Tick), ADR-0012 (Repair-Issues) · **Verifizierung:** Quellcode-Abgleich (`comfort/mold.py`, `estimation/psychrometrics.py`, `comfort/corridor.py`, `control/tick_pipeline.py`, `safety/sensor_watchdog.py`, `const.py`) + Normabgleich DIN 4108-2 / EN ISO 13788
+**Status:** Ersetzt durch ADR-0071 · **Wirkung:** n.a. · **Datum:** 2026-07-26 · **Bezug:** ADR-0023 (Dual-Setpoint), ADR-0035 (Präzedenz-Solver), ADR-0041 (Fenster), ADR-0048 (Abgrenzung VDI 6022), ADR-0050 (Dry-Pfad), ADR-0057 (Card-Tick), ADR-0012 (Repair-Issues) · **Verifizierung:** Quellcode-Abgleich (`comfort/mold.py`, `estimation/psychrometrics.py`, `comfort/corridor.py`, `control/tick_pipeline.py`, `safety/sensor_watchdog.py`, `const.py`) + Normabgleich DIN 4108-2 / EN ISO 13788
 
 ## Kontext
 

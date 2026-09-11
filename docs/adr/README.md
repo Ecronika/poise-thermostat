@@ -95,7 +95,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0059](ADR-0059-Override-Lebenszyklus.md) | Override-Lebenszyklus — Gültigkeit, Rückkehr, Feedback, L1-Erfassung (manuelle Eingriffe) | Implementiert (v0.163.0) |
 | [0060](ADR-0060-Override-Vorschlags-Lernen.md) | Override-Vorschlags-Lernen (L2) + Modus-Saison-Hinweis | Implementiert (§3-Runde abgeschlossen, Emission default-an) |
 | [0061](ADR-0061-Kuehlkante-Anwesenheit-vs-FreeRunning.md) | Kühlkante — fest bei Anwesenheit, adaptiv nur free-running | Implementiert (v0.165.0) |
-| [0062](ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md) | Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden | Implementiert (rückwirkend dokumentiert) |
+| [0062](ADR-0062-Schimmelschutz-Oberflaechenfeuchte-Boden.md) | Schimmelschutz — Oberflächenfeuchte-Modell und Mindest-Lufttemperatur-Boden | Ersetzt durch ADR-0071 |
 | [0063](ADR-0063-Tick-Entkopplung-Datei-und-Wetter-IO.md) | Datei-/Wetter-I/O aus dem Tick-Lock — und was `tick_ms` danach misst | Implementiert (v0.179.0) |
 | [0064](ADR-0064-Persistenz-Checkpoint-am-Tickende.md) | Persistenz-Checkpoint am Tick-Ende — ein Zustand, eine Momentaufnahme | Implementiert (v0.179.0) |
 | [0065](ADR-0065-Fehlergrenzen-Diagnose-Segmente.md) | Fehlergrenzen — eine Grenze je Segment statt zwei Sammel-Domänen | Implementiert (v0.179.0) |
@@ -104,6 +104,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0068](ADR-0068-Luefter-als-erste-Kuehlstufe.md) | Lüfter als erste Kühlstufe — dritte Rolle der `air_movement`-Achse (R2) | Implementiert (v1 Single-Aktor, P6/P7-Überführung offen) |
 | [0069](ADR-0069-Aktive-Behaglichkeit-Stufe-A.md) | „Aktive Behaglichkeit" — Stufe-A-Spezifikation (Bedienelement, Name, Verhaltensumfang) | Implementiert (alle 8 Schritte; Tier-2-Freigaben warten auf M1) |
 | [0070](ADR-0070-Mehrere-Komfortfenster.md) | Mehrere Komfortfenster pro Tag (n-Fenster-Datenmodell, n+1-Options-UI) | Implementiert (v0.187.0) |
+| [0071](ADR-0071-Schimmelrisiko-Dosismodell.md) | Schimmelrisiko — Dosismodell (VTT-Schimmelindex) statt Momentanwert-Boden | Implementiert |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
