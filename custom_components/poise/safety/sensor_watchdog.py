@@ -66,7 +66,7 @@ def sensor_source_handback_target(
     select_entity_id: str | None,
     select_state: str | None,
     configured_feed: str | None,
-    last_fed: str | None,
+    last_fed: float | None,
 ) -> str | None:
     """The sensor-source select to release, or ``None`` when none is due.
 
@@ -83,11 +83,14 @@ def sensor_source_handback_target(
     pendant of the frozen-sensor degradation (ADR-0012).
 
     OWNERSHIP. Only a select THIS zone drives is released, never a foreign
-    automation's: the explicitly configured feed target (``configured_feed``),
-    or -- for an auto-detected one -- the fact that we have actually fed this
-    device in this run (``last_fed``). ``last_fed`` is transient by design, so
-    a restart INSIDE an outage degrades to the old behaviour (no handback)
-    rather than releasing a select that may be someone else's.
+    automation's. Two kinds of evidence, either of which suffices:
+    ``configured_feed`` is the explicitly configured feed target (an entity
+    id), and ``last_fed`` is the last TEMPERATURE we actually wrote to this
+    device -- a value, not an entity, and its mere presence is the proof that
+    the feed path ran here at least once (the auto-detected case). ``last_fed``
+    is transient by design, so a restart INSIDE an outage degrades to the old
+    behaviour (no handback) rather than releasing a select that may be someone
+    else's.
 
     NO RETURN-PATH COUNTERPART is needed: once the sensor is back,
     ``_stage_ext_temp_feed`` re-claims the select on the next tick ("switch
