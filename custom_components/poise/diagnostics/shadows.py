@@ -557,16 +557,25 @@ def compose_climate_band(
     # ``required_air_temperature`` is stateless: the DOSE decided whether the
     # floor applies at all (``mould_engaged``), the floor itself is pure
     # psychrometry over the current reading and can be re-derived safely.
-    mold_min: float | None = None
-    mold_capped = False
-    if mould_engaged and rh is not None and t_out_eff is not None:
-        mold_min, mold_capped = required_air_temperature(
+    # TWO values, because ADR-0071 split what used to be one. ``required`` is
+    # the psychrometric answer to "how warm must the air be to keep these
+    # surfaces safe" — always available, dose or no dose. ``mold_min`` is the
+    # ENFORCED floor and exists only once the dose engaged it. Heating and
+    # guard 5 (which vetoes a real comfort decision) read the enforced value;
+    # the mould GUARD advice reads the requirement, because a recommendation
+    # costs nothing and must not wait weeks for the dose to mature.
+    required: float | None = None
+    required_capped = False
+    if rh is not None and t_out_eff is not None:
+        required, required_capped = required_air_temperature(
             t_out=t_out_eff,
             rh_room=rh,
             t_room=room,
             f_rsi=DEFAULT_F_RSI,
             spec=_MOULD_SPEC,
         )
+    mold_min = required if mould_engaged else None
+    mold_capped = required_capped if mould_engaged else False
     mould_reason = _mould_reason(
         rh=rh, engaged=mould_engaged, index=mould_index, wet_hours=mould_wet_hours
     )
@@ -601,6 +610,12 @@ def compose_climate_band(
         rh_max_safe_pct=rh_max,
         cool_edge_protected=(
             mold_min is not None and mold_min >= eff_cool - _PROTECTED_EDGE_TOL_K
+        ),
+        # ADR-0071: the same comparison on the UNGATED requirement — "the
+        # fabric would need it warmer than the cooling edge", whether or not
+        # the dose has earned the right to heat for it yet.
+        surface_needs_warmer=(
+            required is not None and required >= eff_cool - _PROTECTED_EDGE_TOL_K
         ),
     )
     return {
