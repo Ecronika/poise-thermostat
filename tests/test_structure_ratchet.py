@@ -196,20 +196,14 @@ _RATCHET: tuple[_Entry, ...] = (
         # docstring (gone releases automatically, still-present stays
         # fail-closed). 1160/699 -> 1194/717 — 6 total lines under the 1200
         # cap: the next growth in this file must move lines out instead.
-        # ADR-0029 handback 2026-09-11 +23/+13 (feature growth): the release
-        # node on the unavailable path — the ownership gate, the executor
-        # dispatch and its commit. The rule above was honoured: the DECISION
-        # and its whole rationale MOVED OUT to
-        # ``safety.sensor_watchdog.sensor_source_handback_target``, leaving
-        # only the dispatch here (the node measured 36 lines before the
-        # extraction, 23 after). 1194/717 -> 1217/730. The 1200 prose mark is
-        # therefore passed by 17 total lines while CODE — the half rule 1b
-        # actually enforces — stays 170 lines under the 900 cap. The owed
-        # follow-up is real and named: the two calibration segments (H/W,
-        # ~300 lines) are the only extraction left that changes the order of
-        # magnitude, and they cannot leave without carrying the await
-        # topology with them — a release-sized refactor, not a debug-session
-        # edit.
+        # ADR-0029 handback 2026-09-11 +23/+13: the release node on the
+        # unavailable path. The rule above was honoured — the DECISION and its
+        # rationale MOVED OUT to ``sensor_watchdog.sensor_source_handback_
+        # target``, leaving only the dispatch (36 lines before, 23 after).
+        # 1194/717 -> 1217/730: past the 1200 PROSE mark by 17, while CODE —
+        # the half rule 1b enforces — stays 170 under the 900 cap. The owed
+        # extraction is named: the calibration segments H/W (~300 lines), which
+        # cannot leave without the await topology. Release work, not debug.
         baseline_total=1217,
         baseline_code=730,
         headroom=50,
@@ -532,7 +526,11 @@ _RATCHET: tuple[_Entry, ...] = (
         # +9/0 for the 2026-08-26 follow-up (gone-leg release): the
         # phase_actuate annotation plus these four lines, all comments —
         # this row measured LAST again. 713/301 -> 722/301.
-        baseline_total=722,
+        # +18/0 for the ADR-0029 handback (2026-09-11): the
+        # phase_actuate annotation plus these four lines, all comments —
+        # measured LAST again, and it bit once more: the first attempt raised
+        # only the row it was about. 722/301 -> 740/301.
+        baseline_total=740,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight
