@@ -45,7 +45,8 @@ accumulators) is ONE sequential prefix parse in a fixed restore order —
 ``ekf`` -> ``trm`` -> ``seasonless`` -> ``window_auto`` -> ``multi_lifecycle``
 -> ``outcome_stats`` -> ``regulation_quality`` -> ``comfort_activation`` ->
 ``ref_offset`` -> ``tau_settle`` -> ``hdh_savings`` -> ``dry_active`` ->
-``vent_active`` -> ``surface_rh_mean``.  The FIRST structural
+``vent_active`` -> ``surface_rh_mean`` -> ``mould_index`` ->
+``mould_wet_hours`` -> ``mould_dry_hours``.  The FIRST structural
 throw stops the parse: every model parsed before the throwing key is kept,
 every later field stays undecoded (``None``), and it can never cost the
 user-intent sections.  The original exception is surfaced as
@@ -93,6 +94,9 @@ PAYLOAD_KEYS: Final[tuple[str, ...]] = (
     "dry_active",
     "vent_active",
     "surface_rh_mean",
+    "mould_index",
+    "mould_wet_hours",
+    "mould_dry_hours",
     "window_bypass",
     "preset",
     "enabled",
@@ -193,6 +197,13 @@ class PersistedZoneState:
     # ADR-0066 humidity axis (defaulted: additive to the v1 store shape)
     vent_active: bool = False
     surface_rh_mean: float | None = None
+    # ADR-0071 §4 VTT mould-dose model (defaulted: additive). Warm start 1.0
+    # mirrors ``comfort.mould_risk.WARM_START_INDEX`` — a literal here, not an
+    # import: the codec stays consistent with ``runtime/state.py``'s layering
+    # comment even though codec.py itself has no ADR-0005 restriction.
+    mould_index: float = 1.0
+    mould_wet_hours: float = 0.0
+    mould_dry_hours: float = 0.0
     # ADR-0068 U3 fan-stage echo baselines (defaulted: additive)
     last_commanded_fan: str | None = None
     prev_device_fan: str | None = None
@@ -242,6 +253,9 @@ class PersistedZoneState:
             "dry_active": self.dry_active,
             "vent_active": self.vent_active,
             "surface_rh_mean": self.surface_rh_mean,
+            "mould_index": self.mould_index,  # ADR-0071 §4 VTT dose model
+            "mould_wet_hours": self.mould_wet_hours,
+            "mould_dry_hours": self.mould_dry_hours,
             "window_bypass": self.window_bypass,
             "preset": self.preset.value,
             "enabled": self.enabled,
@@ -397,7 +411,11 @@ class DiagnosticsSection:
     section, at their restore positions (``outcome_stats``/
     ``regulation_quality`` between ``multi_lifecycle`` and ``ref_offset``;
     ``hdh_savings``/``dry_active`` at the very end), so a mid-tail throw
-    retains the same prefix as a fully sequential parse.
+    retains the same prefix as a fully sequential parse. ``mould_index``/
+    ``mould_wet_hours``/``mould_dry_hours`` (ADR-0071 §4) sit right after
+    ``surface_rh_mean``, the very last positions in the tail — an old payload
+    missing them decodes all three as ``None`` (the caller applies the
+    dataclass warm-start default), never an error.
     """
 
     outcome_stats: OutcomeStats | None = None
@@ -407,6 +425,9 @@ class DiagnosticsSection:
     dry_active: bool | None = None
     vent_active: bool | None = None
     surface_rh_mean: float | None = None
+    mould_index: float | None = None
+    mould_wet_hours: float | None = None
+    mould_dry_hours: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -607,6 +628,18 @@ def _decode_models(
         srm = data.get("surface_rh_mean")
         if isinstance(srm, int | float):
             diag["surface_rh_mean"] = float(srm)
+        # ADR-0071 §4: an old payload has none of these three keys — each
+        # stays undecoded (``None``) and the caller applies the dataclass
+        # warm-start default (1.0 / 0.0 / 0.0), never an error.
+        mi = data.get("mould_index")
+        if isinstance(mi, int | float):
+            diag["mould_index"] = float(mi)
+        mwh = data.get("mould_wet_hours")
+        if isinstance(mwh, int | float):
+            diag["mould_wet_hours"] = float(mwh)
+        mdh = data.get("mould_dry_hours")
+        if isinstance(mdh, int | float):
+            diag["mould_dry_hours"] = float(mdh)
     except Exception as err:  # first structural throw stops the parse
         return LearningSection(**learn), DiagnosticsSection(**diag), err
     return LearningSection(**learn), DiagnosticsSection(**diag), None
