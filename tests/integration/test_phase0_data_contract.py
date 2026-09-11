@@ -80,7 +80,8 @@ TIMING_KEYS = ("tick_ms", "tick_ms_ewma", "tick_ms_max", "tick_over_budget")
 
 # Frozen once from the Ist-Zustand (this exact ROOM_DATA, one normal tick,
 # 168 keys; re-frozen for the 12 ADR-0066 humidity-axis keys in v0.180.0 and
-# for the 4 ADR-0054-V1/V2/V3 keys — clo_used/clo_source/met_used/pmv_valid).
+# for the 4 ADR-0054-V1/V2/V3 keys — clo_used/clo_source/met_used/pmv_valid,
+# and for the 4 ADR-0071 dose keys — mould_index/_engaged/_reason/_substrate).
 # A mismatch = deliberate coordinator.data API change -> review,
 # then re-freeze. NOTE: 'compressor_gate_would_block' and
 # 'compressor_mode_hold_remaining' exist only when the shadow try
@@ -183,7 +184,12 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "mode_override",
     "mold_capped",
     "mono_ts",
+    # ADR-0071 dose model (4 keys, v0.192.0)
+    "mould_engaged",
     "mould_floor",
+    "mould_index",
+    "mould_reason",
+    "mould_substrate",
     "mpc_active",
     "mpc_power",
     "mpc_regime",
