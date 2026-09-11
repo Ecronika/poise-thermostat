@@ -61,6 +61,48 @@ def sensor_source_handback_due(*, select_state: str | None, feed_owned: bool) ->
     return feed_owned and select_state == "external"
 
 
+def sensor_source_handback_target(
+    *,
+    select_entity_id: str | None,
+    select_state: str | None,
+    configured_feed: str | None,
+    last_fed: str | None,
+) -> str | None:
+    """The sensor-source select to release, or ``None`` when none is due.
+
+    The DECISION half of the ADR-0029 release. It lives here rather than in
+    ``ha/phase_actuate`` so that module keeps only the dispatch: its ratchet
+    row stood six lines under the 1200-total mark and the rule for the next
+    growth was "move lines out instead".
+
+    WHY THE RELEASE EXISTS. With the room sensor gone the TRV must fall back
+    to its OWN sensor, or the safe state's health floor is enforced against
+    the value we fed last -- frozen at the instant the sensor died, so "the
+    actuator holds the floor with its own sensor" (the promise of
+    :func:`unavailable_safe_engaged`) would be false. It is the external-feed
+    pendant of the frozen-sensor degradation (ADR-0012).
+
+    OWNERSHIP. Only a select THIS zone drives is released, never a foreign
+    automation's: the explicitly configured feed target (``configured_feed``),
+    or -- for an auto-detected one -- the fact that we have actually fed this
+    device in this run (``last_fed``). ``last_fed`` is transient by design, so
+    a restart INSIDE an outage degrades to the old behaviour (no handback)
+    rather than releasing a select that may be someone else's.
+
+    NO RETURN-PATH COUNTERPART is needed: once the sensor is back,
+    ``_stage_ext_temp_feed`` re-claims the select on the next tick ("switch
+    unless already external") -- which is also why the release must never
+    fire for a select we do not drive.
+    """
+    if select_entity_id is None:
+        return None
+    due = sensor_source_handback_due(
+        select_state=select_state,
+        feed_owned=configured_feed is not None or last_fed is not None,
+    )
+    return select_entity_id if due else None
+
+
 def sensor_at_heat_source(
     tau_hours: float, identified: bool, *, min_plausible_tau_h: float
 ) -> bool:
