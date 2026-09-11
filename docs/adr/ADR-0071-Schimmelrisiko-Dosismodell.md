@@ -131,6 +131,18 @@ Entschieden: `ComfortDecision` bekommt ein Feld `lower_cause: str` mit den Werte
 
 Das Prinzip, das hier zum zweiten Mal in diesem Record auftaucht: **eine Ursache wird dort festgehalten, wo sie entsteht, nicht aus einem gerundeten Resultat zurückgeschlossen.**
 
+### §8 Dritte Entscheidung: die Beratungsachse wird von der Dosis entkoppelt
+
+Aufgefallen erst im CI, nachdem §1–§7 standen, und es ist der Preis dafür, dass §1 eine bis dahin *implizite* Gleichsetzung auflöst.
+
+ADR-0066 N2 formuliert den Schließ-Rat `mold_guard` als „Fenster offen ∧ Boden gebunden ∧ Oberflächen-RH über der sicheren Grenze". Unter ADR-0062 war „ein Boden greift durch" eine reine Funktion des aktuellen Messwerts und damit **synonym** zu „die Oberflächen brauchen es wärmer als die Kühlkante". Das Dosismodell macht die erste Aussage langsam — absichtlich, denn sie rechtfertigt Heizen — und zieht die zweite unbeabsichtigt mit. Ergebnis: eine frische Installation hätte die Empfehlung über die gesamte Reifezeit des Index nie bekommen, obwohl die Wände nachweislich über der Grenze liegen (im Glue-Test 82,2 % gegen eine Decke von 58,4 %).
+
+Entschieden: `ventilation_advise` bekommt den Parameter `surface_needs_warmer` (Default `False`), berechnet an der Naht aus dem **ungegateten** `required_air_temperature` gegen die effektive Kühlkante — dieselbe Vergleichsform und Toleranz wie `cool_edge_protected`, nur ohne den Dosis-Gate. `mold_guard` liest ihn; Wächter 5, der eine echte Komfort-Entscheidung (`heat_out`) vetoed, liest weiter den **durchgreifenden** Boden. In `diagnostics/shadows.py` stehen deshalb ab jetzt zwei Werte nebeneinander: `required` (immer, wenn Feuchte und Außentemperatur vorliegen) und `mold_min = required if mould_engaged else None`.
+
+Das Prinzip dahinter, und es ist nicht dasselbe wie in §7: **Die Dosis ist die Berechtigung zu handeln, nicht die Berechtigung zu sprechen.** Heizen übergeht den Nutzerwunsch und kostet Geld — dafür muss die Evidenz reif sein. Ein Rat kostet nichts und ist reversibel; ihn hinter dasselbe Gate zu stellen verwechselt die Schwelle für eine Handlung mit der Schwelle für eine Information. Dieselbe Linie trägt bereits die Festlegung, dass Lüften nur empfohlen und nie in der Präzedenz bevorzugt werden darf (ADR-0048).
+
+Was das **nicht** heißt: dass die Beratungsachse jetzt ungefiltert auf jeden Feuchtepeak anspringt. Der offensichtliche Fehlauslöser — Bad nach dem Duschen — wird weiterhin von der Präzedenz gefangen, nicht von dieser Bedingung: Regel 1 (`mold_risk`, „öffnen") sitzt über `mold_guard` und gewinnt bei trockenerer Außenluft und akutem 48-h-Mittel. Der Küchenfall erreicht `mold_guard` gerade deshalb, weil sein Mittel noch unter der Rule-1-Linie liegt. Die Einzelheiten stehen in ADR-0066 N3, der die Regel besitzt; hier steht die Begründung, weil dieser Record die Ursache gesetzt hat.
+
 ## Begründung
 
 **Warum überhaupt gewechselt, wenn die neue Methodik nichts zusätzlich fängt.** Weil die Frage nicht „fängt sie mehr?" ist, sondern „bindet sie richtig?". Die alte Schranke hat in drei von sechs Szenarien den Heiz-Sollwert angehoben, ohne dass ein Schimmelindex über 90 Tage messbar reagiert hätte. 1182 Stunden Heizen sind keine Sicherheitsreserve, sondern ein Kriterium, das auf die falsche Größe misst. Eine Sicherheitsschranke, deren Eingriffe der Nutzer als grundlos erlebt, verliert ihre Autorität — und genau das ist bei einer Schranke, die sich gegen den Nutzerwunsch durchsetzt, das eigentliche Risiko. Der Schutz im chronischen Fall bleibt dabei vollständig erhalten und setzt am selben Tag ein wie vorher.
