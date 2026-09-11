@@ -670,6 +670,28 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     )
     assert (free["vent_action"], free["vent_reason"]) == ("open", "heat_out")
 
+    # ADR-0071 split: the SAME wet walls on a zone whose dose has not engaged
+    # still produce the guard. The advice reads the psychrometric requirement,
+    # the enforced floor stays the dose's business -- otherwise every fresh
+    # installation would run its whole ramp-up without this warning.
+    fresh = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],
+        rh=66.0,
+        room=23.0,
+        eff_cool=22.4,
+        window_open=True,
+        t_out_eff=14.0,
+        rh_out=70.0,
+        surface_rh_mean_prev=72.0,
+        mould_index=1.0,  # warm start, nothing earned yet
+        mould_engaged=False,
+        mould_binds=False,
+    )
+    assert (fresh["vent_action"], fresh["vent_reason"]) == ("close", "mold_guard")
+    assert fresh["mould_engaged"] is False  # no floor enforced ...
+    assert fresh["mold_capped"] is False  # ... and none reported as capped
+
 
 def test_compose_climate_band_publishes_the_dose_state() -> None:
     """ADR-0071: the index, the engage verdict, the reason and the substrate

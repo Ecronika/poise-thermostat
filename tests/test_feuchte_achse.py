@@ -317,6 +317,7 @@ def _bound_edge(**kw: object) -> VentilationAdvice:
         "occupied": False,
         "window_open": True,
         "cool_edge_protected": True,
+        "surface_needs_warmer": True,
         "surface_rh_pct": 77.0,
         "rh_max_safe_pct": 69.6,
         "surface_rh_mean_pct": 72.0,
@@ -330,7 +331,10 @@ def test_the_defect_reproduces_without_the_new_guards() -> None:
     3t reads the protection-bound edge as a comfort target and advises airing
     the room down onto the mould floor."""
     old = _bound_edge(
-        cool_edge_protected=False, surface_rh_mean_pct=None, rh_max_safe_pct=None
+        cool_edge_protected=False,
+        surface_needs_warmer=False,
+        surface_rh_mean_pct=None,
+        rh_max_safe_pct=None,
     )
     assert (old.action, old.reason) == ("open", "heat_out")
 
@@ -363,12 +367,29 @@ def test_mold_guard_advises_closing_before_the_air_floor_is_reached() -> None:
 def test_mold_guard_needs_open_window_bound_edge_and_unsafe_surface() -> None:
     # closed window: nothing to close
     assert _bound_edge(window_open=False).reason != "mold_guard"
-    # edge not protection-bound: an ordinary cool edge is a legitimate target
-    assert _bound_edge(cool_edge_protected=False).reason != "mold_guard"
+    # the fabric does NOT need it warmer than the edge: an ordinary cool edge
+    # is a legitimate target
+    assert _bound_edge(surface_needs_warmer=False).reason != "mold_guard"
     # surface still below the safe ceiling: no acute risk yet
     assert _bound_edge(surface_rh_pct=69.0).reason == "no_gain"
     # no ceiling published (no outdoor temperature) -> silent, never guessed
     assert _bound_edge(rh_max_safe_pct=None).reason == "no_gain"
+
+
+def test_mold_guard_reads_the_requirement_not_the_enforced_floor() -> None:
+    """ADR-0071: the guard must fire on a zone whose dose has NOT engaged.
+
+    This is the whole point of the split. The VTT model needs weeks of dose
+    (or 48 h of acute wetness) before a floor is enforced, so a guard tied to
+    ``cool_edge_protected`` would stay silent through the entire ramp-up of
+    every new installation — while the walls are already over the safe line.
+    Advice costs nothing; it reacts to the risk, not to the dose.
+    """
+    fresh = _bound_edge(cool_edge_protected=False, surface_needs_warmer=True)
+    assert (fresh.action, fresh.reason) == ("close", "mold_guard")
+    # ... and the converse: guard 5 still reads the ENFORCED floor, so a bare
+    # requirement does not veto free cooling on its own.
+    assert _free_cool(surface_needs_warmer=True).reason == "heat_out"
 
 
 def test_mold_guard_precedence_below_rule1_and_above_the_rest() -> None:
