@@ -36,6 +36,15 @@ class ComfortDecision:
     mode: str  # "heat" | "cool" | "idle"
     write_setpoint: float  # capability-correct value for the SETPOINT path
     target: float | None  # active target when conditioning, else None
+    # ADR-0071 §4.5: WHICH bound produced ``heat_sp``, decided where the
+    # max() happens and on the UNROUNDED values. Until now the diagnostics
+    # reconstructed this after the fact, comparing an unrounded mould floor
+    # against the ROUNDED ``heat_sp`` — which mislabels every case where the
+    # rounding moved the setpoint across the floor (a 22.34 floor against a
+    # published 22.3 read as "en16798" although mould is exactly what bound).
+    # A cause can only be told at its source, so it is told here.
+    # Defaulted so no existing construction site has to change.
+    lower_cause: str = "comfort_base"  # "mould"|"frost"|"en16798"|"comfort_base"
 
 
 def decide(
@@ -89,10 +98,15 @@ def decide(
     # the fan-CE credit raises ONLY the cooling edge, never below 0.
     pmv_shift = _clamp(pmv_offset_k, -1.0, 1.0)
     ce_credit = max(0.0, cool_edge_credit)
-    heat_op = _clamp(
-        comfort_base - widen - eco_widen + pmv_shift,
-        heat_lower,
-        HEATING_UPPER[category],
+    heat_raw = comfort_base - widen - eco_widen + pmv_shift
+    heat_op = _clamp(heat_raw, heat_lower, HEATING_UPPER[category])
+    # ADR-0071 §4.5, first of three cause steps: did the OPERATIVE lower clamp
+    # bind at all? Which bound it was depends on occupancy (V3 above relaxes
+    # the EN comfort lower to the frost floor during an unoccupied setback).
+    lower_cause = (
+        ("en16798" if occupied else "frost")
+        if heat_raw < heat_lower
+        else "comfort_base"
     )
     # ADR-0058: presence Eco widens both edges symmetrically (heat down, cool up);
     # the unoccupied cool ceiling relaxes from COOLING_UPPER to the caller's
@@ -131,10 +145,17 @@ def decide(
     heat_sp = operative_to_air(heat_op, t_mrt, velocity)
     cool_sp = operative_to_air(cool_op, t_mrt, velocity)
 
-    # hard floors / caps
-    heat_sp = max(heat_sp, frost_floor)
-    if mold_min is not None:
-        heat_sp = max(heat_sp, mold_min)
+    # hard floors / caps. The two air-side floors are applied in PRECEDENCE
+    # order (ADR-0071 §4.5: mould > frost > en16798 clamp > comfort_base), and
+    # each one that actually raises the edge — ties included, because a tie is
+    # the floor holding the setpoint just as much as an excess is — takes the
+    # cause with it. This is the single place where the lower bound is decided.
+    if heat_sp <= frost_floor:
+        heat_sp = frost_floor
+        lower_cause = "frost"
+    if mold_min is not None and heat_sp <= mold_min:
+        heat_sp = mold_min
+        lower_cause = "mould"
     if dewpoint is not None:  # never cool below dewpoint + 2 K (condensation)
         cool_sp = max(cool_sp, dewpoint + 2.0)
     cool_sp = max(cool_sp, heat_sp)  # never invert the band
@@ -159,4 +180,6 @@ def decide(
         write = setpoint.heat if can_heat else setpoint.cool
         target = None
 
-    return ComfortDecision(setpoint.heat, setpoint.cool, mode, write, target)
+    return ComfortDecision(
+        setpoint.heat, setpoint.cool, mode, write, target, lower_cause
+    )

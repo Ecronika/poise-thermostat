@@ -1,27 +1,44 @@
-"""Mould-protection minimum temperature (DIN 4108-2, EN ISO 13788).
+"""Shared surface psychrometry for the mould/humidity axis (ADR-0071).
 
-Mould risk is governed by the relative humidity at the *coldest surface*, not
-the room air. The surface temperature factor ``f_Rsi = (θ_si - θ_e)/(θ_i - θ_e)``
-links surface to air; the growth criterion is surface RH <= 80 %. We invert it
-to the minimum air temperature that keeps the surface below the limit
-(ADR-0062).
+Mould risk is governed by the humidity at the *coldest surface*, not by the
+room air. The surface-temperature factor ``f_Rsi = (θ_si - θ_e)/(θ_i - θ_e)``
+links surface to air; this module owns that link and nothing else.
+
+WHAT LEFT THIS MODULE: ADR-0062's judgement — surface RH over 80 % as an
+INSTANTANEOUS criterion, inverted in one line into an air-temperature floor —
+is gone (``mold_min_air_temperature``/``_detail``, ``SURFACE_RH_LIMIT``,
+``_MOLD_MAX_C``). ADR-0071 replaced it with the VTT dose model in
+:mod:`comfort.mould_risk`, which integrates how LONG a surface stayed above a
+temperature- and substrate-dependent critical humidity. 80 % is the lower
+bound of *possible* growth, not a growth event, so a single reading can never
+carry that decision.
+
+WHAT STAYED, and why: :func:`surface_temperature`,
+:func:`surface_relative_humidity` and :func:`max_safe_rh` are plain
+psychrometry, shared with the ADR-0066 ventilation/humidity axis and used BY
+``comfort.mould_risk`` itself. They must not fork, so they keep living here —
+one layer below the risk model, with no knowledge of it (``mould_risk``
+imports this module, never the other way round).
 """
 
 from __future__ import annotations
 
-from ..estimation.psychrometrics import (
-    saturation_pressure,
-    temperature_at_saturation,
-    vapour_pressure,
-)
+from ..estimation.psychrometrics import saturation_pressure, vapour_pressure
 
 # DIN 4108-2 minimum surface-temperature factor; 0.7 is deliberately the
 # conservative existing-building value (ADR-0062 — the safe assumption when
-# the construction is unknown).
+# the construction is unknown; the factor survived the ADR-0071 change of
+# method, only the growth criterion on top of it did not).
 DEFAULT_F_RSI: float = 0.7
-SURFACE_RH_LIMIT: float = 0.80  # mould growth criterion (EN ISO 13788)
 _F_RSI_FLOOR: float = 0.1  # f_Rsi in (0,1]; guard div-by-zero / unphysical input
-_MOLD_MAX_C: float = 24.0  # sane ceiling: caps the singularity blow-up (ADR-0062 §3)
+# Fallback growth limit for :func:`max_safe_rh` when the caller has no live
+# critical humidity to hand. NOT the old ADR-0062 criterion re-imported: it is
+# the SENSITIVE class's ``rh_min`` floor from Ojanen et al. (the lowest value
+# ``mould_risk.critical_rh`` can ever return for the default substrate), so a
+# defaulted call is conservative rather than arbitrary. Written as a literal
+# because ``mould_risk`` imports THIS module — importing it back would close
+# the cycle. Live callers pass ``MouldRisk.critical_rh / 100`` (ADR-0071 §4).
+_FALLBACK_RH_LIMIT: float = 0.80
 
 
 def surface_temperature(
@@ -40,60 +57,30 @@ def surface_relative_humidity(
     return p_v / saturation_pressure(t_si)
 
 
-def mold_min_air_temperature_detail(
-    t_out: float,
-    rh_percent: float,
-    t_air_ref: float,
-    f_rsi: float = DEFAULT_F_RSI,
-    limit: float = SURFACE_RH_LIMIT,
-) -> tuple[float, bool]:
-    """``(minimum air temperature capped at 24 °C, was_capped)``.
-
-    ``was_capped`` is True when the *physically required* minimum exceeds the
-    24 °C ceiling — i.e. mould protection at the returned setpoint is
-    **insufficient** and the room really needs dehumidification (or a higher
-    cap). Surfacing it avoids silently under-protecting (review F15).
-    ``t_air_ref`` (current room air temperature) estimates the room's absolute
-    humidity from ``rh_percent``.
-    """
-    f = min(max(f_rsi, _F_RSI_FLOOR), 1.0)
-    lim = min(max(limit, 0.01), 1.0)
-    p_v = vapour_pressure(t_air_ref, rh_percent)
-    t_si_min = temperature_at_saturation(p_v / lim)
-    raw = t_out + (t_si_min - t_out) / f
-    return min(raw, _MOLD_MAX_C), raw > _MOLD_MAX_C
-
-
 def max_safe_rh(
     t_air: float,
     t_out: float,
     f_rsi: float = DEFAULT_F_RSI,
-    limit: float = SURFACE_RH_LIMIT,
+    limit: float = _FALLBACK_RH_LIMIT,
 ) -> float:
     """Mould-safe ROOM-RH ceiling [%] at the current air/outdoor temperatures.
 
-    The same surface-humidity criterion as :func:`mold_min_air_temperature`,
-    solved for relative humidity instead of temperature (ADR-0066 feature C):
+    The surface-humidity criterion solved for relative humidity instead of
+    temperature (ADR-0066 feature C):
     ``rh_max = 100 * limit * p_sat(t_si) / p_sat(t_air)``. This is the target a
     foreign humidifier (``generic_hygrostat``) lacks — published monitor-only,
     never actuated (ADR-0048 §3 / ``tests/test_non_goals.py``). Clamped to
-    [0, 100]; inverse-consistent with the floor (round-trip reference test).
+    [0, 100]; the exact inverse of :func:`surface_relative_humidity` at
+    ``limit`` (round-trip reference test).
+
+    ``limit`` is the surface RH the ceiling is solved for, as a FRACTION. Since
+    ADR-0071 the live caller (``diagnostics/shadows.py``) passes the tick's
+    ``MouldRisk.critical_rh / 100`` — the substrate- and temperature-dependent
+    growth line — instead of a fixed number; ``_FALLBACK_RH_LIMIT`` only covers
+    calls made without one.
     """
     f = min(max(f_rsi, _F_RSI_FLOOR), 1.0)
     lim = min(max(limit, 0.01), 1.0)
     t_si = surface_temperature(t_air, t_out, f)
     rh = 100.0 * lim * saturation_pressure(t_si) / saturation_pressure(t_air)
     return min(max(rh, 0.0), 100.0)
-
-
-def mold_min_air_temperature(
-    t_out: float,
-    rh_percent: float,
-    t_air_ref: float,
-    f_rsi: float = DEFAULT_F_RSI,
-    limit: float = SURFACE_RH_LIMIT,
-) -> float:
-    """Minimum room air temperature keeping the coldest surface <= ``limit`` RH."""
-    return mold_min_air_temperature_detail(t_out, rh_percent, t_air_ref, f_rsi, limit)[
-        0
-    ]
