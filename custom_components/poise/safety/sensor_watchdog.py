@@ -41,6 +41,26 @@ def unavailable_safe_engaged(unavailable_s: float | None, threshold_s: float) ->
     return unavailable_s >= threshold_s
 
 
+def sensor_source_handback_due(*, select_state: str | None, feed_owned: bool) -> bool:
+    """True when a TRV's sensor-source select must be handed back to 'internal'.
+
+    The companion of :func:`unavailable_safe_engaged` for a zone in
+    external-feed mode (ADR-0029).  The safe state commands the health floor
+    and lets the actuator "hold it with its own sensor" -- which is only true
+    if the device actually READS its own sensor.  A TRV parked on 'external'
+    keeps regulating against the last value we fed it, frozen at the moment the
+    room sensor died, so the floor would be enforced against a stale reading:
+    the external-feed pendant of the frozen-sensor degradation (ADR-0012).
+
+    ``feed_owned`` gates on OUR claim: only a select this zone actually drives
+    is released, never a foreign automation's (the release pendant of the feed
+    path's "switch unless already external").  ``select_state`` is the select's
+    live state -- 'internal' is already correct (idempotent, no write) and
+    'unavailable'/``None`` cannot be written at all.
+    """
+    return feed_owned and select_state == "external"
+
+
 def sensor_at_heat_source(
     tau_hours: float, identified: bool, *, min_plausible_tau_h: float
 ) -> bool:
