@@ -117,6 +117,7 @@ def ventilation_advise(
     surface_rh_pct: float | None = None,
     rh_max_safe_pct: float | None = None,
     cool_edge_protected: bool = False,
+    surface_needs_warmer: bool = False,
 ) -> VentilationAdvice:
     """Decision table B.2 of the design, precedence top-down.
 
@@ -138,16 +139,27 @@ def ventilation_advise(
     occupancy-gated by design: night purge is most valuable in an empty room.
 
     N2 (v0.192.0) adds the two halves of the mould guard. Guard 5 vetoes
-    ``heat_out`` when the cooling edge is itself held up by a protection floor
-    (``cool_edge_protected`` — such an edge is not a comfort target: airing
-    down onto it works AGAINST the protection) or when the smoothed surface RH
-    has come within ``mold_guard_margin_pp`` of the safe ceiling. The
-    ``mold_guard`` rule is the active counterpart: an open window over a bound
-    floor with the CURRENT surface RH already past the ceiling advises closing
-    — before rule 5a, which waits for the AIR to reach the floor and is
-    therefore too late once the WALLS are over the limit. It deliberately does
-    NOT require drier outside air: the risk driver is the surfaces cooling
-    down, not imported vapour.
+    ``heat_out`` when the cooling edge is itself held up by an ENFORCED
+    protection floor (``cool_edge_protected`` — such an edge is not a comfort
+    target: airing down onto it works AGAINST the protection) or when the
+    smoothed surface RH has come within ``mold_guard_margin_pp`` of the safe
+    ceiling. The ``mold_guard`` rule is the active counterpart: an open window
+    over an edge the FABRIC would need warmer, with the CURRENT surface RH
+    already past the ceiling, advises closing — before rule 5a, which waits
+    for the AIR to reach the floor and is therefore too late once the WALLS
+    are over the limit. It deliberately does NOT require drier outside air:
+    the risk driver is the surfaces cooling down, not imported vapour.
+
+    ADR-0071 splits those two inputs, which were ONE input until then. While
+    the mould floor was an inversion of the current reading, "a floor is
+    enforced" and "the fabric needs it warmer than the cooling edge" were the
+    same statement. The VTT dose model made the first one slow on purpose —
+    it gates HEATING, and a fresh zone needs weeks of dose (or 48 h of acute
+    wetness) before any floor is enforced. Advice is not an action: it costs
+    nothing and must react at the speed of the risk, so ``mold_guard`` reads
+    ``surface_needs_warmer`` — the psychrometric requirement, computed every
+    tick regardless of the dose — while guard 5, which vetoes a REAL comfort
+    decision, keeps reading the enforced floor.
     """
     if w_in_gm3 is None or w_out_gm3 is None:
         # Design §9: no indoor value or no outdoor source -> feature silent.
@@ -171,9 +183,13 @@ def ventilation_advise(
     # the CURRENT surface RH, not the 48-h mean: the mean is deliberately slow
     # (mould CAUSE), while this is the acute state. Building protection ->
     # never occupancy-gated, and no drier-outside condition.
+    # ADR-0071: ``surface_needs_warmer``, NOT the enforced floor — see the
+    # docstring. The rule-1 precedence above is also what keeps the obvious
+    # false positive out: a bathroom after a shower has an acute mean too, and
+    # with drier air outside rule 1 says "open" before this rule is reached.
     if (
         window_open
-        and cool_edge_protected
+        and surface_needs_warmer
         and surface_rh_pct is not None
         and rh_max_safe_pct is not None
         and surface_rh_pct > rh_max_safe_pct
