@@ -147,12 +147,21 @@ async def test_p2_1_mould_floor_suppressed_under_fresh_window(
     while the diagnostics ``mould_floor`` keeps the real, unsuppressed value."""
     async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
-    # high RH at a mild room -> mould_min_air_temperature is well above frost.
+    # high RH at a mild room -> the required air temperature is well above frost.
     _states(hass, room=22.0, sp=21.0, window_state="off", rh=85.0)
     entry = await _setup(
         hass, data=_room_data(**{CONF_HUMIDITY_SENSOR: "sensor.room_rh"})
     )
     coord: Any = entry.runtime_data
+
+    # ADR-0071: a humid READING no longer produces a floor -- the VTT dose
+    # does. What P2-1 is about is the window SUPPRESSION of an existing floor,
+    # so the zone has to arrive with one: an index past INDEX_ENGAGE is the
+    # matured wall this test always meant (before the dose model, every humid
+    # tick implied it). Seeded on the runtime, which is exactly where a
+    # restored payload would put it.
+    coord.runtime.humidity.mould_index = 2.5
+    coord.runtime.humidity.mould_engaged = True
 
     set_temp = async_mock_service(hass, "climate", "set_temperature")
     async_mock_service(hass, "climate", "set_hvac_mode")
