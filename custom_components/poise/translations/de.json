@@ -32,7 +32,7 @@
             "data_description": {
               "trm_sensor": "Ein vorberechneter gleitender Außentemperatur-Mittelwert (T_rm). Ohne ihn leitet Poise T_rm selbst aus dem Außenwert ab.",
               "outdoor_sensor": "Ein physischer Außensensor. Ohne ihn nutzt Poise die aktuelle Temperatur der Wetter-Entität.",
-              "humidity_sensor": "Aktiviert den Schimmelschutz-Boden nach DIN 4108-2 und die Feuchte-Komfortobergrenze für diesen Raum.",
+              "humidity_sensor": "Aktiviert den dosisbasierten Schimmelschutz-Boden (VTT-Schimmelindex) und die Feuchte-Komfortobergrenze für diesen Raum.",
               "outdoor_humidity_sensor": "Erlaubt der Lüftungsempfehlung den Vergleich von Innen- und Außenfeuchte, bevor Lüften empfohlen wird.",
               "mrt_sensor": "Mittlere Strahlungstemperatur für die operative Temperatur. Ohne sie schätzt Poise die MRT aus dem Raummodell.",
               "window_sensor": "Offen pausiert Heizen und Modelllernen. Auch ohne Kontakt kann Poise ein geöffnetes Fenster am Temperaturverlauf erkennen.",
@@ -91,7 +91,7 @@
               "comfort_base": "Die Temperatur, um die das Komfortband aufgebaut wird. Zeitplan und Presets verschieben um diese Basis — die Basis anpassen, nicht die Presets.",
               "category": "EN-16798-1-Komfortklasse: I = engstes Band (höchster Komfortanspruch), III = weitestes (größte Einsparung). II ist der Norm-Standard für Wohnräume.",
               "outdoor_sensor": "Ein physischer Außensensor. Ohne ihn nutzt Poise die aktuelle Temperatur der Wetter-Entität.",
-              "humidity_sensor": "Aktiviert den Schimmelschutz-Boden nach DIN 4108-2 und die Feuchte-Komfortobergrenze für diesen Raum.",
+              "humidity_sensor": "Aktiviert den dosisbasierten Schimmelschutz-Boden (VTT-Schimmelindex) und die Feuchte-Komfortobergrenze für diesen Raum.",
               "outdoor_humidity_sensor": "Erlaubt der Lüftungsempfehlung den Vergleich von Innen- und Außenfeuchte, bevor Lüften empfohlen wird.",
               "window_sensor": "Offen pausiert Heizen und Modelllernen. Auch ohne Kontakt kann Poise ein geöffnetes Fenster am Temperaturverlauf erkennen.",
               "weather_entity": "Prognosequelle für Optimal Start/Stopp (Vorheiz- und Ausroll-Timing). Wird über Home Assistants Forecast-Dienst gelesen und gecacht — Poise selbst fragt keine Cloud ab."
@@ -341,6 +341,10 @@
       "title": "Poise: Kalibrier-Entity nicht nutzbar",
       "description": "Die TRV-Kalibrierung ist aktiviert, aber `{entity}` meldet keine sicheren Metadaten (Wert, Min/Max oder Schrittweite fehlen oder sind ungültig). Poise schreibt keinen Offset, bis die Metadaten wieder lesbar sind."
     },
+    "calibration_entity_mismatch": {
+      "title": "Poise: Kalibrier-Entity gewechselt",
+      "description": "Die Kalibrier-Ownership ist auf `{owned}` festgeschrieben, aber das Gerät meldet jetzt `{entity}` als Kalibrier-Entity. Die alte Entity existiert noch, deshalb schreibt Poise in diesem Zustand keinen Offset. Deaktiviere die Option TRV-Kalibrierung und aktiviere sie erneut, um den alten Offset sauber zurückzugeben und auf der neuen Entity neu zu starten. (Eine vollständig entfernte alte Entity gibt Poise automatisch frei und regelt auf der neuen weiter.)"
+    },
     "calibration_unapplied": {
       "title": "Poise: Kalibrier-Offset nicht übernommen",
       "description": "Das TRV meldet Poises letzten Kalibrier-Offset auf `{entity}` seit längerem nicht. Die Schreibbefehle erreichen das Gerät evtl. nicht — Verbindung oder Kindersicherung prüfen. Der Hinweis verschwindet, sobald der Offset gemeldet wird."
@@ -371,7 +375,7 @@
     },
     "mould_protection_inactive": {
       "title": "Poise: Schimmelschutz inaktiv",
-      "description": "Der Feuchtesensor `{entity}` dieses Raums ist ausgefallen, daher kann Poise die relative Luftfeuchte nicht überwachen und den schimmelsicheren Mindest-Sollwert nicht anheben. Prüfe den Sensor; bis dahin regelt Poise ohne Schimmelschutz weiter. Der Hinweis verschwindet automatisch, sobald der Sensor wieder plausible Werte liefert."
+      "description": "Der Feuchtesensor `{entity}` dieses Raums ist ausgefallen, daher kann Poise die relative Luftfeuchte nicht überwachen und den dosisbasierten Schimmelschutz-Boden (VTT-Schimmelindex) nicht fortschreiben. Prüfe den Sensor; bis dahin regelt Poise ohne Schimmelschutz weiter. Der Hinweis verschwindet automatisch, sobald der Sensor wieder plausible Werte liefert."
     },
     "external_temp_implausible": {
       "title": "Poise: Externer Temperatureingang unplausibel",
