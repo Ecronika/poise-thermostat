@@ -3,10 +3,10 @@
 ``ActuatorExecutor`` owns the effect-call PRIMITIVES of the coordinator tick
 (one named method per write-site class, each a character-exact passthrough of
 the dispatch — payload shape, ``blocking=False``, context handling; they make
-NO decisions, hold NO try boundaries and stamp NO state) and the seven
+NO decisions, hold NO try boundaries and stamp NO state) and the eight
 SEQUENCE methods (``run_mode_nudge``, ``run_fan_write``,
-``run_setpoint_write``, ``run_ext_temp``, ``run_calibration``,
-``run_frost_rescue``,
+``run_setpoint_write``, ``run_ext_temp``, ``run_sensor_source_handback``,
+``run_calibration``, ``run_frost_rescue``,
 ``run_unavailable_safe``) that own the per-effect TRY BOUNDARIES and return
 an ordered ``ExecutionReport``.  The sequences still make
 no domain decisions and stamp no domain state — every gate (throttle, guard,
@@ -383,6 +383,43 @@ class ActuatorExecutor:
                 )
             )
         return ExecutionReport(executions=tuple(executions))
+
+    async def run_sensor_source_handback(
+        self, *, select_entity_id: str
+    ) -> ExecutionReport:
+        """Site 3b — hand the TRV sensor source back to 'internal' (ADR-0029).
+
+        The RELEASE pendant of ``run_ext_temp``'s claim: same physical control,
+        same ``ext_select`` effect id (a pure pass in the commit fold — the
+        select carries no domain stamp, so the release needs no rule of its
+        own and no ``now=``).  ONE boundary, best-effort: a handback that
+        cannot dispatch must never break the unavailable tick.  Untagged like
+        its sibling (open F-CONTEXT).
+
+        The caller decides WHETHER (``sensor_source_handback_due`` — our claim
+        plus a select actually parked on 'external'); this sequence only
+        dispatches.
+        """
+        success = False
+        try:
+            await self.select_option(select_entity_id, "internal")
+            success = True
+        except Exception:  # noqa: BLE001 - a handback must never break the tick
+            self._log.exception(
+                "Poise: sensor-source handback failed for %s", select_entity_id
+            )
+        return ExecutionReport(
+            executions=(
+                EffectExecution(
+                    effect_id="ext_select",
+                    attempted=True,
+                    success=success,
+                    context_id=None,
+                    pre_write_value=None,
+                    commanded_value=None,
+                ),
+            )
+        )
 
     async def run_calibration(
         self,

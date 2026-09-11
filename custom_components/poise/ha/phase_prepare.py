@@ -77,6 +77,7 @@ from ..const import (
     DEVICE_MAX_C,
     EVENT_VENT_ADVICE,
     FROST_FLOOR_C,
+    TICK_INTERVAL_S,
     WINDOW_MOULD_SUPPRESS_S,
 )
 from ..control import optimal_start, tick_resolve, window_auto
@@ -241,13 +242,31 @@ class PreparePhase:
         Body in ``pipeline_prepare.stage_safety_floors`` via the runtime;
         ``dewpoint`` (test_phase6_health_checkpoints) is read off
         ``estimation.psychrometrics`` at call time.
+
+        ADR-0071 §4.3: the dose model is pure, so the STATE cycle lives here
+        -- read the persisted counters plus the previous engage verdict off
+        ``runtime.humidity``, hand them over, fold the advanced values back.
+        Same shape as the ``surface_rh_mean`` EWMA in ``_climate_shadows``
+        below: the runtime owns long-lived state, the pure stage the maths.
         """
-        return self._runtime.stage_safety_floors(
+        hum = self._runtime.humidity
+        floors = self._runtime.stage_safety_floors(
             ing,
             entry_id=bindings.entry_id,
             humidity_entity=bindings.humidity,
             psychro_dewpoint_fn=psychrometrics.dewpoint,
+            mould_state=(hum.mould_index, hum.mould_wet_hours, hum.mould_dry_hours),
+            was_engaged=hum.mould_engaged,
+            # The dose integrates over TIME; an event-driven refresh books the
+            # same 60 s, which against a 48 h acute window is noise.
+            dt_h=TICK_INTERVAL_S / 3600.0,
         )
+        hum.mould_index = floors.mould_index
+        hum.mould_wet_hours = floors.mould_wet_hours
+        hum.mould_dry_hours = floors.mould_dry_hours
+        # Transient (NOT persisted): the hysteresis carry for the next tick.
+        hum.mould_engaged = floors.mould_engaged
+        return floors
 
     def _stage_schedule_gate(
         self,
@@ -626,13 +645,13 @@ class PreparePhase:
             )
         else:
             cool_write = decision.write_setpoint
-        # DIN 4108-2 is a steady-state criterion. Under an open window the
-        # write target collapses to the floor (= max(frost, mould)); a humid
-        # room would then heat toward ~24 C against the ventilation. Suppress
-        # only the mould component for the first WINDOW_MOULD_SUPPRESS_S of the
-        # episode -- the frost floor (FROST_FLOOR_C) is NEVER suppressed.
-        # Diagnostics keep the real ``mold_min`` (see the ``mould_floor``
-        # attribute below).
+        # The mould floor answers a SLOW criterion (ADR-0071: a multi-day
+        # dose). Under an open window the write target collapses to the floor
+        # (= max(frost, mould)); a humid room would then heat toward ~24 C
+        # against the ventilation. Suppress only the mould component for the
+        # first WINDOW_MOULD_SUPPRESS_S of the episode -- the frost floor
+        # (FROST_FLOOR_C) is NEVER suppressed. Diagnostics keep the real
+        # ``mold_min`` (see the ``mould_floor`` attribute below).
         mold_min_write = (
             None
             if (
@@ -949,6 +968,15 @@ class PreparePhase:
                 t_forecast_day=diag_rt.clo_forecast_day,
                 room_profile=config.room_profile,
                 clo_offset=config.clo_offset,
+                # ADR-0071: this tick's ADVANCED dose (``_stage_safety_floors``
+                # folded it back a few stages ago) plus the §4.5 binding cause
+                # decided at the source. The floor is re-derived inside the
+                # composition, which keeps it the undisturbed DIAGNOSTIC value
+                # — never the window-suppressed write value (design B.2).
+                mould_index=self._runtime.humidity.mould_index,
+                mould_wet_hours=self._runtime.humidity.mould_wet_hours,
+                mould_engaged=self._runtime.humidity.mould_engaged,
+                mould_binds=decision.lower_cause == "mould",
             )
             # Fold the advice latch + persisted surface mean back (ADR-0066).
             self._runtime.humidity.vent_active = bool(

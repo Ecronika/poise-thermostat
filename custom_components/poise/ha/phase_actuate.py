@@ -16,7 +16,9 @@ commits, and the structure gate pins exactly that:
                        sites (the P1.4 segment-H restore dispatch and the
                        segment-W regulation write -- one boundary, two
                        mutually exclusive positions)
-    unavailable path : exactly 1 executor await -- run_unavailable_safe
+    unavailable path : exactly 2 executor awaits -- run_sensor_source_handback
+                       (ADR-0029 release, only while WE claim the select) and
+                       run_unavailable_safe
     anything else    : 0 awaits
 
 CAPABILITY NARROWING (binding, plan section 9).  Within the tick execution
@@ -109,6 +111,7 @@ from ..runtime.tick_result import (
     WriteTargetResult,
 )
 from ..runtime.zone_runtime import ZoneRuntime
+from ..safety.sensor_watchdog import sensor_source_handback_due
 from ..safety.write_convergence import convergence_tolerance
 from .actuator_executor import ActuatorExecutor
 from .input_reader import CalibrationMeta, InputReader, parse_attr_number
@@ -567,10 +570,13 @@ class ActuatePhase:
         repeated inactive emissions free, so no raised issue can outlive its
         condition. Concretely:
 
-        * Segment W, calibration not the live path: ``calibration_unapplied``
-          and ``calibration_entity_unsafe`` — no regulation writes happen on
-          a path that is not live, so neither divergence nor unsafe metadata
-          is a live claim any more.
+        * Segment W, calibration not the live path: ``calibration_unapplied``,
+          ``calibration_entity_unsafe`` and ``calibration_entity_mismatch`` —
+          no regulation writes happen on a path that is not live, so neither
+          divergence nor unsafe metadata nor a pinned-to-another-entity
+          ownership is a live claim any more (the mismatch's prescribed user
+          action — toggle the option off — lands exactly here and routes the
+          stored entity through segment H's handoff).
         * Segment H, calibration IS the live path (no handoff needed) and
           segment H without ownership (nothing to hand off): both handoff
           issues, ``calibration_restore_failed`` and
@@ -766,12 +772,28 @@ class ActuatePhase:
         same position that guarantees no frost-rescue/unavailable-safe tick
         runs it). Every gate is decided BEFORE the sequence, in order: live
         path (D6) -> actuator online (write-storm/safety guard, mirrors the
-        setpoint gate) -> metadata safe (P1.1) -> device temperature present
-        -> resume quarantine (D4 pre-I/O fold) -> evidence gate (convergence
-        AND a device report NEWER than the dispatch anchor) -> deadband/
-        interval due gate. The target is ``op.room_decide`` — with operative
-        mode and no external input, calibration compensates toward the same
-        control variable the solver decided on (one truth per tick).
+        setpoint gate) -> metadata safe (P1.1) -> ownership identity (the
+        stored ``cal_entity`` IS the discovered entity, review 2026-08-26)
+        -> device temperature present -> resume quarantine (D4 pre-I/O fold)
+        -> evidence gate (convergence AND a device report NEWER than the
+        dispatch anchor) -> deadband/interval due gate. The target is
+        ``op.room_decide`` — with operative mode and no external input,
+        calibration compensates toward the same control variable the solver
+        decided on (one truth per tick).
+
+        Identity drift, the combined story with segment H: while ownership
+        pins an entity other than the discovered one, THIS segment never
+        writes to the discovered entity (``calibration_entity_mismatch``);
+        segment H stays inert too, because calibration is still the live
+        path. The stored entity's tri-state resolves it: structurally GONE
+        (rename/re-create) releases the ownership automatically via the
+        orphan fold — WARN as evidence, next tick first-writes the
+        discovered entity — because an option-off handoff would dead-end
+        (segment H's gone branch keeps ownership as evidence, and the gate
+        would then block forever). A STILL-EXISTING old entity stays
+        fail-closed: disabling the option routes it through segment H's
+        handoff (restore + state-confirmed release), after which re-enabling
+        starts a fresh first-write ownership on the discovered entity.
         """
         now = ing.now
         if self._calibration_live_path(op, wt, config) is not ActuatorPath.CALIBRATION:
@@ -783,6 +805,7 @@ class ActuatePhase:
                     self._reader.calibration_entity,
                     "calibration_unapplied",
                     "calibration_entity_unsafe",
+                    "calibration_entity_mismatch",
                 )
             )
         if not wt.actuator_online or wt.act_state is None:
@@ -799,6 +822,63 @@ class ActuatePhase:
             )
         ]
         if not isinstance(meta, CalibrationMeta) or cal_entity is None:
+            # A standing mismatch issue survives this unreadable phase on
+            # purpose: UNKNOWN-gate hygiene — no edge on unconcluded state.
+            return CalibrationStageResult(health_updates=tuple(pending))
+        # Identity gate (review 2026-08-26): active ownership pins the ONE
+        # entity the baseline was read from. If discovery now resolves a
+        # DIFFERENT number (the entity was renamed or re-created across a
+        # reload), a regulation write would land on an entity no baseline was
+        # ever taken from, while the handoff automaton (segment H) would
+        # later restore the OLD stored one — two entities, one ownership.
+        # The STORED entity's tri-state decides the resolution:
+        # * structurally "gone" (the headline rename/re-create case): the
+        #   old offset lives on an entity that no longer exists — nothing it
+        #   still acts on, nothing a handoff could restore against, and
+        #   keeping the pin would brick the feature forever (the first-write
+        #   re-stamping only runs on an EMPTY baseline). Release through the
+        #   orphan fold (the one clearing site), WARN as the evidence trail,
+        #   and the next tick's first write re-owns the discovered entity.
+        #   Deliberately NO calibration_restore_failed: that issue prescribes
+        #   waking the entity so a restore can confirm — here there is
+        #   nothing to restore, and the WARN carries the evidence instead.
+        # * "unreadable" or readable (the old entity still exists): fail
+        #   closed — no write, the mismatch issue stands, and the user hands
+        #   back cleanly via option off -> segment H on the stored entity.
+        # Placed BEFORE the resume fold so the wrong entity's reported
+        # offset is never adopted as a D4 anchor.
+        act = self._runtime.actuator
+        owned = act.cal_entity
+        mismatch = owned is not None and owned != cal_entity
+        orphan_released = False
+        if mismatch and self._reader.calibration_meta(owned) == "gone":
+            baseline = act.cal_baseline
+            orphan_released = self._runtime.observe_calibration_orphaned(
+                stored_entity_gone=True
+            )
+            if orphan_released:
+                mismatch = False  # the condition just ended with the release
+                self._log.warning(
+                    "Poise: calibration ownership released — the owned entity "
+                    "%s is structurally gone, its original offset (baseline "
+                    "%s) is unrecoverable; regulation resumes on %s with a "
+                    "fresh baseline next tick.",
+                    owned,
+                    baseline,
+                    cal_entity,
+                )
+        pending.append(
+            HealthUpdate(
+                issue_id=f"calibration_entity_mismatch_{bindings.entry_id}",
+                active=mismatch,
+                translation_key="calibration_entity_mismatch",
+                placeholders={
+                    "entity": cal_entity,
+                    "owned": owned or "—",
+                },
+            )
+        )
+        if mismatch or orphan_released:
             return CalibrationStageResult(health_updates=tuple(pending))
         trv_temp = parse_attr_number(wt.act_state, "current_temperature")
         if trv_temp is None:
@@ -810,7 +890,6 @@ class ActuatePhase:
             reported=meta.reported, wall_now=wall_now
         ):
             return CalibrationStageResult(health_updates=tuple(pending))
-        act = self._runtime.actuator
         # Evidence (D4): accumulate only on a device report NEWER than the
         # dispatch anchor AND a reported offset converged onto the last
         # command (± half a grid step).
@@ -1082,6 +1161,39 @@ class ActuatePhase:
         stamps. The actuator read below is await-relative behaviour, so the
         plan cannot be resolved in the prepare phase.
         """
+        # ADR-0029 RELEASE (the feed path's claim, undone): with the room
+        # sensor gone the TRV must fall back to its OWN sensor, or the health
+        # floor below is enforced against the value we fed last -- frozen at
+        # the instant the sensor died, so "the actuator holds the floor with
+        # its own sensor" would be false. Positioned FIRST, before the
+        # idempotent-plan early return: the handback is due on every tick of
+        # the outage, including the ones where the safe setpoint already
+        # stands. No counterpart is needed for the return path -- once the
+        # sensor is back, ``_stage_ext_temp_feed`` re-claims the select on the
+        # next tick ("switch unless already external"), which is also why the
+        # release must never fire for a select we do not drive.
+        _select = self._reader.sensor_select
+        if _select is not None and sensor_source_handback_due(
+            select_state=self._reader.ext_select_state(),
+            # Our claim: the explicitly configured feed target, or -- for an
+            # auto-detected one -- the fact that we have actually fed this
+            # device in this run. ``last_fed`` is transient by design, so a
+            # restart INSIDE an outage degrades to the old behaviour (no
+            # handback) rather than releasing a select that may be someone
+            # else's.
+            feed_owned=(
+                bindings.trv_ext_temp is not None
+                or self._runtime.actuator.last_fed is not None
+            ),
+        ):
+            # ``ext_select`` is a pure pass in the commit fold, so this commit
+            # stamps nothing and needs no ``now=``; it keeps the release on the
+            # same execution-report path as every other effect.
+            self._ports.commit_execution(
+                await self._executor.run_sensor_source_handback(
+                    select_entity_id=_select
+                )
+            )
         # Positioned read: the dirty flush follows this write (F-SAVEPOINT,
         # ADR-0064), so this read sees the device state at tick start.
         act = self._reader.actuator_state()
