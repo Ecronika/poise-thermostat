@@ -6,7 +6,7 @@ from pathlib import Path
 
 from custom_components.poise.comfort.mold import (
     max_safe_rh,
-    mold_min_air_temperature,
+    surface_relative_humidity,
 )
 from custom_components.poise.comfort.ventilation import (
     AdviceEmission,
@@ -58,13 +58,15 @@ def test_max_safe_rh_design_table_20c() -> None:
     assert max_safe_rh(20.0, -20.0, f_rsi=0.9) > 60.0
 
 
-def test_max_safe_rh_round_trip_inverts_the_floor() -> None:
-    # inverse consistency (design §10): the RH ceiling returned for a given
-    # air temperature must, fed into the floor, reproduce that temperature.
+def test_max_safe_rh_round_trip_inverts_the_surface_criterion() -> None:
+    # inverse consistency (design §10). ADR-0071 retired
+    # ``mold_min_air_temperature``, so the round trip is stated against the
+    # criterion itself instead of against the retired inversion: the ceiling
+    # returned for an air temperature must put the SURFACE exactly on the
+    # limit it was solved for.
     t_air, t_out = 20.0, -5.0
-    rh_max = max_safe_rh(t_air, t_out)
-    back = mold_min_air_temperature(t_out, rh_max, t_air)
-    assert abs(back - t_air) < 0.1
+    rh_max = max_safe_rh(t_air, t_out, limit=0.80)
+    assert abs(surface_relative_humidity(t_air, rh_max, t_out) - 0.80) < 1e-9
 
 
 def test_fabric_conflict_case_exists() -> None:

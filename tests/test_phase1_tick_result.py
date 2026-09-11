@@ -447,7 +447,21 @@ def test_stage_result_field_sets_are_pinned() -> None:
             "device_max",
             "health_updates",
         ],
-        SafetyFloorsResult: ["mold_min", "mold_capped", "dewpoint", "health_updates"],
+        # ADR-0071 §4.2: ``mold_min``/``mold_capped`` KEEP their names and
+        # meaning (now fed by ``MouldRisk.floor``/``.capped``), so the whole
+        # downstream path is unchanged; the five ``mould_*`` fields are the
+        # new dose state the glue folds back onto ``HumidityRuntime``.
+        SafetyFloorsResult: [
+            "mold_min",
+            "mold_capped",
+            "dewpoint",
+            "mould_index",
+            "mould_wet_hours",
+            "mould_dry_hours",
+            "mould_engaged",
+            "mould_reason",
+            "health_updates",
+        ],
         ScheduleGateResult: ["sched", "forecast_request"],
         SchedulePresenceResult: [
             "home",

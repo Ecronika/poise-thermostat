@@ -86,6 +86,9 @@ EXPECTED_PAYLOAD_KEYS = (
     "dry_active",
     "vent_active",
     "surface_rh_mean",
+    "mould_index",
+    "mould_wet_hours",
+    "mould_dry_hours",
     "window_bypass",
     "preset",
     "enabled",
@@ -256,8 +259,8 @@ def test_encode_key_snapshot_exact() -> None:
     payload = codec.encode(_rich_state())
     assert list(payload) == list(EXPECTED_PAYLOAD_KEYS)
     assert list(codec.PAYLOAD_KEYS) == list(EXPECTED_PAYLOAD_KEYS)
-    # +0066 +0067 +0060 +0068/0069, +P1.4 cal_baseline/cal_entity
-    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 44
+    # +0066 +0067 +0060 +0068/0069, +P1.4 cal_baseline/cal_entity, +0071 mould
+    assert len(set(EXPECTED_PAYLOAD_KEYS)) == 47
 
 
 def test_encode_values_match_save_payload_transforms() -> None:

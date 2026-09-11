@@ -155,8 +155,14 @@ _RATCHET: tuple[_Entry, ...] = (
         # has_setback_edge feeding the existing plan_preheat enable gates,
         # plus the stage-is-never-skipped rationale comment.
         # 1131/796 -> 1140/800.
-        baseline_total=1140,
-        baseline_code=800,
+        # ADR-0071 +28/+14 (feature growth, measured after the fact): the dose
+        # model needs state ACROSS ticks, so the safety-floors stage gained a
+        # read/advance/write-back cycle against ``runtime.humidity`` plus the
+        # four mould keywords into ``compose_climate_band``. The 14 code lines
+        # are irreducible — the counters cannot be recomputed from this tick's
+        # reading alone. 1140/800 -> 1168/814.
+        baseline_total=1168,
+        baseline_code=814,
         headroom=50,
         note=(
             "1200/900 total/code - plan DoD cap, effective from O.5. "
@@ -178,8 +184,20 @@ _RATCHET: tuple[_Entry, ...] = (
         # issue-hygiene rule (_cal_inactive_edges helper carrying the ONE
         # rationale comment + the inactive edges on every concluded path,
         # quality review Important 1). 216 code lines short of the DoD cap.
-        baseline_total=1118,
-        baseline_code=684,
+        # Review 2026-08-26 +42/+15 (feature growth): the calibration
+        # identity gate in segment W (calibration_entity_mismatch
+        # HealthUpdate + early return before the resume fold, the third
+        # inactive-edge key on the not-live path, the combined identity-
+        # drift story in the W docstring). 1118/684 -> 1160/699, 201 code
+        # lines short of the DoD cap.
+        # Review-Folge 2026-08-26 +34/+18 (gone-leg resolution): the stored
+        # entity's tri-state read in the mismatch path, the orphan-fold call
+        # + WARN evidence log, and the rewritten identity-drift comment/
+        # docstring (gone releases automatically, still-present stays
+        # fail-closed). 1160/699 -> 1194/717 — 6 total lines under the 1200
+        # cap: the next growth in this file must move lines out instead.
+        baseline_total=1194,
+        baseline_code=717,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -390,9 +408,15 @@ _RATCHET: tuple[_Entry, ...] = (
         # into the schedule_days_invalid_{entry_id} repair issue -- one
         # health.issue() call at the ONE existing tuning-applied write path,
         # shared by __init__ and async_apply_options. 1385/724 -> 1399/733.
+        # AR-46 (review 2026-08-26) +45/+7: the async_quiesce lifecycle port
+        # (detach listeners -> async_shutdown -> tick-lock drain; three code
+        # lines under a proof docstring carrying the ordering rationale) and
+        # the input-listener detach in the handoff port's two success
+        # branches with its assessment comment (the reconfigure-park
+        # exposure). 1399/733 -> 1444/740.
         identifier="custom_components/poise/coordinator.py",
-        baseline_total=1399,
-        baseline_code=733,
+        baseline_total=1444,
+        baseline_code=740,
         headroom=50,
         note=(
             "growth guard only, no lowering target - the code metric is "
@@ -487,7 +511,14 @@ _RATCHET: tuple[_Entry, ...] = (
         # atomic schedule clock, pipeline_prepare.py's dropped interim-
         # weekday comment) plus this line, all comments — this row measured
         # LAST, after every other edit stood.
-        baseline_total=692,
+        # +21/0 for review 2026-08-26 (AR-46 + identity gate): two feature-
+        # growth annotations (coordinator.py, phase_actuate.py) plus these
+        # four lines, all comments — this row measured LAST, after every
+        # other edit stood. 692/301 -> 713/301.
+        # +9/0 for the 2026-08-26 follow-up (gone-leg release): the
+        # phase_actuate annotation plus these four lines, all comments —
+        # this row measured LAST again. 713/301 -> 722/301.
+        baseline_total=722,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight

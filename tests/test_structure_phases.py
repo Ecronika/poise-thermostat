@@ -118,7 +118,12 @@ _NORMAL_PATH_AWAIT_COUNTS: dict[str, int] = {"run_calibration": 2}
 _UNAVAILABLE_PATH_METHOD = "write_unavailable_safe_state"
 
 
-_UNAVAILABLE_PATH_AWAITS = frozenset({"run_unavailable_safe"})
+# The ADR-0029 sensor-source RELEASE shares the unavailable path with the
+# safe-state write: a TRV parked on "external" would hold the health floor
+# against the frozen last feed, so the release is part of degrading safely.
+_UNAVAILABLE_PATH_AWAITS = frozenset(
+    {"run_sensor_source_handback", "run_unavailable_safe"}
+)
 
 
 def _name_references(rel_path: str, name: str) -> list[int]:
@@ -292,8 +297,9 @@ def test_prepare_shadow_report_are_await_free(rel_path: str) -> None:
 def test_actuate_phase_await_topology() -> None:
     """Plan O.0 invariant (active from O.5): ``phase_actuate.py`` awaits the
     executor exactly 7 times on the normal tick path (P1.4: ``run_calibration``
-    at its two sanctioned sites) and exactly once on the
-    unavailable path, and awaits nothing else.
+    at its two sanctioned sites) and exactly twice on the
+    unavailable path (the ADR-0029 sensor-source release and the safe-state
+    write), and awaits nothing else.
 
     Formulated semantically rather than as a count of 8, because a count alone
     would not notice an await MOVED between the two paths - and the unavailable

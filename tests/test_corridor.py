@@ -24,7 +24,26 @@ def test_band_bounds_present_with_causes() -> None:
     assert "en16798" in upper_causes and "device_max" in upper_causes
 
 
-def test_mold_floor_added_when_humidity_known() -> None:
+def test_mold_floor_added_when_the_dose_model_engaged() -> None:
+    # ADR-0071: the corridor no longer derives the floor from a humidity
+    # reading — it is handed ``MouldRisk.floor`` and only places the bound.
+    corridor = build_corridor(
+        ComfortContext(
+            t_rm=15.0,
+            t_air=20.0,
+            frost_floor=7.0,
+            device_max=30.0,
+            mold_min=18.5,
+        )
+    )
+    mold = [b for b in corridor.lower if b.cause == "mold"]
+    assert len(mold) == 1
+    assert mold[0].value == 18.5
+
+
+def test_no_mold_bound_while_the_protection_is_not_engaged() -> None:
+    # ``mold_min is None`` means the dose model did NOT engage; a humidity
+    # reading alone must no longer conjure a bound (that was ADR-0062).
     corridor = build_corridor(
         ComfortContext(
             t_rm=15.0,
@@ -35,7 +54,7 @@ def test_mold_floor_added_when_humidity_known() -> None:
             t_out=-5.0,
         )
     )
-    assert any(b.cause == "mold" for b in corridor.lower)
+    assert not any(b.cause == "mold" for b in corridor.lower)
 
 
 def test_cold_walls_raise_the_air_target() -> None:

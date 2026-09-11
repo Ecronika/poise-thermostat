@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from custom_components.poise.safety.sensor_watchdog import (
     is_frozen,
+    sensor_source_handback_due,
     unavailable_safe_engaged,
 )
 
@@ -94,3 +95,25 @@ def test_frozen_safe_target_is_the_health_floor() -> None:
     assert frozen_safe_target(7.0, 14.5) == 14.5
     # never below frost
     assert frozen_safe_target(7.0, 5.0) == 7.0
+
+
+def test_sensor_source_handback_due_releases_a_claimed_external_select() -> None:
+    assert sensor_source_handback_due(select_state="external", feed_owned=True) is True
+
+
+def test_sensor_source_handback_due_never_touches_a_foreign_select() -> None:
+    # Not our feed -> never release, whatever the select says (the return path
+    # would not re-claim it either).
+    assert (
+        sensor_source_handback_due(select_state="external", feed_owned=False) is False
+    )
+
+
+def test_sensor_source_handback_due_is_idempotent_and_write_safe() -> None:
+    # Already internal -> nothing to do; no select discovered / device offline
+    # -> nothing writable.
+    assert sensor_source_handback_due(select_state="internal", feed_owned=True) is False
+    assert sensor_source_handback_due(select_state=None, feed_owned=True) is False
+    assert (
+        sensor_source_handback_due(select_state="unavailable", feed_owned=True) is False
+    )

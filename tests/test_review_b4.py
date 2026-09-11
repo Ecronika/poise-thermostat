@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from custom_components.poise.comfort.mold import (
-    mold_min_air_temperature,
-    mold_min_air_temperature_detail,
+from custom_components.poise.comfort.mould_risk import (
+    DEFAULT_SUBSTRATE,
+    FLOOR_CEILING_C,
+    SUBSTRATES,
+    required_air_temperature,
 )
 from custom_components.poise.estimation.thermal_ekf import _Q, _T, ThermalEKF
 from custom_components.poise.safety.heating_failure import HeatingFailureDetector
@@ -29,24 +31,29 @@ def test_heating_failure_monotonic_still_trips() -> None:
 
 
 # --- F15: mould cap surfaces silent under-protection ------------------------
+# ADR-0071 moved the inversion itself from ``comfort.mold`` to the dose model's
+# ``required_air_temperature``; the F15 PROMISE is unchanged and is re-anchored
+# here on the new function, because the review finding was about the reporting
+# ("do not silently under-protect"), not about which formula produced the floor.
+
+_SPEC = SUBSTRATES[DEFAULT_SUBSTRATE]
 
 
 def test_mold_cap_flags_insufficient_protection() -> None:
     # very cold outside + nearly saturated room -> required temp >> 24 C ceiling
-    capped, was_capped = mold_min_air_temperature_detail(
-        t_out=-15.0, rh_percent=95.0, t_air_ref=21.0
+    capped, was_capped = required_air_temperature(
+        t_out=-15.0, rh_room=95.0, t_room=21.0, f_rsi=0.7, spec=_SPEC
     )
-    assert capped == 24.0
+    assert capped == FLOOR_CEILING_C == 24.0
     assert was_capped is True
 
 
 def test_mold_normal_case_not_capped() -> None:
-    capped, was_capped = mold_min_air_temperature_detail(
-        t_out=5.0, rh_percent=50.0, t_air_ref=21.0
+    floor, was_capped = required_air_temperature(
+        t_out=5.0, rh_room=50.0, t_room=21.0, f_rsi=0.7, spec=_SPEC
     )
     assert was_capped is False
-    assert capped < 24.0
-    assert mold_min_air_temperature(5.0, 50.0, 21.0) == capped  # back-compat
+    assert floor < FLOOR_CEILING_C
 
 
 # --- F7: EKF process noise scales with step length --------------------------

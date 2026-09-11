@@ -33,6 +33,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import pytest
+
 from custom_components.poise.clock import ManualClock
 from custom_components.poise.comfort.dual_setpoint import ComfortDecision
 from custom_components.poise.comfort.dual_setpoint import decide as comfort_decide
@@ -387,7 +389,15 @@ def test_stage_observe_healthy_sensor_resets_slope_detector() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_stage_safety_floors_computes_dewpoint_and_mold_floor() -> None:
+# ADR-0071: the stage now advances the VTT dose instead of inverting a single
+# reading, so every call carries the persisted counters, the previous engage
+# verdict and the tick length. The floor is a consequence of the DOSE, not of
+# the momentary humidity — a healthy sensor alone no longer produces one.
+_FRESH_DOSE = (1.0, 0.0, 0.0)  # warm start, no history
+_TICK_H = 60.0 / 3600.0
+
+
+def test_stage_safety_floors_advances_the_dose_without_engaging() -> None:
     rt = _runtime()
     ing = _stage_ingest(rt, _inputs())
     floors = rt.stage_safety_floors(
@@ -395,14 +405,41 @@ def test_stage_safety_floors_computes_dewpoint_and_mold_floor() -> None:
         entry_id="e1",
         humidity_entity="sensor.rh",
         psychro_dewpoint_fn=psychro_dewpoint,
+        mould_state=_FRESH_DOSE,
+        was_engaged=False,
+        dt_h=_TICK_H,
     )
     assert isinstance(floors, SafetyFloorsResult)
     assert floors.dewpoint == psychro_dewpoint(21.0, 50.0)
-    assert floors.mold_min is not None
+    # 21 °C at 50 % RH is nowhere near the critical line -> dry tick, no floor.
+    assert floors.mold_min is None
+    assert floors.mould_engaged is False
+    assert floors.mould_reason == "clear"
+    assert floors.mould_dry_hours == pytest.approx(_TICK_H)
+    assert floors.mould_wet_hours == 0.0
     assert [u.issue_id for u in floors.health_updates] == [
         "mould_protection_inactive_e1"
     ]
     assert floors.health_updates[0].active is False
+
+
+def test_stage_safety_floors_engages_on_a_matured_index() -> None:
+    # a zone that arrives with an index at/over INDEX_ENGAGE keeps the floor.
+    rt = _runtime()
+    ing = _stage_ingest(rt, _inputs())
+    floors = rt.stage_safety_floors(
+        ing,
+        entry_id="e1",
+        humidity_entity="sensor.rh",
+        psychro_dewpoint_fn=psychro_dewpoint,
+        mould_state=(2.5, 0.0, 0.0),
+        was_engaged=True,
+        dt_h=_TICK_H,
+    )
+    assert floors.mould_engaged is True
+    assert floors.mould_reason == "index"
+    assert floors.mold_min is not None
+    assert floors.mold_capped is False
 
 
 def test_stage_safety_floors_flags_humidity_dropout() -> None:
@@ -419,11 +456,22 @@ def test_stage_safety_floors_flags_humidity_dropout() -> None:
         entry_id="e1",
         humidity_entity="sensor.rh",
         psychro_dewpoint_fn=_spy_dewpoint,
+        mould_state=(1.7, 3.0, 0.0),
+        was_engaged=False,
+        dt_h=_TICK_H,
     )
     assert floors.dewpoint is None
     assert floors.mold_min is None
     assert calls == []  # rh is None -> the injected fn is never dispatched
     assert floors.health_updates[0].active is True
+    # Blind means FROZEN, not dry: the earned dose is passed through untouched
+    # rather than quietly decayed while the sensor is out.
+    assert floors.mould_reason == "no_humidity"
+    assert (floors.mould_index, floors.mould_wet_hours, floors.mould_dry_hours) == (
+        1.7,
+        3.0,
+        0.0,
+    )
 
 
 # ---------------------------------------------------------------------------

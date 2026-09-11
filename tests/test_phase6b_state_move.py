@@ -179,6 +179,16 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
         "humidity",
         "vent_last_reason",
     ): "ADR-0066 N2 emission edge, reason half (transient)",
+    # ADR-0071 §4: VTT/Hukka&Viitanen mould-dose model — born on the group,
+    # persisted via the codec snapshot built directly from zone_runtime (no
+    # coordinator proxy ever existed, same as the ADR-0066 pair above).
+    ("humidity", "mould_index"): "ADR-0071 §4 VTT mould index (persisted)",
+    ("humidity", "mould_wet_hours"): "ADR-0071 §4 wet-hours counter (persisted)",
+    ("humidity", "mould_dry_hours"): "ADR-0071 §4 dry-hours counter (persisted)",
+    # ADR-0071 §4: previous-tick engage verdict for the engage/release
+    # hysteresis — deliberately NOT persisted (see the field comment on
+    # HumidityRuntime.mould_engaged), but still born after phase 6b.
+    ("humidity", "mould_engaged"): "ADR-0071 §4 engage hysteresis (transient)",
     # ADR-0054 Nachtrag V1: forecast daily mean for the clo blend, latched
     # once per local day — transient, recomputed on the first tick of a run.
     ("diagnostics", "clo_forecast_key"): "ADR-0054 V1 clo forecast day latch key",

@@ -41,6 +41,7 @@ from custom_components.poise.comfort.humidity import (
     HumidityDecision,
     rh_high_for_category,
 )
+from custom_components.poise.comfort.mold import max_safe_rh
 from custom_components.poise.comfort.pmv import (
     clo_dynamic,
     pmv_ppd,
@@ -295,7 +296,7 @@ def test_lifecycle_fragment_dispatches_via_injected_fns() -> None:
 
 def _cover(
     *,
-    mold_min: float | None,
+    mould_binds: bool = False,
     predict_fn: object = None,
     shading_fn: object = None,
 ) -> tuple[float, int, str, str]:
@@ -304,8 +305,7 @@ def _cover(
         t_out_eff=30.0,
         q_solar=0.8,
         cool_sp=26.0,
-        heat_sp=21.0,
-        mold_min=mold_min,
+        mould_binds=mould_binds,
         model=SimpleNamespace(alpha=0.5, beta_s=3.0),  # only .alpha/.beta_s read
         identified=True,
         temperature_std=0.1,
@@ -329,7 +329,7 @@ def test_evaluate_cover_shadow_matches_the_historical_inline_composition() -> No
     expected_pos, expected_reason = shading_target_position(
         peak=expected_peak, t_upper=26.0, current_position=0.0, oriented_q=0.8
     )
-    assert _cover(mold_min=None) == (
+    assert _cover() == (
         expected_peak,
         expected_pos,
         expected_reason,
@@ -360,7 +360,7 @@ def test_evaluate_cover_shadow_kernel_choreography_via_injected_fns() -> None:
         return 40, "deploy"
 
     peak, pos, reason, binding = _cover(
-        mold_min=None, predict_fn=fake_predict, shading_fn=fake_shading
+        predict_fn=fake_predict, shading_fn=fake_shading
     )
     assert (peak, pos, reason, binding) == (27.3, 40, "deploy", "en16798")
     # historical argument choreography: 36-slot flat solar series, 5-min ZOH
@@ -380,8 +380,7 @@ def test_evaluate_cover_shadow_confident_gate_needs_low_std() -> None:
         t_out_eff=30.0,
         q_solar=0.0,
         cool_sp=26.0,
-        heat_sp=21.0,
-        mold_min=None,
+        mould_binds=False,
         model=SimpleNamespace(alpha=0.5, beta_s=3.0),
         identified=True,
         temperature_std=0.9,
@@ -391,19 +390,25 @@ def test_evaluate_cover_shadow_confident_gate_needs_low_std() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mold_min", "expected"),
+    ("mould_binds", "expected"),
     [
-        (None, "en16798"),
-        (0.0, "en16798"),  # falsy floor: historical ``mold_min and …`` gate
-        (20.9, "en16798"),  # below heat_sp
-        (21.0, "mold"),  # >= heat_sp binds mould
-        (23.5, "mold"),
+        (False, "en16798"),
+        (True, "mold"),
     ],
 )
 def test_evaluate_cover_shadow_binding_classification(
-    mold_min: float | None, expected: str
+    mould_binds: bool, expected: str
 ) -> None:
-    assert _cover(mold_min=mold_min)[3] == expected
+    """ADR-0071 §4.4/§4.5: the classification is no longer RECONSTRUCTED here.
+
+    It used to read ``"mold" if mold_min and mold_min >= heat_sp else
+    "en16798"`` — an unrounded floor against a rounded setpoint, plus a
+    truthiness test that read a legitimate 0.0 °C floor as "no floor". Both
+    failure modes are gone with the expression: ``comfort/dual_setpoint``
+    records the cause where the ``max()`` happens and hands it over, and the
+    published token stays "mold" for the card and ``hub_aggregate``.
+    """
+    assert _cover(mould_binds=mould_binds)[3] == expected
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +504,11 @@ _CLIMATE_KEY_ORDER = [
     "surface_rh",
     "surface_rh_mean",
     "mold_capped",
+    # ADR-0071 dose model
+    "mould_index",
+    "mould_engaged",
+    "mould_reason",
+    "mould_substrate",
     "rh_max_safe",
     "abs_max_safe",
     "fabric_conflict",
@@ -562,8 +572,19 @@ def _climate_band(
     t_out_eff: float | None = None,
     rh_out: float | None = None,
     surface_rh_mean_prev: float | None = None,
+    # ADR-0071: the dose state the floors stage advanced this tick. Absent by
+    # default — a fresh zone is at the warm start and NOT engaged, so no floor
+    # reaches the composition at all.
+    mould_index: float = 0.0,
+    mould_wet_hours: float = 0.0,
+    mould_engaged: bool = False,
+    mould_binds: bool = False,
 ) -> dict[str, object]:
     return compose_climate_band(
+        mould_index=mould_index,
+        mould_wet_hours=mould_wet_hours,
+        mould_engaged=mould_engaged,
+        mould_binds=mould_binds,
         t_forecast_day=t_forecast_day,
         room_profile=room_profile,
         clo_offset=clo_offset,
@@ -616,6 +637,12 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
         t_out_eff=14.0,
         rh_out=70.0,  # absolutely drier outside — airing would not import water
         surface_rh_mean_prev=72.0,  # 48-h mean still under the rule-1 line
+        # ADR-0071: the dose decides THAT the floor applies; the floor value
+        # itself is the same 22.36 °C the old inversion produced here, because
+        # at a 20.3 °C surface the Ojanen critical line IS 80 %.
+        mould_index=2.4,
+        mould_engaged=True,
+        mould_binds=True,
     )
     assert (diag["vent_action"], diag["vent_reason"], diag["vent_level"]) == (
         "close",
@@ -637,8 +664,57 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
         t_out_eff=14.0,
         rh_out=70.0,
         surface_rh_mean_prev=60.0,
+        mould_index=2.4,
+        mould_engaged=True,
+        mould_binds=True,
     )
     assert (free["vent_action"], free["vent_reason"]) == ("open", "heat_out")
+
+
+def test_compose_climate_band_publishes_the_dose_state() -> None:
+    """ADR-0071: the index, the engage verdict, the reason and the substrate
+    are what a field report needs to tell "this wall is chronically wet" from
+    "somebody took a shower"."""
+    clear = _climate_band(cool_ac=None, hvac_modes=["heat", "off"], t_out_eff=5.0)
+    assert clear["mould_index"] == 0.0
+    assert clear["mould_engaged"] is False
+    assert clear["mould_reason"] == "clear"
+    assert clear["mould_substrate"] == "sensitive"  # DEFAULT_SUBSTRATE
+    assert clear["mold_capped"] is False
+
+    # The acute backstop is distinguishable from the dose branch: the index is
+    # still under INDEX_ENGAGE, only the 48 h wet counter engaged the floor.
+    acute = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],
+        t_out_eff=5.0,
+        mould_index=1.2,
+        mould_wet_hours=50.0,
+        mould_engaged=True,
+    )
+    assert acute["mould_reason"] == "acute"
+
+    # A humidity dropout freezes the dose and says so — the floor is off, but
+    # the reason distinguishes "blind" from "clear" (the repair issue stays the
+    # glue's job either way).
+    blind = _climate_band(cool_ac=None, hvac_modes=["heat", "off"], rh=None)
+    assert blind["mould_reason"] == "no_humidity"
+    assert blind["mould_engaged"] is False
+
+
+def test_compose_climate_band_safe_rh_ceiling_follows_the_critical_line() -> None:
+    """ADR-0071 §4.4: ``max_safe_rh`` is solved for the LIVE critical humidity
+    (``MouldRisk.critical_rh``), not for a fixed 80 %. Above a 20 °C surface
+    the Ojanen line IS the class floor, so the warm case is byte-identical to
+    the old behaviour; on a cold wall the line rises and the ceiling with it."""
+    warm = _climate_band(cool_ac=None, hvac_modes=["heat", "off"], t_out_eff=14.0)
+    cold = _climate_band(cool_ac=None, hvac_modes=["heat", "off"], t_out_eff=-10.0)
+    warm_ceiling, cold_ceiling = warm["rh_max_safe"], cold["rh_max_safe"]
+    assert isinstance(warm_ceiling, float) and isinstance(cold_ceiling, float)
+    # colder wall -> lower absolute ceiling, but relaxed by the higher critical
+    # line compared with what a flat 80 % would have produced.
+    assert cold_ceiling < warm_ceiling
+    assert cold_ceiling > max_safe_rh(22.0, -10.0, limit=0.80)
 
 
 def test_compose_climate_band_key_order_is_the_published_contract() -> None:

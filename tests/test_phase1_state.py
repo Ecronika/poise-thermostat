@@ -77,7 +77,16 @@ EXPECTED_PERSISTED: dict[type[Any], frozenset[str]] = {
     ),
     WindowRuntime: frozenset({"window_auto"}),
     PresenceRuntime: frozenset(),
-    HumidityRuntime: frozenset({"dry_active", "vent_active", "surface_rh_mean"}),
+    HumidityRuntime: frozenset(
+        {
+            "dry_active",
+            "vent_active",
+            "surface_rh_mean",
+            "mould_index",
+            "mould_wet_hours",
+            "mould_dry_hours",
+        }
+    ),
     CompressorRuntime: frozenset({"multi_lifecycle"}),
     SafetyRuntime: frozenset(),
     DiagnosticsRuntime: frozenset(

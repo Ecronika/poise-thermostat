@@ -76,6 +76,54 @@ def test_efficiency_priority_widens_dead_band() -> None:
 def test_mold_floor_raises_heat_setpoint() -> None:
     d = decide(t_rm=4.0, room=18.0, can_heat=True, t_out=-5.0, mold_min=22.0)
     assert d.heat_sp >= 22.0
+    assert d.lower_cause == "mould"
+
+
+# --- ADR-0071 §4.5: the lower bound names its own cause ---------------------
+
+
+def test_lower_cause_defaults_to_the_comfort_base() -> None:
+    d = decide(t_rm=15.0, room=20.0, t_out=5.0)
+    assert d.lower_cause == "comfort_base"
+
+
+def test_lower_cause_reports_the_en16798_clamp() -> None:
+    # a comfort base under the category's heating lower is clamped up by the
+    # norm guardrail — that clamp, not the base, is what set the edge.
+    d = decide(t_rm=15.0, room=20.0, t_out=5.0, comfort_base=5.0)
+    assert d.lower_cause == "en16798"
+
+
+def test_lower_cause_reports_frost_before_en16798() -> None:
+    # unoccupied: V3 relaxes the EN clamp to the frost floor, so the floor that
+    # actually holds the edge is the frost floor and it must say so.
+    d = decide(t_rm=15.0, room=20.0, t_out=5.0, comfort_base=5.0, occupied=False)
+    assert d.heat_sp == 7.0
+    assert d.lower_cause == "frost"
+
+
+def test_lower_cause_prefers_mould_over_frost() -> None:
+    d = decide(
+        t_rm=2.0,
+        room=6.0,
+        comfort_base=5.0,
+        can_heat=True,
+        t_out=2.0,
+        mold_min=16.0,
+        occupied=False,
+    )
+    assert d.heat_sp == 16.0
+    assert d.lower_cause == "mould"
+
+
+def test_lower_cause_is_decided_before_rounding() -> None:
+    """The whole point of §4.5: a floor that ROUNDS onto the setpoint is still
+    the cause. The retired reconstruction in ``diagnostics/shadows`` compared
+    an unrounded ``mold_min`` against the published, rounded ``heat_sp`` and
+    therefore flipped the verdict exactly here."""
+    d = decide(t_rm=15.0, room=20.0, t_out=5.0, comfort_base=21.0, mold_min=21.04)
+    assert d.heat_sp == 21.0  # rounding pulled the published value BELOW 21.04
+    assert d.lower_cause == "mould"
 
 
 def test_dewpoint_caps_cooling_setpoint() -> None:
