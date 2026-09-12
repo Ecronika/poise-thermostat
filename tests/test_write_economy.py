@@ -658,3 +658,65 @@ def test_the_sensor_source_handback_retries_with_a_backoff_not_every_tick() -> N
         )
         is None
     )
+
+
+def test_an_anchor_from_another_clock_never_silences_a_write() -> None:
+    """A swapped monotonic clock must fail OPEN on both throttles.
+
+    The clock is injected (ADR-0006/0014), so "monotonic" holds within one
+    clock and not across two. A replay harness, or a test that installs its own
+    clock after setup, leaves an anchor stamped from the previous era; ``now -
+    anchor`` is then large and NEGATIVE, which reads as "just written" and
+    would keep the gate shut until the clock caught up — potentially forever.
+
+    Found the honest way: the mode limit swallowed the re-nudge in
+    ``test_nudge_recorder_is_armed_after_setup``, the control test whose entire
+    job is to prove the neighbouring "no re-nudge" assertions are not
+    vacuous. A gate that can silence THAT is a gate that can silence a zone.
+    """
+    # M5: dispatched at 5000 on the old clock, asked at 1000 on the new one.
+    assert (
+        mode_reassert_throttled(
+            desired_mode="heat",
+            last_commanded_hvac="heat",
+            last_mode_nudge_ts=5000.0,
+            now=1000.0,
+        )
+        is False
+    )
+    # ...while the same pair on ONE clock throttles as designed.
+    assert (
+        mode_reassert_throttled(
+            desired_mode="heat",
+            last_commanded_hvac="heat",
+            last_mode_nudge_ts=1000.0,
+            now=1060.0,
+        )
+        is True
+    )
+    # M4, same exposure, same direction.
+    assert (
+        reassert_throttled(
+            target_snapped=20.0,
+            last_cmd_sp=20.0,
+            cmd_episode_ts=5000.0,
+            last_sp_write_ts=5000.0,
+            now=1000.0,
+        )
+        is False
+    )
+    # M2's liveness escape too: a stale anchor must not read as "written
+    # recently enough", or the V3 escape would never fire again.
+    assert (
+        reassert_idempotent(
+            target_snapped=20.0,
+            last_cmd_sp=20.0,
+            actual_sp=20.0,
+            prev_device_sp=20.0,
+            provenance=CURRENT_COMMAND_MATCH,
+            cmd_episode_ts=0.0,
+            last_sp_write_ts=5000.0,
+            now=1000.0,
+        )
+        is False
+    )
