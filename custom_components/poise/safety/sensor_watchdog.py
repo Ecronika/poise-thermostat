@@ -13,6 +13,7 @@ a comfort target computed from a dead value.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Final
 
 
 def is_frozen(age_s: float | None, threshold_s: float) -> bool:
@@ -24,6 +25,13 @@ def is_frozen(age_s: float | None, threshold_s: float) -> bool:
     if age_s is None or threshold_s <= 0.0:
         return False
     return age_s >= threshold_s
+
+
+# Phase 2a: the floor between two identical sensor-source RELEASE attempts.
+# Shorter than the 600 s the setpoint and mode channels use, because this one
+# runs only during a room-sensor outage and the safe state's health floor is
+# enforced against the device's own sensor only once the release has taken.
+SELECT_HANDBACK_RETRY_S: Final = 300.0
 
 
 def unavailable_safe_engaged(unavailable_s: float | None, threshold_s: float) -> bool:
@@ -67,6 +75,9 @@ def sensor_source_handback_target(
     select_state: str | None,
     configured_feed: str | None,
     last_fed: float | None,
+    last_attempt_ts: float | None = None,
+    now: float | None = None,
+    retry_interval_s: float = SELECT_HANDBACK_RETRY_S,
 ) -> str | None:
     """The sensor-source select to release, or ``None`` when none is due.
 
@@ -96,6 +107,21 @@ def sensor_source_handback_target(
     ``_stage_ext_temp_feed`` re-claims the select on the next tick ("switch
     unless already external") -- which is also why the release must never
     fire for a select we do not drive.
+
+    RETRY BACKOFF (Phase 2a). The release is due on every tick for as long as
+    the select still reads ``external``, and the write is the only thing that
+    can change that -- so a device that does not take it is written once a
+    minute for the whole outage. That is not hypothetical: the SONOFF TRVZB
+    reverts ``temperature_sensor_select`` by itself, unpredictably and with no
+    documented trigger (Koenkk/zigbee2mqtt#29650), and an outage lasting a
+    workday would spend a four-figure write count on a battery valve fighting
+    it. The FIRST attempt therefore stays immediate -- a sensor outage is a
+    safety event and the release must not wait behind a timer -- and only the
+    repetitions are bounded. Bounded, never vetoed, for the same reason the
+    mode channel is only throttled: a select that will not move is a fault,
+    and the answer to a fault is to keep asserting more slowly, not to stop.
+    Passing neither ``last_attempt_ts`` nor ``now`` disables the backoff, so
+    the pure callers that only ask "is a release due" are unchanged.
     """
     if select_entity_id is None:
         return None
@@ -103,7 +129,15 @@ def sensor_source_handback_target(
         select_state=select_state,
         feed_owned=configured_feed is not None or last_fed is not None,
     )
-    return select_entity_id if due else None
+    if not due:
+        return None
+    if (
+        last_attempt_ts is not None
+        and now is not None
+        and (now - last_attempt_ts) < retry_interval_s
+    ):
+        return None  # already asserted recently -- the device has the command
+    return select_entity_id
 
 
 def sensor_at_heat_source(
