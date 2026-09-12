@@ -393,6 +393,10 @@
       "title": "Aktor übernimmt Befehle nicht — {zone}",
       "description": "Der Aktor in {zone} meldet dauerhaft einen anderen Sollwert oder Modus als Poise befiehlt — die Schreibbefehle werden abgesetzt, aber nicht übernommen. Prüfe die Verbindung des Geräts (Zigbee/WLAN), die Kindersicherung oder einen internen Smart-Modus, der externe Befehle übersteuert. Dieser Hinweis verschwindet automatisch, sobald ein Befehl ankommt."
     },
+    "declared_step_mismatch": {
+      "title": "Poise: Schrittweite des Thermostats vermutlich falsch angegeben",
+      "description": "Im Raum {zone} gibt das Thermostat `{entity}` eine Sollwert-Schrittweite von {step} K an, kommt aber wiederholt {delta} K neben dem von Poise geschriebenen Wert zur Ruhe und bleibt dort. Poise schreibt diesen Sollwert nicht mehr nach — ein identischer Schreibvorgang kann ein bereits eingeschwungenes Gerät nicht bewegen. Die Regelung ist davon nicht betroffen; es spart der Batterie einen Schreibvorgang pro Zyklus. Zwei Ursachen erzeugen dasselbe Bild, und Poise kann sie nicht unterscheiden: Das Gerät setzt ein gröberes Raster um, als es angibt (häufig ein `homeassistant:` / `customize:`-Block, der `target_temp_step` setzt, oder der Zigbee-/Z-Wave-Converter), oder es hat einen festen Kalibrier-Offset. Prüfe zuerst die angegebene Schrittweite — wenn das Gerät intern ohnehin nur in 0,5-K-Schritten verstellt, bringt die Angabe 0,1 K nichts und kostet Schreibvorgänge."
+    },
     "override_suggestion_base_up": {
       "title": "Poise: Komfortbasis anheben?",
       "fix_flow": {

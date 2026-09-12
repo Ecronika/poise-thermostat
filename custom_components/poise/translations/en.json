@@ -636,6 +636,10 @@
       "title": "Actuator not applying commands — {zone}",
       "description": "The actuator in {zone} keeps reporting a different setpoint or mode than Poise commands — the writes are dispatched but never applied. Check the device's connection (Zigbee/Wi-Fi), its child lock, or an internal smart mode overriding external commands. This notice clears automatically once a command lands."
     },
+    "declared_step_mismatch": {
+      "title": "Poise: thermostat step may be misdeclared",
+      "description": "In {zone}, the thermostat `{entity}` declares a setpoint step of {step} K, but it keeps coming to rest {delta} K away from the value Poise wrote and stays there. Poise has stopped re-sending that setpoint — an identical write cannot move a device that has already settled. Heating control is unaffected; this saves the battery one write per cycle. Two causes produce the same reading and Poise cannot tell them apart: the device applies a coarser grid than it declares (often a `homeassistant:` / `customize:` block setting `target_temp_step`, or the Zigbee/Z-Wave converter), or it carries a fixed calibration offset. Check the declared step first — if the device only moves in 0.5 K steps internally, declaring 0.1 K gains nothing and costs writes."
+    },
     "override_suggestion_base_up": {
       "title": "Poise: raise the comfort base?",
       "fix_flow": {
