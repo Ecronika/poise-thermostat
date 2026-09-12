@@ -47,6 +47,8 @@ from ..const import (
 )
 from ..control.cooling import override_mode
 from ..control.dynamics import PROFILES, regulation_throttled
+from ..control.write_economy import classify_settle, reassert_idempotent
+from ..safety.write_convergence import convergence_tolerance
 from ..control.external_override import ExternalOverrideTracker
 from ..control.tick_resolve import should_write, snap_to_step
 from ..multi.lifecycle import resolve_guard_policy
@@ -356,6 +358,18 @@ def stage_setpoint_observe(
         setpoint_adopt_reason_fn=setpoint_adopt_reason_fn,
     )
     _adopted_sp: float | None = observation.adopt_setpoint
+    # M2: classify the reading, then ask whether re-sending the command in
+    # force can still achieve anything. Both pure (``control.write_economy``);
+    # the write gate consumes only the verdict.
+    _provenance = classify_settle(
+        own_change=_own_change,
+        stale_own_echo=stale_own_echo,
+        actual_sp=actual_sp,
+        last_cmd_sp=rt.external.last_cmd_sp,
+        prev_device_sp=rt.external.prev_device_sp,
+        match_tolerance=convergence_tolerance(step),
+        adopt_reason=observation.reason,
+    )
     return SetpointObservation(
         actual_sp=actual_sp,
         step=step,
@@ -364,6 +378,17 @@ def stage_setpoint_observe(
         adopted_sp=_adopted_sp,
         sp_adopt_reason=observation.reason,
         stale_own_echo=stale_own_echo,
+        settle_provenance=_provenance,
+        reassert_idempotent=reassert_idempotent(
+            target_snapped=snap_to_step(wt.target, step),
+            last_cmd_sp=rt.external.last_cmd_sp,
+            actual_sp=actual_sp,
+            prev_device_sp=rt.external.prev_device_sp,
+            provenance=_provenance,
+            cmd_episode_ts=rt.external.cmd_episode_ts,
+            last_sp_write_ts=rt.external.last_sp_write_ts,
+            now=now,
+        ),
     )
 
 
@@ -409,6 +434,8 @@ def plan_setpoint_write(
         # (mode + setpoint) until the guard clears.
         and not _mode_nudge_blocked
         and not _reg_throttled
+        # M2: an identical re-assert that cannot move the device is not sent.
+        and not spo.reassert_idempotent
         and should_write(
             actual_sp,
             snap_to_step(target, step),
