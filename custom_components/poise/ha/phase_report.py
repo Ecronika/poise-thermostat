@@ -777,6 +777,22 @@ class ReportPhase:
             "declared_step": (
                 act_state.attributes.get("target_temp_step") if act_state else None
             ),
+            # Phase 2a: the mode channel's own silence counter, and the
+            # per-channel write census. Same contract as the two keys above —
+            # dump only, never ``_ATTRS``. The census is what makes the NEXT
+            # write-economy decision arguable instead of plausible: the
+            # setpoint fix was defensible because 1440/day were measured
+            # before a line of code fell, and no other channel has such a
+            # number. Cumulative since the process started, so a restart shows
+            # as a discontinuity rather than as a quiet reset.
+            "mode_reasserts_suppressed": (
+                self._runtime.external.mode_reasserts_suppressed
+            ),
+            "setpoint_writes": self._runtime.actuator.setpoint_writes,
+            "mode_writes": self._runtime.actuator.mode_writes,
+            "external_temp_writes": self._runtime.actuator.external_temp_writes,
+            "calibration_writes": self._runtime.actuator.calibration_writes,
+            "select_writes": self._runtime.actuator.select_writes,
             "mold_capped": mold_capped,  # mould floor clipped at 24 °C
             # ADR-0057: publish the mould-protection floor + dewpoint so the card
             # can draw the "Schimmel" tick on the dial (display only, no control).

@@ -66,6 +66,7 @@ from ..devices.model_fixes import (
 from ..runtime.issue_ledger import IssueLedger
 from ..runtime.tick_result import HealthUpdate
 from .input_reader import InputReader
+from .presenter import decimal as _decimal
 
 
 class HealthReporter:
@@ -237,6 +238,7 @@ class HealthReporter:
         on EVERY tick of a normal device, so this is the hot path, not an edge
         case.
         """
+        _language = self._hass.config.language
         self.emit(
             (
                 HealthUpdate(
@@ -252,8 +254,19 @@ class HealthReporter:
                         # measured distance. ``f"{None:g}"`` raises, and an
                         # exception in a health emission takes the whole tick
                         # down with it (it did, once).
-                        "step": f"{declared_step:g}" if declared_step else "—",
-                        "delta": f"{settle_delta:g}" if settle_delta else "—",
+                        # v0.193.1: and rendered for the UI language — HA
+                        # passes placeholders through untranslated, so the
+                        # German text showed "0.1 K" with a decimal POINT.
+                        "step": (
+                            _decimal(declared_step, language=_language)
+                            if declared_step
+                            else "—"
+                        ),
+                        "delta": (
+                            _decimal(settle_delta, language=_language)
+                            if settle_delta
+                            else "—"
+                        ),
                     },
                 ),
             )

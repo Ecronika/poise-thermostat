@@ -83,6 +83,7 @@ from ..control.tick_resolve import (
     needs_mode_nudge,
     resolve_desired_mode,
 )
+from ..control.write_economy import mode_reassert_throttled
 from ..devices.capability import (
     DeviceCapabilities,
     reliable_heat_mode_from,
@@ -300,6 +301,24 @@ class ActuatePhase:
             ),
             now=now,
         )
+        # M5 (Phase 2a): the mode channel's rate limit. Positioned AFTER the
+        # watchdog fold above and BEFORE the dispatch, and both halves of that
+        # position are load-bearing. After, because a throttled re-nudge is
+        # silence exactly like a suppressed setpoint re-assert: the device is
+        # still in the wrong mode and still not moving, which is divergence
+        # evidence the watchdog must keep receiving (T2) — the same argument
+        # that made M2 and M4 join the setpoint fold. Before, because the
+        # throttle must actually cancel the write. A guard-blocked tick has
+        # already set ``_mode_nudge`` False above and is deliberately NOT
+        # evidence; this one is.
+        if _mode_nudge and mode_reassert_throttled(
+            desired_mode=desired_hvac,
+            last_commanded_hvac=self._runtime.external.last_commanded_hvac,
+            last_mode_nudge_ts=self._runtime.external.last_mode_nudge_ts,
+            now=now,
+        ):
+            _mode_nudge = False
+            self._runtime.external.mode_reasserts_suppressed += 1
         if _mode_nudge:
             # The executor sequence owns the boundary, the own-context
             # creation (tag our own mode change; the id reports even when the
@@ -1178,21 +1197,34 @@ class ActuatePhase:
         # FIRST, before the idempotent-plan early return: the handback is due
         # on EVERY tick of the outage, including the ones where the safe
         # setpoint already stands.
+        _now_mono = self._runtime.clock.monotonic()
         _release = sensor_source_handback_target(
             select_entity_id=self._reader.sensor_select,
             select_state=self._reader.ext_select_state(),
             configured_feed=bindings.trv_ext_temp,
             last_fed=self._runtime.actuator.last_fed,
+            # Phase 2a backoff: first attempt of an outage immediate, the
+            # repetitions bounded. This path runs outside the normal tick
+            # pipeline and carries no ``ing.now``, so the monotonic instant
+            # comes from the injected clock — the same source the pipeline's
+            # own ``now`` is read from, which keeps the manual-clock tests
+            # able to advance past the interval.
+            last_attempt_ts=self._runtime.actuator.last_handback_ts,
+            now=_now_mono,
         )
         if _release is not None:
             # ``ext_select`` is a pure pass in the commit fold, so this commit
             # stamps nothing and needs no ``now=``; it keeps the release on the
-            # same execution-report path as every other effect.
+            # same execution-report path as every other effect. The backoff
+            # stamp is folded here rather than in the commit for exactly that
+            # reason: adding a stamp to ``ext_select`` would make ``now=``
+            # mandatory on a fold four other call sites share.
             self._ports.commit_execution(
                 await self._executor.run_sensor_source_handback(
                     select_entity_id=_release
                 )
             )
+            self._runtime.actuator.last_handback_ts = _now_mono
         # Positioned read: the dirty flush follows this write (F-SAVEPOINT,
         # ADR-0064), so this read sees the device state at tick start.
         act = self._reader.actuator_state()

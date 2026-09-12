@@ -57,6 +57,28 @@ def iso_utc(ts: float | None) -> str | None:
     return datetime.fromtimestamp(ts, tz=UTC).isoformat() if ts is not None else None
 
 
+def decimal(value: float, *, language: str) -> str:
+    """A small decimal rendered for the UI language (ADR-0021).
+
+    Home Assistant does NOT localise repair-issue placeholders: whatever string
+    the integration hands over is rendered verbatim in every language. A German
+    sentence carrying "0.1 K" is simply wrong, and that shipped in v0.193.0.
+
+    Two limitations, stated rather than hidden:
+
+    * ``hass.config.language`` is the INSTANCE language, while the repair
+      dialog renders in the VIEWING user's frontend language. Where the two
+      differ the separator follows the instance. That is the best a
+      placeholder can do, and it is wrong for one rare mismatch instead of for
+      every German reader.
+    * Only German is special-cased, because ``strings.json``/``en.json``/
+      ``de.json`` is the whole of this integration's i18n (ADR-0021). A
+      general separator table would claim a coverage that does not exist.
+    """
+    text = f"{value:g}"
+    return text.replace(".", ",") if language.lower().startswith("de") else text
+
+
 def present(outcome: TickOutcome) -> dict[str, Any]:
     """Flatten ``outcome.data`` into the ``coordinator.data`` dict.
 
