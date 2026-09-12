@@ -139,6 +139,10 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "cover_would_shade",
     "current_humidity",
     "current_temperature",
+    # M2/M3 write economy (2026-09-12 plan): diagnostics-only telemetry —
+    # deliberately NOT added to the climate entity's ``_ATTRS`` allowlist, so
+    # this is a dump/API change and not an attribute-contract change.
+    "declared_step",
     "device_alarm",
     "device_hvac_mode",
     "device_schedule_active",
@@ -236,6 +240,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "q_solar",
     "q_solar_internal",
     "q_solar_source",
+    "reasserts_suppressed",  # M2: suppressed identical re-asserts, this episode
     "ref_offset",
     "ref_offset_conditioning",
     "ref_offset_dev",

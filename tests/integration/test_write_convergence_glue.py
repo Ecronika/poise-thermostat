@@ -234,6 +234,44 @@ async def test_notify_convergence_is_a_translated_repair_issue(
     assert reg.async_get_issue(DOMAIN, issue_id) is None
 
 
+async def test_notify_quantization_survives_a_device_that_declares_no_step(
+    hass: HomeAssistant,
+) -> None:
+    """M3 (2026-09-12 plan): the CLEARING path is the hot path, and it must not
+    raise.
+
+    ``notify_quantization`` runs on every tick of every zone, and on a normal
+    device both of its numbers are absent — no advice to give, and often no
+    declared step to name. Formatting those placeholders blind raised a
+    ``TypeError`` inside a health emission, which does not fail one issue: it
+    aborts the whole tick and leaves the config entry in SETUP_RETRY. This test
+    exists because that shipped once.
+
+    The sibling ``test_notify_convergence_is_a_translated_repair_issue`` above
+    pins the raise/clear pair; this one pins that the ABSENT case is rendered
+    rather than formatted.
+    """
+    from homeassistant.helpers import issue_registry as ir
+
+    async_mock_service(hass, "climate", "set_temperature")
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass, room=19.0, sp=20.0)
+    entry = await _setup(hass, data=_room_data())
+    coord: Any = entry.runtime_data
+    reg = ir.async_get(hass)
+    issue_id = f"declared_step_mismatch_{coord._entry_id}"
+
+    # Nothing to say, and nothing declared — the all-absent case.
+    coord._notify_quantization(None, declared_step=None)
+    assert reg.async_get_issue(DOMAIN, issue_id) is None
+    # Raise it with both numbers, then clear it again while the declaration is
+    # gone (an actuator that went unavailable between the two ticks).
+    coord._notify_quantization(0.2, declared_step=0.1)
+    assert reg.async_get_issue(DOMAIN, issue_id) is not None
+    coord._notify_quantization(None, declared_step=None)
+    assert reg.async_get_issue(DOMAIN, issue_id) is None
+
+
 async def test_own_context_clamp_settle_counts_as_divergence(
     hass: HomeAssistant,
 ) -> None:
