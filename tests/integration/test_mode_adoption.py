@@ -212,6 +212,14 @@ async def test_nudge_recorder_is_armed_after_setup(hass: HomeAssistant) -> None:
 
     clock = _FakeClock(1000.0)
     coord.runtime.clock = clock
+    # ADR-0073 M5: setup already nudged, so THIS tick is an identical RE-nudge and
+    # the mode rate limit would rightly swallow it. Clearing the dispatch anchor
+    # makes the tick a first assertion again — which is what this self-test is
+    # about (is the recorder armed?), not what the rate limit is about. Moving the
+    # fake clock instead would not do: the anchor was stamped from the REAL
+    # monotonic during setup, so no fixed fake value is reliably outside the
+    # 600 s window — that is exactly how this test failed once already.
+    coord.runtime.external.last_mode_nudge_ts = None
     nudges = async_mock_service(hass, "climate", "set_hvac_mode")  # re-arm after setup
     await coord.async_refresh()
     await hass.async_block_till_done()
