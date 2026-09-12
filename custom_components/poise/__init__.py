@@ -34,6 +34,32 @@ def _is_system(entry: ConfigEntry) -> bool:
     return bool(entry.data.get(CONF_ENTRY_TYPE) == ENTRY_TYPE_SYSTEM)
 
 
+def orphan_entry_id(issue_id: str, live_entry_ids: frozenset[str]) -> str | None:
+    """The DEAD config-entry id a per-entry repair issue carries, or None.
+
+    Poise builds its per-entry issue ids as ``f"{key}_{entry_id}"`` (a dozen
+    keys across the reporter and the coordinator), and Home Assistant's issue
+    registry is not entry-scoped: nothing removes them when the entry goes.
+    v0.193.1 closes that, and this predicate decides what "stale" means.
+
+    Three cases, and only the middle one is deleted:
+
+    * the tail belongs to a LIVE entry — checked against every domain's
+      entries, not just Poise's, so nothing hinges on Poise's own bookkeeping;
+    * the tail is not an entry id at all — a global issue such as
+      ``frost_zone_not_controlling_boiler`` (tail ``boiler``). Left alone;
+    * the tail LOOKS like an entry id (26-char ULID, or the 32-char hex of a
+      pre-2022 install) and matches none. That is an orphan.
+
+    The shape test is what keeps a future GLOBAL issue safe: it would have to
+    end in an underscore plus 26 or 32 alphanumerics to be mistaken for one.
+    """
+    head, sep, tail = issue_id.rpartition("_")
+    if not sep or not head or tail in live_entry_ids:
+        return None
+    return tail if len(tail) in (26, 32) and tail.isalnum() else None
+
+
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Apply an entry update: hot-apply tuning, reload on a structural change.
 
@@ -94,6 +120,11 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
         connection.send_result(msg["id"], {"version": VERSION})
 
     websocket_api.async_register_command(hass, _card_version)
+
+    # v0.193.1: clear repair issues left behind by config entries that no
+    # longer exist (see ``_sweep_orphan_issues``). Here because this runs once
+    # and every entry is already registered; harmless if there are none.
+    _sweep_orphan_issues(hass)
 
     try:
         await async_register_card(hass)
@@ -414,6 +445,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         return bool(unloaded_sys)
 
+    # AR-46: make the dying room coordinator inert FIRST — the room mirror of
+    # the hub's AR-02 tick-cancel — before platform unload, the final save and
+    # the park, so the park's own actuator writes cannot fire the still-attached
+    # state listener and run one last tick of this instance (which would
+    # re-write setpoint/mode against the park and, with active calibration,
+    # even a fresh offset AFTER the store's ownership cleanup). Deliberately
+    # BEFORE async_unload_platforms and therefore unconditional on its result
+    # (the AR-25 reasoning): a failed platform unload leaves the entry broken
+    # either way, and a half-alive coordinator must not keep actuating. The
+    # removal path needs no mirror of this call: async_remove_entry runs only
+    # after a completed unload, i.e. after this quiesce AND after HA ran the
+    # entry's on_unload callbacks (listener detach + coordinator shutdown).
+    await entry.runtime_data.async_quiesce()
     unloaded = await hass.config_entries.async_unload_platforms(
         entry, [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH, Platform.BUTTON]
     )
@@ -438,6 +482,51 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         await _remove_hub_entry(hass, entry)
     else:
         await _remove_room_entry(hass, entry)
+    # v0.193.1: and drop every repair issue this entry raised. AR-29 already
+    # cleared the hub's ONE global issue by name; the per-entry family was
+    # missed, so a deleted zone left ghosts that outlive their entry — and the
+    # repair dialog needs the entry to render, so they cannot even be dismissed.
+    _delete_issues(hass, [f"_{entry.entry_id}"])
+
+
+def _delete_issues(hass: HomeAssistant, suffixes: list[str]) -> None:
+    """Delete every Poise repair issue whose id ends with one of ``suffixes``.
+
+    Suffix match, not a key list: the keys live at half a dozen emission sites
+    and a list here would go stale without anything noticing.
+    """
+    from homeassistant.helpers import issue_registry as ir
+
+    registry = ir.async_get(hass)
+    doomed = [
+        issue_id
+        for (domain, issue_id) in registry.issues
+        if domain == DOMAIN and any(issue_id.endswith(s) for s in suffixes)
+    ]
+    for issue_id in doomed:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+
+def _sweep_orphan_issues(hass: HomeAssistant) -> None:
+    """Remove the per-entry issues whose config entry is already gone.
+
+    The removal hook above stops new orphans; this clears the ones stranded by
+    earlier versions. Runs exactly once, from ``async_setup``, which is the
+    only place where "once" and "every config entry is registered" both hold —
+    HA reads the entries from storage during bootstrap, long before the first
+    component setup.
+    """
+    from homeassistant.helpers import issue_registry as ir
+
+    registry = ir.async_get(hass)
+    live = frozenset(entry.entry_id for entry in hass.config_entries.async_entries())
+    orphans = [
+        issue_id
+        for (domain, issue_id) in registry.issues
+        if domain == DOMAIN and orphan_entry_id(issue_id, live) is not None
+    ]
+    for issue_id in orphans:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
 async def _remove_hub_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -500,6 +589,10 @@ async def _remove_room_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     # AR-11/AR-13: the park reads has_actuated + the live climate_mode from the
     # store, so it must run BEFORE the store is removed.
+    # AR-46: no quiesce needed here — HA calls async_remove_entry only after a
+    # COMPLETED unload, i.e. after the unload path's async_quiesce and after
+    # the entry's on_unload callbacks ran (listener detach + coordinator
+    # shutdown); no coordinator of this entry can still tick during this park.
     await _park_room_actuator(hass, entry, live_mode=False)
 
     # AR-44: narrow the best-effort suppression to the store/IO errors we actually
