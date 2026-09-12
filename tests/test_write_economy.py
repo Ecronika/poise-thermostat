@@ -49,6 +49,7 @@ def _run_reassert_loop(
     settles_to: float,
     step: float,
     minutes: int = _MINUTES,
+    offline: frozenset[int] = frozenset(),
 ) -> dict:
     """Drive ``minutes`` ticks of the real gate composition against a device.
 
@@ -78,7 +79,13 @@ def _run_reassert_loop(
     throttled = 0
     reasons: list[str] = []
     provenances: list[str] = []
-    for _ in range(minutes):
+    for tick in range(minutes):
+        if tick in offline:
+            # Observe stage: an offline actuator ENDS the command episode (V3,
+            # availability half). Nothing is dispatched to it either.
+            cmd_episode_ts = None
+            now += _TICK_S
+            continue
         snapped = snap_to_step(target, step)
         adopt_reason = setpoint_adopt_reason(
             device_sp=device_sp,
@@ -131,7 +138,10 @@ def _run_reassert_loop(
             writes += 1
             last_written_sp = snapped
             last_write_ts = now  # re-arms the 120 s adoption echo window
-            if last_cmd_sp != snapped:  # episode anchor: only a REAL change
+            # Episode anchor: a REAL command change, or a write that BEGINS
+            # an episode (there is none after a dropout). Both halves, exactly
+            # as ``ZoneRuntime`` commits them.
+            if last_cmd_sp != snapped or cmd_episode_ts is None:
                 cmd_episode_ts = now
             last_cmd_sp = snapped
             device_sp = settles_to  # the device takes what it can represent
@@ -442,3 +452,37 @@ def test_the_two_gates_compose_with_the_liveness_escape() -> None:
     """
     assert MIN_SETPOINT_REASSERT_INTERVAL_S < REASSERT_LIVENESS_S
     assert _throttle(now=REASSERT_LIVENESS_S) is False
+
+
+def test_a_dropout_resumes_writing_and_does_not_restart_the_loop() -> None:
+    """V3's availability half, and the commit clause that makes it safe.
+
+    Two rules have to hold together, and each one alone is a defect:
+
+    * an offline actuator ends the command episode, so the first tick after it
+      returns writes immediately — a TRV that rebooted while away (the field
+      case reports ``power_outage_count: 852``) must be told again, and the
+      "it did not work last time" premise says nothing about it. Without this,
+      M4 swallows the recovery write for its whole interval — which is exactly
+      how ``test_p3_18a_actuator_dropout_then_recovery_resumes_writes`` went
+      red;
+    * a write that BEGINS an episode stamps the anchor even when the command
+      value is unchanged — which it usually is after a dropout. Without this,
+      no episode ever starts again, neither gate can ever hold, and the
+      re-assert loop is back unbounded. Nothing in the glue suite would catch
+      that: writes DO resume there, forever.
+
+    So: one write, silence while away, one write on recovery, then quiet.
+    """
+    run = _run_reassert_loop(
+        target=15.2,
+        device_before=15.5,
+        settles_to=15.0,
+        step=0.1,
+        offline=frozenset({1, 2}),
+    )
+    assert run["writes"] == 2, (
+        f"{run['writes']} writes — expected one before the dropout and one "
+        "after the recovery"
+    )
+    assert run["suppressed"] + run["throttled"] > 0, "and quiet afterwards"

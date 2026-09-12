@@ -496,6 +496,10 @@ _RATCHET: tuple[_Entry, ...] = (
         note="1200/900 total/code - plan DoD cap, effective from P.1",
     ),
     _Entry(
+        # V3 availability half (2026-09-12) +13/+3: an offline actuator ends
+        # the command episode in the observe stage — three lines under the
+        # rationale that a device which has been away may have rebooted, so
+        # the premise both gates rest on is void. 476/264 -> 489/267.
         # M4 (2026-09-12 plan) +19/+14: the second verdict is computed
         # beside the first in the observe stage and vetoes beside it in the
         # gate. The DECISION is again the pure ``control/write_economy``; what
@@ -509,8 +513,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # The DECISION itself lives in the new pure ``control/write_economy``,
         # so what grows here is the call plus two carried fields, not logic.
         # 430/227 -> 457/250, 650 code lines under the 900 cap.
-        baseline_total=476,
-        baseline_code=264,
+        baseline_total=489,
+        baseline_code=267,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from P.1",
     ),
@@ -564,6 +568,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # _stage_assemble_tick_data, tick_ports, coordinator) plus this note.
         # All comments. Measured LAST, after every other edit stood — the
         # self-measuring lesson below, for the fourth time.
+        # +6/0 for the V3 availability half (2026-09-12): one annotation
+        # plus this note. Measured LAST.
         # +11/0 for M4 (2026-09-12): two feature-growth annotations plus
         # this note. Measured LAST, after every other edit stood.
         # +4/0 in P1.5b: the coordinator row's resolve_restore re-measure
@@ -590,7 +596,7 @@ _RATCHET: tuple[_Entry, ...] = (
         # +10/0 for M2 (2026-09-12): the pipeline_actuate annotation plus
         # these three lines, all comments — measured LAST again.
         # 740/301 -> 750/301.
-        baseline_total=800,
+        baseline_total=806,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight
