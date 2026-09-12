@@ -101,6 +101,26 @@ def _same(a: float | None, b: float | None) -> bool:
     return a is not None and b is not None and abs(a - b) <= _SAME_VALUE_EPS
 
 
+def _stale_anchor(now: float, anchor: float) -> bool:
+    """True when ``anchor`` cannot belong to the same clock as ``now``.
+
+    The monotonic clock is injected (ADR-0006/0014), so "monotonic" holds
+    within one clock and not across a swapped one — a replay harness, a test
+    that installs its own clock mid-run, a restore path that stamped from a
+    previous process. An anchor from ANOTHER era is not merely inaccurate, it
+    is unusable: ``now - anchor`` comes out large and negative, every interval
+    comparison reads as "just written", and the gate below would stay shut
+    until the clock caught up.
+
+    Both gates that use this therefore fail OPEN — they let the write through.
+    That is the same direction ``safety/heating_failure`` chose for the same
+    problem (its F22 clock guard re-anchors instead of stalling its window),
+    and it is the direction this module's whole stance demands: silence must
+    be justified, and an unusable anchor justifies nothing.
+    """
+    return now < anchor
+
+
 def classify_settle(
     *,
     own_change: bool,
@@ -186,9 +206,13 @@ def reassert_idempotent(
         return False  # still moving, or unreadable -> the premise is void
     if provenance not in RELEASING:
         return False
+    if last_sp_write_ts is None:
+        return True
+    if now < last_sp_write_ts:
+        return False  # see _stale_anchor
     # V3: once the escape interval has elapsed, one write goes out again — the
     # commit re-stamps the clock, so the next interval starts by itself.
-    return last_sp_write_ts is None or (now - last_sp_write_ts) < liveness_s
+    return (now - last_sp_write_ts) < liveness_s
 
 
 def quantization_settle_delta(
@@ -277,6 +301,8 @@ def reassert_throttled(
         return False  # a new command is never throttled
     if cmd_episode_ts is None or last_sp_write_ts is None:
         return False  # nothing has been commanded yet -> nothing to repeat
+    if _stale_anchor(now, last_sp_write_ts):
+        return False
     return (now - last_sp_write_ts) < min_interval_s
 
 
@@ -330,4 +356,6 @@ def mode_reassert_throttled(
         return False  # a mode change is never throttled
     if last_mode_nudge_ts is None:
         return False  # nothing dispatched yet -> nothing to repeat
+    if _stale_anchor(now, last_mode_nudge_ts):
+        return False
     return (now - last_mode_nudge_ts) < min_interval_s
