@@ -71,8 +71,9 @@ jobs:
       matrix:
         # E.11: two HA targets — MIN is the promised minimum (README badge /
         # hacs.json), LATEST the current stable as API-drift early warning.
-        # E.11b: LATEST is HA 2026.8.2 (current stable) via pytest-hacc
-        # 0.13.356, which needs Python 3.14.
+        # E.11b: LATEST is HA 2026.9.1 (current stable) via pytest-hacc
+        # 0.13.364, which needs Python 3.14 (HA itself declares >= 3.14.2,
+        # satisfied by the newest 3.14.x setup-python resolves to).
         # E.13: MIN is HA 2025.10.1, which requires Python >= 3.13.2 — the
         # former 3.12 MIN entry is therefore gone (no HA we support runs on
         # 3.12 any more). The pure core keeps its own 3.12 entry in the
