@@ -296,7 +296,13 @@ async def test_a_requantising_device_is_not_rewritten_every_tick(
     # commanded value, or this is a test of a well-behaved thermostat.
     assert set_temp, "expected at least the first write"
     written = float(set_temp[-1].data["temperature"])
-    assert settled is not None and abs(written - settled) >= 0.2, (
+    # Rounded, for the same reason ``should_write`` and
+    # ``quantization_settle_delta`` round: setpoints are 0.1-resolution floats,
+    # and the field case's own distance is the one that bites —
+    # ``abs(23.2 - 23.0)`` is 0.19999999999999929 in binary floating point. The
+    # gate this test guards compares the SAME number, and it rounds; a guard
+    # that does not would reject exactly the scenario it exists to confirm.
+    assert settled is not None and round(abs(written - settled), 3) >= 0.2, (
         f"commanded {written}, device settled at {settled} — no re-quantisation, "
         "so this scenario does not reproduce the field case"
     )
