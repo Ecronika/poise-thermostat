@@ -511,11 +511,18 @@ class ActuatePhase:
         # device settling one step away still counts as converged. No evidence
         # from a state the integration has not refreshed since our last write
         # (poll latency) or from a late echo of a superseded command.
+        # M2/T2: a SUPPRESSED re-assert must count as the evidence the write
+        # would have produced. The watchdog counts divergence only in its
+        # ``elif wrote:`` branch, so suppressing the write would otherwise
+        # blind the very detector for "device never applies our commands".
+        _suppressed = spo.reassert_idempotent and not plan.write_setpoint
+        if _suppressed:
+            self._runtime.external.reasserts_suppressed += 1
         self._runtime.safety.convergence.observe_setpoint(
             actual_sp=actual_sp,
             last_written_sp=self._runtime.external.last_cmd_sp,
             tolerance=convergence_tolerance(spo.step),
-            wrote=plan.write_setpoint,
+            wrote=plan.write_setpoint or _suppressed,
             evidence_fresh=(
                 not spo.stale_own_echo
                 and self._convergence_evidence_fresh(
