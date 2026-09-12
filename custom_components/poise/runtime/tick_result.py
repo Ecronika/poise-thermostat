@@ -574,6 +574,11 @@ class SetpointObservation:
     # classification stays where the evidence is.
     settle_provenance: str = "unknown"
     reassert_idempotent: bool = False
+    # M4: the weaker sibling of the verdict above — not "this write cannot
+    # achieve anything" but "this identical command was sent recently enough".
+    # Kept as its OWN field: collapsing a proof and a rate limit into one flag
+    # is exactly the conflation the 2026-09-12 report was about.
+    reassert_throttled: bool = False
     # C.8f: this reading is a late echo of a SUPERSEDED command (own context,
     # but not the newest setpoint write's) — no convergence evidence in
     # either direction. Classified in the observe stage from the hold-routing
