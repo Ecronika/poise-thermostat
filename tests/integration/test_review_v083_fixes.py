@@ -250,6 +250,26 @@ async def test_sensor_loss_and_recovery_log_once_each(
 
 
 # --------------------------------------------------------------- M9: via_device
+def _poise_device(reg: dr.DeviceRegistry, entry_id: str) -> dr.DeviceEntry:
+    """The one device a Poise config entry owns — looked up version-neutrally.
+
+    ``DeviceRegistry.async_get_device`` is deprecated from HA 2026.9 (device
+    identifiers are no longer unique across config entries) and raises in the
+    test harness, while its replacement ``async_get_device_by_identifier`` does
+    not exist on the MIN target (HA 2025.10). ``async_entries_for_config_entry``
+    is present, identical and non-deprecated in both — and it asks the sharper
+    question anyway: which device does THIS entry own. The identifier check
+    stays, so the test still pins the identifier scheme and not just the count.
+    """
+    owned = [
+        device
+        for device in dr.async_entries_for_config_entry(reg, entry_id)
+        if (DOMAIN, entry_id) in device.identifiers
+    ]
+    assert len(owned) == 1, f"expected exactly one Poise device for {entry_id}"
+    return owned[0]
+
+
 async def test_zone_device_nests_under_hub(hass: HomeAssistant) -> None:
     """M9: with a system hub configured, a zone device links to it via via_device."""
     async_mock_service(hass, "climate", "set_temperature")
@@ -282,9 +302,8 @@ async def test_zone_device_nests_under_hub(hass: HomeAssistant) -> None:
 
     assert zone.runtime_data.via_device_id == (DOMAIN, hub.entry_id)
     reg = dr.async_get(hass)
-    zone_dev = reg.async_get_device(identifiers={(DOMAIN, zone.entry_id)})
-    hub_dev = reg.async_get_device(identifiers={(DOMAIN, hub.entry_id)})
-    assert zone_dev is not None and hub_dev is not None
+    zone_dev = _poise_device(reg, zone.entry_id)
+    hub_dev = _poise_device(reg, hub.entry_id)
     assert zone_dev.via_device_id == hub_dev.id  # nested under the hub
 
 
