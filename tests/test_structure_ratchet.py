@@ -462,8 +462,15 @@ _RATCHET: tuple[_Entry, ...] = (
     ),
     _Entry(
         identifier="custom_components/poise/control/pipeline_actuate.py",
-        baseline_total=430,
-        baseline_code=227,
+        # M2 2026-09-12 +27/+23 (feature growth): the write-economy seam. The
+        # settle classification and the idempotence verdict are computed in
+        # the stage that has ``now`` and the runtime, and travel on
+        # ``SetpointObservation``; the gate below only consumes the verdict.
+        # The DECISION itself lives in the new pure ``control/write_economy``,
+        # so what grows here is the call plus two carried fields, not logic.
+        # 430/227 -> 457/250, 650 code lines under the 900 cap.
+        baseline_total=457,
+        baseline_code=250,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from P.1",
     ),
@@ -530,7 +537,10 @@ _RATCHET: tuple[_Entry, ...] = (
         # phase_actuate annotation plus these four lines, all comments —
         # measured LAST again, and it bit once more: the first attempt raised
         # only the row it was about. 722/301 -> 740/301.
-        baseline_total=740,
+        # +10/0 for M2 (2026-09-12): the pipeline_actuate annotation plus
+        # these three lines, all comments — measured LAST again.
+        # 740/301 -> 750/301.
+        baseline_total=750,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight
