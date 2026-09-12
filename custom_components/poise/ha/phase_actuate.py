@@ -515,7 +515,12 @@ class ActuatePhase:
         # would have produced. The watchdog counts divergence only in its
         # ``elif wrote:`` branch, so suppressing the write would otherwise
         # blind the very detector for "device never applies our commands".
-        _suppressed = spo.reassert_idempotent and not plan.write_setpoint
+        # M4 joins the fold for the SAME reason M2 did: a throttled re-assert
+        # is silence too, and a device that never applies a command must not
+        # be judged on one write per interval instead of one per tick.
+        _suppressed = (
+            spo.reassert_idempotent or spo.reassert_throttled
+        ) and not plan.write_setpoint
         if _suppressed:
             self._runtime.external.reasserts_suppressed += 1
         self._runtime.safety.convergence.observe_setpoint(
