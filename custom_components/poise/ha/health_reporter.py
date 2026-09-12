@@ -229,8 +229,13 @@ class HealthReporter:
         NON-fixable on purpose: the cause sits outside Poise (a ``customize``
         override, a converter's ``temp_step``, a device quirk) and Poise must
         not write into the user's Home Assistant configuration to "repair" it.
-        ``None`` means there is nothing to say and clears the issue —
-        transition-only, like every other issue here.
+        ``settle_delta is None`` means there is nothing to say and clears the
+        issue — transition-only, like every other issue here. ``declared_step``
+        is optional for the same reason the detector treats it as optional: a
+        device that declares no step yields no advice. Both placeholders are
+        therefore rendered defensively; the clearing path passes through here
+        on EVERY tick of a normal device, so this is the hot path, not an edge
+        case.
         """
         self.emit(
             (
@@ -241,7 +246,13 @@ class HealthReporter:
                     placeholders={
                         "zone": self._zone_name,
                         "entity": self._actuator or "—",
-                        "step": f"{declared_step:g}",
+                        # Both are rendered, never formatted blind: this
+                        # method also runs on the CLEARING path, where the
+                        # device may declare no step at all and there is no
+                        # measured distance. ``f"{None:g}"`` raises, and an
+                        # exception in a health emission takes the whole tick
+                        # down with it (it did, once).
+                        "step": f"{declared_step:g}" if declared_step else "—",
                         "delta": f"{settle_delta:g}" if settle_delta else "—",
                     },
                 ),
