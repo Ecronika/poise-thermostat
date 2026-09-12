@@ -1092,6 +1092,17 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         """
         self._health.notify_convergence(active)
 
+    def _notify_quantization(
+        self, settle_delta: float | None, *, declared_step: float
+    ) -> None:
+        """Surface a possible declared-step mismatch as advice (M3, 2026-09-12).
+
+        Body in ``HealthReporter.notify_quantization``; a coordinator method
+        for the same reasons as ``_notify_convergence`` above, and emitted at
+        the same checkpoint so the two setpoint verdicts cannot drift apart.
+        """
+        self._health.notify_quantization(settle_delta, declared_step=declared_step)
+
     def _save_payload(self) -> dict[str, Any]:
         """The v1 store payload — the FORMAT is owned by ``persistence.codec``.
 
