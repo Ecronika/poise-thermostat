@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from custom_components.poise.ha.presenter import decimal
+
 COMPONENT = Path(__file__).resolve().parents[1] / "custom_components" / "poise"
 
 _QUOTED_PLACEHOLDER = re.compile(r"'\{\w+\}'")
@@ -79,3 +81,29 @@ def test_locale_file_is_sorted_json_without_empty_strings(locale: Path) -> None:
         if not text.strip()
     ]
     assert not blanks, f"{locale.name} has empty translation string(s): {blanks}"
+
+
+def test_a_number_in_a_german_sentence_uses_a_comma() -> None:
+    """v0.193.1: HA renders repair-issue placeholders VERBATIM in every
+    language, so a number formatted ``0.1`` appears with a decimal point in
+    the German text too. That shipped in v0.193.0 — the declared-step advisory
+    read "eine Sollwert-Schrittweite von 0.1 K".
+
+    Only German is special-cased on purpose: ``strings.json``/``en.json``/
+    ``de.json`` is the whole of this integration's i18n (ADR-0021), and a
+    general separator table would claim a coverage that does not exist.
+    """
+    assert decimal(0.1, language="de") == "0,1"
+    assert decimal(0.2, language="de-DE") == "0,2"
+    assert decimal(0.1, language="en") == "0.1"
+    assert decimal(0.2, language="en-GB") == "0.2"
+    # Not a language this integration ships: it keeps the neutral form rather
+    # than guessing a convention nobody verified.
+    assert decimal(0.1, language="nl") == "0.1"
+
+
+def test_a_whole_number_carries_no_separator_at_all() -> None:
+    """Non-vacuity for the replacement: ``:g`` drops the fractional part, so
+    the comma substitution must have nothing to act on."""
+    assert decimal(1.0, language="de") == "1"
+    assert decimal(22.0, language="de") == "22"

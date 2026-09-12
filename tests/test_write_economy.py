@@ -24,13 +24,19 @@ from custom_components.poise.control.override import setpoint_adopt_reason
 from custom_components.poise.control.tick_resolve import should_write, snap_to_step
 from custom_components.poise.control.write_economy import (
     CURRENT_COMMAND_MATCH,
+    MIN_MODE_REASSERT_INTERVAL_S,
     MIN_SETPOINT_REASSERT_INTERVAL_S,
     QUANT_MIN_SUPPRESSED,
     REASSERT_LIVENESS_S,
     classify_settle,
+    mode_reassert_throttled,
     quantization_settle_delta,
     reassert_idempotent,
     reassert_throttled,
+)
+from custom_components.poise.safety.sensor_watchdog import (
+    SELECT_HANDBACK_RETRY_S,
+    sensor_source_handback_target,
 )
 from custom_components.poise.safety.write_convergence import (
     CONV_FAIL_WRITES,
@@ -486,3 +492,169 @@ def test_a_dropout_resumes_writing_and_does_not_restart_the_loop() -> None:
         "after the recovery"
     )
     assert run["suppressed"] + run["throttled"] > 0, "and quiet afterwards"
+
+
+# --- Phase 2a: the other three channels -------------------------------------
+
+
+def _run_mode_nudge_loop(
+    *,
+    desired: str,
+    device_mode: str,
+    adopts_at_tick: int | None = None,
+    minutes: int = _MINUTES,
+) -> dict[str, int]:
+    """The mode channel's re-nudge loop, composed like the setpoint one above.
+
+    ``needs_mode_nudge`` + the M5 rate limit + the commit's two stamps, in the
+    order ``_stage_mode_nudge`` runs them. ``adopts_at_tick`` is the tick on
+    which the device finally reports ``desired`` — ``None`` means it never
+    does, which is the case the rate limit exists for and also the case the
+    convergence watchdog must keep seeing.
+    """
+    last_commanded: str | None = None
+    last_nudge_ts: float | None = None
+    writes = 0
+    throttled = 0
+    evidence = 0  # ticks the watchdog was fed a re-nudge as divergence
+    for tick in range(1, minutes + 1):
+        now = tick * _TICK_S
+        if adopts_at_tick is not None and tick >= adopts_at_tick:
+            device_mode = desired
+        nudge = device_mode != desired  # needs_mode_nudge, supported=True
+        if nudge and desired == last_commanded:
+            evidence += 1  # T2: counted BEFORE the throttle can cancel it
+        if nudge and mode_reassert_throttled(
+            desired_mode=desired,
+            last_commanded_hvac=last_commanded,
+            last_mode_nudge_ts=last_nudge_ts,
+            now=now,
+        ):
+            nudge = False
+            throttled += 1
+        if nudge:
+            writes += 1
+            last_nudge_ts = now
+            last_commanded = desired
+    return {"writes": writes, "throttled": throttled, "evidence": evidence}
+
+
+def test_a_mode_that_never_takes_is_asserted_ten_times_an_hour_not_sixty() -> None:
+    """The M5 acceptance test — the mode channel's version of the field case.
+
+    A TRV that keeps falling back to its own weekly schedule (``system_mode``
+    back to ``auto``) is nudged by ``needs_mode_nudge`` on every single tick,
+    because "current != desired" is true on every single tick. That is the
+    same 1440/day shape the setpoint channel had, on the same battery, and it
+    had no gate at all.
+
+    The limit must NOT make it stop: a mode that does not take is a fault, and
+    Poise keeps telling the device. It only slows down — first assert
+    immediate, then one per interval.
+    """
+    run = _run_mode_nudge_loop(desired="heat", device_mode="auto", minutes=30)
+    # 30 unthrottled nudges before, three now: the first tick, then one per
+    # ``MIN_MODE_REASSERT_INTERVAL_S``. Ten times an hour is the ceiling, not
+    # the rate — the first assert of a run is free, so 30 minutes buy three.
+    assert MIN_MODE_REASSERT_INTERVAL_S == 600.0
+    assert run["writes"] == 3, f"{run['writes']} nudges in 30 minutes"
+    assert run["throttled"] == 27
+    # ...and it never falls silent: the interval is finite, so the next
+    # assertion is always scheduled.
+    assert (
+        _run_mode_nudge_loop(desired="heat", device_mode="auto", minutes=180)["writes"]
+        > run["writes"]
+    )
+
+
+def test_a_throttled_re_nudge_still_reaches_the_convergence_watchdog() -> None:
+    """T2 for the mode channel, stated as a test rather than as a comment.
+
+    The watchdog for "this device never applies our commands" counts evidence
+    per nudge. If the rate limit removed the nudge before the fold, a device
+    that refuses ``heat`` forever would produce one piece of evidence per ten
+    minutes instead of one per tick — the detector would need hours to reach
+    its threshold, and the whole point of the limit was to change the WRITE
+    rate, not the DIAGNOSIS rate.
+    """
+    run = _run_mode_nudge_loop(desired="heat", device_mode="auto", minutes=30)
+    assert run["evidence"] == run["throttled"] + run["writes"] - 1, (
+        "every re-nudge must be evidence — sent or throttled; only the very "
+        "first nudge is not a RE-nudge"
+    )
+
+
+def test_a_real_mode_change_is_never_throttled() -> None:
+    """The exemption that keeps the limit honest.
+
+    Every safety and comfort path that changes the mode — window open, frost,
+    a user override, the fan-first FSM, the idle park of a reversible AC —
+    produces a DIFFERENT desired mode, and none of them may wait behind a
+    ten-minute timer. The comparison is the same one the executor evaluates at
+    dispatch time and the commit folds as ``mode_changed``, so the two cannot
+    drift apart.
+    """
+    assert (
+        mode_reassert_throttled(
+            desired_mode="cool",
+            last_commanded_hvac="heat",
+            last_mode_nudge_ts=0.0,
+            now=1.0,  # one second after the last dispatch
+        )
+        is False
+    )
+    # and the first nudge of a run, which has no previous dispatch at all
+    assert (
+        mode_reassert_throttled(
+            desired_mode="heat",
+            last_commanded_hvac=None,
+            last_mode_nudge_ts=None,
+            now=1.0,
+        )
+        is False
+    )
+
+
+def test_the_sensor_source_handback_retries_with_a_backoff_not_every_tick() -> None:
+    """The third channel: the ADR-0029 release during a room-sensor outage.
+
+    The release is due for as long as the select still reads ``external``, and
+    the write is the only thing that can change that — so a device that keeps
+    reverting the select (SONOFF TRVZB, Koenkk/zigbee2mqtt#29650) is written
+    once a minute for the whole outage. An outage lasting a workday spends a
+    four-figure write count on a battery valve.
+
+    The first attempt stays immediate — a sensor outage is a safety event and
+    the release must not wait behind a timer — and only the repetitions are
+    bounded.
+    """
+    kw = {
+        "select_entity_id": "select.kuche_trv_sensor",
+        "select_state": "external",
+        "configured_feed": "number.kuche_trv_ext_temp",
+        "last_fed": 21.0,
+    }
+    # first tick of the outage: released immediately, no attempt on record
+    assert sensor_source_handback_target(**kw, last_attempt_ts=None, now=0.0)
+    # the device did not take it — the next ticks are silent
+    assert sensor_source_handback_target(**kw, last_attempt_ts=0.0, now=60.0) is None
+    assert (
+        sensor_source_handback_target(
+            **kw, last_attempt_ts=0.0, now=SELECT_HANDBACK_RETRY_S - 1.0
+        )
+        is None
+    )
+    # ...and then it is asserted again. Bounded, never vetoed.
+    assert sensor_source_handback_target(
+        **kw, last_attempt_ts=0.0, now=SELECT_HANDBACK_RETRY_S
+    )
+    # a select that already reads ``internal`` is not written at all, backoff
+    # or no backoff — the idempotence that was always there stays first.
+    assert (
+        sensor_source_handback_target(
+            **{**kw, "select_state": "internal"},
+            last_attempt_ts=None,
+            now=0.0,
+        )
+        is None
+    )

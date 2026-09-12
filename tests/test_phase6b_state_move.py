@@ -251,6 +251,15 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # the watchdog fold reads. Both transient (process-local clocks/counts).
     ("external", "cmd_episode_ts"): "M2 command-episode anchor (transient)",
     ("external", "reasserts_suppressed"): "M2 suppressed re-assert count (transient)",
+    # Phase 2a (M5): the mode channel's rate-limit clock and its silence
+    # counter. The clock is separate from ``last_hvac_cmd_ts`` on purpose —
+    # that one stands still across identical re-nudges because it arms the
+    # echo window, so it cannot measure a rate.
+    ("external", "last_mode_nudge_ts"): "M5 mode-dispatch clock (transient)",
+    (
+        "external",
+        "mode_reasserts_suppressed",
+    ): "M5 throttled re-nudge count (transient)",
     # P1.4 (ADR-0015 / D3-D4): calibration ownership + evidence anchors —
     # born on the group, persisted pair encoded straight off zone_runtime
     # (no coordinator proxy ever existed); the anchors are transient by
@@ -261,6 +270,15 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     ("actuator", "last_cal_write_ts"): "P1.4 due/divergence anchor (transient)",
     ("actuator", "last_cal_dispatch_wall_ts"): "P1.4 dispatch anchor (transient)",
     ("actuator", "last_cal_restore_ts"): "P1.4 restore throttle (transient)",
+    # Phase 2a: the ADR-0029 release backoff plus the five-channel write
+    # census. All transient — a persisted counter would blur the before/after
+    # of a tuning change, which is the one thing the census exists to show.
+    ("actuator", "last_handback_ts"): "Phase 2a handback backoff (transient)",
+    ("actuator", "setpoint_writes"): "Phase 2a write census (transient)",
+    ("actuator", "mode_writes"): "Phase 2a write census (transient)",
+    ("actuator", "external_temp_writes"): "Phase 2a write census (transient)",
+    ("actuator", "calibration_writes"): "Phase 2a write census (transient)",
+    ("actuator", "select_writes"): "Phase 2a write census (transient)",
     # P1.4 display latches (transient diagnosis; stamped by the SEQUENCER
     # from the typed stage results — the stages stay report-pure).
     ("diagnostics", "cal_diverged"): "P1.4 divergence display latch (transient)",

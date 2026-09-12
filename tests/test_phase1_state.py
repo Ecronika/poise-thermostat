@@ -158,6 +158,10 @@ def test_external_override_split_exact() -> None:
         # would be meaningless after a restart, so neither is persisted.
         "cmd_episode_ts",
         "reasserts_suppressed",
+        # Phase 2a (M5): the mode channel's pair, transient for the same two
+        # reasons — a monotonic dispatch stamp and a per-process count.
+        "last_mode_nudge_ts",
+        "mode_reasserts_suppressed",
     }
 
 

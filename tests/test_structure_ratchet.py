@@ -215,8 +215,18 @@ _RATCHET: tuple[_Entry, ...] = (
         # the half rule 1b enforces — stays 170 under the 900 cap. The owed
         # extraction is named: the calibration segments H/W (~300 lines), which
         # cannot leave without the await topology. Release work, not debug.
-        baseline_total=1229,
-        baseline_code=735,
+        # Phase 2a 2026-09-12 +32/+13: the mode channel's rate limit (M5) in
+        # the nudge segment and the handback backoff on the unavailable path.
+        # Both are DISPATCH only — both DECISIONS moved out, to
+        # ``write_economy.mode_reassert_throttled`` and to the existing
+        # ``sensor_watchdog`` release, which is the rule this row has been
+        # under since 1194/717. What stays here is the T2 positioning proof:
+        # a throttled re-nudge must reach the convergence watchdog exactly
+        # like a sent one, and that argument only holds at this call site.
+        # 1229/735 -> 1261/748; CODE, the half rule 1b enforces, stays 152
+        # under the 900 cap.
+        baseline_total=1261,
+        baseline_code=748,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -233,7 +243,9 @@ _RATCHET: tuple[_Entry, ...] = (
         # and the actuator's own ``declared_step``. Dump only, deliberately
         # NOT added to the climate entity's ``_ATTRS`` allowlist: silence has
         # to be auditable without widening the ADR-0016 attribute contract.
-        # 827/581 -> 841/585.
+        # 827/581 -> 841/585. Phase 2a +16/+8: the mode channel's silence
+        # counter and the five per-channel write counters, in the same dump,
+        # under the same contract (never ``_ATTRS``). 841/585 -> 857/593.
         identifier="custom_components/poise/ha/phase_report.py",
         # O.6 grew this file by +64/+21: the outcome folds became six methods,
         # which costs six signatures, six docstrings and the per-fold ctx
@@ -249,8 +261,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # position. 816/577 -> 824/581. P2.1 +3/0: the fixed-fallback
         # rationale comment at the ``model_expected_minutes`` seam
         # (``float(x or 0.0)``, plan §0.6 p.3). 824/581 -> 827/581.
-        baseline_total=841,
-        baseline_code=585,
+        baseline_total=857,
+        baseline_code=593,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -333,9 +345,11 @@ _RATCHET: tuple[_Entry, ...] = (
         # M3 advisory (2026-09-12 plan) +14/+4: ``reasserts_suppressed``
         # and ``declared_step`` join the dict literal next to
         # ``sp_diverged_writes``. The literal is the aliasing-contract
-        # proof body and stays verbatim. 354/270 -> 368/274.
-        baseline_total=368,
-        baseline_code=274,
+        # proof body and stays verbatim. 354/270 -> 368/274. Phase 2a +16/+8:
+        # ``mode_reasserts_suppressed`` plus the five write counters join the
+        # same literal at the same place. 368/274 -> 384/282.
+        baseline_total=384,
+        baseline_code=282,
         headroom=10,
         note="354/270 - approved permanent exception, no lowering step",
     ),
@@ -596,7 +610,11 @@ _RATCHET: tuple[_Entry, ...] = (
         # +10/0 for M2 (2026-09-12): the pipeline_actuate annotation plus
         # these three lines, all comments — measured LAST again.
         # 740/301 -> 750/301.
-        baseline_total=806,
+        # +18/0 for Phase 2a (2026-09-12): three feature-growth annotations
+        # (phase_actuate, phase_report, _stage_assemble_tick_data) plus these
+        # four lines, all comments — measured LAST, after every other edit
+        # stood. 806/301 -> 824/301.
+        baseline_total=824,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight
