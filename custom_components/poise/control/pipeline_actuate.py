@@ -362,6 +362,19 @@ def stage_setpoint_observe(
         setpoint_adopt_reason_fn=setpoint_adopt_reason_fn,
     )
     _adopted_sp: float | None = observation.adopt_setpoint
+    # V3 (2026-09-12 plan), the availability half — the one the first pass
+    # implemented only as a long interval: an OFFLINE actuator ends the command
+    # episode. Both write-economy gates rest on "this command did not move the
+    # device, so it cannot move it now", and that premise says nothing about a
+    # device that has been away and may have rebooted meanwhile (the field case
+    # reports ``power_outage_count: 852``). Clearing costs nothing while it is
+    # away — no write is dispatched to an offline actuator anyway — and buys the
+    # only thing that matters: the first tick after it returns is a NEW episode
+    # and is written at once. Pinned by
+    # ``test_p3_18a_actuator_dropout_then_recovery_resumes_writes``.
+    if not wt.actuator_online:
+        rt.external.cmd_episode_ts = None
+        rt.external.reasserts_suppressed = 0
     # M2: classify the reading, then ask whether re-sending the command in
     # force can still achieve anything. Both pure (``control.write_economy``);
     # the write gate consumes only the verdict.
