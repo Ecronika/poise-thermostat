@@ -178,8 +178,22 @@ Beide Ebenen tragen eine Nicht-Vakuitäts-Prüfung: die Kontrollgruppe (ehrliche
 3. **M3-Rasterlernen**, Keep-alive 600 → 1800 s, Feed-Totband 0,1 → 0,2 K — drei unabhängige Inkremente, keines blockiert etwas.
 4. Die Liste in §4 ist empirisch, nicht erschöpfend.
 
+## Nachtrag N1 (2026-09-12, v0.193.1): Feldbefunde nach dem Rollout — umgesetzt
+
+Der Rollout in der Referenzanlage hat den Mechanismus bestätigt und zwei Mängel gezeigt, beide außerhalb der Entscheidungen oben.
+
+**Messung.** Diagnose der Küchen-Zone, eine knappe Stunde nach dem Neustart: `reasserts_suppressed: 37` in **einer einzigen, ununterbrochenen Kommando-Episode** — der Zähler wird bei jedem Kommandowechsel zurückgesetzt, also hat `last_cmd_sp` sich kein Mal geändert. Der befürchtete Fall „Sollwert wandert, jede neue Episode kostet einen Schreibvorgang" tritt nicht ein, und der Grund ist strukturell: In der Absenkung bindet `binding_lower_cause: en16798`, also die Normuntergrenze, die sich mit T_rm über Stunden bewegt. Dazu `sp_diverged_writes: 0`, `ca_deviation_k: 0.0`, `ca_time_in_band: 100.0` über 1412 gewertete Minuten, und `sp_adopt_reason: "command_echo"` — M2 gibt auf `PROVEN_OWN_ECHO` frei, der stärksten der drei Klassen aus §2.3, nicht auf `accepted_settle`.
+
+**N1.1 — Dezimaltrennzeichen.** Home Assistant rendert Repair-Platzhalter **unübersetzt**: Was die Integration übergibt, steht wörtlich in jeder Sprache. Der deutsche Text zeigte damit „eine Sollwert-Schrittweite von 0.1 K". `ha/presenter.decimal(value, language=…)` formatiert jetzt für die Instanzsprache. Zwei Grenzen, benannt statt versteckt: `hass.config.language` ist die **Instanz**-, nicht die Betrachtersprache (bei Abweichung folgt das Trennzeichen der Instanz), und nur Deutsch ist Sonderfall, weil `en`/`de` die gesamte i18n dieser Integration ist (ADR-0021).
+
+**N1.2 — Verwaiste Repair-Issues.** Poise baut seine Issue-Ids als `f"{key}_{entry_id}"`, HAs Issue-Registry ist aber nicht entry-gebunden: Beim Löschen eines Eintrags blieben sie stehen. Gefunden wurde ein Eintrag vom 23. Juni, dessen Config-Entry längst weg war — und weil der Repair-Dialog aus dem Eintrag rendert, ließ er sich nicht einmal wegklicken. AR-29 hatte seinerzeit nur das **eine** globale Hub-Issue namentlich abgeräumt; die Per-Entry-Familie war übersehen. `async_remove_entry` löscht sie jetzt per Suffix (kein Key-Katalog — der würde still veralten), und ein einmaliger Lauf in `async_setup` räumt die bereits gestrandeten ab. Der Prädikat `orphan_entry_id` löscht ausschließlich den mittleren Fall: Schwanz sieht wie eine Entry-Id aus (26-stellige ULID oder 32-stelliges Hex älterer Installationen) **und** gehört zu keinem lebenden Eintrag irgendeiner Domain. Ein globales Issue wie `frost_zone_not_controlling_boiler` (Schwanz `boiler`) bleibt unberührt.
+
+---
+
 ## Konsequenzen
 
-Poise schreibt einen Sollwert noch, wenn er etwas bewirken kann, und sagt es, wenn ein Gerät ein Raster meldet, das es nicht umsetzt. Der Feldfall fällt von 1440 auf 2 Schreibvorgänge am Tag, ohne dass die Regelung, der Konvergenz-Watchdog oder die Freigabemetrik etwas verlieren.
+Poise schreibt einen Sollwert noch, wenn er etwas bewirken kann, und sagt es, wenn ein Gerät ein Raster meldet, das es nicht umsetzt. Der Feldfall fällt von rund 1440 auf **etwa 24** Schreibvorgänge am Tag — Faktor 60 —, ohne dass die Regelung, der Konvergenz-Watchdog oder die Freigabemetrik etwas verlieren.
+
+**Korrektur (Review 2026-09-12):** Hier stand zunächst „auf 2 Schreibvorgänge am Tag". Das war die Zahl aus dem 30-Minuten-Testfenster in §6, fälschlich als Tagesrate gelesen. Die stationäre Rate folgt aus `REASSERT_LIVENESS_S = 3600`: ein freigegebener Reassert pro Stunde und Zone, also ~24/Tag. **Zwei pro Tag waren nie das Ziel** — sie wären nur mit einem Liveness-Intervall um 12 Stunden zu haben, und das ist der falsche Tausch: Ein TRV, dem ein Schreibvorgang verloren ging oder das rebootet hat, bliebe dann einen halben Tag falsch eingestellt. Die Stunde ist die bewusste Wahl, die Zahl im Text war der Fehler.
 
 Der Preis ist ehrlich zu benennen: Poise akzeptiert jetzt einen Ruheversatz von bis zu 0,5 K, statt ewig dagegen zu schreiben. Das ist keine neue Ungenauigkeit — der Versatz war vorher auch da, nur lauter.
