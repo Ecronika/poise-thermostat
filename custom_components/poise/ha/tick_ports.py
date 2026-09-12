@@ -148,7 +148,7 @@ class SequencerPorts(Protocol):
         """Raise/clear the write-convergence repair issue."""
 
     def notify_quantization(
-        self, settle_delta: float | None, *, declared_step: float
+        self, settle_delta: float | None, *, declared_step: float | None
     ) -> None:
         """Raise/clear the declared-step advisory (``None`` = nothing to say)."""
 
@@ -313,7 +313,7 @@ class CoordinatorTickPorts:
         self._c._notify_convergence(active)
 
     def notify_quantization(
-        self, settle_delta: float | None, *, declared_step: float
+        self, settle_delta: float | None, *, declared_step: float | None
     ) -> None:
         self._c._notify_quantization(settle_delta, declared_step=declared_step)
 

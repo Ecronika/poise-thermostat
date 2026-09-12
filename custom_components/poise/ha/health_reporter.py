@@ -215,7 +215,7 @@ class HealthReporter:
         )
 
     def notify_quantization(
-        self, settle_delta: float | None, *, declared_step: float
+        self, settle_delta: float | None, *, declared_step: float | None
     ) -> None:
         """Advise that the actuator's declared step may not be its real one (M3).
 
