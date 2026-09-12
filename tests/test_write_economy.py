@@ -24,8 +24,10 @@ from custom_components.poise.control.override import setpoint_adopt_reason
 from custom_components.poise.control.tick_resolve import should_write, snap_to_step
 from custom_components.poise.control.write_economy import (
     CURRENT_COMMAND_MATCH,
+    QUANT_MIN_SUPPRESSED,
     REASSERT_LIVENESS_S,
     classify_settle,
+    quantization_settle_delta,
     reassert_idempotent,
 )
 from custom_components.poise.safety.write_convergence import (
@@ -248,3 +250,82 @@ def test_watchdog_stays_quiet_when_the_device_merely_requantises() -> None:
         now += _TICK_S
     assert watchdog.sp_diverged_writes == 0
     assert not watchdog.escalated(now=now)
+
+
+# --------------------------------------------------------------- M3 advisory
+def _advice(**over: object) -> float | None:
+    """The field case, with one knob turned per test.
+
+    Küche: declared 0.1 K, commanded 15.2, the device rests at 15.0 — 0.2 K
+    away, which 0.1 K cannot explain, repeated for a whole command episode.
+    """
+    args: dict = {
+        "declared_step": 0.1,
+        "last_cmd_sp": 15.2,
+        "actual_sp": 15.0,
+        "suppressed": QUANT_MIN_SUPPRESSED,
+    }
+    args.update(over)
+    return quantization_settle_delta(**args)  # type: ignore[arg-type]
+
+
+def test_the_field_case_is_reported_with_its_measured_distance() -> None:
+    """What the advisory exists for — and it reports the MEASURED number.
+
+    0.2 K, not "a mismatch": the issue text names the distance so the user can
+    compare it against the grid their device really uses. This is the line that
+    would have shown the case on day one.
+    """
+    assert _advice() == 0.2
+
+
+def test_one_settle_is_not_a_diagnosis() -> None:
+    """Below the evidence floor there is nothing to say.
+
+    A device can be slow, an echo can be missed. The episode anchor resets
+    ``suppressed`` on every real command change, so reaching the floor means
+    the SAME command has rested wrong that many times — not that Poise has
+    been running a while.
+    """
+    assert _advice(suppressed=QUANT_MIN_SUPPRESSED - 1) is None
+
+
+def test_an_honest_grid_says_nothing_even_when_suppressed() -> None:
+    """Non-vacuity from the other side: suppression alone is not the signal.
+
+    The bathroom TRV, the one the faulty ``customize`` block never touched:
+    declared 0.5 K and resting 0.2 K away is ordinary rounding on its own
+    grid. M2 still suppresses the re-assert there — correctly — and the
+    advisory must stay quiet, or it would fire on every well-behaved device.
+    """
+    assert _advice(declared_step=0.5) is None
+
+
+def test_a_device_that_declares_nothing_gets_no_advice() -> None:
+    """No declaration, no claim about one.
+
+    With the attribute missing the write gate falls back to a Poise default;
+    telling the user their device "declares" that default would be a statement
+    about our own code.
+    """
+    assert _advice(declared_step=None) is None
+
+
+def test_an_unreadable_setpoint_is_not_evidence() -> None:
+    """The premise is a MEASURED resting distance; without a reading there is
+    none, and a missing command baseline leaves nothing to measure against."""
+    assert _advice(actual_sp=None) is None
+    assert _advice(last_cmd_sp=None) is None
+
+
+def test_the_gross_failure_case_belongs_to_the_watchdog_not_here() -> None:
+    """Boundary with ``write_convergence`` — the reason this cannot fire on a
+    broken valve.
+
+    A device clamped 3 K below the command never satisfies
+    ``reassert_idempotent`` (the distance exceeds ``convergence_tolerance``),
+    so ``suppressed`` never climbs and this function is never reached with
+    that evidence. Pinned as a unit statement anyway: with the evidence floor
+    unmet, no advice — the fault path stays the watchdog's (T2).
+    """
+    assert _advice(actual_sp=18.0, last_cmd_sp=21.0, suppressed=0) is None

@@ -216,6 +216,9 @@ _PORT_VIEWS: dict[str, frozenset[str]] = {
             "write_unavailable_safe_state",
             "fire_override_ended",
             "notify_convergence",
+            # M3 advisory (2026-09-12): the declared-step mirror, emitted at
+            # the SAME setpoint checkpoint as notify_convergence.
+            "notify_quantization",
             "unavailable_logged",
         }
     ),

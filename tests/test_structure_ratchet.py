@@ -88,6 +88,13 @@ class _Entry:
 
 _RATCHET: tuple[_Entry, ...] = (
     _Entry(
+        # M3 advisory (2026-09-12 plan) +21/+11: the declared-step mirror
+        # is emitted at the EXISTING setpoint checkpoint, right after the
+        # convergence verdict, so both are decided from one state of the
+        # world; the declared step is read off the actuator state there. The
+        # decision itself is the pure
+        # ``control.write_economy.quantization_settle_delta``, so what grows
+        # here is the read plus the port call, not logic. 966/453 -> 987/464.
         identifier="custom_components/poise/ha/tick_orchestrator.py",
         # O.5 landed: the 41 stage bodies left this file for the four phase
         # modules below. 3567 -> 931 total, 2294 -> 436 code. The ceiling drops
@@ -102,8 +109,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # against the unchanged 1200/900 cap; P1.4b +1 comment line.
         # P2.1 +1 comment line (the forecast-handshake condition now names
         # the None-transition half of the iff).
-        baseline_total=966,
-        baseline_code=453,
+        baseline_total=987,
+        baseline_code=464,
         headroom=50,
         note="1200/900 total/code, reached at step O.5",
         # Plan defect found while landing O.1 (see plan section 18): O.0 froze
@@ -217,6 +224,12 @@ _RATCHET: tuple[_Entry, ...] = (
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
     _Entry(
+        # M3 advisory (2026-09-12 plan) +14/+4: two diagnostics keys next
+        # to their sibling ``sp_diverged_writes`` — ``reasserts_suppressed``
+        # and the actuator's own ``declared_step``. Dump only, deliberately
+        # NOT added to the climate entity's ``_ATTRS`` allowlist: silence has
+        # to be auditable without widening the ADR-0016 attribute contract.
+        # 827/581 -> 841/585.
         identifier="custom_components/poise/ha/phase_report.py",
         # O.6 grew this file by +64/+21: the outcome folds became six methods,
         # which costs six signatures, six docstrings and the per-fold ctx
@@ -232,8 +245,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # position. 816/577 -> 824/581. P2.1 +3/0: the fixed-fallback
         # rationale comment at the ``model_expected_minutes`` seam
         # (``float(x or 0.0)``, plan §0.6 p.3). 824/581 -> 827/581.
-        baseline_total=827,
-        baseline_code=581,
+        baseline_total=841,
+        baseline_code=585,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -272,8 +285,13 @@ _RATCHET: tuple[_Entry, ...] = (
         # "110 target" described the pre-P1 program; a longer program is
         # allowed to cost sequencer lines, and the call sites the re-freeze
         # protected are untouched. P1.4b +1 comment line.
-        baseline_total=213,
-        baseline_code=117,
+        # M3 advisory (2026-09-12 plan) +20/+10: the declared-step read
+        # and the ``notify_quantization`` call sit in the sequencer's
+        # program next to the convergence emission — the position IS the
+        # invariant (one state of the world for both setpoint verdicts),
+        # so this growth is program, not glue. 213/117 -> 233/127.
+        baseline_total=233,
+        baseline_code=127,
         headroom=10,
         note=(
             "213/117 - re-frozen after the P1.4 program extension (was "
@@ -308,8 +326,12 @@ _RATCHET: tuple[_Entry, ...] = (
         # calibration shadow keys and the tri-state metadata read);
         # 332/259 -> 346/266. P1.5 +8/+4: the calibration opt-in mirror call
         # inside the existing suggestion-sync try block; 346/266 -> 354/270.
-        baseline_total=354,
-        baseline_code=270,
+        # M3 advisory (2026-09-12 plan) +14/+4: ``reasserts_suppressed``
+        # and ``declared_step`` join the dict literal next to
+        # ``sp_diverged_writes``. The literal is the aliasing-contract
+        # proof body and stays verbatim. 354/270 -> 368/274.
+        baseline_total=368,
+        baseline_code=274,
         headroom=10,
         note="354/270 - approved permanent exception, no lowering step",
     ),
@@ -355,6 +377,11 @@ _RATCHET: tuple[_Entry, ...] = (
         ),
     ),
     _Entry(
+        # M3 advisory (2026-09-12 plan) +17/+7: ``notify_quantization`` as
+        # the SequencerPorts sibling of ``notify_convergence`` — protocol
+        # stub, adapter forward and the docstring census update (21 -> 22
+        # capabilities). Same reading as the P1.5 entry above: a port is
+        # capability, not coupling drift. 418/154 -> 435/161.
         # Added with O.3: the port adapter is the one place that still knows
         # the coordinator instance, so it is exactly the place where coupling
         # would silently accumulate again. The plan's table only foresaw
@@ -368,12 +395,16 @@ _RATCHET: tuple[_Entry, ...] = (
         # guard below still holds for everything that is not a deliberate
         # new port: a port is capability, not coupling drift.
         identifier="custom_components/poise/ha/tick_ports.py",
-        baseline_total=418,
-        baseline_code=154,
+        baseline_total=435,
+        baseline_code=161,
         headroom=50,
         note="418/154 - growth guard; it should shrink, never grow",
     ),
     _Entry(
+        # M3 advisory (2026-09-12 plan) +14/+7: ``_notify_quantization``,
+        # the instance-dispatch facade mirroring ``_notify_convergence``
+        # directly above it (body in the HealthReporter, same reasons).
+        # 1444/740 -> 1458/747; the code metric stays far inside the cap.
         # Added with O.5 (see plan section 18.7). coordinator.py is the
         # composition root, not a tick-chain module in the sense of the split,
         # but O.5 grew it by +43/+30 for the phase wiring and the DoD's
@@ -423,8 +454,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # branches with its assessment comment (the reconfigure-park
         # exposure). 1399/733 -> 1444/740.
         identifier="custom_components/poise/coordinator.py",
-        baseline_total=1444,
-        baseline_code=740,
+        baseline_total=1458,
+        baseline_code=747,
         headroom=50,
         note=(
             "growth guard only, no lowering target - the code metric is "
@@ -505,6 +536,9 @@ _RATCHET: tuple[_Entry, ...] = (
         # moment the ports gate needed to enumerate the package too - the
         # split's own rule (used by more than one gate -> support) applied.
         # +1/+1 in P1.5: the fourth ReportPorts member in _PORT_VIEWS.
+        # +3/+1 for the 2026-09-12 M3 advisory: the ninth SequencerPorts
+        # member (``notify_quantization``) and the two lines saying why it
+        # sits in that view. Still inside the band, so the baseline stays.
         note="1200/900 total/code - the S.2 gate split; the gate measures itself",
     ),
     _Entry(
@@ -516,6 +550,11 @@ _RATCHET: tuple[_Entry, ...] = (
         # +20/0 in P1.5: six feature-growth annotations plus these two
         # lines, all comments — this row measured LAST, after every other
         # edit stood (the baseline is taken AFTER this note existed).
+        # +39/0 for the 2026-09-12 M3 advisory: six feature-growth
+        # annotations (orchestrator, resume_prepare, phase_report,
+        # _stage_assemble_tick_data, tick_ports, coordinator) plus this note.
+        # All comments. Measured LAST, after every other edit stood — the
+        # self-measuring lesson below, for the fourth time.
         # +4/0 in P1.5b: the coordinator row's resolve_restore re-measure
         # note plus this line; measured LAST again.
         # +16/0 in P2.1: four feature-growth annotations (phase_prepare /
@@ -540,7 +579,7 @@ _RATCHET: tuple[_Entry, ...] = (
         # +10/0 for M2 (2026-09-12): the pipeline_actuate annotation plus
         # these three lines, all comments — measured LAST again.
         # 740/301 -> 750/301.
-        baseline_total=750,
+        baseline_total=789,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight

@@ -159,24 +159,27 @@ def test_port_view_membership_matches_the_plan(view: str) -> None:
 
 def test_port_views_union_to_exactly_the_port_census() -> None:
     """Plan O.3: the union of the five views is exactly the port census — the
-    20 ports the O.2 census left on the backreference plus the one P1.5
+    20 ports the O.2 census left on the backreference, plus the one P1.5
     added deliberately (``sync_calibration_available_issue``, the fourth
-    ReportPorts suggestion mirror).
+    ReportPorts suggestion mirror), plus the one the 2026-09-12 M3 advisory
+    added (``notify_quantization``, the SequencerPorts sibling of
+    ``notify_convergence``).
 
     ``end_hold`` and ``fire_override_ended`` are each in two views, so the
-    memberships sum to 23 and the union is 21. The adapter must implement the
+    memberships sum to 24 and the union is 22. The adapter must implement the
     union and nothing beyond it - a public method with no port behind it would
-    be a back channel around the views.
+    be a back channel around the views. Both numbers are written out rather
+    than derived, so growing a view is a visible edit to this test.
     """
     union: set[str] = set()
     for members in _PORT_VIEWS.values():
         union |= members
-    assert sum(len(m) for m in _PORT_VIEWS.values()) == 23
-    assert len(union) == 21, f"union is {len(union)}: {sorted(union)}"
+    assert sum(len(m) for m in _PORT_VIEWS.values()) == 24
+    assert len(union) == 22, f"union is {len(union)}: {sorted(union)}"
 
     tree = ast.parse((REPO_ROOT / _PORTS_MODULE).read_text(encoding="utf-8"))
     assert _class_members(tree, "CoordinatorTickPorts") == union, (
-        "the coordinator adapter's public surface must be exactly the 21 ports"
+        "the coordinator adapter's public surface must be exactly the 22 ports"
     )
 
 
