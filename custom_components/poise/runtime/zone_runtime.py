@@ -334,6 +334,13 @@ class ZoneRuntime:
                     # this write's context, so the clamp judgement can tell
                     # this command's settle from a late echo of a superseded
                     # one (the ctx ring is shared with mode/fan writes).
+                    # M2: the episode anchor moves ONLY on a real command
+                    # change. An identical re-assert re-stamps the write time
+                    # above but must leave the episode intact, or the settle of
+                    # one logical command is never observable.
+                    if self.external.last_cmd_sp != execution.commanded_value:
+                        self.external.cmd_episode_ts = now
+                        self.external.reasserts_suppressed = 0
                     self.external.last_cmd_sp = execution.commanded_value
                     self.external.last_sp_ctx_id = execution.context_id
                     self.mark_actuated()  # persist the first-actuation flip
@@ -590,18 +597,6 @@ class ZoneRuntime:
             self.humidity.vent_active = diag.vent_active  # ADR-0066 advice latch
         if diag.surface_rh_mean is not None:
             self.humidity.surface_rh_mean = diag.surface_rh_mean  # ~48 h EWMA
-        # ADR-0071 §4.3: the VTT mould dose. Each value is restored ONLY when
-        # the payload actually carries it -- a pre-0071 payload knows none of
-        # them, and the dataclass defaults (warm start 1.0 / 0 h / 0 h) are
-        # then exactly the right answer. Writing a ``None`` through would
-        # crash the next ``evaluate``; writing a 0.0 would claim a sterile
-        # laboratory surface for a flat somebody has lived in for years.
-        if diag.mould_index is not None:
-            self.humidity.mould_index = diag.mould_index
-        if diag.mould_wet_hours is not None:
-            self.humidity.mould_wet_hours = diag.mould_wet_hours
-        if diag.mould_dry_hours is not None:
-            self.humidity.mould_dry_hours = diag.mould_dry_hours
 
     def seed_ekf_cold_start(
         self,
@@ -705,26 +700,13 @@ class ZoneRuntime:
         entry_id: str,
         humidity_entity: str | None,
         psychro_dewpoint_fn: Callable[[float, float], float],
-        mould_state: tuple[float, float, float],
-        was_engaged: bool,
-        dt_h: float,
     ) -> SafetyFloorsResult:
-        """Mould floor + dewpoint cap from humidity.
-
-        ADR-0071: the dose state travels THROUGH this wrapper rather than
-        being read off ``self.humidity`` here -- the stage stays a pure
-        function of its arguments, and the glue (``ha/phase_prepare``) keeps
-        owning the read/advance/write-back cycle, exactly as it does for
-        ``surface_rh_mean``.
-        """
+        """Mould floor + dewpoint cap from humidity."""
         return _prepare.stage_safety_floors(
             ing,
             entry_id=entry_id,
             humidity_entity=humidity_entity,
             psychro_dewpoint_fn=psychro_dewpoint_fn,
-            mould_state=mould_state,
-            was_engaged=was_engaged,
-            dt_h=dt_h,
         )
 
     def stage_schedule_gate(

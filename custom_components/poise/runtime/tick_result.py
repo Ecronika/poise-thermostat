@@ -568,6 +568,12 @@ class SetpointObservation:
     reg_throttled: bool
     adopted_sp: float | None
     sp_adopt_reason: str = ""
+    # M2: how the observe stage classified this reading
+    # (``control.write_economy``), and whether re-sending the command in force
+    # can still achieve anything. The write gate only consumes the verdict; the
+    # classification stays where the evidence is.
+    settle_provenance: str = "unknown"
+    reassert_idempotent: bool = False
     # C.8f: this reading is a late echo of a SUPERSEDED command (own context,
     # but not the newest setpoint write's) — no convergence evidence in
     # either direction. Classified in the observe stage from the hold-routing

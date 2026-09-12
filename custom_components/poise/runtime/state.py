@@ -179,6 +179,19 @@ class ExternalOverrideRuntime:
     # baseline moved onto its clamp. This one is stamped ONLY by the commit,
     # never re-baselined. Transient like the other write anchors.
     last_cmd_sp: float | None = None
+    # M2 (ADR folgt): the COMMAND EPISODE anchor — stamped only when
+    # ``last_cmd_sp`` actually CHANGES, never by an identical re-assert.
+    # ``last_sp_write_ts`` above marks the last physical write and re-arms the
+    # adoption echo window every tick, which is why it cannot mark the episode:
+    # with a 60 s re-assert against a 120 s window, ``stable_offset`` would be
+    # unreachable forever. Transient like the other write anchors — after a
+    # restart the episode starts fresh, which costs exactly one write per zone
+    # and is the honest answer, because the device state is not guaranteed
+    # across a restart either.
+    cmd_episode_ts: float | None = None
+    # Diagnostics: identical re-asserts M2 did not send. Silence must be
+    # countable, or "writes less" and "stopped regulating" look the same.
+    reasserts_suppressed: int = 0
 
 
 @dataclass(slots=True)
