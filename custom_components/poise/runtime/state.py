@@ -192,6 +192,17 @@ class ExternalOverrideRuntime:
     # Diagnostics: identical re-asserts M2 did not send. Silence must be
     # countable, or "writes less" and "stopped regulating" look the same.
     reasserts_suppressed: int = 0
+    # Phase 2a (M5): the last physical mode DISPATCH. ``last_hvac_cmd_ts``
+    # above moves only on a real mode CHANGE — it arms the mode echo window,
+    # and re-arming it on every identical re-nudge would block mode adoption
+    # forever — so it cannot clock the mode rate limit. Same split as
+    # ``last_sp_write_ts`` (physical write) against ``cmd_episode_ts`` (command
+    # change), mirrored onto the mode channel. Transient like the other stamps.
+    last_mode_nudge_ts: float | None = None
+    # Diagnostics: identical re-nudges the M5 rate limit did not send — the
+    # mode counterpart of ``reasserts_suppressed``, reset by a real mode
+    # change. Throttled silence stays countable for the same reason.
+    mode_reasserts_suppressed: int = 0
 
 
 @dataclass(slots=True)
@@ -240,6 +251,30 @@ class ActuatorRuntime:
     # last_cal_restore_ts (monotonic): stamped by the cal_restore commit
     # (success = dispatch, F15); consumed by the restore redispatch throttle.
     last_cal_restore_ts: float | None = None
+    # --- Phase 2a: sensor-source handback backoff -------------------------
+    # last_handback_ts (monotonic, transient): the last ADR-0029 release
+    # dispatch. The release is due on EVERY tick of a room-sensor outage, so a
+    # TRV that reverts its own select — a documented SONOFF TRVZB behaviour —
+    # would be written once a minute for the length of the outage. First
+    # attempt immediate, then bounded; see
+    # ``safety.sensor_watchdog.sensor_source_handback_target``.
+    last_handback_ts: float | None = None
+    # --- Phase 2a: per-channel write census -------------------------------
+    # Cumulative successful DISPATCHES per channel since this process started
+    # (transient by design: a restart is a visible discontinuity, and a
+    # persisted counter would blur the before/after of a tuning change).
+    # Folded by the commit in ``ZoneRuntime.commit_execution`` — one place,
+    # keyed by ``effect_id``, so a counter cannot drift from the write it
+    # counts. They exist to make the NEXT decision measurable: the setpoint fix
+    # was defensible because 1440/day were measured before a line of code fell,
+    # and the remaining channels have no such number yet. Read by the
+    # diagnostics dump only; deliberately NOT in the ADR-0016 attribute
+    # contract.
+    setpoint_writes: int = 0
+    mode_writes: int = 0
+    external_temp_writes: int = 0
+    calibration_writes: int = 0
+    select_writes: int = 0
 
 
 @dataclass(slots=True)

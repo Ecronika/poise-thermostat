@@ -35,7 +35,7 @@ construction instead of relying on the dataclass default ``"auto"``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from ..clock import Clock
 from ..const import SETPOINT_ADOPT_ECHO_WINDOW_S
@@ -98,6 +98,27 @@ if TYPE_CHECKING:
         SetpointObservation,
         WriteTargetResult,
     )
+
+
+# Phase 2a: effect id -> the ``ActuatorRuntime`` counter it feeds. Five
+# channels, because five things write to a battery device and only one of them
+# had a number before this table existed. Three ids share the setpoint channel
+# and three the mode channel: the rescue and safe-state paths write the same
+# physical registers as the regulation path, and a census that hid them would
+# understate exactly the situations (outage, frost) where the writes pile up.
+# ``fan_write`` is absent on purpose — not a thermal write, not one of the five.
+_WRITE_CHANNELS: Final[dict[str, str]] = {
+    "setpoint_write": "setpoint_writes",
+    "rescue_write": "setpoint_writes",
+    "safe_setpoint": "setpoint_writes",
+    "mode_nudge": "mode_writes",
+    "rescue_nudge": "mode_writes",
+    "safe_mode": "mode_writes",
+    "ext_feed": "external_temp_writes",
+    "cal_write": "calibration_writes",
+    "cal_restore": "calibration_writes",
+    "ext_select": "select_writes",
+}
 
 
 class ZoneRuntime:
@@ -302,18 +323,43 @@ class ZoneRuntime:
         """
         for execution in report.executions:
             effect_id = execution.effect_id
+            # Phase 2a: the per-channel write census, folded ONCE for every
+            # effect instead of per branch — a counter that lives next to the
+            # rule it counts cannot drift from it. Success semantics are the
+            # commit's own (dispatched without a synchronous exception), so
+            # the census counts what Poise SENT, which is what a battery pays
+            # for. ``fan_write`` has no channel on purpose: it is not one of
+            # the five the write-economy plan named and not a thermal write.
+            if execution.success:
+                _channel = _WRITE_CHANNELS.get(effect_id)
+                if _channel is not None:
+                    setattr(
+                        self.actuator,
+                        _channel,
+                        getattr(self.actuator, _channel) + 1,
+                    )
             if effect_id == "mode_nudge":
                 # Attempt state: the context id is created before the dispatch
                 # and registers even when the call threw.
                 if execution.attempted and execution.context_id is not None:
                     self.external.own_write_ctx_ids.append(execution.context_id)
                 if execution.success:
+                    if now is None:
+                        raise ValueError("mode_nudge commit needs now=")
                     # Mode echo baseline; re-arm the echo window only on a real
                     # mode CHANGE (dispatch-time evaluation).
                     if execution.mode_changed:
-                        if now is None:
-                            raise ValueError("mode_nudge commit needs now=")
                         self.external.last_hvac_cmd_ts = now
+                        # A real change ends the re-nudge run, exactly as a
+                        # changed command ends the setpoint episode below.
+                        self.external.mode_reasserts_suppressed = 0
+                    # Phase 2a (M5): the rate limit's clock — stamped by EVERY
+                    # dispatch, changed or not. The echo-window stamp above
+                    # cannot serve: it stands still across identical re-nudges
+                    # on purpose, so the limit would expire once and then never
+                    # again. ``now`` is therefore required for every mode
+                    # nudge commit, not just a changing one.
+                    self.external.last_mode_nudge_ts = now
                     self.external.last_commanded_hvac = execution.commanded_mode
             elif effect_id == "setpoint_write":
                 if execution.attempted:
