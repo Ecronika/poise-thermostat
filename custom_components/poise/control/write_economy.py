@@ -49,6 +49,12 @@ EPISODE_SETTLE_MIN_S: Final = 90.0
 # in force. Generous on purpose — it is a safety net against a lost write and a
 # device reboot, not a regulation interval.
 REASSERT_LIVENESS_S: Final = 3600.0
+# M4 (2026-09-12 plan): the floor between two IDENTICAL re-asserts of the same
+# command episode. Not a regulation interval — ADR-0052 §4's
+# ``regulation_period_s`` keeps its documented thermodynamic meaning and is not
+# touched. Deliberately NOT a user option: a knob on a write gate needs a
+# reason, and 10 min is far below every thermal time constant in play.
+MIN_SETPOINT_REASSERT_INTERVAL_S: Final = 600.0
 # Two setpoint reads count as the same value below this (0.1 grid + float
 # hygiene, the same rounding the write gate uses).
 _SAME_VALUE_EPS: Final = 0.05
@@ -132,6 +138,7 @@ def reassert_idempotent(
     cmd_episode_ts: float | None,
     last_sp_write_ts: float | None,
     now: float,
+    mode_changed: bool = False,
     settle_min_s: float = EPISODE_SETTLE_MIN_S,
     liveness_s: float = REASSERT_LIVENESS_S,
 ) -> bool:
@@ -139,17 +146,29 @@ def reassert_idempotent(
 
     Every condition is necessary; the order is cheapest-first.
 
+    0. the device's MODE has not just changed,
     1. the target IS the command in force (a changed target is a new episode),
     2. an episode is running and the device had time to react,
     3. the device has come to rest (two identical readings),
     4. the reading is positively classified (:data:`RELEASING`),
     5. the liveness escape has not expired.
 
+    Condition 0 is the same class of exception as the liveness escape, and it
+    was missed on the first pass: the fixpoint argument assumes the device is
+    in the state it was in when the command last failed to move it. A mode
+    change IS a change of that state — a device coming back from ``off``, or
+    switching heat/cool, may have parked or reinterpreted its setpoint while
+    reporting the same number — so the premise is void and
+    :func:`should_write`'s own ``mode_changed`` shortcut must not be vetoed
+    here. Same reasoning as V3 for a reboot, same conclusion.
+
     Deliberately NOT a statement about the device being healthy — see
     :mod:`custom_components.poise.safety.write_convergence`. A suppressed
     re-assert must be folded into that watchdog as divergence evidence, or the
     detector for "device never applies our commands" goes blind (T2).
     """
+    if mode_changed:
+        return False  # the device state the premise rests on just changed
     if last_cmd_sp is None or not _same(target_snapped, last_cmd_sp):
         return False
     if cmd_episode_ts is None or (now - cmd_episode_ts) < settle_min_s:
@@ -208,3 +227,45 @@ def quantization_settle_delta(
         return None
     delta = round(abs(actual_sp - last_cmd_sp), 3)
     return delta if delta > declared_step / 2.0 else None
+
+
+def reassert_throttled(
+    *,
+    target_snapped: float,
+    last_cmd_sp: float | None,
+    cmd_episode_ts: float | None,
+    last_sp_write_ts: float | None,
+    now: float,
+    mode_changed: bool = False,
+    min_interval_s: float = MIN_SETPOINT_REASSERT_INTERVAL_S,
+) -> bool:
+    """True while an identical re-assert should simply wait its turn (M4).
+
+    The second consumer of the command episode, and deliberately the WEAKER
+    of the two. :func:`reassert_idempotent` proves a write cannot achieve
+    anything and needs settle plus provenance to do so; this one proves
+    nothing and only bounds the RATE at which the same command is repeated.
+    It therefore covers exactly the cases M2 correctly declines: the device is
+    still moving, or its reading cannot be classified, so Poise keeps
+    asserting — but ten times an hour, not sixty.
+
+    What is never throttled, because none of it is a re-assert:
+
+    * a different target — schedule, override, window event, frost or any
+      other safety path all produce a NEW command and go out on the tick they
+      are decided;
+    * a mode change, for the reason given in :func:`reassert_idempotent`;
+    * the first write of an episode (``cmd_episode_ts`` is what an episode
+      HAS, and ``last_sp_write_ts`` what it needs to be measured against).
+
+    A throttled re-assert is silence like a suppressed one, so the convergence
+    watchdog must be fed it the same way (T2) — otherwise a device that never
+    applies a command would be judged on one write per ten minutes.
+    """
+    if mode_changed:
+        return False
+    if last_cmd_sp is None or not _same(target_snapped, last_cmd_sp):
+        return False  # a new command is never throttled
+    if cmd_episode_ts is None or last_sp_write_ts is None:
+        return False  # nothing has been commanded yet -> nothing to repeat
+    return (now - last_sp_write_ts) < min_interval_s

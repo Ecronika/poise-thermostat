@@ -49,7 +49,11 @@ from ..control.cooling import override_mode
 from ..control.dynamics import PROFILES, regulation_throttled
 from ..control.external_override import ExternalOverrideTracker
 from ..control.tick_resolve import should_write, snap_to_step
-from ..control.write_economy import classify_settle, reassert_idempotent
+from ..control.write_economy import (
+    classify_settle,
+    reassert_idempotent,
+    reassert_throttled,
+)
 from ..multi.lifecycle import resolve_guard_policy
 from ..runtime.tick_result import (
     ActuatorPlan,
@@ -388,6 +392,19 @@ def stage_setpoint_observe(
             cmd_episode_ts=rt.external.cmd_episode_ts,
             last_sp_write_ts=rt.external.last_sp_write_ts,
             now=now,
+            mode_changed=mode_changed,
+        ),
+        # M4: the same anchor, the weaker question — has this identical
+        # command been sent recently? Evaluated independently of the verdict
+        # above, because it covers the cases that one declines (device still
+        # moving, reading unclassifiable) rather than refining them.
+        reassert_throttled=reassert_throttled(
+            target_snapped=snap_to_step(wt.target, step),
+            last_cmd_sp=rt.external.last_cmd_sp,
+            cmd_episode_ts=rt.external.cmd_episode_ts,
+            last_sp_write_ts=rt.external.last_sp_write_ts,
+            now=now,
+            mode_changed=mode_changed,
         ),
     )
 
@@ -436,6 +453,8 @@ def plan_setpoint_write(
         and not _reg_throttled
         # M2: an identical re-assert that cannot move the device is not sent.
         and not spo.reassert_idempotent
+        # M4: and one that merely COULD still work waits out its interval.
+        and not spo.reassert_throttled
         and should_write(
             actual_sp,
             snap_to_step(target, step),
