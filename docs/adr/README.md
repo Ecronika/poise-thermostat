@@ -105,6 +105,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0069](ADR-0069-Aktive-Behaglichkeit-Stufe-A.md) | „Aktive Behaglichkeit" — Stufe-A-Spezifikation (Bedienelement, Name, Verhaltensumfang) | Implementiert (alle 8 Schritte; Tier-2-Freigaben warten auf M1) |
 | [0070](ADR-0070-Mehrere-Komfortfenster.md) | Mehrere Komfortfenster pro Tag (n-Fenster-Datenmodell, n+1-Options-UI) | Implementiert (v0.187.0) |
 | [0071](ADR-0071-Schimmelrisiko-Dosismodell.md) | Schimmelrisiko — Dosismodell (VTT-Schimmelindex) statt Momentanwert-Boden | Implementiert |
+| [0072](ADR-0072-Schreiboekonomie-Kommando-Episode.md) | Schreibökonomie am Aktor — Kommando-Episode, Idempotenz-Veto, Ratenlimit, Raster-Hinweis | Implementiert (v0.193.0) |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
