@@ -152,6 +152,12 @@ def test_external_override_split_exact() -> None:
         # state's context; the watchdog re-arms from live evidence).
         "last_sp_ctx_id",
         "last_cmd_sp",
+        # M2 (2026-09-12 plan): the command-episode anchor and the suppression
+        # counter. ``cmd_episode_ts`` is a monotonic stamp like the ones above
+        # and ``reasserts_suppressed`` counts within one process life — both
+        # would be meaningless after a restart, so neither is persisted.
+        "cmd_episode_ts",
+        "reasserts_suppressed",
     }
 
 

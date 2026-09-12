@@ -530,6 +530,11 @@ def test_stage_result_field_sets_are_pinned() -> None:
             # Phase 7 S2 (K3 unification): the reason travels with the
             # decision, computed by the ONE observe call.
             "sp_adopt_reason",
+            # M2 (2026-09-12 plan): the settle provenance class and the
+            # idempotence verdict, both computed by the SAME observe call as
+            # the reason above and consumed by the write gate one stage later.
+            "settle_provenance",
+            "reassert_idempotent",
             # C.8f: late-echo-of-a-superseded-command flag for the write
             # stage's convergence-watchdog fold (defaulted).
             "stale_own_echo",

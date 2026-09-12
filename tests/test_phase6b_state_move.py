@@ -245,6 +245,12 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     # classification to the command it judges (transient, process-local ids).
     ("external", "last_sp_ctx_id"): "C.8f newest setpoint-write context id",
     ("external", "last_cmd_sp"): "C.8f un-rebaselined command baseline",
+    # M2 (2026-09-12 plan): the command-episode anchor — stamped only when
+    # ``last_cmd_sp`` actually CHANGES, so identical re-asserts leave the
+    # settle of one logical command observable; plus the suppression counter
+    # the watchdog fold reads. Both transient (process-local clocks/counts).
+    ("external", "cmd_episode_ts"): "M2 command-episode anchor (transient)",
+    ("external", "reasserts_suppressed"): "M2 suppressed re-assert count (transient)",
     # P1.4 (ADR-0015 / D3-D4): calibration ownership + evidence anchors —
     # born on the group, persisted pair encoded straight off zone_runtime
     # (no coordinator proxy ever existed); the anchors are transient by
