@@ -134,9 +134,7 @@ def test_honest_step_needs_exactly_one_write() -> None:
     distance zero. Green before M2 and after it — if this one ever goes red,
     the loop below is measuring something else.
     """
-    run = _run_reassert_loop(
-        target=22.3, device_before=21.0, settles_to=22.5, step=0.5
-    )
+    run = _run_reassert_loop(target=22.3, device_before=21.0, settles_to=22.5, step=0.5)
     assert run["writes"] == 1, "an honest step must settle after the first write"
 
 
@@ -152,9 +150,7 @@ def test_reassert_loop_terminates_on_a_requantising_device() -> None:
     One write is correct (the device has to be told once). Thirty was the
     defect.
     """
-    run = _run_reassert_loop(
-        target=15.2, device_before=15.5, settles_to=15.0, step=0.1
-    )
+    run = _run_reassert_loop(target=15.2, device_before=15.5, settles_to=15.0, step=0.1)
     assert run["writes"] <= 2, (
         f"{run['writes']} writes in {_MINUTES} minutes — the re-assert loop "
         "does not terminate"
