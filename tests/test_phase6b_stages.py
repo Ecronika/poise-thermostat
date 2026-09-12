@@ -1269,17 +1269,29 @@ def test_commit_full_vocabulary_folds_in_call_order() -> None:
     assert rt.actuator.has_actuated is True
 
 
-def test_commit_mode_nudge_without_change_skips_the_ts_stamp() -> None:
-    """M2: an unchanged mode dispatch re-arms no echo window."""
+def test_commit_mode_nudge_without_change_stamps_only_the_rate_clock() -> None:
+    """M2 + M5: the two mode stamps move on different events, on purpose.
+
+    An unchanged mode dispatch must re-arm no echo window — re-arming it on
+    every identical re-nudge would keep the window open forever and block mode
+    adoption permanently, which is why ``last_hvac_cmd_ts`` is gated on
+    ``mode_changed``. That exact property is what disqualifies it as the M5
+    rate limit's clock: a stamp that stands still cannot measure a rate. So
+    ``last_mode_nudge_ts`` moves on EVERY dispatch, and ``now=`` is therefore
+    required for every successful mode-nudge commit rather than only for a
+    changing one.
+    """
     rt = _runtime()
     report = ExecutionReport(
         executions=(
             _execution("mode_nudge", commanded_mode="heat", mode_changed=False),
         )
     )
-    rt.commit_execution(report)  # no ts stamp -> now= may be omitted
+    rt.commit_execution(report, now=NOW)
     assert rt.external.last_commanded_hvac == "heat"
-    assert rt.external.last_hvac_cmd_ts is None
+    assert rt.external.last_hvac_cmd_ts is None  # no echo re-arm
+    assert rt.external.last_mode_nudge_ts == NOW  # but the rate clock moved
+    assert rt.actuator.mode_writes == 1  # and the census counted the dispatch
 
 
 def test_restore_full_model_payload_roundtrip() -> None:
