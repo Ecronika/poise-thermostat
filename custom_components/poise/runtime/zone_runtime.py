@@ -700,13 +700,25 @@ class ZoneRuntime:
         entry_id: str,
         humidity_entity: str | None,
         psychro_dewpoint_fn: Callable[[float, float], float],
+        mould_state: tuple[float, float, float],
+        was_engaged: bool,
+        dt_h: float,
     ) -> SafetyFloorsResult:
-        """Mould floor + dewpoint cap from humidity."""
+        """Mould floor + dewpoint cap from humidity.
+
+        ADR-0071: the VTT dose model is PURE, so its state travels THROUGH the
+        stage — the persisted counters and the previous engage verdict come in,
+        the advanced values go out, and the glue (``ha/phase_prepare``) folds
+        them back onto ``runtime.humidity``. This delegate only passes them on.
+        """
         return _prepare.stage_safety_floors(
             ing,
             entry_id=entry_id,
             humidity_entity=humidity_entity,
             psychro_dewpoint_fn=psychro_dewpoint_fn,
+            mould_state=mould_state,
+            was_engaged=was_engaged,
+            dt_h=dt_h,
         )
 
     def stage_schedule_gate(
