@@ -234,6 +234,81 @@ async def test_notify_convergence_is_a_translated_repair_issue(
     assert reg.async_get_issue(DOMAIN, issue_id) is None
 
 
+def _requantise(hass: HomeAssistant, *, written: float, room: float) -> float:
+    """Let the device take what its REAL 0.5 K grid can represent.
+
+    The field case in one line: the entity declares ``target_temp_step: 0.1``
+    (a ``customize`` override), the hardware moves in 0.5 K. Poise snaps to the
+    declared grid, the device lands up to 0.25 K away, and the ADR-0012 write
+    deadband (0.2 K) sees a difference forever.
+    """
+    settled = round(written * 2.0) / 2.0
+    hass.states.async_set(
+        "climate.trv",
+        "heat",
+        {
+            "hvac_modes": ["heat", "off", "auto"],
+            "temperature": settled,
+            "current_temperature": room,
+            "target_temp_step": 0.1,  # the LIE this whole ADR is about
+            "min_temp": 5.0,
+            "max_temp": 30,
+        },
+    )
+    return settled
+
+
+async def test_a_requantising_device_is_not_rewritten_every_tick(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0072 end to end: the loop terminates in the REAL tick.
+
+    ``tests/test_write_economy.py`` proves the gates terminate, but it composes
+    the pure functions by hand. What it cannot see is whether the shipped tick
+    still REACHES them with the right arguments — observe computes the
+    verdicts, the gate consumes them, the commit stamps the episode anchor. A
+    refactor that disconnected any one of those three would leave every unit
+    test green and put 1440 writes a day back on the wire. That is the gap this
+    test exists for, and the reason it lives at the glue layer.
+
+    Deliberately does NOT pin WHICH gate holds the write back — M2's
+    idempotence proof needs a settled episode and 90 s of clock this harness
+    does not advance, so here it is M4's rate limit that closes it. Both are
+    pinned per-condition in the pure suite; the property at this layer is that
+    the tick as assembled stops writing, and that the silence is counted.
+    """
+    async_mock_service(hass, "climate", "set_hvac_mode")
+    _states(hass, room=19.0, sp=20.0)
+    entry = await _setup(hass, data=_room_data())
+    coord: Any = entry.runtime_data
+    coord.set_override(21.3)  # deliberately off the device's real 0.5 K grid
+    set_temp = async_mock_service(hass, "climate", "set_temperature")
+
+    settled: float | None = None
+    for _ in range(20):
+        await _refresh(hass, coord)
+        if set_temp:
+            settled = _requantise(
+                hass, written=float(set_temp[-1].data["temperature"]), room=19.0
+            )
+
+    # Non-vacuity: the device must actually have re-quantised away from the
+    # commanded value, or this is a test of a well-behaved thermostat.
+    assert set_temp, "expected at least the first write"
+    written = float(set_temp[-1].data["temperature"])
+    assert settled is not None and abs(written - settled) >= 0.2, (
+        f"commanded {written}, device settled at {settled} — no re-quantisation, "
+        "so this scenario does not reproduce the field case"
+    )
+    assert len(set_temp) <= 3, (
+        f"{len(set_temp)} writes in 20 ticks — the re-assert loop is back in "
+        "the assembled tick even though the pure gates terminate"
+    )
+    # ... and the silence is observable rather than merely absent (M2/M3 §7).
+    assert coord.data["reasserts_suppressed"] > 0
+    assert coord.data["declared_step"] == 0.1
+
+
 async def test_notify_quantization_survives_a_device_that_declares_no_step(
     hass: HomeAssistant,
 ) -> None:
