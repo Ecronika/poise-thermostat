@@ -152,6 +152,6 @@ def reassert_idempotent(
         return False  # still moving, or unreadable -> the premise is void
     if provenance not in RELEASING:
         return False
-    if last_sp_write_ts is not None and (now - last_sp_write_ts) >= liveness_s:
-        return False  # V3: let one write through, the commit re-stamps the clock
-    return True
+    # V3: once the escape interval has elapsed, one write goes out again — the
+    # commit re-stamps the clock, so the next interval starts by itself.
+    return last_sp_write_ts is None or (now - last_sp_write_ts) < liveness_s
