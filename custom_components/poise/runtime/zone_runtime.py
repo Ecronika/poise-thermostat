@@ -338,7 +338,17 @@ class ZoneRuntime:
                     # change. An identical re-assert re-stamps the write time
                     # above but must leave the episode intact, or the settle of
                     # one logical command is never observable.
-                    if self.external.last_cmd_sp != execution.commanded_value:
+                    # ``or cmd_episode_ts is None`` is the other half of the
+                    # same rule: a write that BEGINS an episode stamps it. An
+                    # actuator dropout clears the anchor (observe stage), and
+                    # the command in force after the recovery write is often
+                    # the identical value — without this clause no episode
+                    # would ever start again and the re-assert loop would be
+                    # back, this time unbounded.
+                    if (
+                        self.external.last_cmd_sp != execution.commanded_value
+                        or self.external.cmd_episode_ts is None
+                    ):
                         self.external.cmd_episode_ts = now
                         self.external.reasserts_suppressed = 0
                     self.external.last_cmd_sp = execution.commanded_value
