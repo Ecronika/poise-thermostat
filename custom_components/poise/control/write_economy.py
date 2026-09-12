@@ -53,6 +53,12 @@ REASSERT_LIVENESS_S: Final = 3600.0
 # hygiene, the same rounding the write gate uses).
 _SAME_VALUE_EPS: Final = 0.05
 
+# M3 advisory (2026-09-12 plan): how many suppressed re-asserts of ONE command
+# episode must have piled up before the resting distance is reported as a
+# possible declared-step mismatch. Five ticks of a settled episode — enough that
+# a slow settle or a single missed echo is not a diagnosis.
+QUANT_MIN_SUPPRESSED: Final = 5
+
 # --- provenance classes ------------------------------------------------------
 # The three that may release M2 differ in evidence strength and are kept apart
 # so diagnostics cannot later turn a weak statement into a strong one.
@@ -155,3 +161,50 @@ def reassert_idempotent(
     # V3: once the escape interval has elapsed, one write goes out again — the
     # commit re-stamps the clock, so the next interval starts by itself.
     return last_sp_write_ts is None or (now - last_sp_write_ts) < liveness_s
+
+
+def quantization_settle_delta(
+    *,
+    declared_step: float | None,
+    last_cmd_sp: float | None,
+    actual_sp: float | None,
+    suppressed: int,
+    min_suppressed: int = QUANT_MIN_SUPPRESSED,
+) -> float | None:
+    """The resting distance worth reporting, or ``None`` when there is nothing.
+
+    The M3 advisory of the plan, in its cheap half: NOT a grid inference (that
+    is the deferred part), but the observation this module already pays for.
+    Within ONE command episode — ``suppressed`` is reset by the episode anchor,
+    so the count cannot survive a changed command — the device has repeatedly
+    come to rest further from the command than its declared step can explain.
+
+    The band is narrow on both sides, and that is what makes it a statement:
+
+    * below ``declared_step / 2`` the distance is ordinary rounding on the
+      declared grid and means nothing;
+    * above ``convergence_tolerance(step)`` :func:`reassert_idempotent` never
+      releases, so ``suppressed`` never climbs — a clamped, jammed or
+      wrong-mode valve cannot reach here at all. That case belongs to
+      :mod:`custom_components.poise.safety.write_convergence`, which escalates
+      it as a fault instead of as advice.
+
+    ``declared_step`` is the actuator's own ``target_temp_step`` attribute, not
+    the resolved step the write gate falls back to: the claim is about what the
+    device DECLARES, so a missing declaration yields no claim rather than one
+    about a Poise default.
+
+    What is left between the two is a device whose real grid is coarser than
+    the one it declares. ``possible`` stays in the issue's name: a fixed
+    calibration offset inside the device produces the same reading, and this
+    function cannot tell the two apart. The reported text therefore says what
+    was measured and which setting to check — it does not assert a cause.
+    """
+    if suppressed < min_suppressed:
+        return None
+    if declared_step is None or declared_step <= 0.0:
+        return None  # the device declares no step -> no claim about one
+    if last_cmd_sp is None or actual_sp is None:
+        return None
+    delta = round(abs(actual_sp - last_cmd_sp), 3)
+    return delta if delta > declared_step / 2.0 else None
