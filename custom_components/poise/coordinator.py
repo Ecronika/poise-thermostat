@@ -1093,7 +1093,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._health.notify_convergence(active)
 
     def _notify_quantization(
-        self, settle_delta: float | None, *, declared_step: float
+        self, settle_delta: float | None, *, declared_step: float | None
     ) -> None:
         """Surface a possible declared-step mismatch as advice (M3, 2026-09-12).
 
