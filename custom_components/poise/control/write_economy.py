@@ -55,6 +55,15 @@ REASSERT_LIVENESS_S: Final = 3600.0
 # touched. Deliberately NOT a user option: a knob on a write gate needs a
 # reason, and 10 min is far below every thermal time constant in play.
 MIN_SETPOINT_REASSERT_INTERVAL_S: Final = 600.0
+# Phase 2a (M5): the floor between two IDENTICAL re-asserts of the same hvac
+# mode. Same number as the setpoint limit above and the same kind of statement
+# — a rate bound, not a proof — but a DELIBERATELY different gate: there is no
+# mode counterpart to :func:`reassert_idempotent`, and there must not be. A
+# setpoint the device re-quantises is a representation artefact; a mode that
+# does not take is a fault (a TRV back in ``auto`` running its own schedule, a
+# device that rejected ``heat``), and a fault must keep being asserted. So the
+# mode channel is throttled and never vetoed.
+MIN_MODE_REASSERT_INTERVAL_S: Final = 600.0
 # Two setpoint reads count as the same value below this (0.1 grid + float
 # hygiene, the same rounding the write gate uses).
 _SAME_VALUE_EPS: Final = 0.05
@@ -269,3 +278,56 @@ def reassert_throttled(
     if cmd_episode_ts is None or last_sp_write_ts is None:
         return False  # nothing has been commanded yet -> nothing to repeat
     return (now - last_sp_write_ts) < min_interval_s
+
+
+def mode_reassert_throttled(
+    *,
+    desired_mode: str,
+    last_commanded_hvac: str | None,
+    last_mode_nudge_ts: float | None,
+    now: float,
+    min_interval_s: float = MIN_MODE_REASSERT_INTERVAL_S,
+) -> bool:
+    """True while an identical re-nudge of the same mode should wait (M5).
+
+    The mode channel's half of the write economy, and the ONLY half it gets.
+    ``needs_mode_nudge`` is "current != desired", evaluated every tick, so a
+    device that never adopts the commanded mode is nudged sixty times an hour
+    for as long as it refuses — the same 1440/day shape the setpoint channel
+    had, on the same battery.
+
+    WHY THERE IS NO MODE COUNTERPART TO :func:`reassert_idempotent`. The
+    setpoint veto rests on a fixpoint: the device came to rest at a value its
+    grid can represent, so the identical command provably cannot move it, and
+    provenance says the reading is ours. None of that transfers. A device
+    sitting in the wrong MODE has not "settled on a representable
+    approximation" — it has declined, or lost, the command. The honest reading
+    of a mode that does not take is a fault, and the answer to a fault is to
+    keep asserting, more slowly. So this function bounds the rate and stops
+    there; the *diagnosis* belongs to
+    :mod:`custom_components.poise.safety.write_convergence`, which is why the
+    caller must fold a throttled re-nudge into that watchdog exactly as if it
+    had been sent (T2). Silence that the watchdog cannot see is how a device
+    that never applies our commands would be judged on one nudge per ten
+    minutes.
+
+    Never throttled:
+
+    * a mode CHANGE (``desired != last_commanded_hvac`` — the same comparison
+      the executor evaluates at dispatch time and the commit folds as
+      ``mode_changed``): the first assert of a new mode goes out on the tick it
+      is decided, always;
+    * the first nudge of a run (``last_mode_nudge_ts is None``).
+
+    The clock is ``last_mode_nudge_ts`` — the last mode DISPATCH — and not
+    ``last_hvac_cmd_ts``, which moves only on a real change because it arms the
+    mode echo window. Measuring the rate against the change anchor would let
+    the limit expire once and then never again. The split mirrors
+    ``last_sp_write_ts`` (physical write) against ``cmd_episode_ts`` (command
+    change) on the setpoint side.
+    """
+    if last_commanded_hvac is None or desired_mode != last_commanded_hvac:
+        return False  # a mode change is never throttled
+    if last_mode_nudge_ts is None:
+        return False  # nothing dispatched yet -> nothing to repeat
+    return (now - last_mode_nudge_ts) < min_interval_s
