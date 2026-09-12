@@ -58,6 +58,61 @@ def _room_entry(hass: HomeAssistant, **data: Any) -> MockConfigEntry:
     return entry
 
 
+# --- v0.193.1: repair issues must not outlive their entry ----------------------
+async def test_room_remove_clears_this_entrys_repair_issues(
+    hass: HomeAssistant,
+) -> None:
+    """A deleted zone leaves no repair issue behind.
+
+    AR-29 already cleared the hub's ONE global issue by name; the per-entry
+    family (a dozen keys, all built as ``f"{key}_{entry_id}"``) was missed. The
+    result was found in the field: an issue standing since June whose config
+    entry no longer existed — and because the repair dialog renders from the
+    entry, it could not even be dismissed.
+
+    The foreign issue is the control: the sweep is a suffix match, and one that
+    reached past its own entry would be far worse than the leak it fixes.
+    """
+    from homeassistant.helpers import issue_registry as ir
+
+    hass.states.async_set("climate.trv", "heat", {"hvac_modes": ["heat"]})
+    entry = _room_entry(hass)
+    other = MockConfigEntry(
+        domain=DOMAIN,
+        unique_id="climate.other",
+        data={**ROOM, CONF_ACTUATOR: "climate.other"},
+        title="Other Room",
+    )
+    other.add_to_hass(hass)
+    registry = ir.async_get(hass)
+    for issue_id in (
+        f"sensor_frozen_{entry.entry_id}",
+        f"declared_step_mismatch_{entry.entry_id}",
+        f"heating_failure_{other.entry_id}",
+    ):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="sensor_frozen",
+        )
+        assert registry.async_get_issue(DOMAIN, issue_id) is not None
+
+    await async_remove_entry(hass, entry)
+
+    assert registry.async_get_issue(DOMAIN, f"sensor_frozen_{entry.entry_id}") is None
+    assert (
+        registry.async_get_issue(DOMAIN, f"declared_step_mismatch_{entry.entry_id}")
+        is None
+    )
+    assert (
+        registry.async_get_issue(DOMAIN, f"heating_failure_{other.entry_id}")
+        is not None
+    ), "the other zone's issue must survive — the suffix match may not overreach"
+
+
 # --- F3/F6/F15: room-entry teardown -------------------------------------------
 async def test_room_remove_parks_heater_and_deletes_store(
     hass: HomeAssistant,

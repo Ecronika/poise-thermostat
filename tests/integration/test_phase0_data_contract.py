@@ -112,6 +112,11 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "cal_handoff_pending",
     "cal_offset",
     "cal_target",
+    # Phase 2a: the mode channel's silence counter and the five-channel
+    # write census — same contract as the two M2/M3 keys above: dump only,
+    # deliberately NOT in the ``_ATTRS`` allowlist, so this stays a dump
+    # change and not an attribute-contract change.
+    "calibration_writes",
     "category",
     "clo_offset",
     "clo_source",
@@ -150,6 +155,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "dry_active",
     "dynamics_profile",
     "en_cool_upper",
+    "external_temp_writes",
     "fabric_conflict",
     "fan_ce_credit_k",
     "fan_ce_k",
@@ -186,6 +192,8 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "mode_diverged_nudges",  # C.8 write-convergence telemetry
     "mode_nudge_blocked",
     "mode_override",
+    "mode_reasserts_suppressed",
+    "mode_writes",
     "mold_capped",
     "mono_ts",
     # ADR-0071 dose model (4 keys, v0.192.0)
@@ -258,8 +266,10 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "season_hint_last_active_ts",
     "seasonless_phase",
     "seasonless_rate",
+    "select_writes",
     "sensor_frozen",
     "sensor_placement_suspect",
+    "setpoint_writes",
     "source",
     "sp_adopt_reason",
     "sp_diverged_writes",  # C.8 write-convergence telemetry
