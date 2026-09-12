@@ -28,10 +28,15 @@ WHY FIVE VIEWS AND NOT ONE. A single 20-method protocol handed to every phase
 would let ``ShadowPhase`` type-check a ``commit_execution`` call. The views are
 measured from the actual call sites per method group, not designed:
 
-    SequencerPorts  8  emit_health, save_if_due, record_trace,
+    SequencerPorts  9  emit_health, save_if_due, record_trace,
                        forecast_outdoor, write_unavailable_safe_state,
                        fire_override_ended, notify_convergence,
-                       unavailable_logged (read AND write)
+                       notify_quantization, unavailable_logged
+                       (the last read AND write; ``notify_quantization``
+                       added by the 2026-09-12 M3 advisory, emitted at the
+                       SAME checkpoint as ``notify_convergence`` — the two
+                       read the same setpoint evidence and must not drift
+                       apart in position)
     PreparePorts    5  end_hold, expire_timed_states, notify_failure,
                        notify_cooling_failure, set_mpc_params
     ActuatePorts    5  end_hold, fire_override_ended, set_mode_override,
@@ -44,7 +49,9 @@ measured from the actual call sites per method group, not designed:
                        as its three siblings)
 
 ``end_hold`` and ``fire_override_ended`` appear in two views each, so the union
-is 23 - 2 = 21 distinct capabilities (20 at the O.2 census + the P1.5 mirror).
+is 24 - 2 = 22 distinct capabilities (20 at the O.2 census, + the P1.5 mirror,
++ the M3 advisory). A view grows only deliberately: ``test_structure_ports``
+pins both numbers, so a quiet widening fails before it ships.
 
 LATE BINDING (binding, plan section 4.4). Six targets must resolve through the
 coordinator INSTANCE on every call, because tests replace them there after the
@@ -139,6 +146,11 @@ class SequencerPorts(Protocol):
 
     def notify_convergence(self, active: bool) -> None:
         """Raise/clear the write-convergence repair issue."""
+
+    def notify_quantization(
+        self, settle_delta: float | None, *, declared_step: float
+    ) -> None:
+        """Raise/clear the declared-step advisory (``None`` = nothing to say)."""
 
     async def forecast_outdoor(self, horizon_min: float, fallback: float) -> float:
         """The forecast await at the prepare seam (late-binding target)."""
@@ -299,6 +311,11 @@ class CoordinatorTickPorts:
 
     def notify_convergence(self, active: bool) -> None:
         self._c._notify_convergence(active)
+
+    def notify_quantization(
+        self, settle_delta: float | None, *, declared_step: float
+    ) -> None:
+        self._c._notify_quantization(settle_delta, declared_step=declared_step)
 
     async def forecast_outdoor(self, horizon_min: float, fallback: float) -> float:
         # LATE BINDING (test_forecast_backoff / test_glue_coverage4 /

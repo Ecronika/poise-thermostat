@@ -112,6 +112,7 @@ from ..const import (
     DEFAULT_TRACE_MAX_BYTES,
     UNAVAILABLE_SAFE_AFTER_S,
 )
+from ..control.write_economy import quantization_settle_delta
 from ..diagnostics.shadows import (
     neutral_shadow_objs,
 )
@@ -144,7 +145,7 @@ from ..safety.sensor_watchdog import (
     unavailable_safe_engaged,
 )
 from ..trace.recorder import TraceRecorder
-from .input_reader import InputReader
+from .input_reader import InputReader, parse_attr_number
 from .presenter import present as _present
 from .tick_snapshot import TickConfigSnapshot, ZoneBindings
 
@@ -747,6 +748,26 @@ class TickOrchestrator:
             # in-flow emission style as ``_notify_failure``).
             self._ports.notify_convergence(
                 self._runtime.safety.convergence.escalated(now=ing.now)
+            )
+            # M3 advisory (2026-09-12 plan): same checkpoint, same evidence —
+            # the command in force, the device's reading and the suppression
+            # count this tick's write gate just produced. Kept next to the
+            # convergence emission so the two setpoint verdicts are decided
+            # from ONE state of the world; splitting them across the tick is
+            # how they would start contradicting each other.
+            # The DECLARED step (``parse_attr_number`` yields None for a
+            # missing state or attribute), not the resolved fallback the write
+            # gate uses — a device that declares nothing gets no advice about
+            # a Poise default.
+            _declared_step = parse_attr_number(wt.act_state, "target_temp_step")
+            self._ports.notify_quantization(
+                quantization_settle_delta(
+                    declared_step=_declared_step,
+                    last_cmd_sp=self._runtime.external.last_cmd_sp,
+                    actual_sp=spo.actual_sp,
+                    suppressed=self._runtime.external.reasserts_suppressed,
+                ),
+                declared_step=_declared_step,
             )
             # Segment H (P1.4): the fail-closed calibration ownership handoff
             # sits BETWEEN the setpoint write and the ext-temp feed (D3). Its

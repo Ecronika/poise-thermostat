@@ -214,6 +214,40 @@ class HealthReporter:
             )
         )
 
+    def notify_quantization(
+        self, settle_delta: float | None, *, declared_step: float
+    ) -> None:
+        """Advise that the actuator's declared step may not be its real one (M3).
+
+        The counterpart to ``notify_convergence`` above and deliberately a
+        different severity of claim: that one reports a device which never
+        applies our commands, this one a device which applies them onto a
+        coarser grid than it declares. Poise keeps regulating either way — the
+        only cost is a write per tick that cannot achieve anything, which M2
+        already suppresses. So this is advice about the SETUP, not a fault.
+
+        NON-fixable on purpose: the cause sits outside Poise (a ``customize``
+        override, a converter's ``temp_step``, a device quirk) and Poise must
+        not write into the user's Home Assistant configuration to "repair" it.
+        ``None`` means there is nothing to say and clears the issue —
+        transition-only, like every other issue here.
+        """
+        self.emit(
+            (
+                HealthUpdate(
+                    issue_id=f"declared_step_mismatch_{self._entry_id}",
+                    active=settle_delta is not None,
+                    translation_key="declared_step_mismatch",
+                    placeholders={
+                        "zone": self._zone_name,
+                        "entity": self._actuator or "—",
+                        "step": f"{declared_step:g}",
+                        "delta": f"{settle_delta:g}" if settle_delta else "—",
+                    },
+                ),
+            )
+        )
+
     def sync_clo_suggestion_issue(
         self, suggestion: CloSuggestion | None, *, enabled: bool
     ) -> None:

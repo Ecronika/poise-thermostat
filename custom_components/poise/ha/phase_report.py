@@ -763,6 +763,20 @@ class ReportPhase:
             "mode_diverged_nudges": (
                 self._runtime.safety.convergence.mode_diverged_nudges
             ),
+            # M2/M3 write economy (2026-09-12 plan): how often the identical
+            # re-assert of the command in force was suppressed within the
+            # CURRENT command episode (the anchor resets it), and the grid the
+            # actuator declares. Diagnostics only — deliberately NOT in the
+            # climate entity's ``_ATTRS`` allowlist: silence has to be
+            # auditable, but it is not a control reading and does not belong
+            # in the ADR-0016 attribute contract.
+            "reasserts_suppressed": self._runtime.external.reasserts_suppressed,
+            # The actuator's OWN declaration, read straight off its state —
+            # the number the advisory judges against, so the dump and the
+            # repair issue can never disagree about what was declared.
+            "declared_step": (
+                act_state.attributes.get("target_temp_step") if act_state else None
+            ),
             "mold_capped": mold_capped,  # mould floor clipped at 24 °C
             # ADR-0057: publish the mould-protection floor + dewpoint so the card
             # can draw the "Schimmel" tick on the dial (display only, no control).
