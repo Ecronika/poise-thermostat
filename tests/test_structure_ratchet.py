@@ -182,6 +182,10 @@ _RATCHET: tuple[_Entry, ...] = (
         ),
     ),
     _Entry(
+        # M4 (2026-09-12 plan) +12/+5: the watchdog fold now takes BOTH
+        # kinds of silence (suppressed and rate-limited) — the T2 argument
+        # applies unchanged to the second one, and the condition crosses 88
+        # columns, so it is exploded across lines.
         identifier="custom_components/poise/ha/phase_actuate.py",
         # Raised 765/424 -> 1043/646 by P1.4 (feature growth, measured after
         # the fact — the phase_prepare ADR-0066 precedent): the two
@@ -211,8 +215,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # the half rule 1b enforces — stays 170 under the 900 cap. The owed
         # extraction is named: the calibration segments H/W (~300 lines), which
         # cannot leave without the await topology. Release work, not debug.
-        baseline_total=1217,
-        baseline_code=730,
+        baseline_total=1229,
+        baseline_code=735,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from O.5",
     ),
@@ -492,6 +496,11 @@ _RATCHET: tuple[_Entry, ...] = (
         note="1200/900 total/code - plan DoD cap, effective from P.1",
     ),
     _Entry(
+        # M4 (2026-09-12 plan) +19/+14: the second verdict is computed
+        # beside the first in the observe stage and vetoes beside it in the
+        # gate. The DECISION is again the pure ``control/write_economy``; what
+        # grows here is one call and one ``and`` clause. 457/250 -> 476/264,
+        # 650 code lines still far under the 900 cap.
         identifier="custom_components/poise/control/pipeline_actuate.py",
         # M2 2026-09-12 +27/+23 (feature growth): the write-economy seam. The
         # settle classification and the idempotence verdict are computed in
@@ -500,8 +509,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # The DECISION itself lives in the new pure ``control/write_economy``,
         # so what grows here is the call plus two carried fields, not logic.
         # 430/227 -> 457/250, 650 code lines under the 900 cap.
-        baseline_total=457,
-        baseline_code=250,
+        baseline_total=476,
+        baseline_code=264,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from P.1",
     ),
@@ -555,6 +564,8 @@ _RATCHET: tuple[_Entry, ...] = (
         # _stage_assemble_tick_data, tick_ports, coordinator) plus this note.
         # All comments. Measured LAST, after every other edit stood — the
         # self-measuring lesson below, for the fourth time.
+        # +11/0 for M4 (2026-09-12): two feature-growth annotations plus
+        # this note. Measured LAST, after every other edit stood.
         # +4/0 in P1.5b: the coordinator row's resolve_restore re-measure
         # note plus this line; measured LAST again.
         # +16/0 in P2.1: four feature-growth annotations (phase_prepare /
@@ -579,7 +590,7 @@ _RATCHET: tuple[_Entry, ...] = (
         # +10/0 for M2 (2026-09-12): the pipeline_actuate annotation plus
         # these three lines, all comments — measured LAST again.
         # 740/301 -> 750/301.
-        baseline_total=789,
+        baseline_total=800,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight

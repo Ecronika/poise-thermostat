@@ -535,6 +535,8 @@ def test_stage_result_field_sets_are_pinned() -> None:
             # the reason above and consumed by the write gate one stage later.
             "settle_provenance",
             "reassert_idempotent",
+            # M4: the rate-limit verdict, its own field next to the proof.
+            "reassert_throttled",
             # C.8f: late-echo-of-a-superseded-command flag for the write
             # stage's convergence-watchdog fold (defaulted).
             "stale_own_echo",
