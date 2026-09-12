@@ -75,8 +75,15 @@ export class PoiseSystemCard extends LitElement implements LovelaceCard {
   }
 
   render() {
-    const lang = this.hass?.locale?.language;
-    const id = this._config?.entity;
+    // M12 completed (v0.194.1): the guard both editors always had, and the
+    // sibling card's `_setpoint`. `hass` can still be unset after `setConfig` ran,
+    // and `this.hass.states[id]` then throws inside Lit's update, leaving a
+    // half-rendered card and an error nowhere useful. Rendering nothing is
+    // safe: `hass` is a reactive property, and `shouldUpdate` lets the first
+    // assignment through, so the card appears as soon as it arrives.
+    if (!this.hass || !this._config) return html``;
+    const lang = this.hass.locale?.language;
+    const id = this._config.entity;
     const st = id ? this.hass.states[id] : undefined;
     if (!st) {
       return html`<ha-card
