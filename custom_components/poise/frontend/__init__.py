@@ -128,26 +128,48 @@ def _lovelace_part(lovelace: Any, name: str) -> Any:
 def _retry_or_fall_back(
     hass: HomeAssistant, urls: tuple[str, ...], attempt: int, reason: str
 ) -> None:
+    """Schedule one more attempt, or give up and take the fallback.
+
+    ``cancel_on_shutdown`` is not optional here. A pending ``call_later`` that
+    outlives the run is a lingering timer, and HA's own test harness fails the
+    teardown over it — it did, 363 times, when this retry was first written
+    without it. The same property is what a real shutdown wants: a retry for a
+    collection that will never load must not keep the loop alive.
+    """
+    from homeassistant.core import HassJob
     from homeassistant.helpers.event import async_call_later
 
     if attempt >= _MAX_ATTEMPTS:
         _fall_back(hass, urls, f"{reason} after {attempt} attempts")
         return
     async_call_later(
-        hass, _RETRY_S, partial(_async_attach_later, hass, urls, attempt + 1)
+        hass,
+        _RETRY_S,
+        HassJob(
+            partial(_async_attach_later, hass, urls, attempt + 1),
+            "poise card resource retry",
+            cancel_on_shutdown=True,
+        ),
     )
 
 
-def _fall_back(hass: HomeAssistant, urls: tuple[str, ...], reason: str) -> None:
+def _fall_back(
+    hass: HomeAssistant, urls: tuple[str, ...], reason: str, *, expected: bool = False
+) -> None:
     """The pre-N1 loading path, for the cases the resource collection cannot serve.
 
-    Logged at WARNING and not at DEBUG on purpose: this is the path with the
-    race, so an installation running on it should be able to find out why from
-    its own log instead of from a bug report.
+    Normally WARNING, not DEBUG: this is the path with the race, so an
+    installation running on it should be able to find out why from its own log
+    instead of from a bug report. ``expected`` lowers it to DEBUG for the one
+    case that is not a diagnosis — no ``lovelace`` data at all, i.e. no
+    dashboards are set up. That is the test harness and the rare headless
+    install; telling those about a dashboard problem they do not have would
+    train people to ignore the message that matters.
     """
     from homeassistant.components.frontend import add_extra_js_url
 
-    _LOGGER.warning(
+    _LOGGER.log(
+        logging.DEBUG if expected else logging.WARNING,
         "Poise card: registering as a frontend module URL because the Lovelace "
         "resource collection is unavailable (%s). The card may show "
         "'Configuration error' on slow clients until the view is rebuilt; on "
@@ -166,7 +188,11 @@ async def _async_attach(
     lovelace = hass.data.get("lovelace")
     resources = _lovelace_part(lovelace, "resources")
     if resources is None:
-        _retry_or_fall_back(hass, urls, attempt, "lovelace not set up")
+        # No retry: this runs after EVENT_HOMEASSISTANT_STARTED, and ``lovelace``
+        # is a core integration that is up long before that. Absent here means
+        # absent for good — no dashboards at all — so waiting a minute for it
+        # would only park twelve timers in every test run and change nothing.
+        _fall_back(hass, urls, "no lovelace data", expected=True)
         return
 
     mode = _lovelace_part(lovelace, "mode") or _lovelace_part(lovelace, "resource_mode")
