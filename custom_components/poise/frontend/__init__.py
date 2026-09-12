@@ -36,16 +36,20 @@ from __future__ import annotations
 import logging
 from functools import partial
 from pathlib import Path
-from typing import Any
-
-from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.event import async_call_later
+from typing import TYPE_CHECKING, Any
 
 from ..const import CARD_MODULES, CARD_URL_BASE, VERSION
 from .resources import plan_resources
+
+if TYPE_CHECKING:
+    from homeassistant.core import HomeAssistant
+
+# HA imports stay LOCAL to the functions that need them — the same rule the
+# integration's own ``async_setup`` follows, and the reason it exists: the pure
+# core must stay importable without a Home Assistant runtime. ``resources.py``
+# sits inside this package, so a module-level ``homeassistant`` import here
+# would drag HA into every pure test that reaches the planner (it did exactly
+# that once: tests/test_frontend_resources.py could not be collected).
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,6 +82,9 @@ async def async_register_card(hass: HomeAssistant) -> None:
     start it has not run yet. Never raises — the caller already treats a card
     failure as non-fatal, and this keeps that promise at the source.
     """
+    from homeassistant.components.http import StaticPathConfig
+    from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+
     here = Path(__file__).parent
     urls = _versioned_urls()
     configs: list[StaticPathConfig] = []
@@ -121,6 +128,8 @@ def _lovelace_part(lovelace: Any, name: str) -> Any:
 def _retry_or_fall_back(
     hass: HomeAssistant, urls: tuple[str, ...], attempt: int, reason: str
 ) -> None:
+    from homeassistant.helpers.event import async_call_later
+
     if attempt >= _MAX_ATTEMPTS:
         _fall_back(hass, urls, f"{reason} after {attempt} attempts")
         return
@@ -136,6 +145,8 @@ def _fall_back(hass: HomeAssistant, urls: tuple[str, ...], reason: str) -> None:
     race, so an installation running on it should be able to find out why from
     its own log instead of from a bug report.
     """
+    from homeassistant.components.frontend import add_extra_js_url
+
     _LOGGER.warning(
         "Poise card: registering as a frontend module URL because the Lovelace "
         "resource collection is unavailable (%s). The card may show "
