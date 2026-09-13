@@ -959,6 +959,10 @@ class PreparePhase:
                 # event-refresh error is negligible (Poise tick = 60 s,
                 # ADR-0020); a real elapsed anchor is the cost increment's job.
                 t_out_eff=ing.t_out_eff,
+                # ADR-0066 N4.1: two outdoor temperatures on purpose — the
+                # effective one for the thermal/mould chain (its substitute is
+                # conservative there), the measured one for the humidity pair.
+                t_out_measured=ing.t_out_measured,
                 rh_out=self._outdoor_rh(bindings),
                 surface_rh_mean_prev=self._runtime.humidity.surface_rh_mean,
                 surface_elapsed_min=1.0,
