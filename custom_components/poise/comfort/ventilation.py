@@ -170,9 +170,15 @@ def ventilation_advise(
     # source (N4.1) makes this load-bearing: ``w_out`` is now absent more
     # often, so a global gate would silence the mould advice exactly when the
     # outdoor sensor is the thing that failed.
+    # The three derived values are spelled with explicit ``is not None`` tests
+    # rather than through ``have_moisture``: a bool carries no narrowing, so
+    # mypy --strict cannot see that the subtraction is safe. ``delta is not
+    # None`` IS "both sides present", which is why the rules below lean on it.
     have_moisture = w_in_gm3 is not None and w_out_gm3 is not None
-    delta = w_in_gm3 - w_out_gm3 if have_moisture else None
-    outside_drier = have_moisture and w_out_gm3 < w_in_gm3
+    delta = (
+        w_in_gm3 - w_out_gm3 if w_in_gm3 is not None and w_out_gm3 is not None else None
+    )
+    outside_drier = delta is not None and delta > 0.0
     _d = round(delta, 1) if delta is not None else None
     # Rule 1 — mould cause (EWMA mean, never gated). Escalates to alert when
     # the floor is currently costing heat (binding) or can no longer protect
@@ -226,7 +232,7 @@ def ventilation_advise(
     # the actionable advice is to close it. Same rule, same precedence, same
     # reason token; only the action follows the window state, exactly as rules
     # 1b/5a do.
-    if have_moisture and w_in_gm3 <= cfg.dry_warn_gm3 and outside_drier:
+    if w_in_gm3 is not None and w_in_gm3 <= cfg.dry_warn_gm3 and outside_drier:
         return VentilationAdvice(
             "close" if window_open else "discourage", "too_dry", "warn", _d
         )
@@ -248,8 +254,9 @@ def ventilation_advise(
     if (
         # N4: no outdoor humidity -> the muggy-air veto cannot be evaluated,
         # and free-cooling is a comfort decision: without the veto it stays
-        # silent rather than guessing.
-        have_moisture
+        # silent rather than guessing. ``delta is not None`` says exactly that
+        # (both sides present) and narrows for the veto clause below.
+        delta is not None
         and free_cool_zone
         and not cool_edge_protected
         and not surface_near_limit
@@ -259,17 +266,16 @@ def ventilation_advise(
         and room_c > cool_edge_c
         and t_out_c
         <= room_c - (cfg.heat_out_dt_off_k if prev_heat_out else cfg.heat_out_dt_on_k)
-        and delta is not None
         and delta >= -cfg.heat_out_humid_guard_gm3
     ):
         return VentilationAdvice("open", "heat_out", "ok", _d)
     # Rules 3/4 — comfort, occupancy-gated. Asymmetric hysteresis on delta.
     threshold = cfg.delta_off_gm3 if prev_advice_active else cfg.delta_on_gm3
     if (
-        have_moisture
-        and occupied
+        occupied
         and delta is not None
         and delta >= threshold
+        and w_in_gm3 is not None
         and w_in_gm3 > cfg.moist_gm3
     ):
         return VentilationAdvice("open", "moisture_out", "ok", _d)
