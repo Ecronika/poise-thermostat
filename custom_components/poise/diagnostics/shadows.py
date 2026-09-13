@@ -405,6 +405,7 @@ def compose_climate_band(
     fan_mode: str | None,
     hvac_action: str | None,
     t_out_eff: float | None = None,
+    t_out_measured: float | None = None,
     rh_out: float | None = None,
     surface_rh_mean_prev: float | None = None,
     surface_elapsed_min: float = 0.0,
@@ -513,9 +514,21 @@ def compose_climate_band(
     # A: absolute humidity in the ecosystem unit; B: surface-RH EWMA (the mould
     # CAUSE) + ventilation advice; C: mould-safe RH ceiling + fabric conflict.
     w_in = absolute_humidity(room, rh) if rh is not None else None
+    # ADR-0066 N4.1: the outdoor humidity pairs the CURRENT outdoor RH with the
+    # MEASURED outdoor temperature — never with ``t_out_eff``, which substitutes
+    # T_rm or a 5 °C fallback when the sensor is silent. Those two belong to
+    # different moments (or to no moment at all), and the product is an air
+    # state that never existed. Measured against a mild outdoor spell the
+    # substitute runs ~5 g/m³ too dry, which inverts the sign of ``delta`` and
+    # turns "outside is muggier" into "open the window". Without the
+    # measurement the moisture rules stay silent — the per-rule gates in
+    # ``ventilation_advise`` keep the building-protection rules running
+    # regardless. The mould chain below is untouched and keeps ``t_out_eff``:
+    # there the substitute is a THERMAL boundary and errs toward colder
+    # surfaces, i.e. toward protection.
     w_out = (
-        absolute_humidity(t_out_eff, rh_out)
-        if t_out_eff is not None and rh_out is not None
+        absolute_humidity(t_out_measured, rh_out)
+        if t_out_measured is not None and rh_out is not None
         else None
     )
     surface_pct = (
