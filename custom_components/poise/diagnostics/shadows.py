@@ -605,12 +605,32 @@ def compose_climate_band(
         window_open=window_open,
         occupied=occupied,
         prev_advice_active=prev_vent_active,
+        # N5: the room's own relative humidity — the same reading ``w_in``
+        # above was computed from, so it is present whenever ``w_in`` is. The
+        # humidity limits are paired with it because a gram count means a
+        # different RH at every room temperature (ADR-0066 N5).
+        rh_pct=rh,
         # Rule 3t (free-cooling, v0.188.0): thermal inputs + capability gate.
         # cool/fan capability from the device's advertised surfaces — the
         # window-only zones this rule exists for have neither.
+        # N5: TWO room temperatures. ``room_c`` is the AIR, for the dT
+        # hysteresis (a window exchanges air); ``room_decide_c`` is what the
+        # comfort solver judges by — operative when the MRT model is on — and
+        # it is what ``eff_cool`` is compared against everywhere else in this
+        # composition (see ``in_deadband`` above). Feeding the air temperature
+        # into BOTH was the defect: with warm surfaces the solver said "too
+        # warm" while rule 3t saw no cooling need.
         room_c=room,
+        room_decide_c=room_decide,
         cool_edge_c=eff_cool,
-        t_out_c=t_out_eff,
+        # N5: the MEASURED outdoor temperature, not ``t_out_eff``. This is not
+        # a behaviour change but the structural form of an invariant N4.1
+        # created: rule 3t requires ``delta``, ``delta`` requires ``w_out``,
+        # ``w_out`` requires ``t_out_measured`` — and whenever that is present
+        # ``t_out_eff`` IS it (the substitute only appears when the reading is
+        # absent). Passing the measurement directly means a later change to
+        # the fallback cannot reach this rule by accident.
+        t_out_c=t_out_measured,
         cool_capable="cool" in hvac_modes,
         fan_capable=has_fan_modes,
         prev_heat_out=prev_vent_reason == "heat_out",
