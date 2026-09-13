@@ -504,8 +504,21 @@ _RATCHET: tuple[_Entry, ...] = (
         # P2.2 -2/0: the interim-weekday comment is gone -- stage_schedule_gate
         # now reads inputs.local_weekday directly; code unchanged at 597.
         # 922/597 -> 920/597.
-        baseline_total=920,
-        baseline_code=597,
+        # ADR-0066 N4.1 (2026-09-13) +3/+1: ``t_out_measured=t_out`` is handed
+        # to IngestResult beside the effective value, with two comment lines
+        # saying why the humidity axis may not take the substitute. One
+        # assignment, no logic.
+        # The re-measure exposed an older, unrecorded drift: BEFORE this change
+        # the file already stood at 930/607 -- exactly baseline + grow_slack on
+        # BOTH axes, i.e. the row had been riding the upper bound since the
+        # 2026-09-12 M4/M5 work without ever being re-baselined, because the
+        # gate only fails once the slack is spent. That is precisely the blind
+        # spot the slack buys, and one line was enough to run it out. The
+        # baseline is therefore pulled up to the MEASURED 933/608 rather than
+        # to 923/598, so the next change is measured against reality and the
+        # slack is available again for what it is for. 920/597 -> 933/608.
+        baseline_total=933,
+        baseline_code=608,
         headroom=50,
         note="1200/900 total/code - plan DoD cap, effective from P.1",
     ),
@@ -614,7 +627,12 @@ _RATCHET: tuple[_Entry, ...] = (
         # (phase_actuate, phase_report, _stage_assemble_tick_data) plus these
         # four lines, all comments — measured LAST, after every other edit
         # stood. 806/301 -> 824/301.
-        baseline_total=824,
+        # +18/0 for ADR-0066 N4.1 (2026-09-13): the pipeline_prepare
+        # annotation — which had to say twice as much as usual, because the
+        # re-measure uncovered an older drift sitting exactly on the slack
+        # edge — plus these six lines, all comments. Measured LAST, after
+        # every other edit stood. 824/301 -> 842/301.
+        baseline_total=842,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight

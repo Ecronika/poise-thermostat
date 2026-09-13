@@ -438,6 +438,12 @@ def test_stage_result_field_sets_are_pinned() -> None:
             # Phase 6a (S4, finding 13): the collecting stages return their
             # HealthUpdates for the coordinator's stage-end checkpoints.
             "health_updates",
+            # ADR-0066 N4.1: the MEASURED outdoor temperature, alongside the
+            # effective one above. Two fields on purpose — the humidity axis
+            # may only pair the current outdoor RH with a temperature from the
+            # same moment, while the thermal chain keeps the conservative
+            # substitute. Last in the list because it carries a default.
+            "t_out_measured",
         ],
         ObservationResult: [
             "window_open",

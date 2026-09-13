@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from typing import Final
 
 import pytest
 
@@ -552,6 +553,15 @@ _CLIMATE_KEY_ORDER = [
 ]
 
 
+# ADR-0066 N4.1: the humidity pair may only be formed from a MEASURED outdoor
+# temperature; ``t_out_eff`` substitutes T_rm or a 5 °C fallback. In every seam
+# case below the outdoor sensor IS delivering, so the helper mirrors
+# ``t_out_eff`` by default and the cases read as they always did. Passing
+# ``t_out_measured=None`` explicitly expresses the one situation N4.1 is about:
+# an effective value that is a substitute, with no measurement behind it.
+_MEASURED_MIRRORS_EFF: Final = object()
+
+
 def _climate_band(
     *,
     cool_ac: AdaptiveCool | None,
@@ -570,6 +580,7 @@ def _climate_band(
     eff_cool: float = 26.5,
     window_open: bool = False,
     t_out_eff: float | None = None,
+    t_out_measured: float | None | object = _MEASURED_MIRRORS_EFF,
     rh_out: float | None = None,
     surface_rh_mean_prev: float | None = None,
     # ADR-0071: the dose state the floors stage advanced this tick. Absent by
@@ -599,6 +610,9 @@ def _climate_band(
         mode="idle",
         window_open=window_open,
         t_out_eff=t_out_eff,
+        t_out_measured=(
+            t_out_eff if t_out_measured is _MEASURED_MIRRORS_EFF else t_out_measured
+        ),
         rh_out=rh_out,
         surface_rh_mean_prev=surface_rh_mean_prev,
         surface_elapsed_min=1.0,
@@ -691,6 +705,46 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     assert (fresh["vent_action"], fresh["vent_reason"]) == ("close", "mold_guard")
     assert fresh["mould_engaged"] is False  # no floor enforced ...
     assert fresh["mold_capped"] is False  # ... and none reported as capped
+
+
+def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> None:
+    """ADR-0066 N4.1 at the seam: the humidity pair needs a MEASUREMENT.
+
+    Same air as the free-cooling control above, except the outdoor thermometer
+    is silent and ``t_out_eff`` carries the T_rm substitute. Before N4.1 the
+    seam paired that substitute with the CURRENT outdoor RH and published an
+    ``abs_humidity_out_gm3`` for an air state that exists nowhere — always on
+    the low side, so ``delta`` came out too high and the rules advised airing
+    against outside air that may well be wetter. Now ``w_out`` is simply
+    absent and the moisture rules say so.
+
+    The mould chain is deliberately NOT affected: it keeps reading
+    ``t_out_eff``, where a too-cold substitute errs toward colder surfaces,
+    i.e. toward protection. Both halves are asserted here, because "the fix
+    silenced the mould advice too" is the way this could go wrong.
+    """
+    diag = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],
+        rh=66.0,
+        room=23.0,
+        eff_cool=22.4,
+        window_open=True,
+        t_out_eff=14.0,  # the SUBSTITUTE (T_rm), not a reading
+        t_out_measured=None,  # the thermometer is silent
+        rh_out=70.0,  # ... while the hygrometer is not
+        surface_rh_mean_prev=72.0,
+        mould_index=2.4,
+        mould_engaged=True,
+        mould_binds=True,
+    )
+    assert diag["abs_humidity_out_gm3"] is None
+    assert diag["vent_delta_gm3"] is None
+    # N4.2: building protection is not on that data path and still speaks.
+    assert (diag["vent_action"], diag["vent_reason"]) == ("close", "mold_guard")
+    # ... and the mould chain still computed, from t_out_eff, exactly as before.
+    assert isinstance(diag["rh_max_safe"], float)
+    assert isinstance(diag["surface_rh"], float)
 
 
 def test_compose_climate_band_publishes_the_dose_state() -> None:

@@ -456,3 +456,123 @@ def test_ventilation_verdict_never_enters_the_control_path() -> None:
         src = (pkg / rel).read_text(encoding="utf-8")
         assert "ventilation_advise" not in src, f"{rel} must not consume the advice"
         assert "VentilationAdvice" not in src, f"{rel} must not consume the advice"
+
+
+# --- N4 (v0.194.2): the four corrections of the 2026-09-13 review -------------
+
+
+def _advise(**over: object) -> VentilationAdvice:
+    """A neutral tick: moist-ish room, drier outside, nothing else in play."""
+    base: dict[str, object] = dict(
+        w_in_gm3=10.0,
+        w_out_gm3=9.0,
+        surface_rh_mean_pct=None,
+        mold_floor_binding=False,
+        mold_capped=False,
+        room_at_thermal_floor=False,
+        co2_ppm=None,
+        window_open=False,
+        occupied=True,
+        prev_advice_active=False,
+    )
+    base.update(over)
+    return ventilation_advise(**base)  # type: ignore[arg-type]
+
+
+def test_n4_building_protection_survives_a_missing_outdoor_humidity() -> None:
+    """The global ``no_data`` gate swallowed rules that never needed the data.
+
+    ``mold_guard``'s own comment says it deliberately requires no drier outside
+    air — and until v0.194.1 a missing ``w_out`` returned ``no_data`` three
+    lines above it. The same held for ``thermal_floor``, which is purely
+    thermal. That matters more after N4.1, because the outdoor humidity is now
+    absent whenever the outdoor TEMPERATURE is: a global gate would have
+    silenced the mould advice exactly when a sensor failed.
+    """
+    guard = _advise(
+        w_out_gm3=None,
+        window_open=True,
+        surface_rh_pct=82.0,
+        rh_max_safe_pct=58.0,
+        surface_needs_warmer=True,
+    )
+    assert (guard.action, guard.reason) == ("close", "mold_guard")
+    assert guard.delta_gm3 is None  # no number is published without the data
+
+    floor = _advise(
+        w_in_gm3=None, w_out_gm3=None, window_open=True, room_at_thermal_floor=True
+    )
+    assert (floor.action, floor.reason) == ("close", "thermal_floor")
+
+    # ...and the honest token survives for the case that really has nothing.
+    assert _advise(w_in_gm3=None, w_out_gm3=None).reason == "no_data"
+
+
+def test_n4_moisture_rules_stay_silent_without_both_sides() -> None:
+    """The other half of the same change: a rule that NEEDS the comparison
+    must not fire on half of it. Free-cooling included — its muggy-air veto is
+    unevaluable without the outdoor value, and it is a comfort decision."""
+    assert _advise(w_out_gm3=None, w_in_gm3=12.0).reason == "no_data"
+    cool = _advise(
+        w_out_gm3=None,
+        room_c=26.0,
+        cool_edge_c=24.0,
+        t_out_c=20.0,
+    )
+    assert cool.reason != "heat_out"
+
+
+def test_n4_too_dry_closes_an_open_window_instead_of_discouraging_it() -> None:
+    """Same rule, same precedence, same token — only the verb follows the
+    window state, as rules 1b and 5a already do. "Better not open" is not
+    actionable advice for a window that is already open."""
+    assert _advise(w_in_gm3=6.0, w_out_gm3=4.0, window_open=True).action == "close"
+    assert _advise(w_in_gm3=6.0, w_out_gm3=4.0).action == "discourage"
+    # the reason token is unchanged, so the card text and the event keep working
+    assert _advise(w_in_gm3=6.0, w_out_gm3=4.0, window_open=True).reason == "too_dry"
+
+
+def test_n4_mold_risk_keeps_the_fixed_limit_on_purpose() -> None:
+    """The one review proposal that was built and then REJECTED.
+
+    Moving rule 1 onto ADR-0071's dynamic ``rh_max_safe`` looks like the
+    obvious consistency fix — N3 did exactly that for the mould guard. It is
+    the wrong direction here, and the N2 regression case says why: a LOW safe
+    ceiling means a COLD surface, and a cold surface argues for closing the
+    window. Tying the "open" advice to that ceiling makes it fire earliest
+    where opening does the most harm.
+
+    The live kitchen case is the proof: smoothed mean 72 %, ceiling 69.6 %.
+    Against the fixed 80 % - 5 pp rule 1 stays silent and ``mold_guard`` gets
+    to say "close"; against 69.6 - 5 pp it would say "open" instead.
+    """
+    kitchen = _bound_edge()
+    assert (kitchen.action, kitchen.reason) == ("close", "mold_guard")
+    # the dynamic ceiling is present in that very call — and deliberately not
+    # what rule 1 reads.
+    assert _advise(surface_rh_mean_pct=72.0, rh_max_safe_pct=69.6).reason != "mold_risk"
+    # the fixed limit still fires where it should: absolutely wet surfaces.
+    assert _advise(surface_rh_mean_pct=76.0).reason == "mold_risk"
+
+
+def test_n4_1_outdoor_humidity_needs_a_measured_temperature() -> None:
+    """N4.1, the defect this release is named after — the arithmetic that made
+    it visible, kept as a test so the sign cannot flip back unnoticed.
+
+    Room 22 °C/55 % against a genuinely MUGGIER outside of 18 °C/80 %: the
+    honest delta is negative and no rule may fire. Pairing the same outdoor RH
+    with a substituted temperature (T_rm 10 °C, or the 5 °C control fallback)
+    understates the outdoor moisture by ~5-7 g/m³ and turns the sign around,
+    straight past the 3.0 g/m³ open threshold.
+    """
+    w_in = absolute_humidity(22.0, 55.0)
+    honest = absolute_humidity(18.0, 80.0)
+    assert w_in - honest < 0.0  # outside really is moister
+    assert _advise(w_in_gm3=w_in, w_out_gm3=honest).reason != "moisture_out"
+
+    for substitute in (10.0, 5.0):
+        fabricated = absolute_humidity(substitute, 80.0)
+        assert w_in - fabricated >= 3.0, "the substitute clears the open threshold"
+        assert _advise(w_in_gm3=w_in, w_out_gm3=fabricated).reason == "moisture_out", (
+            "which is precisely the wrong advice N4.1 removes at the source"
+        )
