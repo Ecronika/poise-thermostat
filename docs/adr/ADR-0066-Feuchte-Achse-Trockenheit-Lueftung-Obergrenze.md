@@ -107,4 +107,50 @@ Der Grund ist kein Versehen im Code, sondern die Bedeutung der Variablen. Ein **
 
 **Nachweise.** `tests/test_feuchte_achse.py`, fünf neue Fälle: `test_n4_building_protection_survives_a_missing_outdoor_humidity`, `test_n4_moisture_rules_stay_silent_without_both_sides`, `test_n4_too_dry_closes_an_open_window_instead_of_discouraging_it`, `test_n4_mold_risk_keeps_the_fixed_limit_on_purpose` (die Verwerfungs-Schranke aus N4.4), `test_n4_1_outdoor_humidity_needs_a_measured_temperature` (nagelt die Vorzeichen-Rechnung oben fest). `tests/test_phase1_tick_result.py`: der Feldvertrag um `t_out_measured` erweitert.
 
-**Offen (aus der Verifikation, bewusst nicht in N4):** 8,7 g/m³ als alleinige Eintrittsschwelle driftet mit der Raumtemperatur (56,8 % rF bei 18 °C, 32,1 % bei 28 °C) — das braucht eine Entscheidung, keinen Fix; `room_c` auf die operative Temperatur; Schließen nach Anlass über `prev_vent_reason`; g/kg als interne Rechengröße; ein Fähigkeitsmodell, das Umluft von Zuluft unterscheidet (HAs `fan_modes` kann das nicht); τ-Kalibrierung an Felddaten.
+**Offen (aus der Verifikation, bewusst nicht in N4; die ersten beiden sind in N5 erledigt):** ~~8,7 g/m³ als alleinige Eintrittsschwelle driftet mit der Raumtemperatur (56,8 % rF bei 18 °C, 32,1 % bei 28 °C) — das braucht eine Entscheidung, keinen Fix~~ (N5.2); ~~`room_c` auf die operative Temperatur~~ (N5.1); Schließen nach Anlass über `prev_vent_reason`; g/kg als interne Rechengröße; ein Fähigkeitsmodell, das Umluft von Zuluft unterscheidet (HAs `fan_modes` kann das nicht); τ-Kalibrierung an Felddaten.
+
+## Nachtrag N5 (2026-09-13, v0.194.3): operative Kante für das Freikühlen; relative Begleiter für die beiden absoluten Feuchtegrenzen — umgesetzt
+
+**Anlass (Nachprüfung des externen Reviewers zu v0.194.2, verifiziert in [docs/reviews/2026-09-13 (Nachprüfung)](../reviews/2026-09-13-externes-review-lueftungsempfehlung-nachpruefung.md)):** Die N4-Korrekturen wurden bestätigt, die Verwerfung aus N4.4 nach erneuter Prüfung ebenfalls. Zwei der verbliebenen offenen Punkte sind jedoch klein genug für denselben Zyklus — und einer davon war in N4 als „offen" notiert, ohne dass die Schwere klar war.
+
+### N5.1 — Regel 3t stellt zwei Fragen und braucht dafür zwei Temperaturen
+
+`ventilation_advise` bekam bis v0.194.2 ein einziges `room_c` und benutzte es für beides:
+
+1. **„Ist der Raum über der Komfortkante?"** — diese Kante ist `eff_cool`, und **jeder andere** Verbraucher von `eff_cool` in derselben Komposition vergleicht sie gegen `room_decide` (siehe `in_deadband` in `compose_climate_band`). Das ist die operative Temperatur, sobald das MRT-Modell läuft. Regel 3t verglich sie gegen die **Lufttemperatur**: bei warmen Bauteilen sagt der Komfortsolver „zu warm" (operativ 26,0 über einer Kante von 25,0), während 3t mit 24,5 < 25,0 gar keinen Kühlbedarf sieht.
+2. **„Bringt Öffnen etwas?"** — das ist Luft gegen Luft. Ein Fenster tauscht Luft, keine Strahlung. Die operative Temperatur in die dT-Hysterese zu geben, schreibt der Außenluft den gesamten Strahlungsüberschuss gut — im Beispiel 1,5 K von 2,0 K Einschaltschwelle — und öffnet gegen einen Gewinn, den es nicht gibt.
+
+**Entscheidung:** zwei Eingänge. `room_decide_c` für die Kantenfrage, `room_c` (Luft) für die Hysterese. `room_decide_c` hat den Default `None` und spiegelt dann `room_c`, also sind alte Aufrufstellen bit-identisch. Der Vorschlag der Nachprüfung, `room_c` pauschal durch `room_decide` zu ersetzen, hätte nur die Spiegelseite desselben Fehlers erzeugt; das ist der Grund, warum hier zwei Parameter stehen und nicht eine Ersetzung.
+
+### N5.2 — Jede absolute Feuchtegrenze bekommt einen relativen Begleiter
+
+Eine Grammzahl bedeutet bei jeder Raumtemperatur eine andere relative Feuchte. `8,7 g/m³` sind **56,8 % rF bei 18 °C**, aber nur **32,1 % bei 28 °C** — Poise konnte einem 28 °C warmen Raum mit 33 % rF (8,96 g/m³) das Lüften „wegen Feuchte" empfehlen. Das Trockenheits-Veto konnte das nicht fangen, weil seine eigene Grenze ebenfalls absolut ist: 7 g/m³ sind bei 28 °C nur 25,8 % rF.
+
+Dazu kommt ein Einwand, der schwerer wiegt als die Drift selbst: **8,7 g/m³ ist das Referenz-Innenklima 20 °C/50 % der DIN 4108-2 — ein Bemessungsklima, nie eine Betriebsschwelle.** Es beschreibt, wogegen man ein Bauteil auslegt, nicht, wann man ein Fenster öffnet.
+
+**Entscheidung:** beide Grenzen bekommen einen relativen Begleiter, und beide Begleiter sind **derselbe Punkt auf der anderen Achse** — es musste nichts neu kalibriert werden:
+
+| Grenze | absolut | relativ | Verknüpfung |
+|---|---|---|---|
+| Feuchte-Eintritt (Regel 3) | `> 8,7 g/m³` | `>= 50 % rF` | **UND** |
+| Trockenheits-Veto (Regel 2) | `<= 7,0 g/m³` | `<= 35 % rF` | **ODER** |
+
+`8,7 g/m³` **sind** 50 % rF bei 20 °C: die beiden Bedingungen fallen im Referenzklima zusammen, und darunter bindet die absolute, darüber die relative. Das UND ist deshalb keine Verschärfung, sondern die temperaturrobuste Form derselben Linie. Das ODER beim Veto ist die Gegenrichtung: zu trocken ist ein Raum auf zwei Arten, und jede Art genügt.
+
+**Warum 35 % und nicht die 40 %, die 7 g/m³ spiegeln würden:** Regel 2 sitzt **über** Regel 3t. Eine 40-%-Linie würde einem Sommerraum mit 26 °C/40 % (9,72 g/m³ — nach keinem Maßstab trocken) das Freikühlen verbieten, und das Veto würde still den Hitzetag-Rat kosten, für den 3t existiert. 35 % hält diesen Fall freikühlbar und fängt den wirklich trockenen Raum eine Stufe darunter. Der Wert liegt im Band 35–40 %, das die Nachprüfung genannt hat; festgehalten durch `test_n5_dryness_line_sits_at_35_so_summer_free_cooling_survives`.
+
+`rh_pct` ist die Raumfeuchte, aus der `w_in_gm3` an der Naht ohnehin gerechnet wird — die beiden treffen immer gemeinsam ein, es kommt keine Datenquelle hinzu.
+
+### N5.3 — Die N4.1-Invariante wird strukturell statt kommentiert
+
+Regel 3t bekam weiter `t_out_eff`. Das war seit N4.1 **nachweislich** folgenlos: 3t verlangt `delta`, `delta` verlangt `w_out`, `w_out` verlangt `t_out_measured` — und wo die gesetzt ist, **ist** `t_out_eff` genau dieser Messwert, weil der Ersatzwert nur bei fehlender Messung entsteht. Statt das zu kommentieren, reicht die Naht jetzt `t_out_measured` direkt durch. Verhalten bit-identisch, aber eine spätere Änderung am Fallback kann diese Regel nicht mehr versehentlich erreichen.
+
+### Nebenbefund aus der Umsetzung: ein Test-Helfer hat einen anderen verdeckt
+
+Die N4-Fälle brachten einen zweiten `_advise`-Helfer in `tests/test_feuchte_achse.py` mit — gleicher Name, eigene Defaults. Auf Modulebene **verdeckt** die spätere Definition die frühere, also liefen sämtliche älteren Fälle der Datei gegen die N4-Defaults statt gegen ihre eigenen. Sichtbar wurde das erst, als N5 einem der beiden Bestände einen Schlüssel hinzufügte und vier unbeteiligte Tests fielen. Der Helfer heißt jetzt `_n4_advise`, und der Grund steht in seinem Docstring — die Fälle selbst sind unverändert.
+
+**Wirkung.** Geänderter Rat in drei Lagen: Freikühlen wird bei warmen Bauteilen überhaupt erst geraten und bei zu kleinem Luftgewinn nicht mehr; der Feuchte-Rat schweigt im warmen, relativ trockenen Raum; das Trockenheits-Veto greift auch dort, wo die Grammzahl unauffällig ist. Regelung, Writes und Schimmelboden unverändert (ADR-0048).
+
+**Nachweise.** `tests/test_feuchte_achse.py`: `test_n5_free_cooling_separates_the_comfort_edge_from_the_air_gain` (vier Fälle, darunter die Spiegelseite, die der pauschale Tausch gebrochen hätte), `test_n5_moisture_entry_needs_the_absolute_and_the_relative_line`, `test_n5_dryness_veto_takes_either_axis`, `test_n5_dryness_line_sits_at_35_so_summer_free_cooling_survives`. `tests/test_phase8_shadows.py`: `test_free_cooling_edge_is_judged_on_the_operative_temperature` an der Naht; der dortige Helfer spiegelt `room_decide` jetzt auf `room`, statt es bei 22,0 festzunageln — das war unsichtbar, bis Regel 3t den Wert las.
+
+**Offen (unverändert, in dieser Reihenfolge):** `mold_risk` — Eintritt und „Fenster offen halten" trennen, damit der 48-h-EWMA nicht 10 bis 20 Stunden lang den Schließschutz überstimmt (nachgerechnet: 48·ln(25/20) = 10,7 h von 80 auf unter 75 %); ursachenspezifische Ausstiege über `prev_vent_reason` statt des generischen `target_reached` — die beiden gehören zusammen; g/kg als interne Rechengröße; ein Fähigkeitsmodell, das Umluft von Zuluft unterscheidet; τ-Kalibrierung an Felddaten; der Kommentar zu 8,7 g/m³ gegen die Normausgabe DIN 4108-2:2026-05.
