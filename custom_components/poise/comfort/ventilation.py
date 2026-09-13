@@ -161,21 +161,44 @@ def ventilation_advise(
     tick regardless of the dose — while guard 5, which vetoes a REAL comfort
     decision, keeps reading the enforced floor.
     """
-    if w_in_gm3 is None or w_out_gm3 is None:
-        # Design §9: no indoor value or no outdoor source -> feature silent.
-        return VentilationAdvice("idle", "no_data", "ok", None)
-    delta = w_in_gm3 - w_out_gm3
-    outside_drier = w_out_gm3 < w_in_gm3
+    # N4: the data gate is PER RULE, not global. Until v0.194.1 a missing
+    # indoor or outdoor humidity returned ``no_data`` here and took the
+    # building-protection rules with it — including rule 1b, whose own comment
+    # says it deliberately needs no outdoor humidity, and rule 5a, which is
+    # purely thermal. Gebäudeschutz is never gated (ADR-0050 separation), and
+    # that has to include the data gate. The correction of the outdoor-humidity
+    # source (N4.1) makes this load-bearing: ``w_out`` is now absent more
+    # often, so a global gate would silence the mould advice exactly when the
+    # outdoor sensor is the thing that failed.
+    have_moisture = w_in_gm3 is not None and w_out_gm3 is not None
+    delta = w_in_gm3 - w_out_gm3 if have_moisture else None
+    outside_drier = have_moisture and w_out_gm3 < w_in_gm3
+    _d = round(delta, 1) if delta is not None else None
     # Rule 1 — mould cause (EWMA mean, never gated). Escalates to alert when
     # the floor is currently costing heat (binding) or can no longer protect
     # (capped). Requires drier outside air to be actionable at all.
+    # N4, REJECTED after implementation: the 2026-09-13 review proposed moving
+    # this limit onto the dynamic ``rh_max_safe`` of ADR-0071, as N3 did for
+    # the mould GUARD. Built, and the N2 regression case caught it: the live
+    # kitchen tick (mean 72 %, ceiling 69.6 %) then clears 69.6 - 5 and rule 1
+    # advises OPEN — the exact defect N2 exists to remove.
+    #
+    # The reason is not an oversight, it is the variables. A LOW ``rh_max_safe``
+    # means a COLD surface, and a cold surface argues for closing the window,
+    # not for opening it. Tying the "open" advice to that ceiling makes it fire
+    # earliest in precisely the situation where opening is harmful. The fixed
+    # 80 % asks a different and, here, the right question: are the surfaces
+    # ABSOLUTELY wet, regardless of what this wall could tolerate. The guard
+    # below owns the relative question. Pinned by
+    # ``test_n4_mold_risk_keeps_the_fixed_limit_on_purpose``.
     if (
-        surface_rh_mean_pct is not None
+        have_moisture
+        and surface_rh_mean_pct is not None
         and surface_rh_mean_pct >= cfg.surface_limit_pct - cfg.surface_margin_pp
         and outside_drier
     ):
         level = "alert" if (mold_floor_binding or mold_capped) else "warn"
-        return VentilationAdvice("open", "mold_risk", level, round(delta, 1))
+        return VentilationAdvice("open", "mold_risk", level, _d)
     # Rule 1b (N2) — mould GUARD: close the window before the fabric pays.
     # Below rule 1 (drier outside air plus an acute 48-h mean still argues for
     # airing) but above everything else, including the dryness veto, which
@@ -194,16 +217,24 @@ def ventilation_advise(
         and rh_max_safe_pct is not None
         and surface_rh_pct > rh_max_safe_pct
     ):
-        return VentilationAdvice("close", "mold_guard", "warn", round(delta, 1))
+        # N4: reachable without any humidity data now — which is what its own
+        # comment above always claimed.
+        return VentilationAdvice("close", "mold_guard", "warn", _d)
     # Rule 2 — dryness veto (never gated): venting a dry room against drier
     # outside air over-dries it further.
-    if w_in_gm3 <= cfg.dry_warn_gm3 and outside_drier:
-        return VentilationAdvice("discourage", "too_dry", "warn", round(delta, 1))
+    # N4: with the window ALREADY open, "better not open" is the wrong verb —
+    # the actionable advice is to close it. Same rule, same precedence, same
+    # reason token; only the action follows the window state, exactly as rules
+    # 1b/5a do.
+    if have_moisture and w_in_gm3 <= cfg.dry_warn_gm3 and outside_drier:
+        return VentilationAdvice(
+            "close" if window_open else "discourage", "too_dry", "warn", _d
+        )
     # Rule 5a — thermal floor (never gated, BEFORE the comfort rules): the
     # room heating against the open window at the mould/frost floor must win
     # over any comfort reason to keep venting.
     if window_open and room_at_thermal_floor:
-        return VentilationAdvice("close", "thermal_floor", "warn", round(delta, 1))
+        return VentilationAdvice("close", "thermal_floor", "warn", _d)
     # Rule 3t — free-cooling (heat_out): capability-gated (window-only zones),
     # asymmetric dT hysteresis, muggy-outside veto. Not occupancy-gated.
     free_cool_zone = not cool_capable and not fan_capable
@@ -215,7 +246,11 @@ def ventilation_advise(
         and surface_rh_mean_pct >= rh_max_safe_pct - cfg.mold_guard_margin_pp
     )
     if (
-        free_cool_zone
+        # N4: no outdoor humidity -> the muggy-air veto cannot be evaluated,
+        # and free-cooling is a comfort decision: without the veto it stays
+        # silent rather than guessing.
+        have_moisture
+        and free_cool_zone
         and not cool_edge_protected
         and not surface_near_limit
         and room_c is not None
@@ -224,24 +259,37 @@ def ventilation_advise(
         and room_c > cool_edge_c
         and t_out_c
         <= room_c - (cfg.heat_out_dt_off_k if prev_heat_out else cfg.heat_out_dt_on_k)
+        and delta is not None
         and delta >= -cfg.heat_out_humid_guard_gm3
     ):
-        return VentilationAdvice("open", "heat_out", "ok", round(delta, 1))
+        return VentilationAdvice("open", "heat_out", "ok", _d)
     # Rules 3/4 — comfort, occupancy-gated. Asymmetric hysteresis on delta.
     threshold = cfg.delta_off_gm3 if prev_advice_active else cfg.delta_on_gm3
-    if occupied and delta >= threshold and w_in_gm3 > cfg.moist_gm3:
-        return VentilationAdvice("open", "moisture_out", "ok", round(delta, 1))
+    if (
+        have_moisture
+        and occupied
+        and delta is not None
+        and delta >= threshold
+        and w_in_gm3 > cfg.moist_gm3
+    ):
+        return VentilationAdvice("open", "moisture_out", "ok", _d)
+    # N4: CO2 needs no humidity at all — one of the rules the global gate used
+    # to swallow. Still inert until the ADR-0049 backend lands.
     if occupied and co2_ppm is not None and co2_ppm >= cfg.co2_ppm:
-        return VentilationAdvice("open", "co2", "ok", round(delta, 1))
+        return VentilationAdvice("open", "co2", "ok", _d)
     # Rule 3t close — the free-cooling episode ends (edge gone, room in band,
     # or outside turned muggy) while the window is still open. AFTER rules
     # 3/4 on purpose: a still-valid moisture/CO2 reason keeps the window open.
     if window_open and prev_heat_out:
-        return VentilationAdvice("close", "cooled_off", "ok", round(delta, 1))
+        return VentilationAdvice("close", "cooled_off", "ok", _d)
     # Rule 5b — close: the cause is gone (event-driven, not a timer).
-    if window_open and delta < cfg.delta_off_gm3:
-        return VentilationAdvice("close", "target_reached", "ok", round(delta, 1))
-    return VentilationAdvice("idle", "no_gain", "ok", round(delta, 1))
+    if window_open and delta is not None and delta < cfg.delta_off_gm3:
+        return VentilationAdvice("close", "target_reached", "ok", _d)
+    # N4: ``no_data`` survives as the honest token for "the moisture axis had
+    # nothing to say"; ``no_gain`` still means "it had, and the answer is no".
+    return VentilationAdvice(
+        "idle", "no_gain" if have_moisture else "no_data", "ok", _d
+    )
 
 
 # --- B.5 emission edge (ADR-0066): pure decision, delivery stays in glue ----
