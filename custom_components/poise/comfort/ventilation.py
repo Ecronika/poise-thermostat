@@ -25,6 +25,22 @@ DEFAULT_DELTA_OFF_GM3: float = 1.5  # asymmetric exit — same anti-chatter patt
 DEFAULT_DRY_ALERT_GM3: float = 5.0  # ~29 % RH @ 20 °C (design A.3)
 DEFAULT_DRY_WARN_GM3: float = 7.0  # ~40 % RH @ 20 °C — physiological floor
 DEFAULT_MOIST_GM3: float = 8.7  # 20 °C/50 % (DIN 4108-2 reference indoor climate)
+# N5: the two thresholds above are ABSOLUTE, and an absolute gram count means a
+# different relative humidity at every room temperature — 8.7 g/m³ is 56.8 % RH
+# at 18 °C but only 32.1 % at 28 °C. Both are therefore paired with a RELATIVE
+# companion, and both companions are the SAME point expressed on the other
+# axis, so nothing new had to be calibrated:
+#   * 8.7 g/m³ IS 50 % RH at the 20 °C reference temperature -> moist_rh_pct.
+#     The two conditions coincide at the reference climate the number comes
+#     from; below it the absolute test binds, above it the relative one does.
+#   * 7.0 g/m³ IS ~40 % RH at 20 °C. The dryness veto does NOT take 40 here
+#     but 35, deliberately: rule 2 sits ABOVE rule 3t, so a 40 % line would
+#     veto free-cooling for a summer room at 26 °C/40 % (9.8 g/m³ — not dry by
+#     any measure), and the veto would quietly cost the hot-day advice the 3t
+#     rule exists for. 35 % keeps that case free-coolable and still catches
+#     the physiologically dry room. Inside the 35–40 % band the review named.
+DEFAULT_MOIST_RH_PCT: float = 50.0
+DEFAULT_DRY_WARN_RH_PCT: float = 35.0
 DEFAULT_SURFACE_LIMIT_PCT: float = 80.0  # mould criterion (EN ISO 13788, mold.py)
 DEFAULT_SURFACE_MARGIN_PP: float = 5.0  # technical margin (sensor noise, f_Rsi)
 DEFAULT_CO2_PPM: float = 1000.0  # UBA de-facto ventilation line (ADR-0049)
@@ -53,6 +69,8 @@ class VentConfig:
     dry_alert_gm3: float = DEFAULT_DRY_ALERT_GM3
     dry_warn_gm3: float = DEFAULT_DRY_WARN_GM3
     moist_gm3: float = DEFAULT_MOIST_GM3
+    moist_rh_pct: float = DEFAULT_MOIST_RH_PCT
+    dry_warn_rh_pct: float = DEFAULT_DRY_WARN_RH_PCT
     surface_limit_pct: float = DEFAULT_SURFACE_LIMIT_PCT
     surface_margin_pp: float = DEFAULT_SURFACE_MARGIN_PP
     co2_ppm: float = DEFAULT_CO2_PPM
@@ -108,7 +126,9 @@ def ventilation_advise(
     occupied: bool,
     prev_advice_active: bool,
     cfg: VentConfig = _DEFAULT,
+    rh_pct: float | None = None,
     room_c: float | None = None,
+    room_decide_c: float | None = None,
     cool_edge_c: float | None = None,
     t_out_c: float | None = None,
     cool_capable: bool = False,
@@ -129,10 +149,20 @@ def ventilation_advise(
     humid outdoors would import moisture, so without a plausible gain the
     advice degrades silently (``no_data``/``no_gain``), never wrongly.
 
+    N5 (v0.194.3) pairs the two absolute humidity limits with a relative
+    companion, because a gram count means a different RH at every room
+    temperature: the moisture ENTRY needs both (they are the same point at the
+    20 °C reference, and each binds on its own side of it), the dryness VETO
+    accepts either. ``rh_pct`` is the room's own relative humidity — the
+    reading ``w_in_gm3`` was computed from, so at the seam the two always
+    arrive together.
+
     Rule 3t (free-cooling, v0.188.0) is the thermal sibling for zones that
     can neither cool nor move air (``cool_capable``/``fan_capable`` false —
-    the window is their only summer relief): room above the cool edge AND
-    outside at least ``heat_out_dt_on_k`` cooler opens; the episode holds
+    the window is their only summer relief): room above the cool edge (on
+    ``room_decide_c``, the temperature the comfort solver judges by) AND
+    outside at least ``heat_out_dt_on_k`` cooler than the room AIR (``room_c``
+    — a window exchanges air, see N5 at the rule) opens; the episode holds
     (``prev_heat_out``) until the edge shrinks below ``heat_out_dt_off_k`` or
     the room reaches the band, then ``cooled_off`` advises closing. The
     moisture guard vetoes muggy outside air (delta >= -humid_guard). NOT
@@ -232,7 +262,15 @@ def ventilation_advise(
     # the actionable advice is to close it. Same rule, same precedence, same
     # reason token; only the action follows the window state, exactly as rules
     # 1b/5a do.
-    if w_in_gm3 is not None and w_in_gm3 <= cfg.dry_warn_gm3 and outside_drier:
+    # N5: OR, not AND. The absolute gram count and the relative reading are two
+    # different ways for a room to be too dry, and each catches what the other
+    # misses — 7 g/m³ is the physiological floor for a 20 °C room, while a warm
+    # room can sit at 10 g/m³ and still be parched (26 °C/35 % = 8.5 g/m³ is
+    # ABOVE the absolute floor). Either one is enough to stop drying it further.
+    too_dry = (w_in_gm3 is not None and w_in_gm3 <= cfg.dry_warn_gm3) or (
+        rh_pct is not None and rh_pct <= cfg.dry_warn_rh_pct
+    )
+    if too_dry and outside_drier:
         return VentilationAdvice(
             "close" if window_open else "discourage", "too_dry", "warn", _d
         )
@@ -244,6 +282,23 @@ def ventilation_advise(
     # Rule 3t — free-cooling (heat_out): capability-gated (window-only zones),
     # asymmetric dT hysteresis, muggy-outside veto. Not occupancy-gated.
     free_cool_zone = not cool_capable and not fan_capable
+    # N5: rule 3t asks TWO physically different questions, and until v0.194.2
+    # both read the same ``room_c``:
+    #   1. "is the room above the comfort edge?" — that edge is the comfort
+    #      solver's, decided on ``room_decide`` (operative temperature when the
+    #      MRT model is on), and every other consumer of ``eff_cool`` in the
+    #      composition compares it against exactly that. Rule 3t compared it
+    #      against the AIR temperature, so with warm surfaces the solver could
+    #      say "too warm" (operative 26.0 over a 25.0 edge) while 3t saw no
+    #      cooling need at all (air 24.5 under 25.0).
+    #   2. "does opening the window help?" — that one is air against air. The
+    #      exchange through a window is an air exchange; feeding the operative
+    #      temperature into the dT hysteresis would credit the outside with the
+    #      whole MRT excess (1.5 K in the example above — most of the 2.0 K
+    #      entry threshold) and open against too little real gain.
+    # Hence two inputs. ``room_decide_c`` defaults to ``room_c``, so a caller
+    # that has only one temperature behaves exactly as before.
+    room_edge_c = room_decide_c if room_decide_c is not None else room_c
     # Guard 5 (N2): never advise cooling toward an edge that a protection floor
     # holds up, and stop one margin short of the mould-safe ceiling.
     surface_near_limit = (
@@ -261,9 +316,10 @@ def ventilation_advise(
         and not cool_edge_protected
         and not surface_near_limit
         and room_c is not None
+        and room_edge_c is not None
         and cool_edge_c is not None
         and t_out_c is not None
-        and room_c > cool_edge_c
+        and room_edge_c > cool_edge_c
         and t_out_c
         <= room_c - (cfg.heat_out_dt_off_k if prev_heat_out else cfg.heat_out_dt_on_k)
         and delta >= -cfg.heat_out_humid_guard_gm3
@@ -275,8 +331,18 @@ def ventilation_advise(
         occupied
         and delta is not None
         and delta >= threshold
+        # N5: AND, not OR — the two halves are the same line seen from two
+        # sides, and each is the binding one on its side of the 20 °C
+        # reference. Without the relative half a 28 °C room at 33 % RH carries
+        # 9 g/m³, clears the absolute 8.7 and gets told to air out a room that
+        # is objectively DRY; the dryness veto cannot catch it either, because
+        # its own limit (7 g/m³ = 25.8 % RH at 28 °C) is absolute too. Without
+        # the absolute half an 18 °C room at 52 % RH (8.0 g/m³) would be told
+        # to vent air that carries less water than the reference climate.
         and w_in_gm3 is not None
         and w_in_gm3 > cfg.moist_gm3
+        and rh_pct is not None
+        and rh_pct >= cfg.moist_rh_pct
     ):
         return VentilationAdvice("open", "moisture_out", "ok", _d)
     # N4: CO2 needs no humidity at all — one of the rules the global gate used
