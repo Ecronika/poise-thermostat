@@ -342,6 +342,9 @@ def stage_ingest(
             room=room,
             rh=rh,
             t_out_eff=t_out_eff,
+            # ADR-0066 N4.1: the raw reading travels alongside the effective
+            # one — the humidity axis may only use a measured outdoor value.
+            t_out_measured=t_out,
             t_rm_eff=t_rm_eff,
             t_rm_source=t_rm_source,
             q_solar=q_solar,
