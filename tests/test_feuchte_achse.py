@@ -83,6 +83,12 @@ def _advise(**kw: object) -> VentilationAdvice:
     base: dict[str, object] = {
         "w_in_gm3": 10.0,
         "w_out_gm3": 5.0,
+        # N5: the room's own RH, which the humidity limits are now paired
+        # with. 60 % is what 10.0 g/m³ means at ~21 °C, so the base case is
+        # physically consistent and sits clear of BOTH new lines (>= 50 for
+        # the moisture entry, <= 35 for the dryness veto) — every existing
+        # case keeps testing what it tested. The N5 cases below vary it.
+        "rh_pct": 60.0,
         "surface_rh_mean_pct": None,
         "mold_floor_binding": False,
         "mold_capped": False,
@@ -461,11 +467,22 @@ def test_ventilation_verdict_never_enters_the_control_path() -> None:
 # --- N4 (v0.194.2): the four corrections of the 2026-09-13 review -------------
 
 
-def _advise(**over: object) -> VentilationAdvice:
-    """A neutral tick: moist-ish room, drier outside, nothing else in play."""
+def _n4_advise(**over: object) -> VentilationAdvice:
+    """A neutral tick: moist-ish room, drier outside, nothing else in play.
+
+    Named apart from ``_advise`` above on purpose, and renamed in N5 after it
+    bit: written as a second ``_advise`` in N4, this definition SHADOWED the
+    module's own helper, so every earlier test in this file silently ran
+    against these defaults instead of theirs. It stayed invisible only because
+    both bases agreed wherever it mattered — until N5 added a key to one of
+    them and four unrelated tests failed. Two helpers, two names.
+    """
     base: dict[str, object] = dict(
         w_in_gm3=10.0,
         w_out_gm3=9.0,
+        # N5: see the note on the other helper — 60 % RH for ~10 g/m³, clear
+        # of both new lines so these cases keep testing what they test.
+        rh_pct=60.0,
         surface_rh_mean_pct=None,
         mold_floor_binding=False,
         mold_capped=False,
@@ -489,7 +506,7 @@ def test_n4_building_protection_survives_a_missing_outdoor_humidity() -> None:
     absent whenever the outdoor TEMPERATURE is: a global gate would have
     silenced the mould advice exactly when a sensor failed.
     """
-    guard = _advise(
+    guard = _n4_advise(
         w_out_gm3=None,
         window_open=True,
         surface_rh_pct=82.0,
@@ -499,21 +516,21 @@ def test_n4_building_protection_survives_a_missing_outdoor_humidity() -> None:
     assert (guard.action, guard.reason) == ("close", "mold_guard")
     assert guard.delta_gm3 is None  # no number is published without the data
 
-    floor = _advise(
+    floor = _n4_advise(
         w_in_gm3=None, w_out_gm3=None, window_open=True, room_at_thermal_floor=True
     )
     assert (floor.action, floor.reason) == ("close", "thermal_floor")
 
     # ...and the honest token survives for the case that really has nothing.
-    assert _advise(w_in_gm3=None, w_out_gm3=None).reason == "no_data"
+    assert _n4_advise(w_in_gm3=None, w_out_gm3=None).reason == "no_data"
 
 
 def test_n4_moisture_rules_stay_silent_without_both_sides() -> None:
     """The other half of the same change: a rule that NEEDS the comparison
     must not fire on half of it. Free-cooling included — its muggy-air veto is
     unevaluable without the outdoor value, and it is a comfort decision."""
-    assert _advise(w_out_gm3=None, w_in_gm3=12.0).reason == "no_data"
-    cool = _advise(
+    assert _n4_advise(w_out_gm3=None, w_in_gm3=12.0).reason == "no_data"
+    cool = _n4_advise(
         w_out_gm3=None,
         room_c=26.0,
         cool_edge_c=24.0,
@@ -526,10 +543,10 @@ def test_n4_too_dry_closes_an_open_window_instead_of_discouraging_it() -> None:
     """Same rule, same precedence, same token — only the verb follows the
     window state, as rules 1b and 5a already do. "Better not open" is not
     actionable advice for a window that is already open."""
-    assert _advise(w_in_gm3=6.0, w_out_gm3=4.0, window_open=True).action == "close"
-    assert _advise(w_in_gm3=6.0, w_out_gm3=4.0).action == "discourage"
+    assert _n4_advise(w_in_gm3=6.0, w_out_gm3=4.0, window_open=True).action == "close"
+    assert _n4_advise(w_in_gm3=6.0, w_out_gm3=4.0).action == "discourage"
     # the reason token is unchanged, so the card text and the event keep working
-    assert _advise(w_in_gm3=6.0, w_out_gm3=4.0, window_open=True).reason == "too_dry"
+    assert _n4_advise(w_in_gm3=6.0, w_out_gm3=4.0, window_open=True).reason == "too_dry"
 
 
 def test_n4_mold_risk_keeps_the_fixed_limit_on_purpose() -> None:
@@ -550,9 +567,11 @@ def test_n4_mold_risk_keeps_the_fixed_limit_on_purpose() -> None:
     assert (kitchen.action, kitchen.reason) == ("close", "mold_guard")
     # the dynamic ceiling is present in that very call — and deliberately not
     # what rule 1 reads.
-    assert _advise(surface_rh_mean_pct=72.0, rh_max_safe_pct=69.6).reason != "mold_risk"
+    assert (
+        _n4_advise(surface_rh_mean_pct=72.0, rh_max_safe_pct=69.6).reason != "mold_risk"
+    )
     # the fixed limit still fires where it should: absolutely wet surfaces.
-    assert _advise(surface_rh_mean_pct=76.0).reason == "mold_risk"
+    assert _n4_advise(surface_rh_mean_pct=76.0).reason == "mold_risk"
 
 
 def test_n4_1_outdoor_humidity_needs_a_measured_temperature() -> None:
@@ -568,11 +587,106 @@ def test_n4_1_outdoor_humidity_needs_a_measured_temperature() -> None:
     w_in = absolute_humidity(22.0, 55.0)
     honest = absolute_humidity(18.0, 80.0)
     assert w_in - honest < 0.0  # outside really is moister
-    assert _advise(w_in_gm3=w_in, w_out_gm3=honest).reason != "moisture_out"
+    assert _n4_advise(w_in_gm3=w_in, w_out_gm3=honest).reason != "moisture_out"
 
     for substitute in (10.0, 5.0):
         fabricated = absolute_humidity(substitute, 80.0)
         assert w_in - fabricated >= 3.0, "the substitute clears the open threshold"
-        assert _advise(w_in_gm3=w_in, w_out_gm3=fabricated).reason == "moisture_out", (
-            "which is precisely the wrong advice N4.1 removes at the source"
-        )
+        assert (
+            _n4_advise(w_in_gm3=w_in, w_out_gm3=fabricated).reason == "moisture_out"
+        ), "which is precisely the wrong advice N4.1 removes at the source"
+
+
+# --- N5 (v0.194.3): the follow-up review of v0.194.2 --------------------------
+
+
+def test_n5_free_cooling_separates_the_comfort_edge_from_the_air_gain() -> None:
+    """Rule 3t asks two questions and must read a different temperature for each.
+
+    The review's case, measured: air 24.5 °C, warm surfaces lifting the
+    operative temperature to 26.0, cooling edge 25.0. The comfort solver calls
+    that room too warm — it judges on ``room_decide`` and so does every other
+    consumer of ``eff_cool`` — while rule 3t, reading the air, saw 24.5 < 25.0
+    and stayed silent. Swapping the air for the operative value wholesale would
+    have been the mirror defect: the window exchanges AIR, so crediting the
+    outside with the 1.5 K radiant excess opens against a gain that is not
+    there.
+    """
+    kw: dict[str, object] = {
+        "w_in_gm3": 10.0,
+        "w_out_gm3": 10.0,  # delta 0 — no moisture rule in play
+        "cool_edge_c": 25.0,
+        "cool_capable": False,
+        "fan_capable": False,
+        "occupied": False,
+    }
+    # (a) operative over the edge AND a real 2.5 K air gain -> open.
+    assert (
+        _advise(room_c=24.5, room_decide_c=26.0, t_out_c=22.0, **kw).reason
+        == "heat_out"
+    )
+    # (b) same room, outside only 0.5 K under the AIR. The operative value
+    # would clear the 2.0 K entry (26.0 - 2.0 = 24.0 >= 24.0); the air does
+    # not. No advice — this is the half the wholesale swap would have broken.
+    assert (
+        _advise(room_c=24.5, room_decide_c=26.0, t_out_c=24.0, **kw).reason
+        != "heat_out"
+    )
+    # (c) the converse: air over the edge but COLD surfaces pulling the
+    # operative value under it. The solver does not call that room too warm,
+    # so neither may rule 3t.
+    assert (
+        _advise(room_c=25.5, room_decide_c=24.5, t_out_c=22.0, **kw).reason
+        != "heat_out"
+    )
+    # (d) no MRT model -> one temperature, and the rule behaves as before.
+    assert _advise(room_c=26.0, t_out_c=22.0, **kw).reason == "heat_out"
+
+
+def test_n5_moisture_entry_needs_the_absolute_and_the_relative_line() -> None:
+    """8.7 g/m³ alone told a hot, dry room to air itself out.
+
+    The threshold encodes 20 °C/50 %, the DIN 4108-2 reference indoor climate —
+    a DESIGN climate, never an operating threshold. Read as an operating one it
+    drifts with room temperature: the same 8.7 g/m³ is 56.8 % RH at 18 °C and
+    32.1 % at 28 °C. The dryness veto cannot catch the warm end, because its
+    own limit is absolute too (7 g/m³ = 25.8 % RH at 28 °C).
+    """
+    # 28 °C / 33 % = 8.96 g/m³: over the absolute line, objectively dry air.
+    assert _advise(w_in_gm3=8.96, w_out_gm3=5.0, rh_pct=33.0).reason != "moisture_out"
+    # 16 °C / 65 % = 8.84 g/m³: barely over the same line, and genuinely damp.
+    assert _advise(w_in_gm3=8.84, w_out_gm3=5.0, rh_pct=65.0).reason == "moisture_out"
+    # The relative line alone is not enough either: 18 °C / 52 % = 7.97 g/m³
+    # carries less water than the reference climate.
+    assert _advise(w_in_gm3=7.97, w_out_gm3=4.0, rh_pct=52.0).reason != "moisture_out"
+
+
+def test_n5_dryness_veto_takes_either_axis() -> None:
+    """The veto is an OR, and each half catches what the other cannot."""
+    # absolute half, unchanged: 7 g/m³ in a normally humid-reading room.
+    assert _advise(w_in_gm3=6.0, w_out_gm3=3.0, rh_pct=55.0).reason == "too_dry"
+    # relative half: 26 °C / 33 % = 8.02 g/m³ — ABOVE the absolute floor and
+    # still parched. Nothing objected to drying it further before N5.
+    assert _advise(w_in_gm3=8.02, w_out_gm3=5.0, rh_pct=33.0).reason == "too_dry"
+
+
+def test_n5_dryness_line_sits_at_35_so_summer_free_cooling_survives() -> None:
+    """Why the relative dryness line is 35 % and not the 40 % that mirrors 7 g/m³.
+
+    Rule 2 sits ABOVE rule 3t. A 40 % line would veto free-cooling for a 26 °C
+    room at 40 % RH (9.72 g/m³ — dry by no measure), and the veto would quietly
+    cost the hot-day advice that rule 3t exists for. 35 % keeps that case
+    free-coolable and still catches the genuinely dry room one step below.
+    """
+    summer: dict[str, object] = {
+        "w_in_gm3": 9.72,  # 26 °C / 40 %
+        "w_out_gm3": 8.0,  # drier outside, so rule 2 would be actionable
+        "room_c": 26.0,
+        "cool_edge_c": 24.5,
+        "t_out_c": 21.0,
+        "cool_capable": False,
+        "fan_capable": False,
+        "occupied": False,
+    }
+    assert _advise(rh_pct=40.0, **summer).reason == "heat_out"
+    assert _advise(rh_pct=34.0, **summer).reason == "too_dry"

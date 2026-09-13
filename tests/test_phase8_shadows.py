@@ -577,6 +577,13 @@ def _climate_band(
     # ADR-0066 humidity axis: absent by default, exactly like every caller
     # before N2 — without an outdoor source the advice stays ``no_data``.
     room: float = 22.0,
+    # ADR-0066 N5: the temperature the comfort solver decides on — operative
+    # when the MRT model is on, the air temperature otherwise. ``None`` means
+    # "no MRT model", and the helper then mirrors ``room``, which is what the
+    # composition sees on a zone without a radiant estimate. It used to be
+    # pinned at 22.0 regardless of ``room``; that was invisible until rule 3t
+    # started reading it, and then made a 23.0 °C room look like a 22.0 °C one.
+    room_decide: float | None = None,
     eff_cool: float = 26.5,
     window_open: bool = False,
     t_out_eff: float | None = None,
@@ -602,7 +609,7 @@ def _climate_band(
         heat_sp=21.0,
         cool_sp=26.0,
         room=room,
-        room_decide=22.0,
+        room_decide=room if room_decide is None else room_decide,
         t_rm_eff=18.0,
         t_mrt=22.5,
         rh=rh,
@@ -745,6 +752,44 @@ def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> Non
     # ... and the mould chain still computed, from t_out_eff, exactly as before.
     assert isinstance(diag["rh_max_safe"], float)
     assert isinstance(diag["surface_rh"], float)
+
+
+def test_free_cooling_edge_is_judged_on_the_operative_temperature() -> None:
+    """ADR-0066 N5 at the seam: ``eff_cool`` is the comfort solver's edge.
+
+    Every other consumer in this composition compares that edge against
+    ``room_decide`` — ``in_deadband`` two dozen lines up does exactly that.
+    Rule 3t compared it against the air temperature, so a room the solver calls
+    too warm (operative 26.0 over a 25.0 edge) could get no free-cooling advice
+    at all because its air sat at 24.5. The air keeps the dT hysteresis: a
+    window exchanges air, not radiation.
+    """
+    warm_surfaces = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],  # window-only zone
+        room=24.5,  # air
+        room_decide=26.0,  # operative — warm surfaces, sunlit room
+        eff_cool=25.0,
+        rh=50.0,
+        t_out_eff=22.0,
+        rh_out=55.0,  # delta +0.5 g/m³: no moisture rule in play
+    )
+    assert (warm_surfaces["vent_action"], warm_surfaces["vent_reason"]) == (
+        "open",
+        "heat_out",
+    )
+    # Same zone without a radiant estimate: operative == air, 24.5 is under
+    # the 25.0 edge, and the advice is correctly silent.
+    air_only = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],
+        room=24.5,
+        eff_cool=25.0,
+        rh=50.0,
+        t_out_eff=22.0,
+        rh_out=55.0,
+    )
+    assert air_only["vent_reason"] != "heat_out"
 
 
 def test_compose_climate_band_publishes_the_dose_state() -> None:
