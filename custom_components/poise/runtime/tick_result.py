@@ -326,6 +326,15 @@ class IngestResult:
     mrt_source: str
     mrt_internal: float
     health_updates: tuple[HealthUpdate, ...] = ()
+    # ADR-0066 N4.1: the MEASURED outdoor temperature, or None when the sensor
+    # did not deliver this tick. ``t_out_eff`` above is the CONTROL value and
+    # substitutes T_rm or a fixed fallback — deliberately, and conservatively,
+    # for the thermal chain. That substitute must never reach a humidity
+    # calculation: pairing an old temperature with the current outdoor RH
+    # yields an air state that does not exist. Defaults to None so a caller
+    # that forgets it degrades to "no outdoor humidity" instead of to a
+    # fabricated one.
+    t_out_measured: float | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
