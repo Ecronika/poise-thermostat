@@ -135,6 +135,7 @@ def ventilation_advise(
     fan_capable: bool = False,
     prev_heat_out: bool = False,
     prev_moisture_airing: bool = False,
+    prev_moisture_protect: bool = False,
     surface_rh_pct: float | None = None,
     rh_max_safe_pct: float | None = None,
     cool_edge_protected: bool = False,
@@ -303,16 +304,65 @@ def ventilation_advise(
         and rh_pct is not None
         and rh_pct >= cfg.moist_rh_pct
     )
+    # N7 (2026-09-14) — the SECOND entry into the same moisture episode, and
+    # the one the bathroom needed: moisture removal is building protection,
+    # not comfort, once the room carries more vapour than its own fabric
+    # tolerates. Ungated by occupancy, for the reason N1 already gave for
+    # free-cooling — a bathroom is at its wettest exactly when nobody is left
+    # standing in it, and a presence model is least certain precisely then.
+    #
+    # The limit is ``rh_max_safe``: the room-air RH at which the modelled
+    # surface sits on its critical line. It is the SAME limit rule 1b reads —
+    # since N7.1 in the same coordinate — so the two can never disagree about
+    # whether the fabric is over its line, only about what to do while the
+    # window is open, and there the stand-down below decides.
+    #
+    # Own hysteresis on the own reason, not on the global ``prev_advice_active``
+    # anchor: entry at ``delta_on``, hold at ``delta_off``. That is the
+    # cause-specific shape the rest of the axis is meant to grow into.
+    protect_threshold = cfg.delta_off_gm3 if prev_moisture_protect else cfg.delta_on_gm3
+    protect_reason_valid = (
+        rh_pct is not None
+        and rh_max_safe_pct is not None
+        and rh_pct > rh_max_safe_pct
+        and delta is not None
+        and delta >= protect_threshold
+        # An ENFORCED floor means the fabric is already being paid for with
+        # heat; airing then works against the protection rather than for it.
+        and not cool_edge_protected
+    )
     own_airing_running = (
         prev_moisture_airing and moisture_reason_valid and not cool_edge_protected
-    )
+    ) or (prev_moisture_protect and protect_reason_valid)
     if (
         window_open
         and not own_airing_running
         and surface_needs_warmer
-        and surface_rh_pct is not None
+        and rh_pct is not None
         and rh_max_safe_pct is not None
-        and surface_rh_pct > rh_max_safe_pct
+        # N7.1 (external review 2026-09-14): the canonical comparison. Until
+        # v0.194.4 this read ``surface_rh_pct > rh_max_safe_pct`` — a SURFACE
+        # relative humidity against a ROOM-air ceiling. Both are "% RH", but at
+        # different reference temperatures, so they are two coordinates of the
+        # same vapour load and not comparable; the quotient
+        # ``p_sat(T_room)/p_sat(T_si)`` ran at 1.20-1.27 in the field, i.e. the
+        # rule fired from roughly ``rh_max_safe / 1.2`` upwards. Measured on
+        # three real ticks it fired in all three, while the canonical limit was
+        # exceeded in only one: bathroom +6.2 pp, bedroom -0.8 pp, the 2026-08-19
+        # kitchen -2.6 pp. The two field cases N2 and N6 were built on were
+        # therefore NOT over the mould line.
+        #
+        # ``rh_max_safe_pct`` IS the safe ROOM-air RH, so the like-for-like form
+        # is the room's own ``rh_pct`` — no new value, no new parameter (N5 put
+        # ``rh_pct`` in this signature). ``surface_rh_pct > critical_rh`` would
+        # be equivalent but would have to carry ``critical_rh`` in first;
+        # ``w_in > abs_max_safe`` is the same limit again in absolute
+        # coordinates. One limit, three coordinate systems.
+        #
+        # ``surface_rh_pct`` stays in the signature: it is what the CARD shows
+        # and what makes the severity legible, and the guard's other half
+        # (``surface_needs_warmer``) is a temperature comparison, untouched.
+        and rh_pct > rh_max_safe_pct
     ):
         # N4: reachable without any humidity data now — which is what its own
         # comment above always claimed. N6 does not change that: without the
@@ -342,6 +392,36 @@ def ventilation_advise(
     # over any comfort reason to keep venting.
     if window_open and room_at_thermal_floor:
         return VentilationAdvice("close", "thermal_floor", "warn", _d)
+    # Rule 2b (N7) — moisture removal as BUILDING PROTECTION, never gated.
+    # Predicate computed above rule 1b, because the guard's stand-down defers
+    # to it. Placed HERE, below the guard and below the thermal floor, and
+    # deliberately not above them:
+    #
+    #   * below 1b, because an open window over a room that is over its line
+    #     is the N2 situation, and letting this rule outrank the guard would
+    #     re-open exactly the conflict N6 closed. The way to keep a window
+    #     open is the stand-down — this rule's OWN running episode — not a
+    #     higher precedence. The 2026-09-13 glue scenario proves the point:
+    #     23 °C/60 % against a 58.4 % ceiling is over the line too, and a
+    #     rule 2b above the guard would turn that close back into an open.
+    #   * below 5a, because a room whose AIR has reached the protection floor
+    #     is being cooled below it by further airing.
+    #
+    # What it does change is the case the guard can never reach: a CLOSED
+    # window. The bathroom of 2026-09-14 — 69.5 % against a 63.3 % ceiling,
+    # 5.1 g/m³ to gain, empty for seven hours — had every moisture condition
+    # met and was silent only because rule 3 is occupancy-gated.
+    if protect_reason_valid:
+        return VentilationAdvice("open", "moisture_protect", "warn", _d)
+    # Rule 2b-close (N7) — the episode this axis started must end explicitly.
+    # Without it a protection airing that reaches its goal while the outside
+    # air is still much drier falls through to ``no_gain`` and leaves the
+    # window open with an ``idle`` advice: rule 5b only closes on a spent
+    # DELTA, and the delta is not what ended this episode. ``target_reached``
+    # is the honest token — the cause is gone, event-driven, exactly what it
+    # has always meant.
+    if window_open and prev_moisture_protect and not moisture_reason_valid:
+        return VentilationAdvice("close", "target_reached", "ok", _d)
     # Rule 3t — free-cooling (heat_out): capability-gated (window-only zones),
     # asymmetric dT hysteresis, muggy-outside veto. Not occupancy-gated.
     free_cool_zone = not cool_capable and not fan_capable
