@@ -275,7 +275,37 @@ def ventilation_advise(
     # An ENFORCED protection floor overrides the stand-down: once a floor is
     # actually holding the cooling edge up, the fabric is already paying and
     # the advice stays "close" whatever the episode says.
-    own_airing_running = prev_moisture_airing and not cool_edge_protected
+    #
+    # N6b: "an episode is running" is not enough — it must still be VALID.
+    # The predicate of rule 3 is therefore computed ONCE, here, and consumed
+    # in both places; rebuilding it in two spots is how the first draft came
+    # to stand down on ``delta >= delta_on`` while the rule it was protecting
+    # held on down to ``delta_off``. With one predicate the stand-down starts
+    # and ends exactly with the reason it defers to — including the indoor
+    # humidity lines, so a room that has dried below them stops being a
+    # reason to keep the window open even while the outside air is still
+    # much drier.
+    threshold = cfg.delta_off_gm3 if prev_advice_active else cfg.delta_on_gm3
+    moisture_reason_valid = (
+        occupied
+        and delta is not None
+        and delta >= threshold
+        # N5: AND, not OR — the two halves are the same line seen from two
+        # sides, and each is the binding one on its side of the 20 °C
+        # reference. Without the relative half a 28 °C room at 33 % RH carries
+        # 9 g/m³, clears the absolute 8.7 and gets told to air out a room that
+        # is objectively DRY; the dryness veto cannot catch it either, because
+        # its own limit (7 g/m³ = 25.8 % RH at 28 °C) is absolute too. Without
+        # the absolute half an 18 °C room at 52 % RH (8.0 g/m³) would be told
+        # to vent air that carries less water than the reference climate.
+        and w_in_gm3 is not None
+        and w_in_gm3 > cfg.moist_gm3
+        and rh_pct is not None
+        and rh_pct >= cfg.moist_rh_pct
+    )
+    own_airing_running = (
+        prev_moisture_airing and moisture_reason_valid and not cool_edge_protected
+    )
     if (
         window_open
         and not own_airing_running
@@ -359,24 +389,9 @@ def ventilation_advise(
     ):
         return VentilationAdvice("open", "heat_out", "ok", _d)
     # Rules 3/4 — comfort, occupancy-gated. Asymmetric hysteresis on delta.
-    threshold = cfg.delta_off_gm3 if prev_advice_active else cfg.delta_on_gm3
-    if (
-        occupied
-        and delta is not None
-        and delta >= threshold
-        # N5: AND, not OR — the two halves are the same line seen from two
-        # sides, and each is the binding one on its side of the 20 °C
-        # reference. Without the relative half a 28 °C room at 33 % RH carries
-        # 9 g/m³, clears the absolute 8.7 and gets told to air out a room that
-        # is objectively DRY; the dryness veto cannot catch it either, because
-        # its own limit (7 g/m³ = 25.8 % RH at 28 °C) is absolute too. Without
-        # the absolute half an 18 °C room at 52 % RH (8.0 g/m³) would be told
-        # to vent air that carries less water than the reference climate.
-        and w_in_gm3 is not None
-        and w_in_gm3 > cfg.moist_gm3
-        and rh_pct is not None
-        and rh_pct >= cfg.moist_rh_pct
-    ):
+    # The predicate itself is ``moisture_reason_valid``, computed above rule 1b
+    # because the mould guard's stand-down defers to exactly this reason (N6b).
+    if moisture_reason_valid:
         return VentilationAdvice("open", "moisture_out", "ok", _d)
     # N4: CO2 needs no humidity at all — one of the rules the global gate used
     # to swallow. Still inert until the ADR-0049 backend lands.
