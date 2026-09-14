@@ -422,6 +422,16 @@ test("ventChip shows the open advice and the mould guard only (ADR-0066 N2)", ()
     alert: false,
   });
   assert.equal(ventChip("open", "mold_risk", "alert")!.alert, true);
+  // ADR-0066 N7: the ungated sibling of ``moisture_out`` carries its own
+  // label — same action, different justification (the room is over the
+  // humidity its own fabric tolerates), and it fires with nobody in the room.
+  assert.deepEqual(ventChip("open", "moisture_protect", "warn"), {
+    labelKey: "vent_open",
+    reasonKey: "vent_moisture_protect",
+    alert: false,
+  });
+  assert.equal(t("de", "vent_moisture_protect"), "Bauteilschutz");
+  assert.equal(t("en", "vent_moisture_protect"), "fabric protection");
   // A reason the card does not know yet still shows the advice, without the
   // bracket — never a raw token in the UI.
   assert.equal(ventChip("open", "brand_new_reason", "ok")!.reasonKey, null);
