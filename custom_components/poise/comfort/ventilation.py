@@ -246,15 +246,41 @@ def ventilation_advise(
     # docstring. The rule-1 precedence above is also what keeps the obvious
     # false positive out: a bathroom after a shower has an acute mean too, and
     # with drier air outside rule 1 says "open" before this rule is reached.
+    # N6 (live finding, bedroom 2026-09-14): the rule STANDS DOWN while airing
+    # is the cure. Its two physical conditions say nothing about the window —
+    # they were already true with it shut — so the only window-dependent term
+    # was the contact itself, and since 1b outranks rule 3, the advice
+    # inverted on the contact: open the window and the same second it said
+    # "close", close it and it said "open". Not a missing hysteresis, a
+    # missing FEEDBACK: nothing in the rule measured what the airing achieved.
+    #
+    # The separating question is what drives the risk. Where the outside air
+    # is drier by at least the moisture rule's own entry gain, airing lowers
+    # the indoor vapour — and with it the surface RH — faster than it cools
+    # the surfaces, so the window is the treatment, not the cause. Where it
+    # is not, the N2 reading holds: the surfaces are cooling behind an open
+    # window and the window has to shut. The live cases separate cleanly on
+    # this line — the 2026-08-19 kitchen had 1.6 g/m³ to gain, the 2026-09-14
+    # bedroom 3.7 — and no new number was needed for it.
+    #
+    # An ENFORCED protection floor overrides the stand-down: once a floor is
+    # actually holding the cooling edge up, the fabric is already paying and
+    # the advice stays "close" whatever the outside air offers.
+    airing_is_the_cure = (
+        not cool_edge_protected and delta is not None and delta >= cfg.delta_on_gm3
+    )
     if (
         window_open
+        and not airing_is_the_cure
         and surface_needs_warmer
         and surface_rh_pct is not None
         and rh_max_safe_pct is not None
         and surface_rh_pct > rh_max_safe_pct
     ):
         # N4: reachable without any humidity data now — which is what its own
-        # comment above always claimed.
+        # comment above always claimed. N6 does not change that: with no
+        # outdoor humidity there is no ``delta``, so nothing argues that
+        # airing would help, and the rule still speaks.
         return VentilationAdvice("close", "mold_guard", "warn", _d)
     # Rule 2 — dryness veto (never gated): venting a dry room against drier
     # outside air over-dries it further.
