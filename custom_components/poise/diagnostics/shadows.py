@@ -651,6 +651,9 @@ def compose_climate_band(
         # open-advices that argue from moisture count; ``heat_out`` does not —
         # that one is the thermal rule and carries its own guards.
         prev_moisture_airing=prev_vent_reason in ("moisture_out", "mold_risk"),
+        # N7: the protection entry holds on its OWN reason, so the axis can
+        # grow cause-specific hysteresis one rule at a time.
+        prev_moisture_protect=prev_vent_reason == "moisture_protect",
         # N2: the mould guard. The EDGE is what matters, not which value the
         # floor happened to raise: a floor under the setpoint (the winter
         # normal case, floor 22.1 / edge 25.0) leaves free-cooling perfectly
