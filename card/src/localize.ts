@@ -89,6 +89,7 @@ const EN: Dict = {
   vent_open: "Air out",
   vent_mold_risk: "mould risk",
   vent_moisture_out: "moisture",
+  vent_moisture_protect: "fabric protection",
   vent_co2: "CO₂",
   vent_heat_out: "cooler outside",
   // ADR-0066 N2: the one CLOSE advice worth a chip.
@@ -182,6 +183,7 @@ const DE: Dict = {
   vent_open: "Lüften",
   vent_mold_risk: "Schimmelrisiko",
   vent_moisture_out: "Feuchte",
+  vent_moisture_protect: "Bauteilschutz",
   vent_co2: "CO₂",
   vent_heat_out: "draußen kühler",
   vent_close: "Fenster schließen",

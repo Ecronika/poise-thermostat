@@ -258,7 +258,17 @@ export interface VentChip {
 // Open reasons the card can name. An unknown one still shows the advice —
 // dropping it would hide a real recommendation, printing the raw token would
 // be worse than saying nothing about the why.
-const VENT_OPEN_REASONS = ["mold_risk", "moisture_out", "co2", "heat_out"];
+// ADR-0066 N7: ``moisture_protect`` is the ungated sibling of
+// ``moisture_out`` — same action, different justification (the room
+// carries more vapour than its own fabric tolerates), so it deserves its
+// own label rather than the comfort one.
+const VENT_OPEN_REASONS = [
+  "mold_risk",
+  "moisture_out",
+  "moisture_protect",
+  "co2",
+  "heat_out",
+];
 // Close advices are silent by default: "you may shut the window again" is an
 // all-clear, not a task. The mould guard is the exception (ADR-0066 N2) —
 // there the fabric is already over its limit and closing IS the action.
