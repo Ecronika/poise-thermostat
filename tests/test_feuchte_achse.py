@@ -777,3 +777,104 @@ def test_n6_stand_down_stays_silent_without_outdoor_humidity() -> None:
     blind = _bedroom_0914(w_out_gm3=None)
     assert (blind.action, blind.reason) == ("close", "mold_guard")
     assert blind.delta_gm3 is None
+
+
+def test_n6b_stand_down_shares_the_moisture_rule_own_hysteresis() -> None:
+    """External review of b024be0, finding 1 — the version it found is gone,
+    the case it named is pinned here.
+
+    The first N6 draft keyed the stand-down on ``delta >= delta_on`` (3.0)
+    while the rule it was protecting holds a running episode down to
+    ``delta_off`` (1.5). Airing would then have re-armed the guard at 3.0 and
+    the advice would have flipped a second time — at the threshold instead of
+    at the window contact. One predicate, computed once, cannot drift like
+    that: the stand-down starts and ends exactly with ``moisture_out``.
+    """
+    # 3.7 -> 2.5 -> 2.0: below the 3.0 entry, above the 1.5 exit, episode runs
+    for w_out in (8.3, 9.5, 10.0):
+        advice = _bedroom_0914(
+            w_out_gm3=w_out, prev_moisture_airing=True, prev_advice_active=True
+        )
+        assert (advice.action, advice.reason) == ("open", "moisture_out"), w_out
+    # ... and the tick the episode expires the guard takes over in the SAME
+    # tick, not one later: no ``idle`` gap over an open window and wet walls.
+    ended = _bedroom_0914(
+        w_out_gm3=10.6, prev_moisture_airing=True, prev_advice_active=True
+    )
+    assert (ended.action, ended.reason) == ("close", "mold_guard")
+
+
+def test_n6b_stand_down_needs_the_whole_moisture_reason_not_just_the_gain() -> None:
+    """External review of b024be0, finding 2 — his constructed counter-case.
+
+    Window open, surfaces critical, no floor, indoor 8.6 g/m³ at 45 % RH
+    against 5.0 outside: 3.6 g/m³ of gain, but the room is below BOTH indoor
+    humidity lines, so ``moisture_out`` cannot fire. A stand-down that asks
+    only "is it drier outside" would suppress the guard and leave the advice
+    at ``idle`` over an open window and wet walls, waiting for the generic
+    close at delta < 1.5. Asking for the whole reason answers it correctly
+    whether or not an episode preceded it.
+    """
+    for running in (False, True):
+        advice = _bedroom_0914(
+            w_in_gm3=8.6,
+            rh_pct=45.0,
+            w_out_gm3=5.0,
+            prev_moisture_airing=running,
+            prev_advice_active=running,
+        )
+        assert (advice.action, advice.reason) == ("close", "mold_guard"), running
+
+
+def test_n6b_cold_winter_air_does_not_switch_the_guard_off() -> None:
+    """External review of b024be0, finding 3, and the integration suite's own
+    verdict on the first draft.
+
+    Cold outdoor air is absolutely drier by construction: 23 °C/60 % indoors
+    against 6 °C/85 % outdoors is 6.2 g/m³ of gain — more than the bedroom
+    that started all this. A gain-keyed stand-down would have disabled the
+    mould guard for the whole heating season. This is the emission rail's own
+    glue scenario, stated as a pure case.
+    """
+    winter = _bedroom_0914(
+        w_in_gm3=12.31,
+        w_out_gm3=6.16,
+        rh_pct=60.0,
+        room_c=23.0,
+        cool_edge_c=22.4,
+        t_out_c=6.0,
+        surface_rh_pct=82.2,
+        rh_max_safe_pct=58.4,
+        surface_rh_mean_pct=54.8,
+        prev_moisture_airing=False,
+        prev_advice_active=False,
+    )
+    assert (winter.action, winter.reason) == ("close", "mold_guard")
+
+
+def test_n6b_episode_hands_over_to_the_guard_in_order() -> None:
+    """The full transition the review asked to see, tick by tick."""
+    seq = [
+        # shut window, moisture reason valid -> open
+        _bedroom_0914(window_open=False, prev_moisture_airing=False),
+        # user opens it; the axis does not take its own advice back
+        _bedroom_0914(prev_moisture_airing=True, prev_advice_active=True),
+        # airing works, delta falls but the episode still holds (2.0 > 1.5)
+        _bedroom_0914(
+            w_out_gm3=10.0, prev_moisture_airing=True, prev_advice_active=True
+        ),
+        # the reason expires and the guard, still looking at wet walls, closes
+        _bedroom_0914(
+            w_out_gm3=10.6, prev_moisture_airing=True, prev_advice_active=True
+        ),
+        # window shut again -> the guard cannot fire, and nothing argues for
+        # opening either
+        _bedroom_0914(w_out_gm3=10.6, window_open=False, prev_moisture_airing=False),
+    ]
+    assert [(a.action, a.reason) for a in seq] == [
+        ("open", "moisture_out"),
+        ("open", "moisture_out"),
+        ("open", "moisture_out"),
+        ("close", "mold_guard"),
+        ("idle", "no_gain"),
+    ]
