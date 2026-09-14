@@ -198,3 +198,52 @@ Ohne Außenfeuchte kann keine Feuchteregel das Öffnen geraten haben, also läuf
 **Nachweise (N6).** `tests/test_feuchte_achse.py`: `test_n6_advice_no_longer_inverts_on_the_window_contact` (der Live-Tick, vor und nach dem Öffnen), `test_n6_stand_down_is_only_for_this_axis_own_running_episode` (keine Episode, greifender Boden, `heat_out` als Vorgänger, und der unveränderte N2-Küchenfall), `test_n6_stand_down_stays_silent_without_outdoor_humidity`. `tests/test_phase8_shadows.py`: `test_mold_guard_releases_on_a_wider_margin_than_it_enters` an der Naht, und die N3-Probe um ihre N6-Gegenprobe ergänzt — identische Eingänge, einziger Unterschied ist die laufende Episode. `tests/integration/test_vent_advice_glue.py` läuft unverändert wieder grün; es war der Fund.
 
 **Offen (unverändert):** ursachenspezifische Ausstiege über `prev_vent_reason` statt des generischen `target_reached`; g/kg als interne Rechengröße; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung — N6 nimmt dem EWMA-Befund die Dringlichkeit, hebt ihn aber nicht auf.
+
+## Nachtrag N7 (2026-09-14, v0.194.5): `mold_guard` vergleicht wieder gleiche Bezugsgrößen; ungegateter Feuchte-Schutzrat `moisture_protect` — umgesetzt
+
+**Anlass:** der [Bad-Feldbefund](../reviews/2026-09-14-Feldbefund-Bad-ohne-Lueftungsrat.md) und die externe Prüfung dazu. Der Bericht deckte zwei unabhängige Probleme auf: dem akuten Bauteilschutz fehlt ein ungegateter Lüftungsrat, und der bestehende `mold_guard` rechnete mit einem bezugsgrößenfalschen RH-Vergleich.
+
+### N7.1 — Die Schimmelgrenze wird auf der Raumluft gelesen, nicht auf der Oberfläche
+
+Regel 1b prüfte seit N2 `surface_rh_pct > rh_max_safe_pct`. Links steht eine **Oberflächen**-RH, rechts die **Raumluft**-Obergrenze (`max_safe_rh` sagt es im eigenen Docstring: „Mould-safe **ROOM**-RH ceiling"). Beide sind „% RH", aber bei **verschiedenen Bezugstemperaturen** — zwei Koordinaten derselben Wasserdampfmenge, nicht direkt vergleichbar. Der Quotient `p_sat(T_Raum)/p_sat(T_si)` lag im Feld bei 1,20–1,27, die Regel sprach also ab etwa `rh_max_safe / 1,2` an.
+
+An drei realen Ticks nachgerechnet (t_out jeweils aus den publizierten Werten zurückgerechnet; die Nachrechnung reproduziert `surface_rh` und `rh_max_safe` auf 0,1 genau):
+
+| Fall | Raum vs `rh_max_safe` | Oberfläche vs `critical_rh` | w_in vs `abs_max_safe` | kanonisch kritisch? |
+|---|---|---|---|---|
+| Bad, 14.09. | 69,5 vs 63,3 → **+6,2** | 87,9 vs 80,0 → **+7,9** | **+1,24** | ja |
+| Schlafzimmer, 14.09. | 62,0 vs 62,8 → **−0,8** | 79,0 vs 80,0 → **−1,0** | **−0,15** | **nein** |
+| Küche, 19.08. (Anlass von N2) | 66,0 vs 68,6 → **−2,6** | 77,0 vs 80,0 → **−3,0** | **−0,53** | **nein** |
+
+Die drei kanonischen Formen stimmen exakt überein — **eine** Grenze in drei Koordinatensystemen. Der alte Vergleich war eine vierte Variante und die einzige, die in allen drei Fällen auslöste.
+
+**Entscheidung:** `rh_pct > rh_max_safe_pct`. Gleiche Bezugsgröße auf beiden Seiten, keine neue Schnittstelle — `rh_pct` steht seit N5 ohnehin in der Signatur. `surface_rh_pct` bleibt Parameter und Attribut: es ist, was die Karte zeigt und was die Schwere lesbar macht; die andere Hälfte des Wächters (`surface_needs_warmer`) ist ein Temperaturvergleich und unberührt. `surface_rh > critical_rh` wäre gleichwertig, müsste aber `critical_rh` erst in die pure Funktion tragen; `w_in > abs_max_safe` ist dieselbe Grenze absolut und taugt als **Schweregrad** („der Raum trägt 1,24 g/m³ mehr Wasserdampf, als die Bauteilsituation zulässt"), nicht als zweite Bedingung.
+
+**Tragweite, offen ausgesprochen:** Die beiden Feldfälle, auf denen N2 und N6 aufgebaut wurden, waren nach der kanonischen Grenze **nicht** kritisch. Der Schlafzimmer-Flip von N6 hätte es unter N7.1 gar nicht gegeben — die N6-Standdown-Logik bleibt trotzdem richtig und nötig, nur greift sie jetzt bei Räumen, die wirklich über ihrer Linie liegen. Der thermische Teil von N2 (Wächter 5, `cool_edge_protected`/`surface_needs_warmer`) ist unberührt und verhindert den ursprünglichen `heat_out`-Fehlrat weiterhin.
+
+**Folge für die Fixtures:** Die Testvorlagen führten Raum-RH, Oberflächen-RH und Decke unabhängig voneinander und waren dadurch physikalisch inkonsistent (77 % Oberfläche, 69,6 % Decke, 60 % Raum — zueinander unmöglich). Sie tragen jetzt zusammengehörige Werte, und die historischen Ticks haben ihren eigenen Fall (`test_n7_1_the_two_field_cases_were_under_their_own_limit`).
+
+### N7.2 — `moisture_protect`: Feuchteabfuhr als Gebäudeschutz, nicht als Komfort
+
+**Anlass (Bad, 14.09. 07:41):** 22,4 °C / 69,5 % rF (13,8 g/m³) gegen 8,6 außen — 5,1 g/m³ Gewinn —, 6,2 pp über der eigenen sicheren Raumgrenze, kein Schutzboden greift, Fenster zu. `moisture_out` erfüllte **jede** Feuchtebedingung und schwieg allein an `occupied=False`; der einzige ungegatete Öffnen-Rat (`mold_risk`) wartete auf ein 48-h-Mittel, das 5,6 pp zu niedrig stand und ~17 h unveränderter Bedingungen gebraucht hätte.
+
+**Entscheidung:** ein **zweiter Eintritt in dieselbe Feuchte-Episode**, nicht eine konkurrierende Regel:
+
+* **Eintritt** (ungegatet): `rh_pct > rh_max_safe_pct` **und** Δ ≥ `delta_on_gm3` **und** kein durchgreifender Schutzboden.
+* **Halten**: an der **eigenen** Vorgeschichte (`prev_vent_reason == "moisture_protect"`) mit `delta_off_gm3` — die ursachenspezifische Form, in die der Rest der Achse noch wachsen soll, statt am globalen `prev_advice_active`.
+* **Ausstieg**: fällt der Grund weg, während das Fenster offen ist, gibt es einen **expliziten `close`/`target_reached`** — Regel 5b wartet auf ein verbrauchtes Δ, und das Δ ist nicht, was diese Episode beendet hat. Ohne den Ausstieg bliebe das Fenster unter einem `idle`-Rat offen stehen.
+* **Standdown**: `mold_guard` schweigt auch für diese Episode (N6 unverändert, zweiter Anker).
+
+**Platzierung: unter 1b und unter 5a, bewusst.** Ein bereits offenes Fenster über einem Raum über seiner Linie *ist* die N2-Lage; diese Regel über den Wächter zu stellen würde genau den Konflikt wieder öffnen, den N6 geschlossen hat — das Glue-Szenario vom 13.09. (23 °C/60 % gegen eine 58,4-%-Decke) liegt ebenfalls über seiner Linie. Der Weg, ein Fenster offen zu halten, ist der Standdown über die **eigene laufende Episode**, nicht eine höhere Präzedenz. Unter 5a, weil ein Raum, dessen **Luft** den Schutzboden erreicht hat, durch weiteres Lüften darunter gekühlt wird. Was die Regel dadurch ändert, ist genau der Fall, den der Wächter nie erreicht: ein **geschlossenes** Fenster.
+
+**Begründung der fehlenden Belegungssperre** — dieselbe, die N1 für das Freikühlen gegeben hat („Nachtauskühlung ist im leeren Raum am wertvollsten"), nur stärker: ein Bad ist genau dann am nassesten, wenn niemand mehr darin steht, und genau dann ist ein Präsenzmodell am unsichersten. Der Bad-Befund zeigt beides zugleich — die konfigurierte Präsenzquelle blieb mit 51 % unter ihrer ~55-%-Schwelle, während ein zweiter Belegungssensor desselben Raums „belegt, jetzt gerade" meldete.
+
+**Modelltrennung, jetzt explizit:** **Langzeit-/Dosisrisiko** (VTT-Mould-Index mit seinem 48-h-Akutbackstop für Dauernässe, ADR-0071) entscheidet über **Heizen/Schutzboden**; **akute Überschreitung plus realer Außentrocknungsgewinn** entscheidet über die **Lüftungsempfehlung**. Ein Rat kostet nichts und ist reversibel, ein Schutzboden kostet Geld und übergeht den Nutzerwunsch — dieselbe Trennlinie, die N3 zwischen Rat und Handlung gezogen hat. Die beiden „48 h" im System sind verschiedene Mechanismen mit derselben Zahl: der Dosis-Backstop (ADR-0071) und die Zeitkonstante τ des EWMA `surface_rh_mean` (Regel 1).
+
+**Vokabular +1** (`moisture_protect`, ein Öffnen-Grund). Karte: eigenes Label (`Bauteilschutz` / `fabric protection`) und Aufnahme in die bekannten Öffnen-Gründe, damit die Begründung nicht als leerer Chip erscheint.
+
+**Wirkung.** Ein Raum über seiner eigenen Feuchtegrenze bekommt den Lüftungsrat unabhängig von der Anwesenheit; ein Raum darunter bekommt keinen Schließ-Rat mehr, den die Bezugsgrößenverwechslung erzeugt hat. Regelung, Writes und Schimmelboden unverändert (ADR-0048).
+
+**Nachweise.** `tests/test_feuchte_achse.py`: `test_n7_1_the_two_field_cases_were_under_their_own_limit`, `test_n7_2_protection_airing_is_not_occupancy_gated`, `test_n7_2_protection_has_its_own_entry_and_hold_thresholds`, `test_n7_2_protection_episode_ends_with_an_explicit_close`, `test_n7_2_protection_does_not_outrank_the_mould_guard`, dazu die auf konsistente Werte umgestellten Bestandsfälle. `card/test/monitoring.test.ts`: Chip und i18n des neuen Grundes. Das Glue-Szenario der Emissionsschiene ist unverändert grün (Raum 60 % über einer 58,4-%-Decke).
+
+**Offen (unverändert):** Trennung von Eintritt und Halten bei `mold_risk`; ursachenspezifische Ausstiege für die übrigen Gründe statt des generischen `target_reached`; g/kg als interne Rechengröße; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung; Substrat/`f_Rsi` als sichtbarer Kalibrierpunkt, bevor `rh_max_safe` weiter Schutz-Trigger wird. **Neu vorgemerkt, nicht Teil dieser Version:** [Poise adoptiert unter bestimmten Bedingungen den eigenen Schreibwert als Handverstellung](../reviews/2026-09-14-Feldbefund-Kueche-eigener-Schreibwert-als-Handverstellung.md).
