@@ -41,13 +41,19 @@ Schlafzimmer, 2026-09-14 06:38, aus `climate.schlafzimmer_trv_2`:
 
 ## 4. Behebung (v0.194.4, ADR-0066 N6)
 
-1. **`mold_guard` tritt zurück, solange Lüften die Behandlung ist:** Außenluft mindestens um die Eintrittsschwelle der Feuchteregel trockener (3,0 g/m³) **und** kein durchgreifender Schutzboden. Die beiden Feldfälle trennen auf dieser Linie sauber — Küche 2026-08-19: 1,6 g/m³ und gebundene Kante; Schlafzimmer 2026-09-14: 3,7 g/m³ und keine Bindung —, es war keine neue Zahl nötig. Ohne Außenfeuchte gibt es kein `delta`, also auch kein Argument fürs Lüften: die N4.2-Zusage (Gebäudeschutz überlebt einen fehlenden Außensensor) bleibt unberührt.
+1. **`mold_guard` widerspricht der eigenen laufenden Empfehlung nicht:** Der Wächter schweigt, solange eine Lüftungs-Episode läuft, die diese Achse selbst angeordnet hat (letzter Rat `open` mit Grund `moisture_out` oder `mold_risk`) — außer ein Schutzboden greift durch. Die Episode endet an der Ausstiegs-Hysterese der Feuchteregel, `target_reached` schließt, und im Tick danach ist der Wächter wieder frei. Ein ohne Poises Zutun geöffnetes Fenster trifft ihn unverändert an; ohne Außenfeuchte gibt es keine Episode, also bleibt die N4.2-Zusage unberührt.
 2. **Asymmetrische Marge statt Punktvergleich:** Eintritt weiter 0,05 K unter der Kante, Loslassen erst 0,35 K darunter — dieselbe Eintritt-eng/Ausstieg-weit-Form wie bei den Feuchte- und Freikühl-Schwellen, verankert am bereits vorhandenen `prev_vent_reason`.
 
-## 5. Nebenwirkung, bewusst in Kauf genommen
+## 5. Der erste Lösungsversuch war falsch — und wie er aufflog
 
-Der N3-Nachweisfall („frische Installation, nasse Wände, kein Boden durchgreifend") trug eine zweite Variable, die N3 nicht getrennt hatte: seine Außenluft war 5,1 g/m³ trockener. Unter N6 rät Poise dort zum **Lüften** statt zum Schließen. Die Aussage von N3 — der Rat darf nicht auf die Reifezeit der Dosis warten — bleibt und wird jetzt an einer schwülen Außenluft gezeigt (14 °C / 98 % = 1,7 g/m³ Gewinn), wo die offene Scheibe wirklich die Ursache und nicht die Behandlung ist.
+Die erste Fassung hängte den Rücktritt an den **Trocknungsgewinn**: Außenluft mindestens um die Eintrittsschwelle der Feuchteregel (3,0 g/m³) trockener. Die beiden bekannten Feldfälle trennten sich darauf sauber — Küche 2026-08-19 mit 1,6 g/m³, Schlafzimmer heute mit 3,7 —, und es war keine neue Zahl nötig. Das sah nach der Antwort aus.
+
+Die Integrationssuite hat sie in derselben Stunde erlegt. Das Glue-Szenario der Emissionsschiene ist ein Winterfall: 23 °C/60 % innen gegen 6 °C/85 % außen — **6,2 g/m³ Gewinn**, mehr als das Schlafzimmer. Kalte Außenluft ist absolut immer trockener, also hätte die gewinnbasierte Fassung `mold_guard` für die **gesamte Heizperiode** abgeschaltet. Der Gewinn trennt die Fälle nicht.
+
+Was sie trennt, ist, **wessen Anweisung gerade ausgeführt wird**. Im Schlafzimmer hatte Poise das Öffnen geraten und sich selbst widersprochen; im Küchen- und im Glue-Fall stand vorher `heat_out` bzw. gar kein Öffnen-Rat. Die enge Bedingung — den eigenen, noch gültigen Öffnen-Rat nicht zurücknehmen — deckt den Befund vollständig ab und lässt beide Bestandsfälle unverändert.
+
+Als Nebenertrag fällt damit auch die Nebenwirkung weg, die die erste Fassung auf den N3-Nachweisfall gehabt hätte.
 
 ## 6. Weiterhin offen
 
-Die ursachenspezifischen Ausstiege über `prev_vent_reason` (statt des generischen `target_reached`) und die τ-Kalibrierung bleiben offen; N6 nimmt dem EWMA-Befund der Nachprüfung die Dringlichkeit, hebt ihn aber nicht auf.
+Die ursachenspezifischen Ausstiege über `prev_vent_reason` (statt des generischen `target_reached`) und die τ-Kalibrierung bleiben offen; N6 nimmt dem EWMA-Befund der Nachprüfung die Dringlichkeit, hebt ihn aber nicht auf. Der Wächter 5 der Regel 3t liest weiterhin bewusst das 48-h-Mittel (N2 §2) und nicht den Momentanwert — das trägt, solange `mold_guard` nur während einer laufenden Feuchte-Episode schweigt, in der Öffnen ohnehin gewollt ist.
