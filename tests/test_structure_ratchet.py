@@ -168,8 +168,16 @@ _RATCHET: tuple[_Entry, ...] = (
         # four mould keywords into ``compose_climate_band``. The 14 code lines
         # are irreducible — the counters cannot be recomputed from this tick's
         # reading alone. 1140/800 -> 1168/814.
-        baseline_total=1168,
-        baseline_code=814,
+        # ADR-0066 N7/N8/N9 +12/+5 (feature growth, measured after the fact):
+        # the notification rail gained the ``moisture_protect`` wording (N7/N8 —
+        # the ungated sibling of ``moisture_out`` needs its own sentence, the
+        # token alone says nothing to a reader) and N9 corrected the
+        # ``mold_guard`` sentence, which named a precondition N3 had already
+        # removed. The three additions ate the whole slack without a re-freeze,
+        # so this row was sitting exactly on its band edge; taken now.
+        # 1168/814 -> 1180/819.
+        baseline_total=1180,
+        baseline_code=819,
         headroom=50,
         note=(
             "1200/900 total/code - plan DoD cap, effective from O.5. "
@@ -632,7 +640,11 @@ _RATCHET: tuple[_Entry, ...] = (
         # re-measure uncovered an older drift sitting exactly on the slack
         # edge — plus these six lines, all comments. Measured LAST, after
         # every other edit stood. 824/301 -> 842/301.
-        baseline_total=842,
+        # +12/0 for ADR-0066 N7/N8/N9 (2026-09-14): the phase_prepare re-freeze
+        # — overdue, the row had been sitting on its band edge since N7 — plus
+        # these four lines, all comments. Measured LAST, after every other
+        # edit stood. 842/301 -> 854/301.
+        baseline_total=854,
         baseline_code=301,
         headroom=50,
         # Self-reference, and it bit on the first run: this row's own eight

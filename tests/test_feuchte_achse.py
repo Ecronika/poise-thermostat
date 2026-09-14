@@ -1103,3 +1103,53 @@ def test_n8_protection_episode_start_and_end_still_announce() -> None:
         reason="target_reached",
     )
     assert (end.fire_event, end.notify_dismiss) == (True, True)
+
+
+# --- N9 (v0.194.7): the enforced floor blocks the COMFORT entry too ----------
+
+
+def test_n9_enforced_floor_blocks_the_comfort_entry_too() -> None:
+    """The last surviving corner of the N6 window-contact inversion.
+
+    N7 suppressed ``moisture_protect`` while a protection floor is enforced,
+    and N6 switched the guard's stand-down off in the same corner — but rule 3,
+    the plain comfort entry, kept its own opinion. So with the window SHUT the
+    protection rule was blocked and the axis fell through to
+    ``open/moisture_out``; the moment the user followed that advice, the
+    stand-down was off (the floor is enforced) and rule 1b answered
+    ``close/mold_guard``. One tick, two opposite answers, decided by the
+    contact — exactly the defect N6 was written to remove.
+
+    Both halves of the reviewer's regression are pinned here: the shut state
+    must not advise opening, and the open state must still say close.
+    """
+    shut = _over_the_line(cool_edge_protected=True, window_open=False)
+    assert (shut.action, shut.reason) != ("open", "moisture_out")
+    assert shut.action != "open"
+    opened = _over_the_line(cool_edge_protected=True, window_open=True)
+    assert (opened.action, opened.reason) == ("close", "mold_guard")
+    # ... and the advice no longer depends on the contact: shut is silent,
+    # open is a close — no inversion between them.
+    assert shut.action != "open" and opened.action == "close"
+
+
+def test_n9_fix_is_narrow_the_rule_itself_is_untouched() -> None:
+    """Only the enforced floor blocks it; nothing else about rule 3 moves.
+
+    The floor is the whole precondition: without it the same over-the-line
+    state still asks for the protection airing N7 introduced, and the plain
+    rule-3 shape — the same room a hair UNDER its own ceiling, so 1b and 2b
+    are both out of reach — still opens for ``moisture_out`` on both contact
+    states.
+    """
+    assert _over_the_line(cool_edge_protected=False, window_open=False).reason == (
+        "moisture_protect"
+    )
+    under = _bedroom_0914(cool_edge_protected=False, window_open=False)
+    assert (under.action, under.reason) == ("open", "moisture_out")
+    assert _bedroom_0914(cool_edge_protected=False, window_open=True).reason == (
+        "moisture_out"
+    )
+    # ... and the floor takes that one away as well, on both contact states.
+    assert _bedroom_0914(cool_edge_protected=True, window_open=False).action != "open"
+    assert _bedroom_0914(cool_edge_protected=True, window_open=True).action != "open"
