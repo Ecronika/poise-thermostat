@@ -661,6 +661,9 @@ def compose_climate_band(
         # edge into a protection value nobody should air the room down to.
         surface_rh_pct=surface_pct,
         rh_max_safe_pct=rh_max,
+        # N8: guard 5 compares the SURFACE mean, so it needs the surface's own
+        # limit. Same precondition as ``rh_max`` above — both need t_out.
+        critical_rh_pct=rh_crit,
         cool_edge_protected=(
             mold_min is not None and mold_min >= eff_cool - _PROTECTED_EDGE_TOL_K
         ),
