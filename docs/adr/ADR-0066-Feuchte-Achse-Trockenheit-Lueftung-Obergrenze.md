@@ -154,3 +154,38 @@ Die N4-Fälle brachten einen zweiten `_advise`-Helfer in `tests/test_feuchte_ach
 **Nachweise.** `tests/test_feuchte_achse.py`: `test_n5_free_cooling_separates_the_comfort_edge_from_the_air_gain` (vier Fälle, darunter die Spiegelseite, die der pauschale Tausch gebrochen hätte), `test_n5_moisture_entry_needs_the_absolute_and_the_relative_line`, `test_n5_dryness_veto_takes_either_axis`, `test_n5_dryness_line_sits_at_35_so_summer_free_cooling_survives`. `tests/test_phase8_shadows.py`: `test_free_cooling_edge_is_judged_on_the_operative_temperature` an der Naht; der dortige Helfer spiegelt `room_decide` jetzt auf `room`, statt es bei 22,0 festzunageln — das war unsichtbar, bis Regel 3t den Wert las.
 
 **Offen (unverändert, in dieser Reihenfolge):** `mold_risk` — Eintritt und „Fenster offen halten" trennen, damit der 48-h-EWMA nicht 10 bis 20 Stunden lang den Schließschutz überstimmt (nachgerechnet: 48·ln(25/20) = 10,7 h von 80 auf unter 75 %); ursachenspezifische Ausstiege über `prev_vent_reason` statt des generischen `target_reached` — die beiden gehören zusammen; g/kg als interne Rechengröße; ein Fähigkeitsmodell, das Umluft von Zuluft unterscheidet; τ-Kalibrierung an Felddaten; der Kommentar zu 8,7 g/m³ gegen die Normausgabe DIN 4108-2:2026-05.
+
+## Nachtrag N6 (2026-09-14, v0.194.4): `mold_guard` tritt zurück, solange Lüften die Behandlung ist — umgesetzt
+
+**Anlass (Feldbefund an der laufenden Anlage, [docs/reviews/2026-09-14](../reviews/2026-09-14-Feldbefund-Luftungsrat-kippt-am-Fensterkontakt.md)):** Der Rat kippte **im selben Moment, in dem das Fenster geöffnet wurde** — 04:03:24 Fenster auf, in derselben Sekunde `close`/`mold_guard`; 04:32:13 Fenster zu, in derselben Sekunde `open`/`moisture_out`; 04:33:51 wieder auf, wieder `close`. Der Rat war damit nicht befolgbar.
+
+**Die Ursache ist keine fehlende Hysterese, sondern eine fehlende Rückkopplung.** `mold_guard` verlangt Fenster offen ∧ `surface_needs_warmer` ∧ Oberflächen-RH über der Decke. Die beiden physikalischen Bedingungen waren **schon bei geschlossenem Fenster** erfüllt (79,0 % gegen 62,8 %) — der einzige fensterabhängige Term der Regel *war der Kontakt selbst*, und 1b steht über Regel 3. Nichts in der Regel maß, was das Lüften bewirkt.
+
+Dazu kam die Asymmetrie, die die externe Nachprüfung als Befund 2 benannt hatte: die Öffnen-Seite (Regel 1) liest ein **träges 48-h-Mittel gegen ein festes** 80-%-Limit (67,26 % — feuert nicht), die Schließen-Seite den **Momentanwert gegen eine dynamische** Decke (79,0 gegen 62,8 — feuert immer). Der Notausgang „draußen ist trockener, also lüften" war damit zu, während die Schließen-Regel dauernd offen stand.
+
+### N6.1 — Die Regel tritt zurück, wenn die offene Scheibe die Behandlung ist
+
+**Entscheidung:** `mold_guard` schweigt, solange die Außenluft mindestens um die **Eintrittsschwelle der Feuchteregel** (`delta_on_gm3`, 3,0 g/m³) absolut trockener ist **und kein Schutzboden durchgreift** (`cool_edge_protected`). Begründung: wo so viel zu gewinnen ist, senkt Lüften die Raumfeuchte — und damit die Oberflächen-RH — schneller, als es die Oberflächen abkühlt; das Fenster ist dann die Behandlung, nicht die Ursache. Wo nicht, gilt die N2-Lesart unverändert: die Oberflächen kühlen hinter der offenen Scheibe aus, und sie muss zu.
+
+Die beiden Feldfälle trennen auf dieser Linie **von selbst**, es war keine neue Zahl nötig:
+
+| Fall | Gewinn außen | Kante schutz-gebunden | Rat |
+|---|---|---|---|
+| Küche 2026-08-19 (N2) | 1,6 g/m³ | ja | `close`/`mold_guard` — unverändert |
+| Schlafzimmer 2026-09-14 | 3,7 g/m³ | nein | `open`/`moisture_out` |
+
+Ein **durchgreifender** Boden hebt den Rücktritt auf: greift er, zahlt das Bauteil bereits, und dann bleibt es beim Schließen, was die Außenluft auch bietet. Ohne Außenfeuchte gibt es kein `delta` und damit kein Argument fürs Lüften — die N4.2-Zusage (Gebäudeschutz überlebt den Ausfall des Außensensors) bleibt unberührt und ist als Fall festgehalten.
+
+### N6.2 — Asymmetrische Marge statt Punktvergleich
+
+`surface_needs_warmer` verglich die nötige Lufttemperatur mit der Kühlkante auf 0,05 K genau — eine halbe Anzeigestufe, also ein **Punktvergleich**. In dieser Wohnung sitzen die Räume exakt auf ihrer Kante (Raum 22,0, Kante 22,0) und die Raumfeuchte 0,2 g/m³ unter der eigenen Decke: ein Zehntel Gramm entscheidet. Sichtbar wurde das zweifach — als Selbstauflösung um 04:37:37 bei unverändert offenem Fenster, und als Unterschied zwischen zwei fast gleichen Räumen (Küche 11,9 g/m³ riet korrekt `open`, Schlafzimmer 12,0 riet `close`).
+
+**Entscheidung:** Eintritt weiter 0,05 K unter der Kante, **Loslassen erst 0,35 K darunter** — dieselbe Eintritt-eng/Ausstieg-weit-Form wie bei jeder anderen Schwelle der Achse, verankert am vorhandenen `prev_vent_reason`. Die Marge liegt an der Naht, weil beide Zahlen dort leben und die pure Regel sie nie sieht — dieselbe Stelle, an der auch `cool_edge_protected` entschieden wird.
+
+**Bewusste Nebenwirkung.** Der Nachweisfall von N3 („frische Installation, nasse Wände, kein Boden durchgreifend") trug eine zweite Variable, die N3 nicht getrennt hatte: seine Außenluft war 5,1 g/m³ trockener. Unter N6 rät Poise dort zum Lüften. **Die Aussage von N3 bleibt** — der Rat darf nicht auf die Reifezeit der Dosis warten — und wird jetzt an einer schwülen Außenluft gezeigt (14 °C / 98 %, 1,7 g/m³ Gewinn), wo die offene Scheibe wirklich die Ursache ist. Der Testfall ist entsprechend umgestellt und um seine Gegenprobe ergänzt.
+
+**Wirkung.** Der Rat ist nicht mehr vom Fensterkontakt abhängig: derselbe Tick liefert bei offenem wie bei geschlossenem Fenster dieselbe Empfehlung, und sie ist befolgbar. Regelung, Writes und Schimmelboden unverändert (ADR-0048).
+
+**Nachweise.** `tests/test_feuchte_achse.py`: `test_n6_advice_no_longer_inverts_on_the_window_contact` (der Live-Tick, gegen beide Kontaktzustände), `test_n6_stand_down_needs_a_real_drying_gain_and_no_enforced_floor` (halber Gewinn, greifender Boden, und der unveränderte N2-Küchenfall), `test_n6_stand_down_stays_silent_without_outdoor_humidity`. `tests/test_phase8_shadows.py`: `test_mold_guard_releases_on_a_wider_margin_than_it_enters` an der Naht, plus die umgestellte N3-Probe mit ihrer Gegenprobe.
+
+**Offen (unverändert):** ursachenspezifische Ausstiege über `prev_vent_reason` statt des generischen `target_reached`; g/kg als interne Rechengröße; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung — N6 nimmt dem EWMA-Befund die Dringlichkeit, hebt ihn aber nicht auf.
