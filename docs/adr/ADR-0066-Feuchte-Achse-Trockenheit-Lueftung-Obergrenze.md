@@ -277,3 +277,28 @@ Der Kommentarblock von Regel 1b beschrieb nach N7.1 noch das alte mentale Modell
 **Nachweise.** `tests/test_feuchte_achse.py`: `test_n8_guard5_compares_the_surface_against_its_own_limit` (der gemessene 26/21-°C-Fall samt Gegenprobe und dem Verhalten ohne `critical_rh_pct`), der umgestellte `test_guard5_surface_rh_margin_blocks_free_cooling`, `test_n8_protection_escalation_reaches_the_emission_rail` (hoch und runter, plus die stille Gegenprobe mit `co2`), `test_n8_protection_episode_start_and_end_still_announce`. `tests/test_phase8_shadows.py`: `test_guard5_reads_the_surfaces_own_limit_at_the_seam`.
 
 **Offen (unverändert):** RH-Hysterese an der Schutzgrenze selbst (Kalibrierfrage — erst Feldverläufe, dann ein Wert); ein echtes Rückkopplungssignal über den Lüfterfolg statt nur des Trocknungspotentials (Trend von `surface_rh − critical_rh` bei offenem Fenster, kein starrer Timer); Trennung von Eintritt und Halten bei `mold_risk`; ursachenspezifische Ausstiege für die übrigen Gründe; g/kg intern; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung; Substrat/`f_Rsi` als sichtbarer Kalibrierpunkt. **Weiterhin vorgemerkt:** [der eigene Schreibwert als Handverstellung](../reviews/2026-09-14-Feldbefund-Kueche-eigener-Schreibwert-als-Handverstellung.md).
+
+## Nachtrag N9 (2026-09-14, v0.194.7): der durchgreifende Schutzboden sperrt auch den Komfort-Eintritt — umgesetzt
+
+**Anlass (externes Review zu v0.194.6):** die letzte überlebende Ecke der Fenster­kontakt-Inversion aus N6.
+
+**Befund.** N7 hat `moisture_protect` unter einem **durchgreifenden** Schutzboden (`cool_edge_protected`) unterdrückt — dort verteidigt bereits Heizwärme das Bauteil, Lüften arbeitet gegen diese Verteidigung. N6 hat aus demselben Grund den Rückzug des Wächters in genau dieser Ecke abgeschaltet. Regel 3 (`moisture_out`, der reine Komfort-Eintritt) behielt aber ihre eigene Meinung. Damit entschied wieder der Fensterkontakt:
+
+| Zustand | v0.194.6 | Begründung |
+|---|---|---|
+| Fenster **zu**, Raum über `rh_max_safe`, Δ ≥ 3 g/m³, belegt, Boden greift durch | `open` / `moisture_out` | 2b gesperrt (N7) → Durchfall auf Regel 3 |
+| dasselbe, Fenster **auf** | `close` / `mold_guard` | kein eigener Lüftungsvorgang → kein Rückzug (N6) → 1b spricht |
+
+Ein und derselbe Tick, zwei entgegengesetzte Räte, unterschieden allein durch den Kontakt — exakt der Defekt, den N6 beseitigen sollte. Er hat drei Revisionen überlebt, weil **kein Test die Kombination abdeckte**: N6 prüfte den Rückzug ohne Boden, N7 den Boden ohne den Komfort-Eintritt.
+
+**Entscheidung.** Das Prädikat wird geteilt. `moisture_comfort_condition` trägt weiterhin nur die Sachlage (Belegung, Hysterese-Schwelle, absolute *und* relative Feuchtelinie); `moisture_reason_valid = moisture_comfort_condition and not cool_edge_protected` trägt die Gültigkeit. Ein Satz: **wo Wärme das Bauteil bereits verteidigt, darf Lüften gar nicht erst geraten werden — statt geraten und im nächsten Tick zurückgenommen.** Beide Gültigkeits­prädikate (`moisture_reason_valid` seit N9, `protect_reason_valid` seit N7) führen die Bedingung damit selbst, weshalb `own_airing_running` sie nicht mehr zusätzlich anhängt: N6b hatte sie dort untergebracht, als nur ein Prädikat sie brauchte.
+
+**Wirkung.** In der Ecke mit durchgreifendem Boden ist die Achse still (`no_gain`), statt zum Öffnen zu raten und den Rat beim Öffnen zurückzunehmen. Ohne Boden ist alles unverändert: derselbe Raum über seiner Decke rät weiter `moisture_protect`, derselbe Raum knapp darunter weiter `moisture_out` — auf **beiden** Kontaktzuständen. Der Eingriff ist auf die Ecke begrenzt, in der tatsächlich Heizenergie für den Bauteilschutz bezahlt wird.
+
+**Nebenbefund (Notification-Text).** Der Nutzertext zu `mold_guard` behauptete „*a protection floor holds the setpoint*" — eine Vorbedingung, die **N3 entfernt** hat: die Regel liest seither die psychrometrische *Anforderung* (`surface_needs_warmer`), gerade damit sie warnen kann, **bevor** ein Boden verdient ist. Zusätzlich stammte die Formulierung („*the surfaces are already over the mould-safe humidity*") aus der Zeit vor N7.1, als die Regel Oberflächen-RH gegen eine Raumluft-Decke verglich. Der Text nennt jetzt beides richtig: der **Raum** liegt über seiner schimmelsicheren Feuchte, und die Oberflächen brauchen eine wärmere Kante — weiteres Lüften kühlt das Bauteil.
+
+**Nachweise.** `tests/test_feuchte_achse.py`: `test_n9_enforced_floor_blocks_the_comfort_entry_too` (die vom Review verlangte Regression — geschlossenes Fenster rät **nicht** `open/moisture_out`, derselbe Zustand mit offenem Fenster rät `close/mold_guard`) und `test_n9_fix_is_narrow_the_rule_itself_is_untouched` (ohne Boden unverändert `moisture_protect` bzw. `moisture_out`, auf beiden Kontaktzuständen). Beide sind gegen v0.194.6 **rot** und gegen diesen Stand grün.
+
+**Struktur.** `tests/test_structure_ratchet.py`: die Zeile zu `phase_prepare.py` war seit N7 auf ihrer Bandkante (1178 von 1168 + 10) — die drei Ergänzungen N7/N8/N9 an der Notification-Schiene hatten den Schlupf ohne Neueinfrieren aufgebraucht. Baseline jetzt 1180/819, die Selbstzeile wie immer **zuletzt** gemessen (842 → 854).
+
+**Offen (unverändert):** RH-Hysterese an der Schutzgrenze selbst; ein echtes Rückkopplungssignal über den Lüfterfolg statt nur des Trocknungspotentials; Trennung von Eintritt und Halten bei `mold_risk`; ursachenspezifische Ausstiege für die übrigen Gründe; g/kg intern; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung; Substrat/`f_Rsi` als sichtbarer Kalibrierpunkt. **Weiterhin vorgemerkt:** [der eigene Schreibwert als Handverstellung](../reviews/2026-09-14-Feldbefund-Kueche-eigener-Schreibwert-als-Handverstellung.md).
