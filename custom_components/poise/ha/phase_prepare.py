@@ -130,6 +130,12 @@ _HUM_FAILED_REASON = "humidity block failed"
 _VENT_REASON_TEXT = {
     "mold_risk": "sustained surface humidity, mould risk",
     "moisture_out": "outside air is drier, airing removes moisture",
+    # ADR-0066 N7/N8: the ungated sibling — same action, the room carries more
+    # vapour than its own fabric tolerates, and it fires with nobody in it.
+    "moisture_protect": (
+        "the room is above the humidity its own surfaces tolerate and the "
+        "outside air is drier"
+    ),
     "co2": "CO₂ is elevated",
     "heat_out": "outside is cooler, airing cools the room",
     # ADR-0066 N2: the only CLOSE reason on the notification rail.
