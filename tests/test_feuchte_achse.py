@@ -733,31 +733,43 @@ def test_n6_advice_no_longer_inverts_on_the_window_contact() -> None:
     changed in between: both physical conditions of the guard were already
     true with the window SHUT, so the only window-dependent term in the rule
     was the contact itself — and 1b outranks rule 3. The advice was therefore
-    impossible to follow, and this test is the statement of that: one and the
-    same tick must not produce opposite advice depending on the contact.
+    impossible to follow, and this test is the statement of that: while the
+    airing Poise ITSELF asked for is running, one and the same tick must not
+    produce opposite advice depending on the contact.
     """
-    open_window = _bedroom_0914(window_open=True)
     shut_window = _bedroom_0914(window_open=False)
-    assert (open_window.action, open_window.reason) == ("open", "moisture_out")
     assert (shut_window.action, shut_window.reason) == ("open", "moisture_out")
+    # ... the user follows that advice, and the next tick must not take it back
+    open_window = _bedroom_0914(window_open=True, prev_moisture_airing=True)
+    assert (open_window.action, open_window.reason) == ("open", "moisture_out")
 
 
-def test_n6_stand_down_needs_a_real_drying_gain_and_no_enforced_floor() -> None:
-    """Both halves of the stand-down, and the case it must not touch."""
-    # Halve the gain to under the moisture rule's own entry threshold and the
-    # guard speaks again: without something to win, an open window over cold
-    # wet walls is the cause, not the cure.
-    assert _bedroom_0914(w_out_gm3=10.5).reason == "mold_guard"  # delta 1.5
-    # An ENFORCED floor overrides the stand-down whatever the outside offers.
-    assert _bedroom_0914(cool_edge_protected=True).reason == "mold_guard"
-    # And the 2026-08-19 kitchen — the case the rule was built for — is
-    # untouched: 1.6 g/m³ to gain AND a protection-bound edge, so it fails the
-    # stand-down twice over.
+def test_n6_stand_down_is_only_for_this_axis_own_running_episode() -> None:
+    """The narrow form, and the three cases it must NOT touch.
+
+    The first attempt keyed the stand-down on the drying gain instead, and the
+    integration suite killed it: in winter the outside air is always
+    absolutely drier (the glue scenario has 6.2 g/m³ of gain against the
+    bedroom's 3.7), so that version switched the guard off for the whole
+    heating season.
+    """
+    # No episode of ours running -> the guard speaks, gain or no gain. This is
+    # the winter case the first attempt broke.
+    assert _bedroom_0914().reason == "mold_guard"
+    # An ENFORCED floor overrides the stand-down: the fabric is already paying.
+    assert (
+        _bedroom_0914(prev_moisture_airing=True, cool_edge_protected=True).reason
+        == "mold_guard"
+    )
+    # ``heat_out`` is not one of ours for this purpose — it is the thermal rule
+    # and carries its own guards.
+    assert _bedroom_0914(prev_heat_out=True).reason == "mold_guard"
+    # And the 2026-08-19 kitchen, the case the rule was built for, is untouched.
     assert _bound_edge().reason == "mold_guard"
 
 
 def test_n6_stand_down_stays_silent_without_outdoor_humidity() -> None:
-    """No ``delta`` means nothing argues that airing would help.
+    """No outdoor humidity means no moisture rule can have advised opening.
 
     The N4.2 promise — building protection survives a missing outdoor sensor —
     must not be quietly undone by a rule that reads the same data.

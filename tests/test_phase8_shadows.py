@@ -699,12 +699,6 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     # still produce the guard. The advice reads the psychrometric requirement,
     # the enforced floor stays the dose's business -- otherwise every fresh
     # installation would run its whole ramp-up without this warning.
-    # N6 (2026-09-14): this case carried a second variable that N3 did not
-    # separate. Its outside air was 5.1 g/m³ drier, i.e. airing was the
-    # TREATMENT, and the guard now stands down for that -- so the case is
-    # stated here the way it was meant: muggy outside (14 °C at 98 % = 1.7
-    # g/m³ to gain, the same order as the 2026-08-19 kitchen), nothing to win
-    # by keeping the window open, and no floor enforced.
     fresh = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
@@ -713,7 +707,7 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
         eff_cool=22.4,
         window_open=True,
         t_out_eff=14.0,
-        rh_out=98.0,
+        rh_out=70.0,
         surface_rh_mean_prev=72.0,
         mould_index=1.0,  # warm start, nothing earned yet
         mould_engaged=False,
@@ -722,10 +716,13 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     assert (fresh["vent_action"], fresh["vent_reason"]) == ("close", "mold_guard")
     assert fresh["mould_engaged"] is False  # no floor enforced ...
     assert fresh["mold_capped"] is False  # ... and none reported as capped
-    # ... and the N6 half of the same zone: give the outside air a real drying
-    # gain and the guard steps aside, because the open window is then what
-    # fixes the walls rather than what threatens them.
-    curable = _climate_band(
+    # N6 (2026-09-14): the SAME zone while an airing episode this axis itself
+    # asked for is still running. The guard then holds its tongue rather than
+    # reversing the instruction the user is in the middle of following; the
+    # moisture rule's own exit hysteresis ends the episode, and the tick after
+    # that the guard is free again. Outside air, walls and floor are identical
+    # to ``fresh`` above -- the ONLY difference is whose instruction stands.
+    mid_airing = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
         rh=66.0,
@@ -733,13 +730,14 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
         eff_cool=22.4,
         window_open=True,
         t_out_eff=14.0,
-        rh_out=70.0,  # 5.1 g/m³ drier outside
+        rh_out=70.0,
         surface_rh_mean_prev=72.0,
         mould_index=1.0,
         mould_engaged=False,
         mould_binds=False,
+        prev_vent_reason="moisture_out",
     )
-    assert curable["vent_reason"] != "mold_guard"
+    assert mid_airing["vent_reason"] != "mold_guard"
 
 
 def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> None:
