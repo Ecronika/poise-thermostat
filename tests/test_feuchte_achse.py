@@ -690,3 +690,78 @@ def test_n5_dryness_line_sits_at_35_so_summer_free_cooling_survives() -> None:
     }
     assert _advise(rh_pct=40.0, **summer).reason == "heat_out"
     assert _advise(rh_pct=34.0, **summer).reason == "too_dry"
+
+
+# --- N6 (v0.194.4): the live bedroom finding, 2026-09-14 ---------------------
+
+
+def _bedroom_0914(**kw: object) -> VentilationAdvice:
+    """The live tick, read off the running instance on 2026-09-14 06:38.
+
+    Bedroom: air 22.0 °C / 62 % RH (12.0 g/m³) against 8.3 g/m³ outside, so
+    3.7 g/m³ to gain. Modelled surface RH 79.0 % over a 62.8 % ceiling, 48-h
+    mean 67.26 % (under rule 1's line, so the "open for mould" escape hatch is
+    shut). No floor enforced anywhere: ``mould_engaged`` false, no binding.
+    Cooling edge 22.0 — exactly the room temperature.
+    """
+    base: dict[str, object] = {
+        "w_in_gm3": 12.0,
+        "w_out_gm3": 8.3,
+        "rh_pct": 62.0,
+        "room_c": 22.0,
+        "cool_edge_c": 22.0,
+        "t_out_c": 12.0,
+        "surface_rh_pct": 79.0,
+        "rh_max_safe_pct": 62.8,
+        "surface_rh_mean_pct": 67.26,
+        "surface_needs_warmer": True,
+        "cool_edge_protected": False,
+        "window_open": True,
+        "occupied": True,
+        "cool_capable": False,
+        "fan_capable": False,
+    }
+    base.update(kw)
+    return _advise(**base)
+
+
+def test_n6_advice_no_longer_inverts_on_the_window_contact() -> None:
+    """The defect, as the instance recorded it to the second.
+
+    04:03:24 window opens -> ``close``/``mold_guard``. 04:32:13 it shuts ->
+    ``open``/``moisture_out``. 04:33:51 it opens -> ``close``. Nothing else
+    changed in between: both physical conditions of the guard were already
+    true with the window SHUT, so the only window-dependent term in the rule
+    was the contact itself — and 1b outranks rule 3. The advice was therefore
+    impossible to follow, and this test is the statement of that: one and the
+    same tick must not produce opposite advice depending on the contact.
+    """
+    open_window = _bedroom_0914(window_open=True)
+    shut_window = _bedroom_0914(window_open=False)
+    assert (open_window.action, open_window.reason) == ("open", "moisture_out")
+    assert (shut_window.action, shut_window.reason) == ("open", "moisture_out")
+
+
+def test_n6_stand_down_needs_a_real_drying_gain_and_no_enforced_floor() -> None:
+    """Both halves of the stand-down, and the case it must not touch."""
+    # Halve the gain to under the moisture rule's own entry threshold and the
+    # guard speaks again: without something to win, an open window over cold
+    # wet walls is the cause, not the cure.
+    assert _bedroom_0914(w_out_gm3=10.5).reason == "mold_guard"  # delta 1.5
+    # An ENFORCED floor overrides the stand-down whatever the outside offers.
+    assert _bedroom_0914(cool_edge_protected=True).reason == "mold_guard"
+    # And the 2026-08-19 kitchen — the case the rule was built for — is
+    # untouched: 1.6 g/m³ to gain AND a protection-bound edge, so it fails the
+    # stand-down twice over.
+    assert _bound_edge().reason == "mold_guard"
+
+
+def test_n6_stand_down_stays_silent_without_outdoor_humidity() -> None:
+    """No ``delta`` means nothing argues that airing would help.
+
+    The N4.2 promise — building protection survives a missing outdoor sensor —
+    must not be quietly undone by a rule that reads the same data.
+    """
+    blind = _bedroom_0914(w_out_gm3=None)
+    assert (blind.action, blind.reason) == ("close", "mold_guard")
+    assert blind.delta_gm3 is None

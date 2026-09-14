@@ -597,8 +597,12 @@ def _climate_band(
     mould_wet_hours: float = 0.0,
     mould_engaged: bool = False,
     mould_binds: bool = False,
+    # ADR-0066 N6: the advice that stood last tick — the anchor the mould
+    # guard's release margin is keyed on (and, since N1, ``heat_out``'s).
+    prev_vent_reason: str = "",
 ) -> dict[str, object]:
     return compose_climate_band(
+        prev_vent_reason=prev_vent_reason,
         mould_index=mould_index,
         mould_wet_hours=mould_wet_hours,
         mould_engaged=mould_engaged,
@@ -695,6 +699,12 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     # still produce the guard. The advice reads the psychrometric requirement,
     # the enforced floor stays the dose's business -- otherwise every fresh
     # installation would run its whole ramp-up without this warning.
+    # N6 (2026-09-14): this case carried a second variable that N3 did not
+    # separate. Its outside air was 5.1 g/m³ drier, i.e. airing was the
+    # TREATMENT, and the guard now stands down for that -- so the case is
+    # stated here the way it was meant: muggy outside (14 °C at 98 % = 1.7
+    # g/m³ to gain, the same order as the 2026-08-19 kitchen), nothing to win
+    # by keeping the window open, and no floor enforced.
     fresh = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
@@ -703,7 +713,7 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
         eff_cool=22.4,
         window_open=True,
         t_out_eff=14.0,
-        rh_out=70.0,
+        rh_out=98.0,
         surface_rh_mean_prev=72.0,
         mould_index=1.0,  # warm start, nothing earned yet
         mould_engaged=False,
@@ -712,6 +722,24 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     assert (fresh["vent_action"], fresh["vent_reason"]) == ("close", "mold_guard")
     assert fresh["mould_engaged"] is False  # no floor enforced ...
     assert fresh["mold_capped"] is False  # ... and none reported as capped
+    # ... and the N6 half of the same zone: give the outside air a real drying
+    # gain and the guard steps aside, because the open window is then what
+    # fixes the walls rather than what threatens them.
+    curable = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],
+        rh=66.0,
+        room=23.0,
+        eff_cool=22.4,
+        window_open=True,
+        t_out_eff=14.0,
+        rh_out=70.0,  # 5.1 g/m³ drier outside
+        surface_rh_mean_prev=72.0,
+        mould_index=1.0,
+        mould_engaged=False,
+        mould_binds=False,
+    )
+    assert curable["vent_reason"] != "mold_guard"
 
 
 def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> None:
@@ -752,6 +780,39 @@ def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> Non
     # ... and the mould chain still computed, from t_out_eff, exactly as before.
     assert isinstance(diag["rh_max_safe"], float)
     assert isinstance(diag["surface_rh"], float)
+
+
+def test_mold_guard_releases_on_a_wider_margin_than_it_enters() -> None:
+    """ADR-0066 N6: the guard's edge comparison is asymmetric.
+
+    Entry is half a display step from the cooling edge — a POINT comparison,
+    and in a flat whose rooms sit exactly on that edge a tenth of a gram of
+    indoor humidity decides it. On 2026-09-14 that showed as an advice
+    flickering between two ticks of one room and between two near-identical
+    rooms. Holding the guard therefore uses a wider margin, the same
+    enter-narrow / release-wide shape the moisture and free-cooling
+    thresholds already have.
+
+    The 22.6 °C edge below sits inside that band: a tick that was NOT already
+    advising ``mold_guard`` does not enter it, one that was keeps it.
+    """
+    muggy: dict[str, object] = {
+        "cool_ac": None,
+        "hvac_modes": ["heat", "off"],
+        "rh": 66.0,
+        "room": 23.0,
+        "eff_cool": 22.6,
+        "window_open": True,
+        "t_out_eff": 14.0,
+        "rh_out": 98.0,  # nothing to gain by airing — N6 stand-down inactive
+        "surface_rh_mean_prev": 72.0,
+        "mould_index": 1.0,
+        "mould_engaged": False,
+        "mould_binds": False,
+    }
+    assert _climate_band(**muggy)["vent_reason"] != "mold_guard"
+    holding = _climate_band(prev_vent_reason="mold_guard", **muggy)
+    assert (holding["vent_action"], holding["vent_reason"]) == ("close", "mold_guard")
 
 
 def test_free_cooling_edge_is_judged_on_the_operative_temperature() -> None:
