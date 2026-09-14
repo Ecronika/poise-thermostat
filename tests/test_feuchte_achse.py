@@ -367,12 +367,49 @@ def test_guard5_bound_cooling_edge_blocks_free_cooling() -> None:
 
 
 def test_guard5_surface_rh_margin_blocks_free_cooling() -> None:
-    # smoothed surface RH within 2 pp of the safe ceiling -> no free cooling
-    near = _free_cool(surface_rh_mean_pct=68.0, rh_max_safe_pct=69.6)
+    """N8: the margin is measured against the SURFACE's own limit.
+
+    This case used to read ``surface_rh_mean_pct=68.0`` as "within 2 pp of
+    69.6" — but 69.6 was the ROOM-air ceiling, so the two numbers lived in
+    different reference frames and the test preserved the error it was meant
+    to describe. The guard keeps the smoothed SURFACE signal on purpose (N2
+    §2), so its limit is ``critical_rh``.
+    """
+    # smoothed surface RH within 2 pp of its critical line -> no free cooling
+    near = _free_cool(surface_rh_mean_pct=78.5, critical_rh_pct=80.0)
     assert near.reason == "no_gain"
-    # 2.6 pp below the ceiling is outside the margin -> unchanged advice
-    clear = _free_cool(surface_rh_mean_pct=67.0, rh_max_safe_pct=69.6)
+    # 3 pp below that line is outside the margin -> unchanged advice
+    clear = _free_cool(surface_rh_mean_pct=77.0, critical_rh_pct=80.0)
     assert clear.reason == "heat_out"
+
+
+def test_n8_guard5_compares_the_surface_against_its_own_limit() -> None:
+    """The reference-frame error N7.1 left behind, with the measured case.
+
+    A 26 °C room over 21 °C outside has a 24.5 °C surface: critical surface RH
+    80.0 %, room ceiling 73.2 %. A smoothed mean of 72 % is 8.0 pp away from
+    its real limit — the old form read it as 0.8 pp INSIDE the 2 pp margin and
+    vetoed free cooling. The direction was the harmless one (lost free cooling,
+    never a wrong "open"), which is why it survived N7.1.
+    """
+    assert (
+        _free_cool(
+            surface_rh_mean_pct=72.0, critical_rh_pct=80.0, rh_max_safe_pct=73.2
+        ).reason
+        == "heat_out"
+    )
+    # ... and the guard still bites where the SURFACE really is near its line
+    assert (
+        _free_cool(
+            surface_rh_mean_pct=79.0, critical_rh_pct=80.0, rh_max_safe_pct=73.2
+        ).reason
+        == "no_gain"
+    )
+    # Without the surface's own limit the guard cannot judge and stays out of
+    # the way; at the seam it arrives whenever ``rh_max_safe_pct`` does.
+    assert (
+        _free_cool(surface_rh_mean_pct=95.0, rh_max_safe_pct=73.2).reason == "heat_out"
+    )
 
 
 def test_mold_guard_advises_closing_before_the_air_floor_is_reached() -> None:
@@ -1006,3 +1043,63 @@ def test_n7_2_protection_does_not_outrank_the_mould_guard() -> None:
         ).reason
         == "thermal_floor"
     )
+
+
+# --- N8 (v0.194.6): the reference frame in guard 5, and the emission edge -----
+
+
+def test_n8_protection_escalation_reaches_the_emission_rail() -> None:
+    """``open/moisture_out`` -> ``open/moisture_protect`` is a real change.
+
+    Both tokens carry the action ``open``, so before N8 the pair collapsed to
+    the same edge key ``("open", "")``: no bus event, and an opt-in
+    notification left standing with the comfort wording while the axis had
+    escalated to fabric protection. N7 introduced the token precisely so the
+    rails could tell the two apart — which needs the reason to be part of the
+    edge, exactly as ``mold_guard`` already is.
+    """
+    up = advice_transition(
+        "open",
+        "open",
+        notify_opt_in=True,
+        prev_reason="moisture_out",
+        reason="moisture_protect",
+    )
+    assert up.fire_event
+    assert up.notify_create  # the standing notification is rewritten
+    assert not up.notify_dismiss  # ... not cleared: the episode continues
+    # and back down again, when the room falls under its fabric limit but the
+    # comfort reason still holds
+    down = advice_transition(
+        "open",
+        "open",
+        notify_opt_in=True,
+        prev_reason="moisture_protect",
+        reason="moisture_out",
+    )
+    assert down.fire_event
+    # An unrelated open reason pair stays silent, as it always did — only the
+    # reasons that own an episode are part of the key.
+    assert not advice_transition(
+        "open",
+        "open",
+        notify_opt_in=True,
+        prev_reason="moisture_out",
+        reason="co2",
+    ).fire_event
+
+
+def test_n8_protection_episode_start_and_end_still_announce() -> None:
+    """The action edges around the new reason are unchanged."""
+    start = advice_transition(
+        "idle", "open", notify_opt_in=True, prev_reason="", reason="moisture_protect"
+    )
+    assert (start.fire_event, start.notify_create) == (True, True)
+    end = advice_transition(
+        "open",
+        "close",
+        notify_opt_in=True,
+        prev_reason="moisture_protect",
+        reason="target_reached",
+    )
+    assert (end.fire_event, end.notify_dismiss) == (True, True)

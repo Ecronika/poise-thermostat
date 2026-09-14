@@ -785,6 +785,32 @@ def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> Non
     assert isinstance(diag["surface_rh"], float)
 
 
+def test_guard5_reads_the_surfaces_own_limit_at_the_seam() -> None:
+    """ADR-0066 N8: the seam hands guard 5 ``critical_rh``, not the room ceiling.
+
+    26 °C room over 21 °C outside: the modelled surface sits at 24.5 °C, its
+    critical RH at 80.0 %, the ROOM ceiling at 73.2 %. A smoothed surface mean
+    of 72 % is 8 pp away from its own limit — under the old comparison it read
+    as inside the 2 pp margin and vetoed free cooling in a window-only zone.
+    """
+    warm = _climate_band(
+        cool_ac=None,
+        hvac_modes=["heat", "off"],  # window-only zone: rule 3t applies
+        rh=45.0,  # well under the room ceiling: no guard, no protection rule
+        room=26.0,
+        eff_cool=24.0,
+        window_open=False,
+        t_out_eff=21.0,
+        rh_out=40.0,
+        surface_rh_mean_prev=72.0,
+        mould_index=1.0,
+        mould_engaged=False,
+        mould_binds=False,
+    )
+    assert warm["rh_max_safe"] is not None
+    assert (warm["vent_action"], warm["vent_reason"]) == ("open", "heat_out")
+
+
 def test_mold_guard_releases_on_a_wider_margin_than_it_enters() -> None:
     """ADR-0066 N6: the guard's edge comparison is asymmetric.
 
