@@ -647,6 +647,10 @@ def compose_climate_band(
         cool_capable="cool" in hvac_modes,
         fan_capable=has_fan_modes,
         prev_heat_out=prev_vent_reason == "heat_out",
+        # N6: an airing episode THIS axis asked for is still running. Both
+        # open-advices that argue from moisture count; ``heat_out`` does not —
+        # that one is the thermal rule and carries its own guards.
+        prev_moisture_airing=prev_vent_reason in ("moisture_out", "mold_risk"),
         # N2: the mould guard. The EDGE is what matters, not which value the
         # floor happened to raise: a floor under the setpoint (the winter
         # normal case, floor 22.1 / edge 25.0) leaves free-cooling perfectly
