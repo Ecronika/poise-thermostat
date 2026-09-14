@@ -22,12 +22,14 @@ Schlafzimmer, 2026-09-14 06:38, aus `climate.schlafzimmer_trv_2`:
 
 `binary_sensor.fenster_sensor_schlafzimmer_contact` gegen `sensor.schlafzimmer_trv_luftungs_empfehlung`:
 
-| Zeit | Fenster | Rat |
-|---|---|---|
-| 04:03:24 | **auf** | `close` (`mold_guard`) — dieselbe Sekunde |
-| 04:32:13 | zu | `open` (`moisture_out`) — dieselbe Sekunde |
-| 04:33:51 | **auf** | `close` — dieselbe Sekunde |
-| 04:37:37 | auf | `open` — von selbst, Fenster blieb offen |
+Alle Zeiten **lokal** (CEST, UTC+2); die Recorder-Zeitstempel darunter stehen in UTC.
+
+| Zeit (lokal) | UTC | Fenster | Rat |
+|---|---|---|---|
+| 06:03:24 | 04:03:24 | **auf** | `close` (`mold_guard`) — dieselbe Sekunde |
+| 06:32:13 | 04:32:13 | zu | `open` (`moisture_out`) — dieselbe Sekunde |
+| 06:33:51 | 04:33:51 | **auf** | `close` — dieselbe Sekunde |
+| 06:37:37 | 04:37:37 | auf | `open` — von selbst, Fenster blieb offen |
 
 ## 3. Ursache
 
