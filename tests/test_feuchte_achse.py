@@ -304,17 +304,30 @@ def test_rule3t_precedence_yields_to_mold_dry_and_thermal_floor() -> None:
 
 
 def _bound_edge(**kw: object) -> VentilationAdvice:
-    """The live case (kitchen, 2026-08-19), which rule 3t got wrong.
+    """The kitchen shape of 2026-08-19: a room over its mould line behind an
+    open window, with a protection-bound cooling edge and little to gain
+    outside.
 
-    Window open, outside 17.1 °C, the mould floor 22.1 °C holds BOTH the
-    setpoint and the effective cooling edge (the published band collapsed onto
-    a point), surface RH 77 % over a 69.6 % safe ceiling, outside absolutely
-    DRIER (12.2 vs 13.8 g/m³) — so the risk driver is the surfaces cooling
-    down behind the open window, not imported vapour.
+    Room 23 °C at 75 % RH over a 17.1 °C outside — surface 83.5 % against a
+    critical 80 %, which is the same statement as 75 % room RH against the
+    71.8 % safe ROOM ceiling (N7.1: one limit, two coordinates). The mould
+    floor 22.1 °C holds BOTH the setpoint and the effective cooling edge (the
+    published band collapsed onto a point), and the outside air is only
+    1.6 g/m³ drier — so the risk driver is the surfaces cooling down behind the
+    open window, not imported vapour, and airing has little to offer.
+
+    N7.1 note on the numbers: the 2026-08-19 tick itself carried 66 % room RH
+    and was, measured against its own ceiling, NOT over the line — the guard
+    fired there only because of the reference-frame error this release fixes.
+    That tick has its own case below
+    (``test_n7_1_the_two_field_cases_were_under_their_own_limit``); this
+    fixture carries the situation the rule is FOR, with numbers that are
+    physically consistent.
     """
     base: dict[str, object] = {
-        "w_in_gm3": 13.8,
-        "w_out_gm3": 12.2,
+        "w_in_gm3": 15.4,
+        "w_out_gm3": 13.8,  # 1.6 g/m³ to gain — the N2 property
+        "rh_pct": 75.0,
         "room_c": 23.0,
         "cool_edge_c": 22.1,
         "t_out_c": 17.1,
@@ -324,8 +337,8 @@ def _bound_edge(**kw: object) -> VentilationAdvice:
         "window_open": True,
         "cool_edge_protected": True,
         "surface_needs_warmer": True,
-        "surface_rh_pct": 77.0,
-        "rh_max_safe_pct": 69.6,
+        "surface_rh_pct": 83.5,
+        "rh_max_safe_pct": 71.8,
         "surface_rh_mean_pct": 72.0,
     }
     base.update(kw)
@@ -376,8 +389,11 @@ def test_mold_guard_needs_open_window_bound_edge_and_unsafe_surface() -> None:
     # the fabric does NOT need it warmer than the edge: an ordinary cool edge
     # is a legitimate target
     assert _bound_edge(surface_needs_warmer=False).reason != "mold_guard"
-    # surface still below the safe ceiling: no acute risk yet
-    assert _bound_edge(surface_rh_pct=69.0).reason == "no_gain"
+    # room still below its safe ceiling: no acute risk yet. N7.1: the limit is
+    # read on the ROOM's own RH now — ``surface_rh_pct`` is published for the
+    # card and no longer decides.
+    assert _bound_edge(rh_pct=70.0).reason == "no_gain"
+    assert _bound_edge(surface_rh_pct=69.0).reason == "mold_guard"  # display only
     # no ceiling published (no outdoor temperature) -> silent, never guessed
     assert _bound_edge(rh_max_safe_pct=None).reason == "no_gain"
 
@@ -712,7 +728,7 @@ def _bedroom_0914(**kw: object) -> VentilationAdvice:
         "cool_edge_c": 22.0,
         "t_out_c": 12.0,
         "surface_rh_pct": 79.0,
-        "rh_max_safe_pct": 62.8,
+        "rh_max_safe_pct": 62.8,  # 62.0 room RH is 0.8 pp UNDER it — see N7.1
         "surface_rh_mean_pct": 67.26,
         "surface_needs_warmer": True,
         "cool_edge_protected": False,
@@ -725,27 +741,41 @@ def _bedroom_0914(**kw: object) -> VentilationAdvice:
     return _advise(**base)
 
 
-def test_n6_advice_no_longer_inverts_on_the_window_contact() -> None:
-    """The defect, as the instance recorded it to the second.
+def _over_the_line(**kw: object) -> VentilationAdvice:
+    """The same tick, but with the room genuinely over its mould ceiling.
 
-    04:03:24 window opens -> ``close``/``mold_guard``. 04:32:13 it shuts ->
-    ``open``/``moisture_out``. 04:33:51 it opens -> ``close``. Nothing else
-    changed in between: both physical conditions of the guard were already
-    true with the window SHUT, so the only window-dependent term in the rule
-    was the contact itself — and 1b outranks rule 3. The advice was therefore
-    impossible to follow, and this test is the statement of that: while the
-    airing Poise ITSELF asked for is running, one and the same tick must not
-    produce opposite advice depending on the contact.
+    N7.1 moved the 2026-09-14 bedroom BELOW its own limit (62.0 % room RH
+    against a 62.8 % ceiling), so its own numbers no longer reach the guard at
+    all — that case is pinned in
+    ``test_n7_1_the_two_field_cases_were_under_their_own_limit``. The N6
+    mechanics are about what happens when the guard and a moisture reason BOTH
+    apply, so they are exercised here on a room that is over the line: same
+    thermal context, 66 % instead of 62 %.
     """
-    shut_window = _bedroom_0914(window_open=False)
-    assert (shut_window.action, shut_window.reason) == ("open", "moisture_out")
+    over: dict[str, object] = {"rh_pct": 66.0}
+    over.update(kw)
+    return _bedroom_0914(**over)
+
+
+def test_n6_advice_no_longer_inverts_on_the_window_contact() -> None:
+    """The 2026-09-14 defect: the advice was a function of the contact.
+
+    Both physical conditions of the guard were already true with the window
+    SHUT, so the only window-dependent term was the contact itself — and 1b
+    outranks the moisture rules. Opening the window flipped ``open`` into
+    ``close`` in the same second, closing it flipped back. While an airing
+    episode this axis itself asked for is running, one and the same tick must
+    not produce opposite advice depending on the contact.
+    """
+    shut = _over_the_line(window_open=False)
+    assert shut.action == "open"
     # ... the user follows that advice, and the next tick must not take it back
-    open_window = _bedroom_0914(window_open=True, prev_moisture_airing=True)
-    assert (open_window.action, open_window.reason) == ("open", "moisture_out")
+    opened = _over_the_line(prev_moisture_protect=True)
+    assert (opened.action, opened.reason) == (shut.action, shut.reason)
 
 
 def test_n6_stand_down_is_only_for_this_axis_own_running_episode() -> None:
-    """The narrow form, and the three cases it must NOT touch.
+    """The narrow form, and the cases it must NOT touch.
 
     The first attempt keyed the stand-down on the drying gain instead, and the
     integration suite killed it: in winter the outside air is always
@@ -753,18 +783,17 @@ def test_n6_stand_down_is_only_for_this_axis_own_running_episode() -> None:
     bedroom's 3.7), so that version switched the guard off for the whole
     heating season.
     """
-    # No episode of ours running -> the guard speaks, gain or no gain. This is
-    # the winter case the first attempt broke.
-    assert _bedroom_0914().reason == "mold_guard"
+    # No episode of ours running -> the guard speaks, gain or no gain.
+    assert _over_the_line(prev_moisture_airing=False).reason == "mold_guard"
     # An ENFORCED floor overrides the stand-down: the fabric is already paying.
     assert (
-        _bedroom_0914(prev_moisture_airing=True, cool_edge_protected=True).reason
+        _over_the_line(prev_moisture_protect=True, cool_edge_protected=True).reason
         == "mold_guard"
     )
     # ``heat_out`` is not one of ours for this purpose — it is the thermal rule
     # and carries its own guards.
-    assert _bedroom_0914(prev_heat_out=True).reason == "mold_guard"
-    # And the 2026-08-19 kitchen, the case the rule was built for, is untouched.
+    assert _over_the_line(prev_heat_out=True).reason == "mold_guard"
+    # And the kitchen shape the rule was built for is untouched.
     assert _bound_edge().reason == "mold_guard"
 
 
@@ -774,52 +803,46 @@ def test_n6_stand_down_stays_silent_without_outdoor_humidity() -> None:
     The N4.2 promise — building protection survives a missing outdoor sensor —
     must not be quietly undone by a rule that reads the same data.
     """
-    blind = _bedroom_0914(w_out_gm3=None)
+    blind = _over_the_line(w_out_gm3=None, prev_moisture_airing=False)
     assert (blind.action, blind.reason) == ("close", "mold_guard")
     assert blind.delta_gm3 is None
 
 
 def test_n6b_stand_down_shares_the_moisture_rule_own_hysteresis() -> None:
-    """External review of b024be0, finding 1 — the version it found is gone,
-    the case it named is pinned here.
+    """One predicate, computed once, cannot drift from the rule it protects.
 
     The first N6 draft keyed the stand-down on ``delta >= delta_on`` (3.0)
     while the rule it was protecting holds a running episode down to
     ``delta_off`` (1.5). Airing would then have re-armed the guard at 3.0 and
     the advice would have flipped a second time — at the threshold instead of
-    at the window contact. One predicate, computed once, cannot drift like
-    that: the stand-down starts and ends exactly with ``moisture_out``.
+    at the window contact.
     """
-    # 3.7 -> 2.5 -> 2.0: below the 3.0 entry, above the 1.5 exit, episode runs
-    for w_out in (8.3, 9.5, 10.0):
-        advice = _bedroom_0914(
+    # 2.5 and 2.0: below the 3.0 entry, above the 1.5 exit — the episode holds
+    for w_out in (9.5, 10.0):
+        advice = _over_the_line(
             w_out_gm3=w_out, prev_moisture_airing=True, prev_advice_active=True
         )
         assert (advice.action, advice.reason) == ("open", "moisture_out"), w_out
     # ... and the tick the episode expires the guard takes over in the SAME
     # tick, not one later: no ``idle`` gap over an open window and wet walls.
-    ended = _bedroom_0914(
+    ended = _over_the_line(
         w_out_gm3=10.6, prev_moisture_airing=True, prev_advice_active=True
     )
     assert (ended.action, ended.reason) == ("close", "mold_guard")
 
 
 def test_n6b_stand_down_needs_the_whole_moisture_reason_not_just_the_gain() -> None:
-    """External review of b024be0, finding 2 — his constructed counter-case.
+    """A stand-down that asks only "is it drier outside" leaves the advice at
+    ``idle`` over an open window and wet walls.
 
-    Window open, surfaces critical, no floor, indoor 8.6 g/m³ at 45 % RH
-    against 5.0 outside: 3.6 g/m³ of gain, but the room is below BOTH indoor
-    humidity lines, so ``moisture_out`` cannot fire. A stand-down that asks
-    only "is it drier outside" would suppress the guard and leave the advice
-    at ``idle`` over an open window and wet walls, waiting for the generic
-    close at delta < 1.5. Asking for the whole reason answers it correctly
-    whether or not an episode preceded it.
+    Here the gain (1.6 g/m³) is real but below the rule's own entry, and the
+    room is empty, so neither moisture reason is valid — with or without a
+    previous episode the guard must speak.
     """
     for running in (False, True):
-        advice = _bedroom_0914(
-            w_in_gm3=8.6,
-            rh_pct=45.0,
-            w_out_gm3=5.0,
+        advice = _over_the_line(
+            w_out_gm3=10.4,
+            occupied=False,
             prev_moisture_airing=running,
             prev_advice_active=running,
         )
@@ -827,14 +850,13 @@ def test_n6b_stand_down_needs_the_whole_moisture_reason_not_just_the_gain() -> N
 
 
 def test_n6b_cold_winter_air_does_not_switch_the_guard_off() -> None:
-    """External review of b024be0, finding 3, and the integration suite's own
-    verdict on the first draft.
+    """Cold outdoor air is absolutely drier by construction.
 
-    Cold outdoor air is absolutely drier by construction: 23 °C/60 % indoors
-    against 6 °C/85 % outdoors is 6.2 g/m³ of gain — more than the bedroom
-    that started all this. A gain-keyed stand-down would have disabled the
-    mould guard for the whole heating season. This is the emission rail's own
-    glue scenario, stated as a pure case.
+    23 °C/60 % indoors against 6 °C/85 % outdoors is 6.2 g/m³ of gain — more
+    than the bedroom that started all this, and the room (60 %) is over its
+    58.4 % ceiling. A gain-keyed stand-down would have disabled the mould
+    guard for the whole heating season. This is the emission rail's own glue
+    scenario, stated as a pure case.
     """
     winter = _bedroom_0914(
         w_in_gm3=12.31,
@@ -852,29 +874,135 @@ def test_n6b_cold_winter_air_does_not_switch_the_guard_off() -> None:
     assert (winter.action, winter.reason) == ("close", "mold_guard")
 
 
-def test_n6b_episode_hands_over_to_the_guard_in_order() -> None:
-    """The full transition the review asked to see, tick by tick."""
-    seq = [
-        # shut window, moisture reason valid -> open
-        _bedroom_0914(window_open=False, prev_moisture_airing=False),
-        # user opens it; the axis does not take its own advice back
-        _bedroom_0914(prev_moisture_airing=True, prev_advice_active=True),
-        # airing works, delta falls but the episode still holds (2.0 > 1.5)
-        _bedroom_0914(
-            w_out_gm3=10.0, prev_moisture_airing=True, prev_advice_active=True
-        ),
-        # the reason expires and the guard, still looking at wet walls, closes
-        _bedroom_0914(
-            w_out_gm3=10.6, prev_moisture_airing=True, prev_advice_active=True
-        ),
-        # window shut again -> the guard cannot fire, and nothing argues for
-        # opening either
-        _bedroom_0914(w_out_gm3=10.6, window_open=False, prev_moisture_airing=False),
-    ]
-    assert [(a.action, a.reason) for a in seq] == [
-        ("open", "moisture_out"),
-        ("open", "moisture_out"),
-        ("open", "moisture_out"),
-        ("close", "mold_guard"),
-        ("idle", "no_gain"),
-    ]
+# --- N7 (v0.194.5): the bathroom finding and the reference-frame fix ---------
+
+
+def test_n7_1_the_two_field_cases_were_under_their_own_limit() -> None:
+    """The guard compared a SURFACE RH against a ROOM-air ceiling.
+
+    Both are "% RH" but at different reference temperatures, so the old
+    comparison fired from roughly ``rh_max_safe / 1.2`` upwards. Measured on
+    the two field ticks that N2 and N6 were built on, the canonical limit was
+    NOT exceeded — the bedroom by 0.8 pp, the 2026-08-19 kitchen by 2.6 pp —
+    while the old form fired in both. Under the canonical comparison neither
+    reaches the guard at all.
+    """
+    # the 2026-09-14 bedroom, exactly as the instance published it
+    bedroom = _bedroom_0914(prev_moisture_airing=False)
+    assert bedroom.reason != "mold_guard"
+    # the 2026-08-19 kitchen tick: 66 % room RH against a 68.6 % ceiling, with
+    # the surface (77 %) far above the ROOM ceiling — which is what used to
+    # decide.
+    kitchen = _bedroom_0914(
+        rh_pct=66.0,
+        rh_max_safe_pct=68.6,
+        surface_rh_pct=77.0,
+        prev_moisture_airing=False,
+    )
+    assert kitchen.reason != "mold_guard"
+
+
+def _bath_0914(**kw: object) -> VentilationAdvice:
+    """The live bathroom tick of 2026-09-14 07:41 — the case with no advice.
+
+    22.4 °C at 69.5 % RH (13.8 g/m³) against 8.6 outside, so 5.1 g/m³ to gain.
+    The room carries 6.2 pp more humidity than its own fabric tolerates
+    (ceiling 63.3 %), the window is shut, no floor is enforced anywhere — and
+    the room had been counted empty for seven hours, which is the only reason
+    the axis was silent.
+    """
+    base: dict[str, object] = {
+        "w_in_gm3": 13.8,
+        "w_out_gm3": 8.6,
+        "rh_pct": 69.5,
+        "rh_max_safe_pct": 63.3,
+        "surface_rh_pct": 87.9,
+        "surface_rh_mean_pct": 69.38,
+        "surface_needs_warmer": True,
+        "cool_edge_protected": False,
+        "room_c": 22.4,
+        "cool_edge_c": 28.5,
+        "t_out_c": 9.7,
+        "window_open": False,
+        "occupied": False,
+        "cool_capable": False,
+        "fan_capable": False,
+    }
+    base.update(kw)
+    return _advise(**base)
+
+
+def test_n7_2_protection_airing_is_not_occupancy_gated() -> None:
+    """The bathroom case: every moisture condition met, silent on occupancy.
+
+    ``moisture_out`` is a comfort rule and gated by design (ADR-0050); the one
+    ungated open rule, ``mold_risk``, reads a 48-h mean that was 5.6 pp short
+    and would have needed ~17 h of unchanged conditions to get there. A room
+    over its own fabric limit is not a comfort case, and a bathroom is at its
+    wettest exactly when nobody is left standing in it — the same argument N1
+    already made for night purging.
+    """
+    empty = _bath_0914()
+    assert (empty.action, empty.reason) == ("open", "moisture_protect")
+    # occupancy changes nothing — it is not part of this reason
+    assert _bath_0914(occupied=True).reason == "moisture_protect"
+    # ... and a room inside its limit is not a protection case
+    assert _bath_0914(rh_pct=60.0).reason != "moisture_protect"
+
+
+def test_n7_2_protection_has_its_own_entry_and_hold_thresholds() -> None:
+    """Cause-specific hysteresis, anchored on the OWN previous reason.
+
+    Entry at ``delta_on`` (3.0), hold at ``delta_off`` (1.5) — keyed on
+    ``prev_moisture_protect``, not on the global "some open advice stood"
+    anchor the rest of the axis still uses.
+    """
+    assert _bath_0914(w_out_gm3=10.9).reason != "moisture_protect"  # 2.9 < 3.0
+    assert (
+        _bath_0914(w_out_gm3=10.9, prev_moisture_protect=True).reason
+        == "moisture_protect"  # 2.9 >= 1.5 while the episode runs
+    )
+    assert (
+        _bath_0914(w_out_gm3=12.5, prev_moisture_protect=True).reason
+        != "moisture_protect"  # 1.3 < 1.5 — spent
+    )
+    # An enforced floor means the fabric is already being paid for with heat;
+    # airing then works against the protection.
+    assert _bath_0914(cool_edge_protected=True).reason != "moisture_protect"
+
+
+def test_n7_2_protection_episode_ends_with_an_explicit_close() -> None:
+    """The episode this axis started must end with a task, not with silence.
+
+    Airing works, the room drops back under its ceiling — but the outside air
+    is still 5.1 g/m³ drier, so rule 5b (which waits for a spent DELTA) would
+    not close either. Without the explicit exit the window stays open under an
+    ``idle`` advice.
+    """
+    done = _bath_0914(rh_pct=60.0, window_open=True, prev_moisture_protect=True)
+    assert (done.action, done.reason) == ("close", "target_reached")
+    # ... and the guard can never both fire and be contradicted here: it reads
+    # the SAME limit from the other side, so once the room is back under it,
+    # ``mold_guard`` is silent too.
+    assert done.reason != "mold_guard"
+
+
+def test_n7_2_protection_does_not_outrank_the_mould_guard() -> None:
+    """Placement, and why it is below 1b and below 5a.
+
+    A window already open over a room that is over its line is the N2
+    situation; letting this rule outrank the guard would re-open exactly the
+    conflict N6 closed — the 2026-09-13 glue scenario is over its ceiling too.
+    The way to keep a window open is the stand-down, not a higher precedence.
+    """
+    # open window, over the line, no episode of ours -> the guard, as before
+    assert _bath_0914(window_open=True).reason == "mold_guard"
+    # ... and rule 5a outranks it too: once the AIR has reached the protection
+    # floor, further airing cools the room below it. Shown with the guard out
+    # of the way (1b sits above 5a and would otherwise answer first).
+    assert (
+        _bath_0914(
+            window_open=True, room_at_thermal_floor=True, surface_needs_warmer=False
+        ).reason
+        == "thermal_floor"
+    )

@@ -655,7 +655,7 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     diag = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],  # window-only zone: no cool, no fan
-        rh=66.0,
+        rh=75.0,  # N7.1: over the 67.8 % room ceiling — see note below
         room=23.0,
         eff_cool=22.4,
         window_open=True,
@@ -682,6 +682,8 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     free = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
+        # N7.1: the control must stay UNDER the room ceiling (67.8 %), or the
+        # guard answers on the humidity alone and the control proves nothing.
         rh=66.0,
         room=23.0,
         eff_cool=22.8,
@@ -702,7 +704,7 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     fresh = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
-        rh=66.0,
+        rh=75.0,  # N7.1: over the 67.8 % room ceiling — see note below
         room=23.0,
         eff_cool=22.4,
         window_open=True,
@@ -725,17 +727,20 @@ def test_bound_cooling_edge_turns_free_cooling_into_a_mold_guard() -> None:
     mid_airing = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
-        rh=66.0,
+        rh=75.0,  # over the 71.7 % room ceiling at this outdoor temperature
         room=23.0,
         eff_cool=22.4,
         window_open=True,
-        t_out_eff=14.0,
-        rh_out=70.0,
+        # 17 °C at 90 % leaves 2.4 g/m³ to gain: below the 3.0 entry, above the
+        # 1.5 hold — so only a RUNNING protection episode can keep the window
+        # open, which is exactly the stand-down under test.
+        t_out_eff=17.0,
+        rh_out=90.0,
         surface_rh_mean_prev=72.0,
         mould_index=1.0,
         mould_engaged=False,
         mould_binds=False,
-        prev_vent_reason="moisture_out",
+        prev_vent_reason="moisture_protect",
     )
     assert mid_airing["vent_reason"] != "mold_guard"
 
@@ -759,7 +764,7 @@ def test_outdoor_humidity_is_absent_when_the_temperature_is_substituted() -> Non
     diag = _climate_band(
         cool_ac=None,
         hvac_modes=["heat", "off"],
-        rh=66.0,
+        rh=75.0,  # N7.1: over the 67.8 % room ceiling — see note below
         room=23.0,
         eff_cool=22.4,
         window_open=True,
@@ -791,18 +796,20 @@ def test_mold_guard_releases_on_a_wider_margin_than_it_enters() -> None:
     enter-narrow / release-wide shape the moisture and free-cooling
     thresholds already have.
 
-    The 22.6 °C edge below sits inside that band: a tick that was NOT already
+    The 24.2 °C edge below sits inside that band: a tick that was NOT already
     advising ``mold_guard`` does not enter it, one that was keeps it.
     """
     muggy: dict[str, object] = {
         "cool_ac": None,
         "hvac_modes": ["heat", "off"],
-        "rh": 66.0,
+        "rh": 75.0,  # over the 71.7 % room ceiling at this outdoor temperature
         "room": 23.0,
-        "eff_cool": 22.6,
+        "eff_cool": 24.2,
         "window_open": True,
-        "t_out_eff": 14.0,
-        "rh_out": 98.0,  # nothing to gain by airing — N6 stand-down inactive
+        # 2.4 g/m³ to gain: under the protection rule's 3.0 entry, so rule 2b
+        # cannot answer instead and the contrast is purely guard vs. no guard.
+        "t_out_eff": 17.0,
+        "rh_out": 90.0,
         "surface_rh_mean_prev": 72.0,
         "mould_index": 1.0,
         "mould_engaged": False,
