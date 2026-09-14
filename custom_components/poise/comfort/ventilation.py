@@ -138,6 +138,7 @@ def ventilation_advise(
     prev_moisture_protect: bool = False,
     surface_rh_pct: float | None = None,
     rh_max_safe_pct: float | None = None,
+    critical_rh_pct: float | None = None,
     cool_edge_protected: bool = False,
     surface_needs_warmer: bool = False,
 ) -> VentilationAdvice:
@@ -244,6 +245,12 @@ def ventilation_advise(
     # the CURRENT surface RH, not the 48-h mean: the mean is deliberately slow
     # (mould CAUSE), while this is the acute state. Building protection ->
     # never occupancy-gated, and no drier-outside condition.
+    # N7.1 corrected WHICH value carries that comparison: the limit is read on
+    # the room's own RH against ``rh_max_safe`` (the room-air ceiling), which is
+    # the same statement as "the surface is over ``critical_rh``", in the other
+    # coordinate. The current-vs-mean distinction this paragraph describes is
+    # unchanged and still the point — rule 1 takes the 48-h mean, this rule the
+    # instantaneous state.
     # ADR-0071: ``surface_needs_warmer``, NOT the enforced floor — see the
     # docstring. The rule-1 precedence above is also what keeps the obvious
     # false positive out: a bathroom after a shower has an acute mean too, and
@@ -444,10 +451,27 @@ def ventilation_advise(
     room_edge_c = room_decide_c if room_decide_c is not None else room_c
     # Guard 5 (N2): never advise cooling toward an edge that a protection floor
     # holds up, and stop one margin short of the mould-safe ceiling.
+    # N8 (external review 2026-09-14): the same reference-frame error N7.1 fixed
+    # in rule 1b sat here too — a SMOOTHED SURFACE RH was compared against
+    # ``rh_max_safe``, the ROOM-air ceiling. Guard 5 reads the surface signal on
+    # purpose (N2 §2: this guard vetoes a comfort decision and takes the slow
+    # mean, while the acute rule takes the current value), so the fix here is
+    # not ``rh_pct`` but the surface's OWN limit: ``critical_rh``.
+    #
+    # Measured: a 26 °C room over 21 °C outside has a 24.5 °C surface, a
+    # critical surface RH of 80.0 % and a room ceiling of 73.2 %. A smoothed
+    # surface mean of 72 % is 8.0 pp away from its real limit, but the old form
+    # read it as 0.8 pp INSIDE the margin and vetoed free cooling. The error
+    # direction is the harmless one — lost free cooling, never a wrong "open" —
+    # which is why it outlived N7.1.
+    #
+    # ``critical_rh_pct`` arrives from the seam under exactly the precondition
+    # that also produces ``rh_max_safe_pct`` (both need the outdoor
+    # temperature), so requiring it costs no coverage.
     surface_near_limit = (
         surface_rh_mean_pct is not None
-        and rh_max_safe_pct is not None
-        and surface_rh_mean_pct >= rh_max_safe_pct - cfg.mold_guard_margin_pp
+        and critical_rh_pct is not None
+        and surface_rh_mean_pct >= critical_rh_pct - cfg.mold_guard_margin_pp
     )
     if (
         # N4: no outdoor humidity -> the muggy-air veto cannot be evaluated,
@@ -494,10 +518,19 @@ def ventilation_advise(
 
 # --- B.5 emission edge (ADR-0066): pure decision, delivery stays in glue ----
 
-# Advice REASONS that carry an episode of their own on the human rails, even
-# though their action token is a plain "close" (ADR-0066 N2). Everything else
-# is announced by its ACTION change alone.
-NOTIFY_REASONS: tuple[str, ...] = ("mold_guard",)
+# Advice REASONS whose IDENTITY is part of the emission edge, not only their
+# action token. Everything else is announced by its ACTION change alone.
+#
+# ``mold_guard`` (N2) is here because its action is a plain "close" that would
+# otherwise be indistinguishable from the harmless all-clears. ``moisture_protect``
+# (N8) is here for the mirror reason: its action is a plain "open", so an
+# escalation from a comfort airing to fabric protection —
+# ``open/moisture_out`` -> ``open/moisture_protect`` — carried the same key
+# ``("open", "")`` and emitted nothing at all. N7 introduced that token so the
+# rails could tell the two apart; without this entry they could not. The name
+# is historical: membership governs the EDGE, and whether a notification is
+# created still follows from the action.
+NOTIFY_REASONS: tuple[str, ...] = ("mold_guard", "moisture_protect")
 
 
 @dataclass(frozen=True, slots=True)
