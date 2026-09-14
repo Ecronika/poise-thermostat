@@ -247,3 +247,33 @@ Die drei kanonischen Formen stimmen exakt überein — **eine** Grenze in drei K
 **Nachweise.** `tests/test_feuchte_achse.py`: `test_n7_1_the_two_field_cases_were_under_their_own_limit`, `test_n7_2_protection_airing_is_not_occupancy_gated`, `test_n7_2_protection_has_its_own_entry_and_hold_thresholds`, `test_n7_2_protection_episode_ends_with_an_explicit_close`, `test_n7_2_protection_does_not_outrank_the_mould_guard`, dazu die auf konsistente Werte umgestellten Bestandsfälle. `card/test/monitoring.test.ts`: Chip und i18n des neuen Grundes. Das Glue-Szenario der Emissionsschiene ist unverändert grün (Raum 60 % über einer 58,4-%-Decke).
 
 **Offen (unverändert):** Trennung von Eintritt und Halten bei `mold_risk`; ursachenspezifische Ausstiege für die übrigen Gründe statt des generischen `target_reached`; g/kg als interne Rechengröße; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung; Substrat/`f_Rsi` als sichtbarer Kalibrierpunkt, bevor `rh_max_safe` weiter Schutz-Trigger wird. **Neu vorgemerkt, nicht Teil dieser Version:** [Poise adoptiert unter bestimmten Bedingungen den eigenen Schreibwert als Handverstellung](../reviews/2026-09-14-Feldbefund-Kueche-eigener-Schreibwert-als-Handverstellung.md).
+
+## Nachtrag N8 (2026-09-14, v0.194.6): derselbe Bezugsgrößen-Fehler in Wächter 5; `moisture_protect` auf der Emissionsschiene — umgesetzt
+
+**Anlass (externes Review zu v0.194.5):** N7.1 hat den Bezugsrahmen in Regel 1b korrigiert, aber **nicht überall**. Zwei konkrete Restbefunde, beide bestätigt.
+
+### N8.1 — Wächter 5 vergleicht die Oberfläche gegen ihre eigene Grenze
+
+Der `heat_out`-Wächter prüfte weiter `surface_rh_mean_pct >= rh_max_safe_pct - mold_guard_margin_pp`: links eine **geglättete Oberflächen**-RH, rechts die **Raumluft**-Obergrenze — genau die Verwechslung, die N7.1 eine Regel weiter oben beseitigt hat.
+
+Nachgerechnet am Gegenfall des Reviews: ein 26 °C warmer Raum über 21 °C Außenluft hat bei `f_Rsi = 0,7` eine 24,5 °C warme Oberfläche, deren kritische RH bei **80,0 %** liegt; die zugehörige Raumluft-Decke ist **73,2 %**. Ein geglättetes Oberflächenmittel von 72 % ist damit **8,0 pp** von seiner echten Grenze entfernt — die alte Form las es als 0,8 pp **innerhalb** der 2-pp-Marge und vetote das Freikühlen.
+
+**Entscheidung:** `surface_rh_mean_pct >= critical_rh_pct - mold_guard_margin_pp`. Hier ist die Korrektur ausdrücklich **nicht** `rh_pct`: Wächter 5 liest das geglättete **Oberflächen**-Signal mit Absicht (N2 §2 — er vetot eine Komfortentscheidung und nimmt das träge Mittel, während die akute Regel den Momentanwert nimmt). Zu korrigieren war die rechte Seite, nicht die linke. `critical_rh` wird an der Naht ohnehin berechnet und jetzt durchgereicht; es steht unter derselben Voraussetzung zur Verfügung wie `rh_max_safe` (beide brauchen die Außentemperatur), die Bedingung verliert also keine Abdeckung.
+
+**Fehlerrichtung, und warum er N7.1 überlebt hat:** verlorenes Freikühlen, nie ein falsches „öffnen" — ein Fehler, der nichts kaputt macht und deshalb nicht auffällt. Der Bestandstest hat ihn sogar **konserviert**: er nannte `surface_rh_mean_pct=68.0` bei `rh_max_safe_pct=69.6` „within 2 pp of the safe ceiling", also zwei Koordinaten als wären sie eine. Der Fall ist umgestellt und um den gemessenen Gegenfall ergänzt.
+
+### N8.2 — Die Eskalation zum Bauteilschutz erreicht die Emissionsschiene
+
+`moisture_protect` trägt die Aktion `open`, genau wie `moisture_out`. Die Kante in `advice_transition` bildete beide auf denselben Schlüssel `("open", "")` ab: beim Übergang **`open/moisture_out` → `open/moisture_protect`** entstand **kein Bus-Event**, und eine stehende Opt-in-Notification behielt den Komfort-Wortlaut, obwohl die Achse auf Gebäudeschutz eskaliert war. N7 hat den Token eingeführt, damit die Schienen die beiden unterscheiden können — dafür muss der Grund Teil der Kante sein, so wie `mold_guard` es seit N2 ist.
+
+**Entscheidung:** `NOTIFY_REASONS = ("mold_guard", "moisture_protect")`. Der Name bleibt historisch: Mitgliedschaft steuert die **Kante**; ob eine Notification entsteht, folgt weiterhin aus der Aktion — für `moisture_protect` ist die ohnehin `open`, die Notify-Semantik ändert sich also nicht. Dazu der fehlende Nutzertext in `_VENT_REASON_TEXT`, der bisher den rohen Token ausgegeben hätte.
+
+### Kleinere Korrekturen aus demselben Review
+
+Der Kommentarblock von Regel 1b beschrieb nach N7.1 noch das alte mentale Modell („liest die aktuelle Oberflächen-RH"); er sagt jetzt, was die Regel wirklich vergleicht, ohne die weiterhin gültige Unterscheidung Momentanwert/Mittel zu verwischen. Die Vorbedingung `surface_rh_pct is not None` war schon mit N7.1 entfallen — sie stammte aus der Zeit, als dieses Feld die Entscheidung trug, und wäre danach eine versteckte Abhängigkeit von einem reinen Anzeigewert gewesen.
+
+**Wirkung.** Freikühlen wird nicht mehr grundlos vetot; die Eskalation vom Komfort- zum Schutz-Lüften ist auf Bus und Notification sichtbar und für Automationen unterscheidbar. Regelung, Writes und Schimmelboden unverändert (ADR-0048). Karte unverändert — sie kennt den Token seit N7.
+
+**Nachweise.** `tests/test_feuchte_achse.py`: `test_n8_guard5_compares_the_surface_against_its_own_limit` (der gemessene 26/21-°C-Fall samt Gegenprobe und dem Verhalten ohne `critical_rh_pct`), der umgestellte `test_guard5_surface_rh_margin_blocks_free_cooling`, `test_n8_protection_escalation_reaches_the_emission_rail` (hoch und runter, plus die stille Gegenprobe mit `co2`), `test_n8_protection_episode_start_and_end_still_announce`. `tests/test_phase8_shadows.py`: `test_guard5_reads_the_surfaces_own_limit_at_the_seam`.
+
+**Offen (unverändert):** RH-Hysterese an der Schutzgrenze selbst (Kalibrierfrage — erst Feldverläufe, dann ein Wert); ein echtes Rückkopplungssignal über den Lüfterfolg statt nur des Trocknungspotentials (Trend von `surface_rh − critical_rh` bei offenem Fenster, kein starrer Timer); Trennung von Eintritt und Halten bei `mold_risk`; ursachenspezifische Ausstiege für die übrigen Gründe; g/kg intern; Fähigkeitsmodell Umluft vs. Zuluft; τ-Kalibrierung; Substrat/`f_Rsi` als sichtbarer Kalibrierpunkt. **Weiterhin vorgemerkt:** [der eigene Schreibwert als Handverstellung](../reviews/2026-09-14-Feldbefund-Kueche-eigener-Schreibwert-als-Handverstellung.md).
