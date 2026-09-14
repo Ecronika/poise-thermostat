@@ -294,7 +294,7 @@ def ventilation_advise(
     # reason to keep the window open even while the outside air is still
     # much drier.
     threshold = cfg.delta_off_gm3 if prev_advice_active else cfg.delta_on_gm3
-    moisture_reason_valid = (
+    moisture_comfort_condition = (
         occupied
         and delta is not None
         and delta >= threshold
@@ -311,6 +311,22 @@ def ventilation_advise(
         and rh_pct is not None
         and rh_pct >= cfg.moist_rh_pct
     )
+    # N9 (external review 2026-09-14): an ENFORCED protection floor blocks BOTH
+    # moisture entries, not only the protection one. N7 suppressed
+    # ``moisture_protect`` under ``cool_edge_protected`` and N6 disabled the
+    # guard's stand-down there — but the comfort entry kept its own opinion, and
+    # the window contact decided between them: shut, rule 3 advised OPENING;
+    # the moment the user followed that advice, the stand-down was off (floor
+    # enforced) and rule 1b answered CLOSE. The same inversion N6 removed,
+    # surviving in the one corner where a floor is actually being paid for with
+    # heat. No test covered the combination, which is why it lasted three
+    # revisions.
+    #
+    # The rule is one sentence: where heat is already defending the fabric,
+    # airing works against that defence — so it must not be advised in the
+    # first place, rather than advised and then retracted. The raw comfort
+    # condition stays a separate name so the two statements do not merge.
+    moisture_reason_valid = moisture_comfort_condition and not cool_edge_protected
     # N7 (2026-09-14) — the SECOND entry into the same moisture episode, and
     # the one the bathroom needed: moisture removal is building protection,
     # not comfort, once the room carries more vapour than its own fabric
@@ -338,9 +354,12 @@ def ventilation_advise(
         # heat; airing then works against the protection rather than for it.
         and not cool_edge_protected
     )
-    own_airing_running = (
-        prev_moisture_airing and moisture_reason_valid and not cool_edge_protected
-    ) or (prev_moisture_protect and protect_reason_valid)
+    # Both validity predicates already carry ``not cool_edge_protected`` (N9 for
+    # the comfort entry, N7 for the protection one), so the stand-down needs it
+    # only once — in them, where it belongs.
+    own_airing_running = (prev_moisture_airing and moisture_reason_valid) or (
+        prev_moisture_protect and protect_reason_valid
+    )
     if (
         window_open
         and not own_airing_running
