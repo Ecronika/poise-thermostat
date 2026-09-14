@@ -138,10 +138,12 @@ _VENT_REASON_TEXT = {
     ),
     "co2": "CO₂ is elevated",
     "heat_out": "outside is cooler, airing cools the room",
-    # ADR-0066 N2: the only CLOSE reason on the notification rail.
+    # ADR-0066 N2: the only CLOSE reason on the notification rail. N9 rewrote
+    # the sentence: it named an enforced floor, which stopped being a
+    # precondition in N3, against a limit N7.1 has since moved onto room air.
     "mold_guard": (
-        "the surfaces are already over the mould-safe humidity and a "
-        "protection floor holds the setpoint"
+        "the room is above its mould-safe humidity and the surfaces need a "
+        "warmer edge — further airing would cool the fabric"
     ),
 }
 # The lead-in belongs to the ADVICE, not to the reason: mold_guard is the one
