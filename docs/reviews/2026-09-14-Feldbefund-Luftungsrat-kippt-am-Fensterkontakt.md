@@ -57,3 +57,18 @@ Als Nebenertrag fällt damit auch die Nebenwirkung weg, die die erste Fassung au
 ## 6. Weiterhin offen
 
 Die ursachenspezifischen Ausstiege über `prev_vent_reason` (statt des generischen `target_reached`) und die τ-Kalibrierung bleiben offen; N6 nimmt dem EWMA-Befund der Nachprüfung die Dringlichkeit, hebt ihn aber nicht auf. Der Wächter 5 der Regel 3t liest weiterhin bewusst das 48-h-Mittel (N2 §2) und nicht den Momentanwert — das trägt, solange `mold_guard` nur während einer laufenden Feuchte-Episode schweigt, in der Öffnen ohnehin gewollt ist.
+
+## 7. Externes Review zu `b024be0` (2026-09-14) — geprüft
+
+Der Reviewer hat den Stand `b024be0` begutachtet, also die **gewinnbasierte erste Fassung**, die die Integrationssuite kurz danach erlegt hat. Seine drei inhaltlichen Befunde sind alle richtig, und sein Lösungsvorschlag — den Rücktritt an die tatsächliche Feuchte-Episode über `prev_vent_reason` koppeln statt an Δ — ist genau der Weg, der hier unabhängig eingeschlagen wurde. Gegen den jetzigen Stand nachgerechnet:
+
+| Befund | Stand `b024be0` | heutiger Stand |
+|---|---|---|
+| 1 — Rücktritt bei 3,0, Episode hält bis 1,5 → zweiter Flip an der Schwelle | zutreffend | **behoben**: ein gemeinsames Prädikat `moisture_reason_valid`, von Regel 1b und Regel 3 gelesen |
+| 2 — Δ ≥ 3 allein ist kein „Lüften ist die Behandlung"; 8,6 g/m³ / 45 % bei Δ 3,6 endet in `idle` über offenem Fenster | zutreffend | **behoben**: der Rücktritt verlangt den **ganzen** Grund samt Innenfeuchte-Linien; sein Gegenfall liefert `close`/`mold_guard` — mit und ohne vorangegangene Episode |
+| 3 — keine echte Rückkopplung, kalte Außenluft hat immer großes Δ | zutreffend, und genau daran ist die Fassung gescheitert (Glue-Szenario: 6,2 g/m³) | **entschärft**: Δ steuert den Rücktritt nicht mehr; die Episode hat einen definierten Endpunkt. Eine Messung des tatsächlichen Lüfterfolgs ist es weiterhin nicht — bleibt offen |
+| Doku: `cool_edge_protected`-Vorrang gilt nicht global, `mold_risk` steht davor | zutreffend | **Text präzisiert** (Reichweite auf Regel 1b eingegrenzt) |
+| 0,35 K ist ein Arbeitswert, kein physikalischer Grenzwert | zutreffend | **als Kalibrierziel gekennzeichnet**, wie τ = 48 h |
+| 0,05/0,35-K-Hysterese beibehalten | — | unverändert übernommen |
+
+Die vier von ihm benannten Testfälle sind als `test_n6b_*` ergänzt. Sein Hinweis zu den fehlenden GitHub-Statuschecks trifft eine andere Schiene: GitHub Actions veröffentlicht **Check-Runs**, keine Commit-Status, weshalb `/statuses` `total_count: 0` liefert; unabhängig davon war der Lauf auf `b024be0` tatsächlich **rot** — an genau dem Fall, den sein Befund 3 beschreibt.
