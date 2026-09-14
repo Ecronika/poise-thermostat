@@ -108,6 +108,19 @@ if TYPE_CHECKING:
 # an exact ">=" would miss the very case the guard exists for.
 _PROTECTED_EDGE_TOL_K = 0.05
 
+# ADR-0066 N6: the RELEASE margin of the same comparison, once ``mold_guard``
+# is the advice that stands. The entry tolerance above is half a display step
+# and therefore a POINT comparison — in a flat whose rooms sit exactly on their
+# cooling edge (bedroom and kitchen, 2026-09-14: room 22.0, edge 22.0, indoor
+# humidity 0.2 g/m³ under its own safe ceiling) a tenth of a gram flips it, and
+# the advice flickered between two neighbouring rooms and between two ticks of
+# the same one. The release is therefore asymmetric, like every other threshold
+# pair in the axis: enter within 0.05 K of the edge, let go only 0.35 K below
+# it. That is roughly three display steps — enough that the released state is
+# visibly different from the entered one, not so much that a real recovery is
+# held back for long.
+_GUARD_RELEASE_TOL_K = 0.35
+
 # ADR-0071: the substrate the dose model runs on. Not a configuration option in
 # this release (``mould_risk.ROOM_PROFILE_SUBSTRATE`` is the prepared map for
 # the later config step), so the diagnostics resolve the same default the
@@ -647,8 +660,18 @@ def compose_climate_band(
         # ADR-0071: the same comparison on the UNGATED requirement — "the
         # fabric would need it warmer than the cooling edge", whether or not
         # the dose has earned the right to heat for it yet.
+        # N6: asymmetric, keyed on the advice that stood last tick. Both
+        # numbers live here and never reach the pure rule, so the hysteresis
+        # belongs here too — the same place ``cool_edge_protected`` is decided.
         surface_needs_warmer=(
-            required is not None and required >= eff_cool - _PROTECTED_EDGE_TOL_K
+            required is not None
+            and required
+            >= eff_cool
+            - (
+                _GUARD_RELEASE_TOL_K
+                if prev_vent_reason == "mold_guard"
+                else _PROTECTED_EDGE_TOL_K
+            )
         ),
     )
     return {
