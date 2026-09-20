@@ -107,6 +107,7 @@ Der Linter (`tests/test_adr_status_lint.py`) erzwingt, dass jeder ADR-Header ein
 | [0071](ADR-0071-Schimmelrisiko-Dosismodell.md) | Schimmelrisiko — Dosismodell (VTT-Schimmelindex) statt Momentanwert-Boden | Implementiert |
 | [0072](ADR-0072-Schreiboekonomie-Kommando-Episode.md) | Schreibökonomie am Aktor — Kommando-Episode, Idempotenz-Veto, Ratenlimit, Raster-Hinweis | Implementiert (v0.193.0) |
 | [0073](ADR-0073-Schreiboekonomie-Kanaele.md) | Schreibökonomie, zweiter Durchgang — Modus-Ratenlimit, Sensorquellen-Backoff, Write-Zensus | Implementiert (v0.194.0) |
+| [0074](ADR-0074-Lueftungs-Episoden-Zustandsmaschine.md) | Lüftungs-Empfehlung als Episoden-Zustandsmaschine (Phase statt Rekonstruktion aus dem Vortick) | Vorgeschlagen |
 
 ## Umsetzungsstand (gegen Code verifiziert)
 
