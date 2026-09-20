@@ -62,6 +62,7 @@ from homeassistant.util import dt as dt_util
 from ..comfort.operative import operative_temperature
 from ..const import (
     CALIBRATION_MIN_INTERVAL_S,
+    EXTERNAL_FEED_DEADBAND_K,
     EXTERNAL_FEED_KEEPALIVE_S,
     FROST_FLOOR_C,
     WRITE_DEADBAND_C,
@@ -1048,7 +1049,7 @@ class ActuatePhase:
                         last_fed_ts=self._runtime.actuator.last_fed_ts,
                         now=now,
                         keepalive_s=EXTERNAL_FEED_KEEPALIVE_S,
-                        deadband=0.1,
+                        deadband=EXTERNAL_FEED_DEADBAND_K,
                     )
                     else None
                 ),

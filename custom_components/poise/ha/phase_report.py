@@ -791,6 +791,10 @@ class ReportPhase:
             "setpoint_writes": self._runtime.actuator.setpoint_writes,
             "mode_writes": self._runtime.actuator.mode_writes,
             "external_temp_writes": self._runtime.actuator.external_temp_writes,
+            # The deadband share of the line above; the rest is keep-alive.
+            "external_temp_writes_deadband": (
+                self._runtime.actuator.external_temp_writes_deadband
+            ),
             "calibration_writes": self._runtime.actuator.calibration_writes,
             "select_writes": self._runtime.actuator.select_writes,
             "mold_capped": mold_capped,  # mould floor clipped at 24 °C
