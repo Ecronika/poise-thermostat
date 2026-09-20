@@ -277,6 +277,9 @@ POST_RELOCATION_FIELDS: dict[tuple[str, str], str] = {
     ("actuator", "setpoint_writes"): "Phase 2a write census (transient)",
     ("actuator", "mode_writes"): "Phase 2a write census (transient)",
     ("actuator", "external_temp_writes"): "Phase 2a write census (transient)",
+    ("actuator", "external_temp_writes_deadband"): (
+        "Phase 2a write census, deadband share (transient)"
+    ),
     ("actuator", "calibration_writes"): "Phase 2a write census (transient)",
     ("actuator", "select_writes"): "Phase 2a write census (transient)",
     # P1.4 display latches (transient diagnosis; stamped by the SEQUENCER

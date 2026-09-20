@@ -42,9 +42,12 @@ from custom_components.poise.comfort.en16798 import Category
 from custom_components.poise.comfort.presence import PresenceLevel
 from custom_components.poise.comfort.schedule import ComfortSchedule, ComfortWindow
 from custom_components.poise.const import (
+    EXTERNAL_FEED_DEADBAND_K,
+    EXTERNAL_FEED_KEEPALIVE_S,
     SETPOINT_ADOPT_ECHO_WINDOW_S,
 )
 from custom_components.poise.control.override import setpoint_adopt_reason
+from custom_components.poise.control.tick_resolve import external_feed_due
 from custom_components.poise.control.window_auto import (
     WindowAutoConfig,
     effective_window_open,
@@ -1426,3 +1429,52 @@ def test_plan_setpoint_write_never_writes_non_finite_target() -> None:
         assert plan.write_setpoint is False, f"wrote target={bad!r}"
         assert plan.raw_setpoint is None
         assert plan.snapped_setpoint is None
+
+
+def test_the_feed_census_splits_the_two_triggers_the_gate_ors() -> None:
+    """One counter cannot say which branch carries the traffic.
+
+    ``external_feed_due`` is an OR, and every write resets the keep-alive
+    clock — so the two triggers absorb each other and neither
+    ``EXTERNAL_FEED_DEADBAND_K`` nor ``EXTERNAL_FEED_KEEPALIVE_S`` could be
+    changed against a number (ADR-0073 §1.6). The commit re-tests the deadband
+    branch on the same two values the gate saw, still unstamped, so the split
+    is the gate's own answer rather than a second copy of it. Driven through
+    BOTH here on purpose: a test that only counted would not notice them
+    drifting apart.
+    """
+    rt = _runtime()
+    feeds = ((0.0, 21.0), (600.0, 21.0), (610.0, 21.3), (1300.0, 21.3))
+    for now, fed in feeds:
+        assert external_feed_due(
+            rt.actuator.last_fed,
+            fed,
+            last_fed_ts=rt.actuator.last_fed_ts,
+            now=now,
+            keepalive_s=EXTERNAL_FEED_KEEPALIVE_S,
+            deadband=EXTERNAL_FEED_DEADBAND_K,
+        )
+        rt.commit_execution(
+            ExecutionReport(executions=(_execution("ext_feed", commanded_value=fed),)),
+            now=now,
+        )
+    assert rt.actuator.external_temp_writes == len(feeds)
+    # No previous value and a moved value are deadband writes; the other two
+    # re-push an unchanged reading because the TRV would otherwise time the
+    # feed out. Keep-alive share = total - deadband.
+    assert rt.actuator.external_temp_writes_deadband == 2
+
+
+def test_a_failed_feed_counts_in_neither_census_line() -> None:
+    """The census counts what Poise SENT, so the subset must not outrun the
+    total it is a subset of."""
+    rt = _runtime()
+    rt.commit_execution(
+        ExecutionReport(
+            executions=(_execution("ext_feed", commanded_value=21.0, success=False),)
+        ),
+        now=NOW,
+    )
+    assert rt.actuator.external_temp_writes == 0
+    assert rt.actuator.external_temp_writes_deadband == 0
+    assert rt.actuator.last_fed is None

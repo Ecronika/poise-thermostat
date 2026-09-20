@@ -143,6 +143,12 @@ _UNWIRED_BY_DESIGN: dict[str, str] = {
         "ADR-0046 section 12 capability-driven field selection - implemented "
         "ahead of its wiring"
     ),
+    "comfort.vent_episode": (
+        "ADR-0074 step 1 (v2a) ventilation episode state machine - a pure "
+        "module with its own tests, wired only at step 4 (shadow); wiring it "
+        "earlier would change the published advice before the equivalence "
+        "proof of step 2 exists"
+    ),
 }
 
 
