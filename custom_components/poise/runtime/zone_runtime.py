@@ -38,13 +38,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Final
 
 from ..clock import Clock
-from ..const import SETPOINT_ADOPT_ECHO_WINDOW_S
+from ..const import EXTERNAL_FEED_DEADBAND_K, SETPOINT_ADOPT_ECHO_WINDOW_S
 from ..control import external_override as _external_override
 from ..control import override_runtime as _override_runtime
 from ..control import pipeline_actuate as _actuate
 from ..control import pipeline_finalize as _finalize
 from ..control import pipeline_prepare as _prepare
 from ..control.override import resolve_hold_expiry
+from ..control.tick_resolve import should_write as _should_write
 from .state import (
     ActuatorRuntime,
     CompressorRuntime,
@@ -408,6 +409,18 @@ class ZoneRuntime:
                 if execution.success:
                     if now is None:
                         raise ValueError("ext_feed commit needs now=")
+                    # Which of the two OR-branches earned this write, decided
+                    # here rather than carried across the phases: the same
+                    # predicate on the same two values, still unstamped. A
+                    # reason handed down from the plan would be a second copy
+                    # of the gate, free to disagree with it.
+                    if _should_write(
+                        self.actuator.last_fed,
+                        execution.commanded_value,
+                        mode_changed=False,
+                        deadband=EXTERNAL_FEED_DEADBAND_K,
+                    ):
+                        self.actuator.external_temp_writes_deadband += 1
                     self.actuator.last_fed = execution.commanded_value
                     self.actuator.last_fed_ts = now
             elif effect_id == "rescue_nudge":

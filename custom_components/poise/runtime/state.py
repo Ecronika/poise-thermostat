@@ -275,6 +275,14 @@ class ActuatorRuntime:
     external_temp_writes: int = 0
     calibration_writes: int = 0
     select_writes: int = 0
+    # A SUBSET of ``external_temp_writes``: the feeds a moved value triggered.
+    # The gate is an OR of "value moved" and "keep-alive elapsed" and every
+    # write resets the keep-alive clock, so the two triggers absorb each other
+    # and a single counter cannot say which one carries the traffic. Without
+    # that split neither ``EXTERNAL_FEED_DEADBAND_K`` nor
+    # ``EXTERNAL_FEED_KEEPALIVE_S`` can be changed against a number, which
+    # ADR-0073 §1.6 requires. Keep-alive share = total - this.
+    external_temp_writes_deadband: int = 0
 
 
 @dataclass(slots=True)
