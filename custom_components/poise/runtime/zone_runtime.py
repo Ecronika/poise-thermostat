@@ -414,14 +414,24 @@ class ZoneRuntime:
                     # predicate on the same two values, still unstamped. A
                     # reason handed down from the plan would be a second copy
                     # of the gate, free to disagree with it.
-                    if _should_write(
+                    #
+                    # ``commanded_value`` is optional across the whole effect
+                    # vocabulary (``ext_select`` carries none), so the feed
+                    # value is narrowed rather than asserted. A valueless feed
+                    # is not silently mis-filed as keep-alive either: the
+                    # executor emits this effect only inside its
+                    # ``feed_value is not None`` branch, so the case does not
+                    # arise, and if it ever did the write would be missing its
+                    # subject entirely.
+                    fed = execution.commanded_value
+                    if fed is not None and _should_write(
                         self.actuator.last_fed,
-                        execution.commanded_value,
+                        fed,
                         mode_changed=False,
                         deadband=EXTERNAL_FEED_DEADBAND_K,
                     ):
                         self.actuator.external_temp_writes_deadband += 1
-                    self.actuator.last_fed = execution.commanded_value
+                    self.actuator.last_fed = fed
                     self.actuator.last_fed_ts = now
             elif effect_id == "rescue_nudge":
                 if execution.success:
