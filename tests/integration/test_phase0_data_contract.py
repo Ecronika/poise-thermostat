@@ -156,6 +156,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "dynamics_profile",
     "en_cool_upper",
     "external_temp_writes",
+    "external_temp_writes_deadband",
     "fabric_conflict",
     "fan_ce_credit_k",
     "fan_ce_k",
