@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.194.7"
+VERSION: Final = "0.194.8"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -33,6 +33,14 @@ WRITE_DEADBAND_C: Final = 0.2
 # input and silently fall back to their own (mounted) sensor, so a stable room
 # would otherwise let the feed go stale. 0 disables the time-based re-push.
 EXTERNAL_FEED_KEEPALIVE_S: Final = 600.0
+
+# ... and push immediately when the fed value itself has moved this far. It is
+# finer than ``WRITE_DEADBAND_C`` on purpose: this number does not command a
+# device, it only tells a TRV what the room measures, and a feed that lags the
+# room by the setpoint deadband would bias the TRV's own internal control.
+# Named because the census counts the two triggers separately (ADR-0073 §1.6)
+# and the commit must test the same number the plan gate tested.
+EXTERNAL_FEED_DEADBAND_K: Final = 0.1
 
 # TRV calibration (local-offset path, ADR-0015 / D6): write gate deadband +
 # minimum interval, and the divergence limit (x MIN_INTERVAL until cal_diverged).
