@@ -302,6 +302,7 @@ def test_tuning_defaults_on_minimal_entry() -> None:
         adopt_external_mode=True,
         operative_input=False,  # literal default
         room_profile="office",  # ADR-0054 V2: backward-compatible default
+        norm_basis="en",  # ADR-0050 N1: EN 16798-1 Annex B unless chosen
         # ADR-0060 §3 CLOSED (2026-08-07): both field edges reviewed (one true
         # positive, one valve-test FP structurally removed by the season gate)
         # -> the ADR's decided end state: suggestion emission on by default.

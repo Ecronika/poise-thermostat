@@ -74,6 +74,7 @@ from ..const import (
     CONF_IRRADIANCE,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_NORM_BASIS,
     CONF_OCCUPANCY_SENSOR,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
@@ -113,6 +114,7 @@ from ..const import (
     DEFAULT_DYNAMICS,
     DEFAULT_HEAT_LOCKOUT_ENABLED,
     DEFAULT_HEAT_MAX_OUTDOOR_C,
+    DEFAULT_NORM_BASIS,
     DEFAULT_OVERRIDE_END_ON_PRESENCE,
     DEFAULT_OVERRIDE_MAX_H,
     DEFAULT_OVERRIDE_POLICY,
@@ -372,6 +374,7 @@ class ZoneTuning:
     adopt_external_mode: bool  # IR remote -> manual mode-hold
     operative_input: bool  # ADR-0029 operative-temperature input mode
     room_profile: str  # ADR-0054 V2 met/clo profile (office/living/bedroom/kitchen)
+    norm_basis: str  # ADR-0050 N1: "en" (Annex B) | "na_de" (German NA)
     override_suggestions: bool  # ADR-0060 L2 suggestion emission (opt-in, §3)
     clo_offset: float  # ADR-0067 learned household clo bias, clamped +-0.3
     active_comfort: bool  # ADR-0069 mechanism toggle (tier gates release)
@@ -522,6 +525,7 @@ class ZoneTuning:
             ),
             operative_input=bool(merged.get(CONF_OPERATIVE_INPUT, False)),
             room_profile=str(merged.get(CONF_ROOM_PROFILE, DEFAULT_ROOM_PROFILE)),
+            norm_basis=str(merged.get(CONF_NORM_BASIS, DEFAULT_NORM_BASIS)),
             override_suggestions=bool(
                 merged.get(CONF_OVERRIDE_SUGGESTIONS, DEFAULT_OVERRIDE_SUGGESTIONS)
             ),

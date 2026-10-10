@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.196.0"
+VERSION: Final = "0.196.1"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -96,6 +96,16 @@ CONF_COMFORT_BASE: Final = "comfort_base"
 # ADR-0054 Nachtrag V2: met/clo room profile for the PMV evaluation.
 CONF_ROOM_PROFILE: Final = "room_profile"
 DEFAULT_ROOM_PROFILE: Final = "office"
+# Review 2026-10-10 (v0.196.1): a NEW zone stores "living" — Poise runs in homes,
+# and the profile selects the residential EN 16798-1 heating range (ADR-0023
+# N1). Zones without a stored profile keep the "office" fallback above.
+NEW_ZONE_ROOM_PROFILE: Final = "living"
+# Norm basis (ADR-0050 N1): EN 16798-1 Annex B defaults, or the German national
+# annex (DIN EN 16798-1/NA) where it deviates in a value Poise uses.
+CONF_NORM_BASIS: Final = "norm_basis"
+NORM_BASIS_EN: Final = "en"
+NORM_BASIS_NA_DE: Final = "na_de"
+DEFAULT_NORM_BASIS: Final = NORM_BASIS_EN
 # ADR-0067: learned household clo offset (config-owned, written only via the
 # visible suggestion fix flow; hard bounds +-0.3).
 CONF_CLO_OFFSET: Final = "clo_offset"

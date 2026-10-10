@@ -615,9 +615,8 @@ class PreparePhase:
         # Zigbee/MQTT device. Setpoint (and mode-nudge) writes are gated on
         # this below.
         _actuator_online = act_state is not None and act_state.state != "unavailable"
-        # ADR-0051 activation: on a hot day raise the cooling setpoint toward the
-        # EN adaptive upper (ASR 26 °C cap; from the 25 °C Cat. II design edge:
-        # ~32 °C outdoor and up), rate-limited <=0.5 K/tick. Cooling-only:
+        # ADR-0051: hot-day raise toward the EN adaptive upper (ASR 26 °C cap;
+        # from ~32 °C outdoor), rate-limited <=0.5 K/tick. Cooling-only:
         # decide_mode gates "cool" on can_cool, so a heat-only TRV never sees it.
         eff_cool = decision.cool_sp
         _cool_ac = None
@@ -889,6 +888,7 @@ class PreparePhase:
                 category=config.category,
                 abs_humidity_gkg=abs_gkg,
                 occupied=lvl.occupied,
+                cfg=humidity.humidity_config_for(config.norm_basis),
             )
             self._runtime.humidity.dry_active = hum.dry_active
         except Exception:  # noqa: BLE001 - must never break the tick

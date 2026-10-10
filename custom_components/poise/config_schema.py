@@ -76,6 +76,7 @@ from .const import (
     CONF_MAX_POWER_SENSOR,
     CONF_MRT_SENSOR,
     CONF_NAME,
+    CONF_NORM_BASIS,
     CONF_OCCUPANCY_SENSOR,
     CONF_OPERATIVE_INPUT,
     CONF_OPTIMAL_START,
@@ -122,6 +123,7 @@ from .const import (
     DEFAULT_HEAT_MAX_OUTDOOR_C,
     DEFAULT_HEAT_SOURCE,
     DEFAULT_MAX_FLOW_TEMP_C,
+    DEFAULT_NORM_BASIS,
     DEFAULT_OVERRIDE_END_ON_PRESENCE,
     DEFAULT_OVERRIDE_MAX_H,
     DEFAULT_OVERRIDE_POLICY,
@@ -132,6 +134,8 @@ from .const import (
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
+    NORM_BASIS_EN,
+    NORM_BASIS_NA_DE,
 )
 from .control.hub_aggregate import service_action_fields
 
@@ -167,6 +171,7 @@ _OPTIONS_SECTIONS: dict[str, tuple[str, ...]] = {
         CONF_CATEGORY,
         CONF_COMFORT_WEIGHT,
         CONF_ROOM_PROFILE,
+        CONF_NORM_BASIS,
         CONF_ACTIVE_COMFORT,
     ),
     # NOTE: the schedule section is extended dynamically with numbered extra
@@ -713,14 +718,31 @@ def _options_schema(hass: HomeAssistant, current: Mapping[str, Any]) -> vol.Sche
                                 mode=selector.NumberSelectorMode.SLIDER,
                             )
                         ),
-                        # ADR-0054 V2: met/clo room profile for the PMV shadow.
+                        # ADR-0054 V2 met/clo profile; since ADR-0023 N1 also
+                        # the space type of the EN heating range. Default =
+                        # the entry's effective profile (new zones store
+                        # "living", older ones fall back to "office"), so an
+                        # untouched first save never flips it (AR-16).
                         vol.Optional(
-                            CONF_ROOM_PROFILE, default=DEFAULT_ROOM_PROFILE
+                            CONF_ROOM_PROFILE,
+                            default=current.get(
+                                CONF_ROOM_PROFILE, DEFAULT_ROOM_PROFILE
+                            ),
                         ): selector.SelectSelector(
                             selector.SelectSelectorConfig(
                                 options=list(ROOM_PROFILES),
                                 mode=selector.SelectSelectorMode.DROPDOWN,
                                 translation_key="room_profile",
+                            )
+                        ),
+                        # ADR-0050 N1: EN 16798-1 Annex B or the German NA.
+                        vol.Optional(
+                            CONF_NORM_BASIS, default=DEFAULT_NORM_BASIS
+                        ): selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=[NORM_BASIS_EN, NORM_BASIS_NA_DE],
+                                mode=selector.SelectSelectorMode.DROPDOWN,
+                                translation_key="norm_basis",
                             )
                         ),
                         # ADR-0069: the "Aktive Behaglichkeit" mechanism

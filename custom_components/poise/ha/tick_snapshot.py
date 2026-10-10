@@ -1,6 +1,6 @@
 """Per-tick read-only views of the coordinator (plan step O.2).
 
-The tick program reads 40 coordinator attributes purely for information: 31
+The tick program reads 41 coordinator attributes purely for information: 32
 policy/config values and 9 entity bindings. Reading them one by one through
 the transitional ``TickOrchestrator._c`` backreference makes every stage
 depend on the whole ``PoiseCoordinator`` type. The two frozen objects here
@@ -19,7 +19,7 @@ replace that with an explicit, narrow contract:
   would be stale for every tick that follows.
 
 Why a snapshot is legitimate at all (the load-bearing argument, pinned by
-``tests/test_o2_tick_snapshot.py``): the 31 config attributes are written
+``tests/test_o2_tick_snapshot.py``): the 32 config attributes are written
 only by ``PoiseCoordinator.__init__`` and ``PoiseCoordinator._apply_hot_tuning``
 (two of them by ``__init__`` alone), and ``_apply_hot_tuning`` runs only from
 ``__init__`` and from ``async_apply_options``, which takes the SAME tick lock
@@ -60,7 +60,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, avoids the import cycle
 
 @dataclass(frozen=True, slots=True)
 class TickConfigSnapshot:
-    """The tick's read-only policy/config view (31 fields).
+    """The tick's read-only policy/config view (32 fields).
 
     Field name == coordinator attribute without the leading underscore. Every
     field is either hot-applyable tuning (29, written by ``_apply_hot_tuning``)
@@ -90,6 +90,7 @@ class TickConfigSnapshot:
     hdh_cfg: HdhConfig
     heat_lockout_enabled: bool
     heat_max_outdoor: float
+    norm_basis: str
     operative_input: bool
     optimal_start: bool
     optimal_stop: bool
@@ -107,7 +108,7 @@ class TickConfigSnapshot:
 
     @classmethod
     def from_coordinator(cls, coordinator: PoiseCoordinator) -> TickConfigSnapshot:
-        """Copy the 31 config attributes off the live coordinator.
+        """Copy the 32 config attributes off the live coordinator.
 
         Called ONCE per tick, right after the availability gate has passed.
         Every keyword below names exactly one coordinator attribute (bijection
@@ -131,6 +132,7 @@ class TickConfigSnapshot:
             hdh_cfg=coordinator._hdh_cfg,
             heat_lockout_enabled=coordinator._heat_lockout_enabled,
             heat_max_outdoor=coordinator._heat_max_outdoor,
+            norm_basis=coordinator._norm_basis,
             operative_input=coordinator._operative_input,
             optimal_start=coordinator._optimal_start,
             optimal_stop=coordinator._optimal_stop,

@@ -118,6 +118,7 @@ _ZONE_TUNING_FIELDS = frozenset(
         "heat_lockout_enabled",
         "heat_max_outdoor",
         "mpc_params",
+        "norm_basis",
         "operative_input",
         "optimal_start",
         "optimal_stop",

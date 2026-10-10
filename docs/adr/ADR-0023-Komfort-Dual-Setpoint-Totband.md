@@ -1,6 +1,6 @@
 # ADR-0023: Capability-aware Dual-Setpoint mit Totband
 
-**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-19, Nachträge N1/N2 2026-10-10 · **Bezug:** Livetest v0.6.0, ADR-0010/0016/0017 · **Verifizierung:** EN 16798-1 (Web), RoomMind/Versatile/BT-Code, eigenes Smart-Setpoint-Gist v5.3.1
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-19, Nachträge N1–N3 2026-10-10 · **Bezug:** Livetest v0.6.0, ADR-0010/0016/0017 · **Verifizierung:** EN 16798-1 (Web), RoomMind/Versatile/BT-Code, eigenes Smart-Setpoint-Gist v5.3.1
 
 ## Umsetzungsstand (Nachtrag v0.101.0)
 Punkte 2–7 sind **live verdrahtet und aktiv** (Capability-Gating, `decide_mode`-Richtung, Prioritäts-Totband, kapazitätskorrektes Idle-Hold, harte Frost-/Schimmel-/Taupunkt-Grenzen; MPC-Totband-Kosten als Shadow). **Punkt 1 — free-running-Widening:** das adaptive Totband-Widening fehlte zunächst (`decide()` verwarf `t_rm` via `_ = t_rm`; `adaptive_band` nur in totem `corridor.py` + `thermal_shock.py` genutzt; kein Test deckte den T_rm-Einfluss — externe Code-Audit-Bestätigung). Es ist nun als pures `comfort/free_running.py` (`free_running_widen`) umgesetzt und **shadow-first** im Coordinator verdrahtet (Diagnose `fr_active`/`fr_heat_sp`/`fr_cool_sp`/`fr_adaptive_lower`/`fr_adaptive_upper`, **keine Writes**); 5 Unit-Tests grün (T_rm speist nun nachweislich das Band). **Sicherheits-Gate:** das Widening greift nur, wenn der Raum **im fixen Totband schwebt** (10 ≤ T_rm ≤ 30, nicht extrapoliert, kein aktiver Heiz-/Kühl-Bedarf) und **hebt nie den Heiz-Sollwert** (`min`) — so kann es eine aktive Konditionierung nie unterdrücken und reproduziert nicht den Ur-Live-Bug (adaptive Neutraltemperatur als warmer Heizsollwert). **Aktivierung bewusst gated:** ein ungegatetes Adaptiv-Widening würde an Hitzetagen (T_rm hoch) den Kühl-Sollwert auf ~31 °C heben und **legitime Sommerkühlung unterdrücken** — die Diagnose macht genau dieses Verhalten zuerst sichtbar; der aktive Schreibpfad behält die fixen Auslegungsbänder (kohärent mit ADR-0051, das das Hitzetag-Kühlziel separat + gekappt regelt).
@@ -68,3 +68,11 @@ Erweitert ADR-0010 (Kühlung) und ADR-0017 (Operativ→Luft je Richtung); nutzt 
 
 ### Komfortgewicht neuer Zonen (Review-Punkt P3)
 Bei Gewicht 70 senkte die Verbreiterung die belegte Heizkante um 0,45 K (Basis 21 → 20,55 °C operativ, 0,55 K über der Kat.-II-Untergrenze). Entscheidung (Variante B): **neue Zonen speichern beim Anlegen Gewicht 100** (`NEW_ZONE_COMFORT_WEIGHT`), die Heizkante ist dann exakt die eingegebene Basis. Zonen ohne gespeichertes Gewicht — alle vor v0.196.0 angelegten, deren Komfort-Abschnitt nie gespeichert wurde — behalten den Rückfallwert 70 (`DEFAULT_COMFORT_WEIGHT`); das Optionsformular zeigt und speichert den **effektiven** Wert der Zone, damit ein unveränderter Erst-Speichern nichts kippt (AR-16). Keine Migration, keine Änderung der Regelmathematik.
+
+## Nachtrag N3 (2026-10-10, v0.196.1): Neue Zonen sind Wohnräume
+
+**Befund (Folge-Review 2026-10-10):** Seit N1 wählt das Raumprofil auch den EN-Heizbereich. Der Standard blieb `office`, sodass die Wohnzeile nur bei aktiver Umstellung griff — für eine Home-Assistant-Integration der seltenere Fall.
+
+**Entscheidung:** Wie beim Komfortgewicht (N2, Variante B): **neue Zonen speichern beim Anlegen `room_profile = living`** (`NEW_ZONE_ROOM_PROFILE`). Zonen ohne gespeichertes Profil behalten den Rückfall `office` (`DEFAULT_ROOM_PROFILE`); das Optionsformular zeigt und speichert den **effektiven** Wert (AR-16). Die Feldbeschreibung nennt jetzt die Wirkung auf den Heizbereich (sie sagte noch „wirkt nie auf den Sollwert", seit N1 falsch) und beim Komfortgewicht die Absenkung der Heizkante unter die Basis.
+
+**Wirkung:** nur neue Zonen; dort Wohnzeile (Kat. II 20–25 °C) und die PMV-Annahme „living" (met 1,1, Sofa-Isolation).

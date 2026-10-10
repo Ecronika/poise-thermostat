@@ -184,12 +184,14 @@
               "climate_mode": "Climate mode",
               "comfort_weight": "Comfort vs efficiency",
               "room_profile": "Room profile (comfort evaluation)",
+              "norm_basis": "Norm basis",
               "active_comfort": "Active comfort"
             },
             "data_description": {
               "comfort_base": "The centre of the comfort band; the category sets how wide the band is around it.",
-              "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. Default 70.",
-              "room_profile": "Activity and clothing assumption for the comfort (PMV) diagnosis: office is the neutral default; living adds the sofa insulation, bedroom assumes resting, kitchen assumes housework. Affects the comfort lamp only, never the setpoint. With the bedroom profile no PMV is evaluated (sleeping is outside the ISO 7730 validity range) — the comfort lamp stays silent there.",
+              "comfort_weight": "0 = save energy (wider band), 100 = tightest comfort. At 100 the occupied heating edge is exactly the comfort base; below 100 it drops by up to 1.5 K (at 70: 0.45 K — e.g. 20.55 instead of 21 °C, only 0.55 K above the Category II minimum). New zones start at 100; zones created before 0.196.0 that never saved this field use 70.",
+              "room_profile": "Space type and activity/clothing assumption. Living, bedroom, kitchen and bathroom use the residential EN 16798-1 heating range (Category II 20–25 °C, Category III 18–25 °C); office uses the office range (20–24 / 19–25 °C). The profile also sets the comfort (PMV) diagnosis: living adds the sofa insulation, bedroom assumes resting (no PMV is evaluated there — sleeping is outside the ISO 7730 validity range), kitchen assumes housework. New zones start as living; zones created before 0.196.1 that never saved this field use office.",
+              "norm_basis": "Which edition of the comfort norm sets the limits: EN 16798-1 Annex B (default) or the German national annex DIN EN 16798-1/NA. Today this changes one value: the absolute humidity ceiling for dehumidification, 12 g/kg (EN) or 11.5 g/kg (NA).",
               "active_comfort": "Actively produce comfort: permits the fan-first cooling stage, the cooling-edge credit and the PMV offset for this zone. Each part only engages once its quality gate and readiness checks pass (ADR-0069)."
             }
           },
@@ -376,11 +378,17 @@
     },
     "room_profile": {
       "options": {
-        "office": "Office / neutral (default)",
+        "office": "Office / neutral",
         "living": "Living room (sofa, relaxed)",
         "bedroom": "Bedroom (resting)",
         "kitchen": "Kitchen (housework)",
         "bathroom": "Bathroom (personal care, light clothing)"
+      }
+    },
+    "norm_basis": {
+      "options": {
+        "en": "EN 16798-1 Annex B (default)",
+        "na_de": "German national annex (DIN EN 16798-1/NA)"
       }
     },
     "feedback_direction": {

@@ -81,6 +81,7 @@ def _tuning(*, comfort_base: float = 21.0) -> ZoneTuning:
         adopt_external_mode=False,
         operative_input=False,
         room_profile="office",
+        norm_basis="en",
         override_suggestions=False,
         clo_offset=0.0,
         active_comfort=False,
@@ -141,7 +142,8 @@ def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
     # +override_suggestions (ADR-0060 L2) +clo_offset (ADR-0067)
     # +active_comfort (ADR-0069 Mechanismus-Schalter)
     # +trv_calibration (ADR-0015 / D6, P1.3b)
-    # +schedule_days_invalid (P2.3, fail-closed comfort_days mask report) = 34.
+    # +schedule_days_invalid (P2.3, fail-closed comfort_days mask report)
+    # +norm_basis (ADR-0050 N1, v0.196.1) = 35.
     assert _field_names(ZoneTuning) == (
         "window_auto_cfg",
         "override_policy",
@@ -172,13 +174,14 @@ def test_tuning_field_contract_is_exactly_the_plan_table() -> None:
         "adopt_external_mode",
         "operative_input",
         "room_profile",
+        "norm_basis",
         "override_suggestions",
         "clo_offset",
         "active_comfort",
         "trv_calibration",
         "schedule_days_invalid",
     )
-    assert len(dataclasses.fields(ZoneTuning)) == 34  # see comment above
+    assert len(dataclasses.fields(ZoneTuning)) == 35  # see comment above
 
 
 def test_tuning_has_no_climate_mode_field() -> None:
