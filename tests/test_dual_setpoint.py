@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from custom_components.poise.comfort.dual_setpoint import decide
 from custom_components.poise.comfort.en16798 import Category
 
@@ -48,9 +50,9 @@ def test_hot_room_with_cooling_cools_to_cool_sp() -> None:
         t_out=29.0,
     )
     assert d.mode == "cool"
-    # M1: cooling now tracks the comfort centre (base 21 + neutral band), no
-    # longer pinned to the absolute category upper.
-    assert d.target is not None and 22.0 <= d.target <= 24.0
+    # ADR-0023 N2: an occupied cooled room is held at the Category II design
+    # value (upper 26 - 1 K margin), no longer at base 21 + 2 K = 23.
+    assert d.target == 25.0
 
 
 def test_heat_only_device_in_heat_does_not_cool() -> None:
@@ -275,11 +277,11 @@ def test_adaptive_cool_edge_gated_on_occupancy() -> None:
     """ADR-0061: the EN adaptive (free-running) cooling raise applies ONLY to an
     UNOCCUPIED room. An occupied, actively-conditioned space uses the fixed EN
     category band (the adaptive model excludes mechanically-cooled spaces —
-    EN 16798-1 / ASHRAE 55). Warm running mean + cool-capable device, room 24.5,
+    EN 16798-1 / ASHRAE 55). Warm running mean + cool-capable device, room 25.5,
     Cat I; without the raise the room is cooled, with it (only empty) it idles."""
     fixed = decide(
         t_rm=21.0,
-        room=24.5,
+        room=25.5,
         category=Category.I,
         comfort_base=21.0,
         can_heat=False,
@@ -288,7 +290,7 @@ def test_adaptive_cool_edge_gated_on_occupancy() -> None:
     )
     occupied = decide(
         t_rm=21.0,
-        room=24.5,
+        room=25.5,
         category=Category.I,
         comfort_base=21.0,
         can_heat=False,
@@ -299,7 +301,7 @@ def test_adaptive_cool_edge_gated_on_occupancy() -> None:
     )
     unoccupied = decide(
         t_rm=21.0,
-        room=24.5,
+        room=25.5,
         category=Category.I,
         comfort_base=21.0,
         can_heat=False,
@@ -309,9 +311,10 @@ def test_adaptive_cool_edge_gated_on_occupancy() -> None:
         occupied=False,
     )
     assert fixed.mode == "cool"  # fixed band cools the mild-warm room
-    assert fixed.cool_sp == 23.5
+    # ADR-0023 N2: Category I design value = upper 25.5 - 1 K.
+    assert fixed.cool_sp == 24.5
     # Occupied + adaptive on: the adaptive raise is gated OFF -> fixed band cools.
-    assert occupied.cool_sp == 23.5
+    assert occupied.cool_sp == 24.5
     assert occupied.mode == "cool"
     # Unoccupied: free-running -> edge lifts to the ASR-capped adaptive upper -> idle.
     assert unoccupied.cool_sp == 26.0
@@ -413,3 +416,115 @@ def test_room_profiles_name_their_space_type() -> None:
     # unset/unknown stays the office default — no silent behaviour change
     assert not resolve_room_profile(None).residential
     assert not resolve_room_profile("garage").residential
+
+
+# --- ADR-0023 N2: the cooling edge starts at the category design value -------
+
+
+@pytest.mark.parametrize(
+    ("category", "expected"),
+    [(Category.I, 24.5), (Category.II, 25.0), (Category.III, 26.0)],
+)
+def test_cooling_edge_sits_at_the_category_design_value(
+    category: Category, expected: float
+) -> None:
+    """Review 2026-10-10: at the defaults the cooling edge sat at 23.45 °C, the
+    lower rim of the Category II summer range. It now starts at the design
+    value (upper limit - 1 K)."""
+    d = decide(
+        t_rm=20.0,
+        room=27.0,
+        category=category,
+        comfort_base=21.0,
+        can_heat=False,
+        can_cool=True,
+        t_out=28.0,
+    )
+    assert d.cool_sp == expected
+
+
+def test_cooling_edge_never_drops_below_the_old_comfort_coupling() -> None:
+    """A warm comfort base keeps its 2 K dead-band: base 24 -> 26, which is the
+    Category II ceiling, not the 25 °C design value."""
+    d = decide(
+        t_rm=20.0,
+        room=27.0,
+        comfort_base=24.0,
+        can_heat=False,
+        can_cool=True,
+        t_out=28.0,
+    )
+    assert d.cool_sp == 26.0
+
+
+def test_efficiency_widening_still_lifts_the_cooling_edge() -> None:
+    """Weight 70 (priority 0.7) widens by 0.45 K: 25.0 -> 25.45 operative."""
+    d = decide(
+        t_rm=20.0,
+        room=27.0,
+        comfort_base=21.0,
+        priority=0.7,
+        can_heat=False,
+        can_cool=True,
+        t_out=28.0,
+    )
+    assert d.cool_sp == pytest.approx(25.4, abs=0.06)
+
+
+def test_heat_only_zone_keeps_the_comfort_coupled_edge() -> None:
+    """A device that cannot cool spends nothing on the cooling edge; there the
+    edge is the reference of the ventilation advice (rule 3t, the ADR-0066 N2
+    mould guard), so it keeps base + 2 K (+ widening), clamped into the band —
+    the CI glue scenario of 2026-10-10 (Cat III, base 17 -> edge 22)."""
+    d = decide(
+        t_rm=5.0,
+        room=23.0,
+        category=Category.III,
+        comfort_base=17.0,
+        priority=0.7,
+        can_heat=True,
+        can_cool=False,
+        t_out=6.0,
+    )
+    assert d.cool_sp == 22.0  # Cat III cooling lower, not the 26 °C design value
+
+
+def test_cooling_design_values_are_below_the_category_upper() -> None:
+    from custom_components.poise.comfort.en16798 import (
+        COOLING_DESIGN,
+        COOLING_LOWER,
+        COOLING_UPPER,
+    )
+
+    for c in Category:
+        assert COOLING_LOWER[c] < COOLING_DESIGN[c] < COOLING_UPPER[c]
+        assert COOLING_UPPER[c] - COOLING_DESIGN[c] == pytest.approx(1.0)
+
+
+# --- ADR-0017 N1: operative->air solved against the radiant model ------------
+
+
+def test_radiant_model_removes_the_room_reading_from_the_setpoint() -> None:
+    """Review 2026-10-10: with the virtual MRT evaluated at the room reading the
+    air setpoint after a setback (room 18, outdoor -5) was ~24.9 °C. Solved
+    against the model it is the steady value, whatever the room reads."""
+    from custom_components.poise.comfort.virtual_mrt import virtual_mrt_model
+
+    model = virtual_mrt_model(-5.0)
+    sps = {
+        room: decide(
+            t_rm=5.0,
+            room=room,
+            comfort_base=21.0,
+            priority=0.7,
+            t_out=-5.0,
+            radiant=model,
+        ).heat_sp
+        for room in (18.0, 20.5, 22.0)
+    }
+    assert set(sps.values()) == {21.6}
+
+
+def test_without_a_radiant_model_the_pointwise_transform_is_kept() -> None:
+    d = decide(t_rm=5.0, room=20.0, comfort_base=21.0, t_out=-5.0, t_mrt=19.0)
+    assert d.heat_sp == 23.0  # (21 - 0.5·19) / 0.5

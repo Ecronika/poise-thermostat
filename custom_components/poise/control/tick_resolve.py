@@ -14,6 +14,8 @@ import math
 from dataclasses import dataclass
 
 from ..comfort.norm_compliance import ASR_MAX_ROOM_C
+from ..comfort.operative import RadiantModel, measured_offset_model
+from ..comfort.virtual_mrt import virtual_mrt_model
 from ..constraints import Constraint, ConstraintKind, resolve_constraints
 from ..contracts import Precedence
 from ..estimation.solar import clear_sky_normalized, normalize_irradiance
@@ -52,6 +54,29 @@ def select_mrt(sensor: float | None, internal: float) -> tuple[float, str]:
     return internal, "internal"
 
 
+def radiant_model(
+    t_mrt: float | None,
+    t_air: float,
+    mrt_source: str,
+    t_out: float,
+    q_solar: float,
+) -> RadiantModel | None:
+    """The MRT model the operative->air transform solves against (ADR-0017 N1).
+
+    ``None`` (identity transform) when no MRT enters the decision — the
+    operative feed mode (ADR-0029: the MRT already lives in the fed value). A
+    measured globe/MRT sensor yields the clamped offset form (ADR-0017 §4);
+    the virtual estimate yields its envelope/solar model, independent of the
+    room reading. Evaluating that model AT the room reading, as before N1, fed
+    the reading back into the setpoint with gain ~0.92.
+    """
+    if t_mrt is None:
+        return None
+    if mrt_source == "sensor":
+        return measured_offset_model(t_mrt, t_air)
+    return virtual_mrt_model(t_out, q_solar)
+
+
 @dataclass(frozen=True, slots=True)
 class WriteTarget:
     target: float
@@ -73,6 +98,7 @@ def resolve_write_target(
     mold_min: float | None,
     device_max: float,
     device_min: float | None = None,
+    can_cool: bool = True,
 ) -> WriteTarget:
     """Final write target: window/override/comfort → setpoint + mode, then the
     unconditional norm envelope (ASR cap + frost/mould floor, skipped when
@@ -87,13 +113,22 @@ def resolve_write_target(
     SAFETY floor: a device silently holds its minimum, so writing below it makes
     the echo-compare rewrite every tick. The floor is clamped up to
     it in both heating and cooling.
+
+    ``can_cool`` (ADR-0017 N1): a device that cannot cool has no cooling
+    setpoint to respect, so a manual value is only clamped UP to ``heat_sp``;
+    above it the ASR cap of the norm envelope is the limit. Until N1 the
+    ``cool_sp`` of such a device was inflated by the room-reading transform
+    and in practice never bound below that cap, so this keeps the effective
+    behaviour while the transform is now exact.
     """
     floor = max(frost_floor, mold_min if mold_min is not None else frost_floor)
     override_clamped = False
     if window_open:
         target, mode = round(floor, 1), "off"
     elif override is not None:
-        clamped = min(max(override, heat_sp), cool_sp)
+        clamped = max(override, heat_sp)
+        if can_cool:
+            clamped = min(clamped, cool_sp)
         override_clamped = clamped != override
         target, mode = round(clamped, 1), "manual"
     else:

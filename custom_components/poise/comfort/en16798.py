@@ -110,3 +110,13 @@ COOLING_UPPER: dict[Category, float] = {
     Category.II: 26.0,
     Category.III: 27.0,
 }
+# ADR-0023 N2: the cooling DESIGN value an occupied, actively cooled room is
+# held at — the category upper limit minus a 1 K margin, so control deviation
+# does not breach the limit. EN 16798-1 sizes cooling on the upper value of the
+# range; holding the room at the LOWER edge (23 °C in Category II, as the
+# comfort-base coupling did until v0.195.0) costs cooling energy for no
+# comfort the category asks for.
+COOLING_DESIGN_MARGIN_K: float = 1.0
+COOLING_DESIGN: dict[Category, float] = {
+    c: COOLING_UPPER[c] - COOLING_DESIGN_MARGIN_K for c in Category
+}

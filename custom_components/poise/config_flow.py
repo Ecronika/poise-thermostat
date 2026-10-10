@@ -46,6 +46,7 @@ from .const import (
     CONF_COMFORT_DAYS,
     CONF_COMFORT_END,
     CONF_COMFORT_START,
+    CONF_COMFORT_WEIGHT,
     CONF_ENTRY_TYPE,
     CONF_NAME,
     CONF_SETBACK_DELTA,
@@ -54,6 +55,7 @@ from .const import (
     DEFAULT_SETBACK_DELTA,
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
+    NEW_ZONE_COMFORT_WEIGHT,
 )
 from .control.hub_aggregate import parse_service_action
 from .migration import SETUP_TUNING_KEYS
@@ -285,7 +287,13 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                 # merged either way ({**data, **options}); what changes is the
                 # MEANING of entry.data, which the reload-vs-hot-apply predicate
                 # (PoiseCoordinator.structural_unchanged) keys on.
-                options = {k: data.pop(k) for k in SETUP_TUNING_KEYS if k in data}
+                options: dict[str, Any] = {
+                    # Review 2026-10-10 (P3): a new zone stores its weight, so
+                    # the heating edge is the typed comfort base; zones without
+                    # a stored weight keep the pre-0.196.0 fallback.
+                    CONF_COMFORT_WEIGHT: NEW_ZONE_COMFORT_WEIGHT,
+                    **{k: data.pop(k) for k in SETUP_TUNING_KEYS if k in data},
+                }
                 return self.async_create_entry(
                     title=data[CONF_NAME], data=data, options=options
                 )

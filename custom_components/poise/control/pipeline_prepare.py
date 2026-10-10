@@ -79,6 +79,7 @@ from ..control.mpc import MpcParams
 from ..control.tick_resolve import (
     cool_drive_signal,
     heat_drive_signal,
+    radiant_model,
     select_mrt,
     select_q_solar,
     select_t_rm,
@@ -896,6 +897,9 @@ def stage_comfort_solve(
         cool_edge_credit=rt.latches.fan_ce_credit_k,
         pmv_offset_k=rt.latches.pmv_offset_k,
         residential=residential,
+        radiant=radiant_model(
+            op.t_mrt_decide, op.room_decide, ing.mrt_source, ing.t_out_eff, ing.q_solar
+        ),
     )
     return decision
 

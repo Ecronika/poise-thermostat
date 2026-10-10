@@ -112,6 +112,9 @@ async def test_user_menu_then_room_creates_entry(hass: HomeAssistant) -> None:
     assert CONF_CATEGORY not in entry.data
     assert entry.options[CONF_COMFORT_BASE] == 21.0
     assert entry.options[CONF_CATEGORY] == "II"
+    # Review 2026-10-10 (P3): a new zone stores weight 100, so its occupied
+    # heating edge is the typed comfort base (older zones fall back to 70).
+    assert entry.options[CONF_COMFORT_WEIGHT] == 100
     assert entry.data[CONF_TEMP_SENSOR] == "sensor.room_temp"
 
 
