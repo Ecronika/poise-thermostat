@@ -253,6 +253,10 @@ async def test_race_no_reacquisition_between_handoff_and_entry_update(
     assert coord._trv_calibration is False  # die Sperre, in beiden Fällen
     assert coord.runtime.actuator.cal_baseline is None
     assert coord.runtime.actuator.cal_entity is None
+    # AR-46-Assessment (Review 2026-08-26): der erfolgreiche Port hängt auch
+    # die IMMEDIATE-Listener aus — der Park des alten Aktors im Swap-Flow darf
+    # über seine eigenen Writes keinen letzten Tick dieser Instanz auslösen.
+    assert coord._unsub_listeners is None
 
     # Der erzwungene Tick des ALTEN Coordinators (Listener/Refresh im
     # F27-Umfeld): Raum 20.5 / TRV 22.0 wäre ein sofortiger Erst-Write,
@@ -312,6 +316,9 @@ async def test_handoff_port_failed_keeps_ownership_and_gate(
     assert coord.runtime.actuator.cal_baseline == 0.0  # Ownership bleibt
     assert coord.runtime.actuator.cal_entity == CAL
     assert coord._trv_calibration is True  # keine Sperre auf FAILED
+    # AR-46: FAILED lässt auch die Listener dran — der Entry bleibt mit der
+    # alten Konfiguration live und muss weiter prompt reagieren.
+    assert coord._unsub_listeners is not None
 
 
 # =============================================================================

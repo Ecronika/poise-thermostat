@@ -538,3 +538,28 @@ def test_observe_resume_engages_only_on_baseline_without_anchor() -> None:
     # Anchors present again: the quarantine never re-engages.
     assert rt.observe_calibration_resume(reported=-1.5, wall_now=3.0) is False
     assert rt.actuator.last_cal_dispatch_wall_ts == 2.0
+
+
+# --- observe_calibration_orphaned (identity-drift release) ------------------
+
+
+def test_observe_orphaned_releases_only_gone_with_ownership() -> None:
+    # Review 2026-08-26 follow-up: the gone-leg release goes through the ONE
+    # clearing site via this fold — never a direct stage mutation.
+    rt = _runtime()
+    # No ownership: nothing to release, whatever the observation says.
+    assert rt.observe_calibration_orphaned(stored_entity_gone=True) is False
+    # Ownership, but the stored entity still exists: fail-closed, no release.
+    rt.actuator.cal_baseline = -1.0
+    rt.actuator.cal_entity = CAL
+    rt.actuator.last_cal_value = -1.5
+    assert rt.observe_calibration_orphaned(stored_entity_gone=False) is False
+    assert rt.actuator.cal_baseline == -1.0
+    assert rt.actuator.cal_entity == CAL
+    # Ownership + structurally gone: released, every anchor cleared, persisted.
+    rt.dirty = False
+    assert rt.observe_calibration_orphaned(stored_entity_gone=True) is True
+    assert rt.actuator.cal_baseline is None
+    assert rt.actuator.cal_entity is None
+    assert rt.actuator.last_cal_value is None
+    assert rt.dirty is True  # the release persists
