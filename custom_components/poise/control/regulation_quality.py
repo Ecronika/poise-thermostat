@@ -9,7 +9,8 @@ Three time-weighted (EWMA) figures over scored (comfort-window, unmasked) ticks:
   * ``deviation_k``     mean Kelvin the room sits OUTSIDE the comfort band (0
                         in-band; EN 15500-1 control accuracy in a dead-band
                         system — inside the band every point is "on target").
-  * ``in_band``         fraction of scored time inside [heat_sp, cool_sp].
+  * ``in_band``         fraction of scored time inside [heat_sp, cool_sp],
+                        widened by ``BAND_TOL_K`` on each side (N3).
   * ``cycles_per_hour`` regime-change rate (mode/actuation transitions) — the
                         hunting detector a band-only metric would miss.
 
@@ -26,6 +27,18 @@ DEFAULT_HORIZON_H = 72.0  # EWMA time constant [h] ~ "recent sustained" quality
 DEV_MAX_K = 0.5  # conservative default flip thresholds (per class in wiring)
 CYCLE_MAX_PER_H = 3.0
 BAND_MIN = 0.9
+# ADR-0055 N3: how far outside the band a tick may sit and still count as IN
+# band. A room controller regulates AROUND its setpoint, and in a heating zone
+# that setpoint IS the lower band edge — so an excellently regulated room
+# spends a large share of its time a few tenths below it. Scored without a
+# tolerance, ``in_band`` measured the actuator's own hysteresis, not comfort
+# (field 2026-10-10: office 0.14 K mean deviation, yet 55 % "in band"; only
+# zones that never needed to heat ever reached 90 %). The number is the
+# deviation the gate already accepts as an AVERAGE (``DEV_MAX_K``), and it is
+# the order of the certified control accuracy of TRV heads (EN 215, CA 0.6 K).
+# ``deviation_k`` stays strict: the tolerance changes what counts as a band
+# violation, not how large a violation is.
+BAND_TOL_K = DEV_MAX_K
 WARMUP_MIN = 3.0 * 24.0 * 60.0  # >= 3 days of scored comfort minutes before a flip
 PPD_SEED = 5.0  # ISO 7730 theoretical optimum — PPD can never sit below 5 %
 # N1: a comfort flip may not worsen the time-weighted PPD beyond this. One
@@ -68,10 +81,11 @@ class RegulationQuality:
         mode: str,
         dt_min: float,
         horizon_h: float = DEFAULT_HORIZON_H,
+        band_tol: float = BAND_TOL_K,
     ) -> RegulationQuality:
         """Fold one scored tick into the EWMA. Call only on unmasked comfort ticks."""
         dev = max(0.0, heat_sp - room, room - cool_sp)
-        inb = 1.0 if heat_sp <= room <= cool_sp else 0.0
+        inb = 1.0 if heat_sp - band_tol <= room <= cool_sp + band_tol else 0.0
         moved = 1.0 if (self.last_mode != "" and mode != self.last_mode) else 0.0
         dt_h = max(dt_min, 1e-6) / 60.0
         alpha = 1.0 - math.exp(-dt_min / (horizon_h * 60.0))

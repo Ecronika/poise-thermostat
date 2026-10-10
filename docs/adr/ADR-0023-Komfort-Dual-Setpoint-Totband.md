@@ -1,6 +1,6 @@
 # ADR-0023: Capability-aware Dual-Setpoint mit Totband
 
-**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-19 · **Bezug:** Livetest v0.6.0, ADR-0010/0016/0017 · **Verifizierung:** EN 16798-1 (Web), RoomMind/Versatile/BT-Code, eigenes Smart-Setpoint-Gist v5.3.1
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-19, Nachtrag N1 2026-10-10 · **Bezug:** Livetest v0.6.0, ADR-0010/0016/0017 · **Verifizierung:** EN 16798-1 (Web), RoomMind/Versatile/BT-Code, eigenes Smart-Setpoint-Gist v5.3.1
 
 ## Umsetzungsstand (Nachtrag v0.101.0)
 Punkte 2–7 sind **live verdrahtet und aktiv** (Capability-Gating, `decide_mode`-Richtung, Prioritäts-Totband, kapazitätskorrektes Idle-Hold, harte Frost-/Schimmel-/Taupunkt-Grenzen; MPC-Totband-Kosten als Shadow). **Punkt 1 — free-running-Widening:** das adaptive Totband-Widening fehlte zunächst (`decide()` verwarf `t_rm` via `_ = t_rm`; `adaptive_band` nur in totem `corridor.py` + `thermal_shock.py` genutzt; kein Test deckte den T_rm-Einfluss — externe Code-Audit-Bestätigung). Es ist nun als pures `comfort/free_running.py` (`free_running_widen`) umgesetzt und **shadow-first** im Coordinator verdrahtet (Diagnose `fr_active`/`fr_heat_sp`/`fr_cool_sp`/`fr_adaptive_lower`/`fr_adaptive_upper`, **keine Writes**); 5 Unit-Tests grün (T_rm speist nun nachweislich das Band). **Sicherheits-Gate:** das Widening greift nur, wenn der Raum **im fixen Totband schwebt** (10 ≤ T_rm ≤ 30, nicht extrapoliert, kein aktiver Heiz-/Kühl-Bedarf) und **hebt nie den Heiz-Sollwert** (`min`) — so kann es eine aktive Konditionierung nie unterdrücken und reproduziert nicht den Ur-Live-Bug (adaptive Neutraltemperatur als warmer Heizsollwert). **Aktivierung bewusst gated:** ein ungegatetes Adaptiv-Widening würde an Hitzetagen (T_rm hoch) den Kühl-Sollwert auf ~31 °C heben und **legitime Sommerkühlung unterdrücken** — die Diagnose macht genau dieses Verhalten zuerst sichtbar; der aktive Schreibpfad behält die fixen Auslegungsbänder (kohärent mit ADR-0051, das das Hitzetag-Kühlziel separat + gekappt regelt).
@@ -39,3 +39,15 @@ Norm- und gerätemuster eigenständig umgesetzt; generisch (Fähigkeit aus Stand
 
 ## Verknüpfungen
 Erweitert ADR-0010 (Kühlung) und ADR-0017 (Operativ→Luft je Richtung); nutzt ADR-0015 (Capability) und ADR-0009 (MPC-Gewichte). Ersetzt die naive Einzel-Korridor-Zielbildung aus der ersten Comfort-Implementierung.
+
+## Nachtrag N1 (2026-10-10, v0.195.0): Heizbereich nach Raumart — Wohnen ist nicht Büro
+
+**Befund:** `comfort/en16798.py` führte einen einzigen Satz fester Heizgrenzen (Kat. I/II/III: 21–23 / 20–24 / 19–25 °C) mit dem Kommentar, nur Kat. II sei quellengestützt, I/III seien Extrapolation. Gegen die Quelle geprüft (EN 16798-1:2019, Auslegungskriterien wie in REHVA Journal 04/2019, Boerstra, Tabelle 1 tabelliert; operativ, 1,0 clo Winter / 1,2 met): Diese Werte sind exakt die **Büro**-Zeile. Für **Wohnräume** nennt dieselbe Tabelle **21–25 / 20–25 / 18–25 °C**; die Kühlbereiche sind für beide Raumarten gleich. Poise wandte die Bürozeile auf alle Zonen an. Feldwirkung (Zuhause-Anlage): Schlafzimmer und Küche (Kat. III, Basis 19, Effizienzgewicht 40 bzw. 50 %) wurden von 18,1 bzw. 18,3 °C — ihrer eigenen Einstellung — auf 19 °C hochgeklemmt; das Bad (Kat. II, Basis 24) saß auf der Büro-Obergrenze 24 °C, sodass die Tier-2-PMV-Verschiebung dort nie wirken konnte.
+
+**Entscheidung:** `heating_band(category, residential=…)` liefert die Zeile zur Raumart. Die Raumart hängt am vorhandenen Raumprofil (`RoomProfile.residential`): `living`, `bedroom`, `kitchen`, `bathroom` sind Wohnräume; `office` — und damit auch jede Zone ohne oder mit unbekanntem Profil — bleibt auf der Bürozeile. Kein neues Konfigurationsfeld, kein Migrationsbedarf; Zonen mit Büroprofil verhalten sich exakt wie bisher. Verdrahtet an beiden Verwendungsstellen: der Komfortentscheidung (`decide(..., residential=)`, durchgereicht über `stage_comfort_solve`) und dem Optimal-Start-Zielwert (`phase_prepare`). Der Kommentar in `en16798.py` nennt jetzt die Quelle statt „Extrapolation".
+
+**Nicht berührt:** der harte ASR-Deckel 26 °C (ADR-0027) liegt über allen neuen Obergrenzen; Frost-/Schimmel-Floors, Kühlbereiche, adaptive Bänder.
+
+**Wirkung im Feld (erwartet, nicht gemessen):** Wohnraumzonen der Kat. III können wieder unter 19 °C geführt werden, wenn ihre Einstellung das verlangt; Kat.-I/II-Wohnräume dürfen bis 25 °C. Wer in einer Kat.-III-Wohnzone 19 °C will, hebt Basis oder Komfortgewicht an — die Klemme hat das bisher stillschweigend für ihn getan.
+
+**Tests:** beide Zeilen gepinnt; Kat.-III-Schlafzimmerfall (Büro 19,0/en16798 → Wohnen 18,1/comfort_base); Bad-Fall (PMV +0,6: Büro 24,0 → Wohnen 24,6); Raumprofile benennen ihre Raumart, unbekannt/leer bleibt Büro.

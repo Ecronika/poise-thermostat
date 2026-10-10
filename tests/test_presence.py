@@ -115,3 +115,52 @@ def test_any_present_or_reduces_tristates() -> None:
     assert any_present([None]) is None
     # a present one still wins over an unresolved sibling
     assert any_present([None, True]) is True
+
+
+# --- ADR-0058 N3: absence only counts inside the comfort window (field 2026-10-10) ----
+
+
+def test_absence_outside_the_window_does_not_accrue() -> None:
+    """An empty room at night is the normal case, not evidence."""
+    anchor = step_room_absence(None, present=False, now=1000.0, accrue=False)
+    assert anchor == 1000.0
+    # still outside the window: the anchor follows the clock instead of aging
+    anchor = step_room_absence(anchor, present=False, now=5000.0, accrue=False)
+    assert anchor == 5000.0
+    # presence still resets as before
+    assert step_room_absence(anchor, present=True, now=5060.0, accrue=False) is None
+
+
+def _level_after_night(*, minutes_into_window: float) -> PresenceLevel:
+    cfg = PresenceConfig(absence_after_min=30.0)
+    anchor: float | None = None
+    t = 0.0
+    # 8 h of an empty bathroom outside the window, the last 4 h preheating
+    for _ in range(8 * 60):
+        anchor = step_room_absence(anchor, present=False, now=t, accrue=False)
+        t += 60.0
+    # the window opens; the room stays empty
+    level = PresenceLevel.COMFORT
+    for _ in range(int(minutes_into_window)):
+        anchor = step_room_absence(anchor, present=False, now=t, accrue=True)
+        absent_min = (t - anchor) / 60.0 if anchor is not None else 0.0
+        level = resolve_presence(
+            home=True,
+            room_absent_min=absent_min,
+            is_comfort=True,
+            preheating=False,
+            cfg=cfg,
+        )
+        t += 60.0
+    return level
+
+
+def test_the_window_opens_at_the_comfort_edge_optimal_start_heated_for() -> None:
+    """Before N3 the night counted: at window start the room had been 'empty'
+    for hours, so the edge preheat had just reached was dropped instantly."""
+    assert _level_after_night(minutes_into_window=1) is PresenceLevel.COMFORT
+    assert _level_after_night(minutes_into_window=29) is PresenceLevel.COMFORT
+
+
+def test_an_empty_room_still_goes_eco_after_the_hold_inside_the_window() -> None:
+    assert _level_after_night(minutes_into_window=32) is PresenceLevel.ROOM_ECO

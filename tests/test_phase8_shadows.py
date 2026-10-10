@@ -297,7 +297,7 @@ def test_lifecycle_fragment_dispatches_via_injected_fns() -> None:
 
 def _cover(
     *,
-    mould_binds: bool = False,
+    lower_cause: str = "en16798",
     predict_fn: object = None,
     shading_fn: object = None,
 ) -> tuple[float, int, str, str]:
@@ -306,7 +306,7 @@ def _cover(
         t_out_eff=30.0,
         q_solar=0.8,
         cool_sp=26.0,
-        mould_binds=mould_binds,
+        lower_cause=lower_cause,
         model=SimpleNamespace(alpha=0.5, beta_s=3.0),  # only .alpha/.beta_s read
         identified=True,
         temperature_std=0.1,
@@ -381,7 +381,7 @@ def test_evaluate_cover_shadow_confident_gate_needs_low_std() -> None:
         t_out_eff=30.0,
         q_solar=0.0,
         cool_sp=26.0,
-        mould_binds=False,
+        lower_cause="en16798",
         model=SimpleNamespace(alpha=0.5, beta_s=3.0),
         identified=True,
         temperature_std=0.9,
@@ -391,14 +391,18 @@ def test_evaluate_cover_shadow_confident_gate_needs_low_std() -> None:
 
 
 @pytest.mark.parametrize(
-    ("mould_binds", "expected"),
+    ("lower_cause", "expected"),
     [
-        (False, "en16798"),
-        (True, "mold"),
+        ("en16798", "en16798"),
+        ("mould", "mold"),
+        # ADR-0071 N1: these three used to be flattened to "en16798"
+        ("frost", "frost"),
+        ("presence", "presence"),
+        ("comfort_base", "comfort_base"),
     ],
 )
 def test_evaluate_cover_shadow_binding_classification(
-    mould_binds: bool, expected: str
+    lower_cause: str, expected: str
 ) -> None:
     """ADR-0071 §4.4/§4.5: the classification is no longer RECONSTRUCTED here.
 
@@ -409,7 +413,7 @@ def test_evaluate_cover_shadow_binding_classification(
     records the cause where the ``max()`` happens and hands it over, and the
     published token stays "mold" for the card and ``hub_aggregate``.
     """
-    assert _cover(mould_binds=mould_binds)[3] == expected
+    assert _cover(lower_cause=lower_cause)[3] == expected
 
 
 # ---------------------------------------------------------------------------

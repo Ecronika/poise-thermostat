@@ -838,6 +838,7 @@ class ZoneRuntime:
         priority: float,
         cool_hard_cap: float,
         comfort_decide_fn: Callable[..., ComfortDecision],
+        residential: bool = False,
     ) -> ComfortDecision:
         """The central comfort solver."""
         return _prepare.stage_comfort_solve(
@@ -856,6 +857,7 @@ class ZoneRuntime:
             priority=priority,
             cool_hard_cap=cool_hard_cap,
             comfort_decide_fn=comfort_decide_fn,
+            residential=residential,
         )
 
     def stage_intents(

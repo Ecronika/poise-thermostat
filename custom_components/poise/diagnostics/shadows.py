@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from ..comfort.dual_setpoint import published_lower_cause
 from ..comfort.fan_circulation import FAN_ONLY_LOW, fan_circulation
 from ..comfort.fan_cooling import fan_cool_setpoint, fan_velocity
 from ..comfort.free_running import free_running_widen
@@ -229,7 +230,7 @@ def evaluate_cover_shadow(
     t_out_eff: float,
     q_solar: float,
     cool_sp: float,
-    mould_binds: bool,
+    lower_cause: str,
     model: ThermalModel,
     identified: bool,
     temperature_std: float,
@@ -253,9 +254,11 @@ def evaluate_cover_shadow(
     the truthiness test.  A cause cannot be recovered from a rounded result; it
     has to be recorded where the ``max()`` is taken.  ``comfort.dual_setpoint``
     now does exactly that and publishes ``ComfortDecision.lower_cause``, and
-    this function is simply told the answer (``mould_binds``).  Both
+    this function is simply told the answer (``lower_cause``).  Both
     ``mold_min`` and ``heat_sp`` are gone from the signature: they existed only
-    to feed that broken reconstruction.
+    to feed that broken reconstruction.  N1: the whole cause is handed over,
+    not just "is it mould" — the yes/no form had flattened every other cause
+    to "en16798".
     """
     peak = predict_peak_operative_fn(
         operative,
@@ -272,9 +275,9 @@ def evaluate_cover_shadow(
         current_position=0.0,
         oriented_q=q_solar,
     )
-    # The published token stays "mold" — ``control/hub_aggregate`` and the card
-    # match on it, and ADR-0071 changed the METHOD, not the vocabulary.
-    binding = "mold" if mould_binds else "en16798"
+    # ADR-0071 N1: the decided cause, published as such ("mold" keeps its
+    # spelling for ``control/hub_aggregate`` and the card).
+    binding = published_lower_cause(lower_cause)
     return peak, pos, reason, binding
 
 

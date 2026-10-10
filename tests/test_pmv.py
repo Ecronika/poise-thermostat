@@ -127,11 +127,18 @@ def test_room_profiles_table() -> None:
     # compatible default).
     assert ROOM_PROFILES["office"] == RoomProfile(met=1.2, clo_add=0.0)
     # living: seated relaxed/TV between 1.0 and 1.2 met; ISO 9920 sofa +0.21.
-    assert ROOM_PROFILES["living"] == RoomProfile(met=1.1, clo_add=0.21)
+    # ADR-0023 N1: the home profiles are EN 16798-1 residential spaces.
+    assert ROOM_PROFILES["living"] == RoomProfile(
+        met=1.1, clo_add=0.21, residential=True
+    )
     # bedroom: real resting metabolism (ASHRAE 55 sleeping) — below the ISO
     # 7730 floor, so the V3 validity flag suppresses the PMV there.
-    assert ROOM_PROFILES["bedroom"] == RoomProfile(met=0.7, clo_add=0.0)
-    assert ROOM_PROFILES["kitchen"] == RoomProfile(met=1.8, clo_add=0.0)
+    assert ROOM_PROFILES["bedroom"] == RoomProfile(
+        met=0.7, clo_add=0.0, residential=True
+    )
+    assert ROOM_PROFILES["kitchen"] == RoomProfile(
+        met=1.8, clo_add=0.0, residential=True
+    )
 
 
 def test_resolve_room_profile_defaults_to_office() -> None:
