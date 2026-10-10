@@ -98,6 +98,7 @@ def resolve_write_target(
     mold_min: float | None,
     device_max: float,
     device_min: float | None = None,
+    can_cool: bool = True,
 ) -> WriteTarget:
     """Final write target: window/override/comfort → setpoint + mode, then the
     unconditional norm envelope (ASR cap + frost/mould floor, skipped when
@@ -112,13 +113,22 @@ def resolve_write_target(
     SAFETY floor: a device silently holds its minimum, so writing below it makes
     the echo-compare rewrite every tick. The floor is clamped up to
     it in both heating and cooling.
+
+    ``can_cool`` (ADR-0017 N1): a device that cannot cool has no cooling
+    setpoint to respect, so a manual value is only clamped UP to ``heat_sp``;
+    above it the ASR cap of the norm envelope is the limit. Until N1 the
+    ``cool_sp`` of such a device was inflated by the room-reading transform
+    and in practice never bound below that cap, so this keeps the effective
+    behaviour while the transform is now exact.
     """
     floor = max(frost_floor, mold_min if mold_min is not None else frost_floor)
     override_clamped = False
     if window_open:
         target, mode = round(floor, 1), "off"
     elif override is not None:
-        clamped = min(max(override, heat_sp), cool_sp)
+        clamped = max(override, heat_sp)
+        if can_cool:
+            clamped = min(clamped, cool_sp)
         override_clamped = clamped != override
         target, mode = round(clamped, 1), "manual"
     else:

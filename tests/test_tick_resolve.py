@@ -607,3 +607,30 @@ def test_radiant_model_virtual_ignores_the_room_reading() -> None:
 def test_radiant_model_measured_uses_the_clamped_offset() -> None:
     m = radiant_model(19.0, 21.0, "sensor", -5.0, 0.0)
     assert m is not None and (m.slope, m.intercept) == (1.0, -2.0)
+
+
+def test_heat_only_override_is_not_capped_by_the_cooling_edge() -> None:
+    """ADR-0017 N1: with the exact transform the cooling edge of a heat-only
+    zone sits at ~24.2 °C air (base 21, weight 70); it used to be inflated far
+    above the ASR cap. A device that cannot cool clamps a manual value only
+    from below; the ASR cap remains the upper limit (CI case 2026-10-10:
+    override 25 must be written as 25)."""
+    kw = dict(
+        window_open=False,
+        heat_sp=21.6,
+        cool_sp=24.2,
+        write_setpoint=21.6,
+        comfort_mode="heat",
+        frost_floor=7.0,
+        mold_min=None,
+        device_max=30.0,
+    )
+    heat_only = resolve_write_target(override=25.0, can_cool=False, **kw)
+    assert heat_only.target == 25.0 and heat_only.override_clamped is False
+    capped = resolve_write_target(override=28.0, can_cool=False, **kw)
+    assert capped.target == 26.0  # ASR norm cap
+    assert capped.norm_binding == "norm_cap"
+    low = resolve_write_target(override=18.0, can_cool=False, **kw)
+    assert low.target == 21.6 and low.override_clamped is True
+    cooling = resolve_write_target(override=25.0, can_cool=True, **kw)
+    assert cooling.target == 24.2 and cooling.override_clamped is True
