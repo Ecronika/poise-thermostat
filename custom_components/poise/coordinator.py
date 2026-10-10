@@ -466,6 +466,7 @@ class PoiseCoordinator(DataUpdateCoordinator[dict[str, Any]]):  # type: ignore[m
         self._comp_mode_hold_opt = tuning.comp_mode_hold_opt
         # ADR-0054 V2: met/clo room profile for the PMV shadow (hot-applied).
         self._room_profile = tuning.room_profile
+        self._norm_basis = tuning.norm_basis  # ADR-0050 N1 (hot-applied)
         # ADR-0060 L2: gate for the suggestion EMISSION (detection always runs).
         self._override_suggestions = tuning.override_suggestions
         # ADR-0067: learned household clo bias (config-owned, fix-flow-written).

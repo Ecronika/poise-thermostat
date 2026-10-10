@@ -495,12 +495,14 @@
               "climate_mode": "Klimamodus (auto / nur Heizen / nur Kühlen)",
               "comfort_weight": "Komfort vs. Effizienz (0 = sparen, 100 = Komfort)",
               "room_profile": "Raumprofil (Behaglichkeitsbewertung)",
+              "norm_basis": "Normbasis",
               "active_comfort": "Aktive Behaglichkeit"
             },
             "data_description": {
               "comfort_base": "Die Mitte des Komfortbands; die Kategorie legt die Bandbreite fest.",
-              "comfort_weight": "0 = Energie sparen (breiteres Band), 100 = engster Komfort. Standard 70.",
-              "room_profile": "Aktivitäts- und Bekleidungsannahme für die Behaglichkeits-Diagnose (PMV): Büro ist der neutrale Standard; Wohnzimmer rechnet die Sofa-Isolation ein, Schlafzimmer ruhende Aktivität, Küche Hausarbeit. Wirkt nur auf die Behaglichkeits-Lampe, nie auf den Sollwert. Im Schlafzimmer-Profil wird kein PMV bewertet (Schlafen liegt außerhalb des ISO-7730-Gültigkeitsbereichs) — die Behaglichkeits-Lampe bleibt dort stumm.",
+              "comfort_weight": "0 = Energie sparen (breiteres Band), 100 = engster Komfort. Bei 100 ist die Heizkante im belegten Zustand genau die Komfort-Basis; darunter sinkt sie um bis zu 1,5 K (bei 70: 0,45 K — z. B. 20,55 statt 21 °C, nur 0,55 K über dem Kategorie-II-Minimum). Neue Zonen starten mit 100; vor 0.196.0 angelegte Zonen, die dieses Feld nie gespeichert haben, nutzen 70.",
+              "room_profile": "Raumart sowie Aktivitäts- und Bekleidungsannahme. Wohnzimmer, Schlafzimmer, Küche und Bad nutzen den EN-16798-1-Heizbereich für Wohnräume (Kategorie II 20–25 °C, Kategorie III 18–25 °C); Büro den Bürobereich (20–24 / 19–25 °C). Das Profil bestimmt auch die Behaglichkeits-Diagnose (PMV): Wohnzimmer rechnet die Sofa-Isolation ein, Schlafzimmer ruhende Aktivität (dort wird kein PMV bewertet — Schlafen liegt außerhalb des ISO-7730-Gültigkeitsbereichs), Küche Hausarbeit. Neue Zonen starten als Wohnzimmer; vor 0.196.1 angelegte Zonen, die dieses Feld nie gespeichert haben, nutzen Büro.",
+              "norm_basis": "Welche Fassung der Komfortnorm die Grenzwerte setzt: EN 16798-1 Anhang B (Standard) oder der deutsche Nationale Anhang DIN EN 16798-1/NA. Derzeit ändert das einen Wert: die absolute Feuchte-Obergrenze für das Entfeuchten, 12 g/kg (EN) bzw. 11,5 g/kg (NA).",
               "active_comfort": "Behaglichkeit aktiv herstellen: erlaubt dieser Zone die Lüfter-zuerst-Kühlstufe, die Kühlkanten-Gutschrift und den PMV-Offset. Jeder Baustein wirkt erst, wenn sein Qualitäts-Gate und die Bereitschafts-Prüfungen bestehen (ADR-0069)."
             }
           },
@@ -687,11 +689,17 @@
     },
     "room_profile": {
       "options": {
-        "office": "Büro / neutral (Standard)",
+        "office": "Büro / neutral",
         "living": "Wohnzimmer (Sofa, entspannt)",
         "bedroom": "Schlafzimmer (ruhend)",
         "kitchen": "Küche (Hausarbeit)",
         "bathroom": "Badezimmer (Körperpflege, leichte Bekleidung)"
+      }
+    },
+    "norm_basis": {
+      "options": {
+        "en": "EN 16798-1 Anhang B (Standard)",
+        "na_de": "Deutscher Nationaler Anhang (DIN EN 16798-1/NA)"
       }
     },
     "feedback_direction": {

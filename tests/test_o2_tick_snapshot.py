@@ -52,9 +52,9 @@ def sample_tick_config() -> TickConfigSnapshot:
 
     Shared helper (imported by ``test_phase1_tick_result`` and
     ``test_phase6b_stages``, which carry the ``PreparedState`` /
-    ``FinalizeContext`` pins): all 31 snapshot fields are also
+    ``FinalizeContext`` pins): all 32 snapshot fields are also
     ``runtime.config.ZoneTuning`` fields, so the parser's defaults give a
-    value-realistic object without spelling 31 literals out.
+    value-realistic object without spelling 32 literals out.
     """
     tuning = ZoneTuning.from_merged({})
     return TickConfigSnapshot(
@@ -160,12 +160,13 @@ def test_every_field_maps_to_exactly_one_coordinator_attribute(
         )
 
 
-def test_config_snapshot_has_thirtyone_fields_and_copies_their_values() -> None:
-    """Proof 1b (config): 31 fields, each equal to its source after the build."""
+def test_config_snapshot_has_thirtytwo_fields_and_copies_their_values() -> None:
+    """Proof 1b (config): 32 fields (+norm_basis, ADR-0050 N1), each equal to
+    its source after the build."""
     stub = _CoordinatorStub()
     snap = TickConfigSnapshot.from_coordinator(stub)  # type: ignore[arg-type]
     mapping = _from_coordinator_map("TickConfigSnapshot")
-    assert len(fields(TickConfigSnapshot)) == 31
+    assert len(fields(TickConfigSnapshot)) == 32
     for field_name, attr in mapping.items():
         assert getattr(snap, field_name) == getattr(stub, attr)
 
@@ -213,6 +214,7 @@ _HOT_APPLYED = (
     "_hdh_cfg",
     "_heat_lockout_enabled",
     "_heat_max_outdoor",
+    "_norm_basis",  # ADR-0050 N1 (v0.196.1)
     "_operative_input",
     "_optimal_start",
     "_optimal_stop",

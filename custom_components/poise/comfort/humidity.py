@@ -32,6 +32,9 @@ DEFAULT_RH_HYSTERESIS: float = 5.0  # exit RH = rh_high - hysteresis
 # only cross at ~25 °C. It is a WARM-room mugginess criterion, not winter
 # mould protection (that is mold.py / ADR-0062, via the air-temperature floor).
 DEFAULT_ABS_HIGH_GKG: float = 12.0
+# ADR-0050 N1: the German national annex (DIN EN 16798-1/NA) lowers the absolute
+# ceiling to the 11.5 g/kg customary in Germany (tga-praxis 2022, NA review).
+ABS_HIGH_NA_DE_GKG: float = 11.5
 DEFAULT_ABS_HYSTERESIS_GKG: float = 1.0  # exit w = abs_high - hysteresis (11 g/kg)
 
 # EN 16798-1 Annex B dehumidification RH ceilings [%] per comfort category.
@@ -52,6 +55,14 @@ class HumidityConfig:
 
 
 _DEFAULT = HumidityConfig()
+_NA_DE = HumidityConfig(abs_high=ABS_HIGH_NA_DE_GKG)
+
+
+def humidity_config_for(norm_basis: str) -> HumidityConfig:
+    """The humidity limits of the configured norm basis (ADR-0050 N1): EN
+    16798-1 Annex B (12 g/kg) unless the German national annex is selected
+    (11.5 g/kg). Unknown values fall back to EN."""
+    return _NA_DE if norm_basis == "na_de" else _DEFAULT
 
 
 def rh_high_for_category(

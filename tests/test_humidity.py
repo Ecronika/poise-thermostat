@@ -235,3 +235,35 @@ def test_occupied_still_enforces_relative_ceiling() -> None:
     )
     assert d.action == "dry"
     assert d.dry_active is True
+
+
+# --- ADR-0050 N1: norm basis EN / German national annex ----------------------
+
+
+def test_norm_basis_selects_the_absolute_ceiling() -> None:
+    from custom_components.poise.comfort.humidity import (
+        ABS_HIGH_NA_DE_GKG,
+        DEFAULT_ABS_HIGH_GKG,
+        humidity_config_for,
+    )
+
+    assert humidity_config_for("en").abs_high == DEFAULT_ABS_HIGH_GKG == 12.0
+    assert humidity_config_for("na_de").abs_high == ABS_HIGH_NA_DE_GKG == 11.5
+    assert humidity_config_for("bogus").abs_high == 12.0  # unknown -> EN
+
+
+def test_na_de_dries_at_eleven_point_seven_where_en_does_not() -> None:
+    """11.7 g/kg in an empty room (only the absolute backstop applies): over the
+    NA ceiling (11.5), under the EN one (12.0)."""
+    from custom_components.poise.comfort.humidity import humidity_config_for
+
+    kw = dict(
+        rh=55.0,
+        too_warm=False,
+        in_deadband=True,
+        can_dry=True,
+        abs_humidity_gkg=11.7,
+        occupied=False,
+    )
+    assert humidity_decide(**kw, cfg=humidity_config_for("en")).action == "idle"
+    assert humidity_decide(**kw, cfg=humidity_config_for("na_de")).action == "dry"

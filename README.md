@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.196.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.196.1-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.10%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -201,7 +201,8 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Outdoor / humidity / MRT / T_rm sensors | no | — | Improve accuracy (mould floor, operative temperature, running mean). |
 | Outdoor-humidity sensor | no | — | Dedicated outdoor-RH sensor for the ventilation advice (else the weather entity's `humidity` attribute is used, ADR-0066). |
 | Presence (home) · occupancy sensor · absence delay | no | — · — · 30 min | ADR-0058 presence coupling: person/tracker entities gate the house, a motion/occupancy sensor gates the room. **Inside** a comfort window, occupancy extends comfort — the band only relaxes (Eco widening) after the room has been empty for the absence delay, and returning restores it immediately. Occupancy does **not** raise the band outside the window(s) (use Boost or another window for spontaneous use; ADR-0058 N2). A dead sensor fails safe to *present*. |
-| Room profile | no | office | met/clo assumption for the PMV evaluation (`office` / `living` / `bedroom` / `kitchen` / `bathroom`, ADR-0054). |
+| Room profile | no | living | Space type and met/clo assumption (`office` / `living` / `bedroom` / `kitchen` / `bathroom`). Every profile except `office` uses the residential EN 16798-1 heating range (Cat. II 20–25 °C) instead of the office range (20–24 °C, ADR-0023 N1); it also drives the PMV evaluation (ADR-0054). New zones start as `living`; zones created before 0.196.1 that never saved this field keep `office`. |
+| Norm basis | no | EN | `EN 16798-1 Annex B` or the German national annex `DIN EN 16798-1/NA`. Currently changes the absolute dehumidification ceiling from 12 to 11.5 g/kg (ADR-0050 N1). |
 | Active comfort | no | off | Opt-in fan-first cooling + comfort actuation building blocks (ADR-0069). |
 | Ventilation notification | no | off | Opt-in self-clearing notification for the ventilation advice (the bus event always fires, ADR-0066). |
 | Suggestion learning | no | on | ADR-0060 override-pattern suggestions as fixable repair issues; the toggle is the per-zone opt-out. |

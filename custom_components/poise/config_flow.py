@@ -49,6 +49,7 @@ from .const import (
     CONF_COMFORT_WEIGHT,
     CONF_ENTRY_TYPE,
     CONF_NAME,
+    CONF_ROOM_PROFILE,
     CONF_SETBACK_DELTA,
     CONF_TEMP_SENSOR,
     DEFAULT_COMFORT_BASE,
@@ -56,6 +57,7 @@ from .const import (
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
     NEW_ZONE_COMFORT_WEIGHT,
+    NEW_ZONE_ROOM_PROFILE,
 )
 from .control.hub_aggregate import parse_service_action
 from .migration import SETUP_TUNING_KEYS
@@ -292,6 +294,9 @@ class PoiseConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[misc, call-arg
                     # the heating edge is the typed comfort base; zones without
                     # a stored weight keep the pre-0.196.0 fallback.
                     CONF_COMFORT_WEIGHT: NEW_ZONE_COMFORT_WEIGHT,
+                    # v0.196.1: homes, not offices — the profile selects the
+                    # residential EN heating range (ADR-0023 N1/N3).
+                    CONF_ROOM_PROFILE: NEW_ZONE_ROOM_PROFILE,
                     **{k: data.pop(k) for k in SETUP_TUNING_KEYS if k in data},
                 }
                 return self.async_create_entry(
