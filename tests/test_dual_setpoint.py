@@ -471,6 +471,24 @@ def test_efficiency_widening_still_lifts_the_cooling_edge() -> None:
     assert d.cool_sp == pytest.approx(25.4, abs=0.06)
 
 
+def test_heat_only_zone_keeps_the_comfort_coupled_edge() -> None:
+    """A device that cannot cool spends nothing on the cooling edge; there the
+    edge is the reference of the ventilation advice (rule 3t, the ADR-0066 N2
+    mould guard), so it keeps base + 2 K (+ widening), clamped into the band —
+    the CI glue scenario of 2026-10-10 (Cat III, base 17 -> edge 22)."""
+    d = decide(
+        t_rm=5.0,
+        room=23.0,
+        category=Category.III,
+        comfort_base=17.0,
+        priority=0.7,
+        can_heat=True,
+        can_cool=False,
+        t_out=6.0,
+    )
+    assert d.cool_sp == 22.0  # Cat III cooling lower, not the 26 °C design value
+
+
 def test_cooling_design_values_are_below_the_category_upper() -> None:
     from custom_components.poise.comfort.en16798 import (
         COOLING_DESIGN,

@@ -146,12 +146,17 @@ def decide(
         if cool_ceiling_override is not None
         else COOLING_UPPER[category]
     )
-    # ADR-0023 N2: the occupied cooling edge starts at the category DESIGN
-    # value (upper limit - 1 K), no longer at comfort_base + 2 K — that held a
-    # cooled room at the lower edge of the summer range (23.45 °C operative at
-    # the defaults). The old coupling survives as a floor, so the edge is never
-    # lower than before and a warm comfort base keeps its dead-band.
-    cool_anchor = max(COOLING_DESIGN[category], comfort_base + _NEUTRAL_DEADBAND_K)
+    # ADR-0023 N2: on a COOL-CAPABLE device the occupied cooling edge starts at
+    # the category DESIGN value (upper limit - 1 K), no longer at comfort_base
+    # + 2 K — that held a cooled room at the lower edge of the summer range
+    # (23.45 °C operative at the defaults). The old coupling survives as a
+    # floor, so the edge is never lower than before and a warm comfort base
+    # keeps its dead-band. A device that cannot cool spends no energy on this
+    # edge; there it is the reference of the ventilation advice (free-cooling
+    # rule 3t, the ADR-0066 N2 mould guard), so it keeps the old coupling.
+    cool_anchor = comfort_base + _NEUTRAL_DEADBAND_K
+    if can_cool:
+        cool_anchor = max(COOLING_DESIGN[category], cool_anchor)
     cool_op = _clamp(
         cool_anchor + widen + eco_widen + pmv_shift + ce_credit,
         COOLING_LOWER[category],
