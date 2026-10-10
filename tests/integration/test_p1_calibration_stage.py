@@ -21,7 +21,13 @@ Task P1.4. Die Fälle (a)–(m) des Plans, als Closed-Loop über
 * (l) Restart-Quarantäne: restaurierte Baseline ohne Anker -> KEIN Write im
       ersten Tick; Akkumulation erst nach neuem Climate-Report,
 * (m) clipped: Baseline 5.0 gegen max 4.5 -> Restore schreibt 4.5, Echo 4.5
-      löscht die Ownership, ``calibration_restore_clipped`` diagnostiziert.
+      löscht die Ownership, ``calibration_restore_clipped`` diagnostiziert,
+* Identitäts-Gate (Review 2026-08-26): Ownership pinnt eine ANDERE Entity als
+  die entdeckte. Tri-State der GESPEICHERTEN Entity entscheidet: noch
+  existent -> fail-closed (kein Write, ``calibration_entity_mismatch``,
+  Handback über Option-aus -> Segment H); strukturell weg -> automatischer
+  Release über den Orphan-Fold (WARN als Beleg), nächster Tick re-owned die
+  entdeckte Entity per Erst-Write.
 
 Harness-Muster: Registry-TRV-Gerät mit Kalibrier-Number
 (tests/integration/test_phase4_input_reader.py), Fake-Monotonic-Clock + Feed-
@@ -706,3 +712,149 @@ async def test_n_stale_restore_failed_clears_when_path_returns(
     # Die (weiterhin unlesbare) Number ist jetzt Sache von Segment W:
     assert _issue(hass, "calibration_entity_unsafe") is not None
     assert set_value == []  # weiterhin kein Dispatch
+
+
+# =============================================================================
+# Identitäts-Gate (Review 2026-08-26) — Ownership pinnt eine andere Entity
+# =============================================================================
+
+OLD_CAL = "number.old_local_temperature_calibration"
+
+
+async def test_w_identity_gate_blocks_write_on_entity_drift(
+    hass: HomeAssistant,
+) -> None:
+    """Review 2026-08-26: Die Ownership pinnt eine ANDERE, noch existierende
+    Entity als die entdeckte -> Segment W schreibt NICHT auf die neue Entity
+    (fail-closed), ``calibration_entity_mismatch`` aktiv, und die
+    Resume-Quarantäne adoptiert den Report der FALSCHEN Entity nicht als
+    D4-Anker (Gate liegt VOR dem Resume-Fold). Zeigt die Ownership wieder
+    auf die entdeckte Entity, räumt der inaktive Rand den Hinweis ab und
+    die Quarantäne darf wieder greifen."""
+    _register_trv_device(hass)
+    _set_states(hass, room=20.5, trv_temp=22.0, cal="0.0")
+    # Die ALTE Entity existiert noch (State vorhanden) -> kein Orphan-Release.
+    hass.states.async_set(OLD_CAL, "-1.0", {"min": -5.0, "max": 5.0, "step": 0.5})
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    clock = _FakeClock(1000.0)
+    coord.runtime.clock = clock
+    _reset_cal(coord)
+    # Persistierte Ownership aus der Zeit VOR dem Wechsel: gepinnt auf die
+    # alte Entity-ID, die Entdeckung findet jetzt CAL.
+    coord.runtime.actuator.cal_baseline = 0.0
+    coord.runtime.actuator.cal_entity = OLD_CAL
+    set_value = async_mock_service(hass, "number", "set_value")
+
+    await _tick(hass, coord)
+    assert _cal_writes(set_value) == []  # kein Write auf die NEUE Entity
+    assert _issue(hass, "calibration_entity_mismatch") is not None
+    # Gate VOR der Resume-Quarantäne: der Report der falschen Entity wird
+    # nicht als letzter Befehl adoptiert, die Ownership bleibt unberührt.
+    assert coord.runtime.actuator.last_cal_value is None
+    assert coord.runtime.actuator.cal_baseline == 0.0
+    assert coord.runtime.actuator.cal_entity == OLD_CAL
+
+    # Bedingungsende (Ownership zeigt wieder auf die entdeckte Entity, wie
+    # nach einem sauberen Handoff + Kalibrier-Neustart): der Hinweis
+    # verschwindet, die Resume-Quarantäne greift jetzt (adoptiert reported).
+    coord.runtime.actuator.cal_entity = CAL
+    clock.t = 1000.0 + 60.0
+    await _tick(hass, coord)
+    assert _issue(hass, "calibration_entity_mismatch") is None
+    assert coord.runtime.actuator.last_cal_value == 0.0  # Quarantäne-Adoption
+    assert _cal_writes(set_value) == []  # Quarantäne-Tick schreibt nie
+
+
+async def test_w_identity_mismatch_option_off_routes_to_segment_h(
+    hass: HomeAssistant,
+) -> None:
+    """Die im Issue vorgeschriebene Nutzeraktion für eine noch EXISTIERENDE
+    alte Entity: Option aus. Segment W ist nicht mehr der Live-Pfad -> der
+    einheitliche inaktive Rand räumt ``calibration_entity_mismatch`` ab, und
+    Segment H übernimmt die GESPEICHERTE Entity — sie meldet die Baseline
+    bereits, also state-bestätigter Release ohne Dispatch. Option wieder an
+    -> Erst-Write re-owned die ENTDECKTE Entity (frische Ownership)."""
+    _register_trv_device(hass)
+    _set_states(hass, room=20.5, trv_temp=22.0, cal="0.0")
+    # Die alte Entity existiert noch und meldet bereits die Baseline 0.0.
+    hass.states.async_set(OLD_CAL, "0.0", {"min": -5.0, "max": 5.0, "step": 0.5})
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    clock = _FakeClock(1000.0)
+    coord.runtime.clock = clock
+    _reset_cal(coord)
+    coord.runtime.actuator.cal_baseline = 0.0
+    coord.runtime.actuator.cal_entity = OLD_CAL
+    set_value = async_mock_service(hass, "number", "set_value")
+
+    await _tick(hass, coord)
+    assert _issue(hass, "calibration_entity_mismatch") is not None
+    assert _cal_writes(set_value) == []
+
+    # Option aus (Hot-Apply-Äquivalent wie in test_h/test_n): der Mismatch
+    # ist keine lebende Behauptung mehr; Segment H bestätigt den Handback
+    # state-basiert gegen die alte Entity (reported == Baseline).
+    coord._trv_calibration = False
+    clock.t = 1000.0 + 60.0
+    await _tick(hass, coord)
+    assert _issue(hass, "calibration_entity_mismatch") is None
+    assert _issue(hass, "calibration_restore_failed") is None
+    assert coord.runtime.actuator.cal_baseline is None  # sauber übergeben
+    assert coord.runtime.actuator.cal_entity is None
+    assert _cal_writes(set_value) == []  # kein Dispatch nötig (Echo stand)
+
+    # Option wieder an: der Erst-Write re-owned die entdeckte Entity.
+    coord._trv_calibration = True
+    clock.t = 1000.0 + 120.0
+    await _tick(hass, coord)
+    writes = _cal_writes(set_value)
+    assert len(writes) == 1
+    assert writes[0].data["value"] == -1.5  # (20.5 − 22.0) + 0.0
+    assert coord.runtime.actuator.cal_entity == CAL  # frische Ownership
+    assert coord.runtime.actuator.cal_baseline == 0.0
+
+
+async def test_w_identity_gone_leg_releases_and_reowns(
+    hass: HomeAssistant, caplog: Any
+) -> None:
+    """Der Gone-Leg (Review-Folge 2026-08-26, Option a): die GESPEICHERTE
+    Entity ist strukturell weg (Rename/Neuanlage — der Headline-Fall). Kein
+    Remediation-Dead-End: Tick 1 gibt die Ownership über den Orphan-Fold
+    frei (WARN als Beleg, KEIN ``calibration_entity_mismatch``, KEIN
+    ``calibration_restore_failed`` — nichts, wogegen ein Restore bestätigen
+    könnte), Tick 2 re-owned die entdeckte Entity per Erst-Write."""
+    _register_trv_device(hass)
+    _set_states(hass, room=20.5, trv_temp=22.0, cal="0.0")
+    entry = await _setup(hass)
+    coord = entry.runtime_data
+    clock = _FakeClock(1000.0)
+    coord.runtime.clock = clock
+    _reset_cal(coord)
+    coord.runtime.actuator.cal_baseline = -1.0
+    coord.runtime.actuator.cal_entity = OLD_CAL  # kein State, kein Registry-Eintrag
+    set_value = async_mock_service(hass, "number", "set_value")
+
+    await _tick(hass, coord)
+    # Tick 1: Release über den Fold — kein Write in DIESEM Tick, kein Issue,
+    # WARN nennt alte Entity + Baseline (der Beleg, Teardown-FAILED-Muster).
+    assert _cal_writes(set_value) == []
+    assert _issue(hass, "calibration_entity_mismatch") is None
+    assert _issue(hass, "calibration_restore_failed") is None
+    assert coord.runtime.actuator.cal_baseline is None  # freigegeben
+    assert coord.runtime.actuator.cal_entity is None
+    assert any(
+        OLD_CAL in rec.getMessage() and "-1.0" in rec.getMessage()
+        for rec in caplog.records
+        if rec.levelname == "WARNING"
+    )
+
+    # Tick 2: Erst-Write auf die ENTDECKTE Entity, frische Ownership.
+    clock.t = 1000.0 + 60.0
+    await _tick(hass, coord)
+    writes = _cal_writes(set_value)
+    assert len(writes) == 1
+    assert writes[0].data["value"] == -1.5  # (20.5 − 22.0) + 0.0
+    assert coord.runtime.actuator.cal_entity == CAL
+    assert coord.runtime.actuator.cal_baseline == 0.0  # neuer Vorgefunden-Wert
+    assert _issue(hass, "calibration_entity_mismatch") is None

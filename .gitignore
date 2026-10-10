@@ -6,3 +6,17 @@ __pycache__/
 .pytest_cache/
 node_modules/
 card/node_modules/
+
+# Local-only clutter, kept out of Git as a precaution (added 2026-07)
+_cleanup_2026-07/
+.venv*/
+.refactor-backups/
+.claude/
+/*.log
+/*.err
+/*.xml
+coverage.xml
+.DS_Store
+
+# hypothesis example database (local "dev" profile; CI runs derandomised)
+.hypothesis/
