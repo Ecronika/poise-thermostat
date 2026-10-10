@@ -239,3 +239,54 @@ def test_ca_mask_actuatable_violations_still_scored() -> None:
     assert ca_tick_scorable(
         room=19.0, heat_sp=20.0, cool_sp=24.0, can_heat=True, can_cool=False
     )
+
+
+# --- N3: the band tolerance (field 2026-10-10) -------------------------------
+
+# A well-regulated heating zone, shaped like the office record: the room hugs
+# the lower edge it is regulated to, a few tenths either side of it.
+_EDGE_HUGGING = (-0.4, -0.2, -0.2, -0.1, 0.0, 0.0, 0.1, 0.2, 0.4, 0.6)
+
+
+def _hug(*, band_tol: float | None = None, offsets=_EDGE_HUGGING) -> RegulationQuality:
+    q = RegulationQuality(in_band=0.0)  # no optimistic seed: earn every point
+    for i in range(600):
+        kw = {} if band_tol is None else {"band_tol": band_tol}
+        q = q.observe(
+            room=20.0 + offsets[i % len(offsets)],
+            heat_sp=20.0,
+            cool_sp=24.0,
+            mode="heat",
+            dt_min=1.0,
+            horizon_h=1.0,
+            **kw,
+        )
+    return q
+
+
+def test_regulation_noise_at_the_heating_edge_is_in_band() -> None:
+    """The setpoint IS the lower band edge, so a good thermostat sits a few
+    tenths below it much of the time. Without a tolerance that hysteresis was
+    scored as a comfort failure and no actively heated zone could ever mature.
+    """
+    strict = _hug(band_tol=0.0)
+    tolerant = _hug()
+    assert strict.time_in_band_pct < 70.0  # what the field showed
+    assert tolerant.time_in_band_pct > 99.0
+    # the deviation leg is NOT softened — a violation keeps its size
+    assert abs(tolerant.deviation_k - strict.deviation_k) < 1e-9
+    assert 0.05 < tolerant.deviation_k < 0.15
+
+
+def test_a_real_shortfall_stays_out_of_band() -> None:
+    q = _hug(offsets=(-0.8, -0.7, -0.9))
+    assert q.time_in_band_pct < 1.0
+
+
+def test_the_tolerance_is_the_accepted_average_deviation() -> None:
+    from custom_components.poise.control.regulation_quality import (
+        BAND_TOL_K,
+        DEV_MAX_K,
+    )
+
+    assert BAND_TOL_K == DEV_MAX_K

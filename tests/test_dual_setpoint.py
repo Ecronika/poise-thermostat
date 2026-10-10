@@ -316,3 +316,100 @@ def test_adaptive_cool_edge_gated_on_occupancy() -> None:
     # Unoccupied: free-running -> edge lifts to the ASR-capped adaptive upper -> idle.
     assert unoccupied.cool_sp == 26.0
     assert unoccupied.mode == "idle"
+
+
+# --- ADR-0071 N1: the presence coupling names itself -------------------------
+
+
+def test_lower_cause_reports_a_presence_lowered_edge() -> None:
+    """Field 2026-10-10: the bathroom's 24 °C base lowered to 22 °C by room
+    Eco was published as the EN norm clamp. The edge is the comfort base minus
+    the presence depth, and the decision now says so."""
+    d = decide(
+        t_rm=13.0,
+        room=21.0,
+        t_out=11.0,
+        comfort_base=24.0,
+        eco_widen=2.0,
+        occupied=False,
+    )
+    assert d.heat_sp == 22.0
+    assert d.lower_cause == "presence"
+
+
+def test_a_clamp_still_outranks_the_presence_cause() -> None:
+    # empty house, base far down: the frost floor holds, not the Eco depth
+    d = decide(
+        t_rm=13.0,
+        room=21.0,
+        t_out=11.0,
+        comfort_base=5.0,
+        eco_widen=4.0,
+        occupied=False,
+    )
+    assert d.lower_cause == "frost"
+
+
+def test_the_published_token_keeps_the_mold_spelling() -> None:
+    from custom_components.poise.comfort.dual_setpoint import published_lower_cause
+
+    assert published_lower_cause("mould") == "mold"  # card + hub_aggregate match
+    for cause in ("frost", "en16798", "presence", "comfort_base"):
+        assert published_lower_cause(cause) == cause
+
+
+# --- ADR-0023 N1: the residential row of the EN 16798-1 heating range --------
+
+
+def test_heating_band_has_an_office_and_a_residential_row() -> None:
+    from custom_components.poise.comfort.en16798 import heating_band
+
+    # EN 16798-1:2019 design criteria (REHVA Journal 04/2019, Table 1)
+    assert heating_band(Category.I, residential=False) == (21.0, 23.0)
+    assert heating_band(Category.II, residential=False) == (20.0, 24.0)
+    assert heating_band(Category.III, residential=False) == (19.0, 25.0)
+    assert heating_band(Category.I, residential=True) == (21.0, 25.0)
+    assert heating_band(Category.II, residential=True) == (20.0, 25.0)
+    assert heating_band(Category.III, residential=True) == (18.0, 25.0)
+
+
+def test_a_residential_category_iii_room_keeps_its_own_setting() -> None:
+    """Field 2026-10-10: a bedroom (Cat III, base 19, 40 % comfort weight)
+    asked for 18.1 °C and was clamped to 19 °C by the OFFICE row."""
+    kw = {
+        "t_rm": 13.0,
+        "room": 20.0,
+        "t_out": 11.0,
+        "comfort_base": 19.0,
+        "priority": 0.4,
+        "category": Category.III,
+    }
+    office = decide(**kw)  # type: ignore[arg-type]
+    home = decide(**kw, residential=True)  # type: ignore[arg-type]
+    assert (office.heat_sp, office.lower_cause) == (19.0, "en16798")
+    assert (home.heat_sp, home.lower_cause) == (18.1, "comfort_base")
+
+
+def test_the_residential_ceiling_leaves_room_for_the_pmv_shift() -> None:
+    """A Category II bathroom at 24 °C sat on the office ceiling (24), so the
+    tier-2 PMV shift could never act there."""
+    kw = {
+        "t_rm": 13.0,
+        "room": 21.0,
+        "t_out": 11.0,
+        "comfort_base": 24.0,
+        "pmv_offset_k": 0.6,
+    }
+    assert decide(**kw).heat_sp == 24.0  # type: ignore[arg-type]
+    assert decide(**kw, residential=True).heat_sp == 24.6  # type: ignore[arg-type]
+
+
+def test_room_profiles_name_their_space_type() -> None:
+    from custom_components.poise.comfort.pmv import ROOM_PROFILES, resolve_room_profile
+
+    assert not ROOM_PROFILES["office"].residential
+    for name in ("living", "bedroom", "kitchen", "bathroom"):
+        assert ROOM_PROFILES[name].residential, name
+    # unset/unknown stays the office default — no silent behaviour change
+    assert not resolve_room_profile(None).residential
+    assert not resolve_room_profile("garage").residential

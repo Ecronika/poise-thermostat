@@ -61,11 +61,11 @@ def adaptive_band(t_rm: float, category: Category = Category.II) -> ComfortBand:
 # Fixed design operative-temperature ranges for *mechanically conditioned*
 # buildings (heating = winter, cooling = summer). The adaptive band above
 # applies only to free-running buildings; when actively heating/cooling these
-# fixed category ranges govern. Only the Cat II pair is source-anchored
-# (heating 20-24 / cooling 23-26, Smart Setpoint blueprint via ADR-0023);
-# the Cat I/III values extrapolate it by +-1 K per category step and are
-# project choices, NOT verbatim EN 16798-1 table values (the norm gives design
-# values per season, not these full ranges).
+# fixed category ranges govern. Source (ADR-0023 N1): the EN 16798-1:2019
+# design criteria as tabulated in REHVA Journal 04/2019 (Boerstra, Table 1),
+# operative, 1.0 clo winter / 0.5 clo summer, 1.2 met. The heating rows below
+# are the OFFICE row (21-23 / 20-24 / 19-25 °C) — the default space type; the
+# cooling rows are identical for offices and residential spaces.
 HEATING_LOWER: dict[Category, float] = {
     Category.I: 21.0,
     Category.II: 20.0,
@@ -76,6 +76,30 @@ HEATING_UPPER: dict[Category, float] = {
     Category.II: 24.0,
     Category.III: 25.0,
 }
+# The RESIDENTIAL row of the same table (21-25 / 20-25 / 18-25 °C). Until
+# ADR-0023 N1 every zone used the office row, so a bedroom or kitchen in
+# Category III was clamped up to 19 °C against its own configuration, and a
+# Category II bathroom at 24 °C sat on a ceiling that is not the residential
+# one — which also left the PMV band shift no room to act there.
+HEATING_LOWER_RESIDENTIAL: dict[Category, float] = {
+    Category.I: 21.0,
+    Category.II: 20.0,
+    Category.III: 18.0,
+}
+HEATING_UPPER_RESIDENTIAL: dict[Category, float] = {
+    Category.I: 25.0,
+    Category.II: 25.0,
+    Category.III: 25.0,
+}
+
+
+def heating_band(category: Category, *, residential: bool) -> tuple[float, float]:
+    """The heating-season design range ``(lower, upper)`` for a space type."""
+    if residential:
+        return HEATING_LOWER_RESIDENTIAL[category], HEATING_UPPER_RESIDENTIAL[category]
+    return HEATING_LOWER[category], HEATING_UPPER[category]
+
+
 COOLING_LOWER: dict[Category, float] = {
     Category.I: 23.5,
     Category.II: 23.0,

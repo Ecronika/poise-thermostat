@@ -144,6 +144,10 @@ class RoomProfile:
 
     met: float  # metabolic rate (ISO 8996 level-1 table values)
     clo_add: float  # additive insulation surcharge (chair/sofa, ISO 9920)
+    # EN 16798-1 space type: residential spaces have their own design
+    # temperature range in the heating season (``en16798.heating_band``).
+    # Defaulted False = the office table, the norm's other default row.
+    residential: bool = False
 
 
 # ISO-8996-level-1 / ASHRAE-55-table values.  "office" is the default
@@ -154,9 +158,9 @@ class RoomProfile:
 # 1.2 + 0.21 < 1.5.
 ROOM_PROFILES: dict[str, RoomProfile] = {
     "office": RoomProfile(met=MET_OFFICE, clo_add=0.0),
-    "living": RoomProfile(met=1.1, clo_add=0.21),
-    "bedroom": RoomProfile(met=0.7, clo_add=0.0),
-    "kitchen": RoomProfile(met=1.8, clo_add=0.0),
+    "living": RoomProfile(met=1.1, clo_add=0.21, residential=True),
+    "bedroom": RoomProfile(met=0.7, clo_add=0.0, residential=True),
+    "kitchen": RoomProfile(met=1.8, clo_add=0.0, residential=True),
     # Bathroom (Nachtrag V5): personal care sits in the ISO 8996
     # washing/dressing band (~1.4-1.7 met; conservative end), and clothing is
     # LIGHTER than the weather-predicted street ensemble — a deduction, the
@@ -164,7 +168,7 @@ ROOM_PROFILES: dict[str, RoomProfile] = {
     # floor (0.4) on purpose: light bathroom clothing ~0.2-0.3 clo (ISO 9920)
     # is the honest assumption; the wet-skin minutes themselves are handled by
     # the RH validity domain below, not by the ensemble estimate.
-    "bathroom": RoomProfile(met=1.4, clo_add=-0.2),
+    "bathroom": RoomProfile(met=1.4, clo_add=-0.2, residential=True),
 }
 
 

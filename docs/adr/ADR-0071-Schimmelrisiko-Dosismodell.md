@@ -1,6 +1,6 @@
 # ADR-0071: Schimmelrisiko — Dosismodell (VTT-Schimmelindex) statt Momentanwert-Boden
 
-**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-09-11 · **Bezug:** ADR-0062 (abgelöst: Oberflächenfeuchte-Boden), ADR-0066 (Feuchte-Achse, teilt sich die Psychrometrie), ADR-0023 (Dual-Setpoint), ADR-0035 (Präzedenz-Solver), ADR-0012 (Repair-Issue `mould_protection_inactive`), ADR-0005 (Schichtgrenzen), ADR-0007/ADR-0064 (Persistenz), ADR-0041 (Fenster-Unterdrückung), ADR-0048 (Nicht-Ziele) · **Verifizierung:** `comfort/mould_risk.py` + `tests/test_mould_risk.py` (26 Fälle), `runtime/state.py::HumidityRuntime`, nachgerechneter Szenarienvergleich (6 × 90 d stündlich)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-09-11, Nachtrag N1 2026-10-10 · **Bezug:** ADR-0062 (abgelöst: Oberflächenfeuchte-Boden), ADR-0066 (Feuchte-Achse, teilt sich die Psychrometrie), ADR-0023 (Dual-Setpoint), ADR-0035 (Präzedenz-Solver), ADR-0012 (Repair-Issue `mould_protection_inactive`), ADR-0005 (Schichtgrenzen), ADR-0007/ADR-0064 (Persistenz), ADR-0041 (Fenster-Unterdrückung), ADR-0048 (Nicht-Ziele) · **Verifizierung:** `comfort/mould_risk.py` + `tests/test_mould_risk.py` (26 Fälle), `runtime/state.py::HumidityRuntime`, nachgerechneter Szenarienvergleich (6 × 90 d stündlich)
 
 ## Kontext
 
@@ -216,3 +216,18 @@ Was das **nicht** heißt: dass die Beratungsachse jetzt ungefiltert auf jeden Fe
 - **Berührt ADR-0007 / ADR-0064**: drei neue persistierte Felder, defaultende Decodierung alter Payloads, Checkpoint am Tick-Ende unverändert.
 - **Offene Folge-Entscheidung (bewusst zurückgestellt):** **Substratklasse und `f_Rsi` als Konfigurationsoption.** `ROOM_PROFILE_SUBSTRATE` ist die dafür vorbereitete Landkarte und wird bis dahin von niemandem aufgerufen. Die Entscheidung ist nicht „später machen", sondern „nicht ohne eigene Begründung": beide Parameter weichen bei falscher Eingabe eine Sicherheitsschranke auf, und beide kennt der Nutzer in aller Regel nicht. Ein künftiger ADR muss zeigen, wie er das auffängt, bevor die Option erscheint.
 - **Offen (nicht Gegenstand dieses ADR):** Sichtbarkeit des Index in der Card (ADR-0057/ADR-0049) über die Diagnose-Schlüssel hinaus.
+
+## Nachtrag N1 (2026-10-10, v0.195.0): die Ursache der Untergrenze wird ganz veröffentlicht
+
+**Befund (Zuhause-Anlage, Bad, 0.194.8):** `binding_lower_cause` meldete `en16798`, während das Bad auf 22 °C stand — tatsächlich war die Kante die Komfortbasis 24 °C, abgesenkt um 2 K durch ROOM_ECO. Ursache ist die Verdrahtung aus §7: `decide()` entscheidet `lower_cause` korrekt an der Quelle, aber an `evaluate_cover_shadow` wurde nur der Wahrheitswert `mould_binds` gereicht, und die Funktion gab `"mold" if mould_binds else "en16798"` zurück. Damit wurden **alle** anderen Ursachen — Frost-Floor, eigene Komfortbasis, Präsenzabsenkung — als Norm-Klemme ausgegeben. Dieselbe Abflachung steckt hinter zwei älteren Beobachtungen: ADR-0039 stellte fest, dass `"frost"` nie publiziert wird, und ADR-0072 las „in der Absenkung bindet `en16798`" — beides war das abgeflachte Token, nicht die Physik.
+
+**Entscheidung:**
+
+1. **Vokabular erweitert** um `"presence"`: die Komfortbasis, abgesenkt durch die Präsenzkopplung (ROOM_ECO oder leeres Haus, `eco_widen > 0`), solange keine Klemme bindet. Prüfreihenfolge damit: mould > frost > en16798-Klemme > presence > comfort_base. Entschieden weiterhin in `decide()`, am Ort des `max()`, vor dem Runden.
+2. **Veröffentlicht wird die entschiedene Ursache**, über ein einziges pures Mapping `published_lower_cause()` in `comfort/dual_setpoint.py`; einzige Umschreibung bleibt `mould → "mold"` (Card und `hub_aggregate` matchen darauf, §7 unverändert). `evaluate_cover_shadow` bekommt `lower_cause` statt `mould_binds`.
+3. **Unabhängig vom Verschattungs-Shadow:** Der neutrale Seed der Shadow-Stufe (`tick_orchestrator`) trägt jetzt ebenfalls `published_lower_cause(ctx.decision.lower_cause)` statt des Literals `"en16798"`. Die Ursache gehört zur Komfortentscheidung, nicht zur Verschattung — fällt das Verschattungs-Segment aus, bleibt sie trotzdem richtig.
+4. **Card:** still bleiben `en16798` (Normband) und `comfort_base` (eigene Einstellung); als Chip erscheinen `mold`, `frost` und neu `presence` („Abgesenkt: niemand anwesend", Icon `mdi:account-off-outline`). Unbekannte künftige Werte zeigt die Card weiterhin roh statt leer.
+
+**Verträglichkeit:** `hub_aggregate` wertet nur `mould`/`mold` aus (Gesundheitsanteil) und leitet `frost_active` physikalisch ab (ADR-0039) — von den neuen Tokens unberührt. Das Attribut steht im `_ATTRS`-Vertrag (ADR-0016); geändert hat sich der Wertebereich, nicht der Schlüssel.
+
+**Tests:** Präsenzkante → `"presence"`; eine Klemme (Frost) schlägt die Präsenzursache; Mapping `mould → mold`, alle übrigen unverändert; Shadow-Klassifikation über alle fünf Ursachen.

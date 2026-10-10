@@ -46,15 +46,29 @@ class PresenceConfig:
 
 
 def step_room_absence(
-    absent_since: float | None, *, present: bool | None, now: float
+    absent_since: float | None,
+    *,
+    present: bool | None,
+    now: float,
+    accrue: bool = True,
 ) -> float | None:
     """Asymmetric room-absence anchor: *present* resets immediately, *absent*
     starts/holds the monotonic clock. ``present is None`` (no sensor, unavailable,
     or a fresh restart) counts as present → clock cleared (fail-safe + the
     conservative restart latch). Returns the monotonic timestamp the room became
-    absent, or ``None`` while present."""
+    absent, or ``None`` while present.
+
+    ``accrue=False`` pins an absent room's anchor to ``now``: absence only
+    COUNTS while the comfort window is open (ADR-0058 N3). The room is empty all night
+    as a matter of course; letting that night count turned every window start
+    into an instant ``ROOM_ECO`` — the edge optimal start had just preheated
+    for was dropped in the same minute it was reached. With the pin, a window
+    opens at the full comfort edge and the Eco hold starts from its beginning.
+    """
     if present is not False:  # True or None -> present / fail-safe
         return None
+    if not accrue:
+        return now
     return now if absent_since is None else absent_since
 
 

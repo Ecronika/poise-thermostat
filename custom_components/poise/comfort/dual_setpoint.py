@@ -14,9 +14,8 @@ from ..control.cooling import DualSetpoint, decide_mode
 from .en16798 import (
     COOLING_LOWER,
     COOLING_UPPER,
-    HEATING_LOWER,
-    HEATING_UPPER,
     Category,
+    heating_band,
 )
 from .free_running import adaptive_cool_edge
 from .operative import operative_to_air
@@ -44,7 +43,22 @@ class ComfortDecision:
     # published 22.3 read as "en16798" although mould is exactly what bound).
     # A cause can only be told at its source, so it is told here.
     # Defaulted so no existing construction site has to change.
-    lower_cause: str = "comfort_base"  # "mould"|"frost"|"en16798"|"comfort_base"
+    # ADR-0071 N1: "presence" is the comfort base LOWERED by the presence
+    # coupling (room Eco / empty house) — until then that case read as the
+    # untouched comfort base, and on the card as the EN norm clamp.
+    lower_cause: str = "comfort_base"  # mould|frost|en16798|presence|comfort_base
+
+
+def published_lower_cause(cause: str) -> str:
+    """The ``binding_lower_cause`` token for a ``ComfortDecision.lower_cause``.
+
+    ADR-0071 N1: published as decided, one spelling aside — the mould floor
+    keeps the token ``"mold"`` that the card and ``hub_aggregate`` match on.
+    Until N1 every other cause was flattened to ``"en16798"``, so a presence
+    Eco edge, the frost floor and the user's own comfort base all claimed to
+    be the norm clamp.
+    """
+    return "mold" if cause == "mould" else cause
 
 
 def decide(
@@ -76,6 +90,9 @@ def decide(
     # ADR-0054 Stufe 2 via ADR-0069 U8: capped PMV band shift (defensive
     # +-1 K cap here; the caller computes it via pmv_setpoint_offset).
     pmv_offset_k: float = 0.0,
+    # ADR-0023 N1: residential spaces use the residential row of the EN
+    # 16798-1 heating range; the default is the office row.
+    residential: bool = False,
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
     # The fixed design bands are anchored to the comfort centre (heat/cool
@@ -92,20 +109,23 @@ def decide(
     # setback target below HEATING_LOWER is silently clamped back up and the whole
     # setback is neutralised. The air-side frost/mould floor is re-applied below,
     # so protection is never weakened; only the comfort lower is waived.
-    heat_lower = HEATING_LOWER[category] if occupied else frost_floor
+    norm_lower, norm_upper = heating_band(category, residential=residential)
+    heat_lower = norm_lower if occupied else frost_floor
     # ADR-0069 U8: the PMV shift moves BOTH edges (a band shift, not a
     # widening); defensively capped to the sanctioned +-1 K. ADR-0068 U7:
     # the fan-CE credit raises ONLY the cooling edge, never below 0.
     pmv_shift = _clamp(pmv_offset_k, -1.0, 1.0)
     ce_credit = max(0.0, cool_edge_credit)
     heat_raw = comfort_base - widen - eco_widen + pmv_shift
-    heat_op = _clamp(heat_raw, heat_lower, HEATING_UPPER[category])
+    heat_op = _clamp(heat_raw, heat_lower, norm_upper)
     # ADR-0071 §4.5, first of three cause steps: did the OPERATIVE lower clamp
     # bind at all? Which bound it was depends on occupancy (V3 above relaxes
     # the EN comfort lower to the frost floor during an unoccupied setback).
     lower_cause = (
         ("en16798" if occupied else "frost")
         if heat_raw < heat_lower
+        else "presence"
+        if eco_widen > 0.0
         else "comfort_base"
     )
     # ADR-0058: presence Eco widens both edges symmetrically (heat down, cool up);

@@ -171,7 +171,8 @@ class ShadowPhase:
                 # ADR-0071 §4.5: the cause travels from where the max() was
                 # taken (``dual_setpoint.decide``, unrounded) instead of being
                 # rebuilt from ``mold_min`` against the ROUNDED ``heat_sp``.
-                mould_binds=ctx.decision.lower_cause == "mould",
+                # N1: the whole cause, not a mould yes/no.
+                lower_cause=ctx.decision.lower_cause,
                 model=self._runtime.learning.ekf.get_model(),
                 identified=self._runtime.learning.ekf.identified,
                 temperature_std=self._runtime.learning.ekf.temperature_std,

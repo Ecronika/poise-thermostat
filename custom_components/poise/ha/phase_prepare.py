@@ -60,9 +60,10 @@ from homeassistant.util import dt as dt_util
 from .. import ingestion
 from ..comfort import dual_setpoint, humidity
 from ..comfort.dual_setpoint import ComfortDecision
-from ..comfort.en16798 import HEATING_LOWER, HEATING_UPPER
+from ..comfort.en16798 import heating_band
 from ..comfort.humidity import HumidityDecision
 from ..comfort.operative import operative_temperature
+from ..comfort.pmv import resolve_room_profile
 from ..comfort.presence import (
     PresenceLevel,
     any_present,
@@ -316,7 +317,10 @@ class PreparePhase:
         """
         room = ing.room
         can_heat = obs.can_heat
-        lo, hi = HEATING_LOWER[config.category], HEATING_UPPER[config.category]
+        lo, hi = heating_band(
+            config.category,
+            residential=resolve_room_profile(config.room_profile).residential,
+        )
 
         # ADR-0058 presence coupling. Resolve the house gate BEFORE the preheat
         # plan: an empty house (home is False) or a manual Away preset means
@@ -487,6 +491,9 @@ class PreparePhase:
             self._runtime.presence.room_absent_since,
             present=_room_present,
             now=_presence_now,
+            # ADR-0058 N3: a preheat is not yet the window — it must not
+            # accrue absence either, or the window opens already in Eco.
+            accrue=sched.is_comfort and not preheating,
         )
         _absent_min = (
             (_presence_now - self._runtime.presence.room_absent_since) / 60.0
@@ -567,6 +574,8 @@ class PreparePhase:
             priority=config.priority,
             cool_hard_cap=config.cool_hard_cap,
             comfort_decide_fn=dual_setpoint.decide,
+            # ADR-0023 N1: the space type picks the EN 16798-1 heating row.
+            residential=resolve_room_profile(config.room_profile).residential,
         )
 
     def _stage_write_target(

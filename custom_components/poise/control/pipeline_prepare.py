@@ -847,6 +847,7 @@ def stage_comfort_solve(
     priority: float,
     cool_hard_cap: float,
     comfort_decide_fn: Callable[..., ComfortDecision],
+    residential: bool = False,
 ) -> ComfortDecision:
     """The central comfort solver.
 
@@ -894,6 +895,7 @@ def stage_comfort_solve(
         # conditions held — the outcome stage owns that decision).
         cool_edge_credit=rt.latches.fan_ce_credit_k,
         pmv_offset_k=rt.latches.pmv_offset_k,
+        residential=residential,
     )
     return decision
 

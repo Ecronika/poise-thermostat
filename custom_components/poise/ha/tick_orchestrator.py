@@ -106,7 +106,7 @@ from typing import TYPE_CHECKING, Any
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from ..comfort.dual_setpoint import ComfortDecision
+from ..comfort.dual_setpoint import ComfortDecision, published_lower_cause
 from ..comfort.operative import operative_temperature
 from ..const import (
     DEFAULT_TRACE_MAX_BYTES,
@@ -921,7 +921,9 @@ class TickOrchestrator:
         # segment costs exactly its own keys and nothing else.
         neutral = ShadowStageResult(
             operative=operative,
-            binding="en16798",
+            # ADR-0071 N1: the cause is the comfort decision's, not the cover
+            # shadow's — so a failing shadow segment still publishes it right.
+            binding=published_lower_cause(ctx.decision.lower_cause),
             cover_peak=operative,
             cover_pos=0.0,
             cover_reason="",
