@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Final
 
 DOMAIN: Final = "poise"
-VERSION: Final = "0.195.0"
+VERSION: Final = "0.196.0"
 
 # Tick / execution (ADR-0006, ADR-0020)
 TICK_INTERVAL_S: Final = 60.0
@@ -126,7 +126,13 @@ CONF_OPERATIVE_INPUT: Final = "operative_input"
 # TRV calibration (local-offset path, ADR-0015 / D6)
 CONF_TRV_CALIBRATION: Final = "trv_calibration"
 DEFAULT_COMFORT_BASE: Final = 21.0
+# Comfort/efficiency weight (0-100). DEFAULT_COMFORT_WEIGHT is the fallback for a
+# zone that never stored one — every zone created before v0.196.0 — and stays 70
+# so those zones keep their behaviour. New zones store NEW_ZONE_COMFORT_WEIGHT at
+# setup (review 2026-10-10, P3): at 100 the occupied heating edge IS the comfort
+# base the user typed; below 100 it is widened downwards by up to 1.5 K.
 DEFAULT_COMFORT_WEIGHT: Final = 70
+NEW_ZONE_COMFORT_WEIGHT: Final = 100
 DEFAULT_SETBACK_DELTA: Final = 3.0
 # Outdoor lockouts (ADR-0047): cool only when outdoor >= cool_min, heat only when
 # outdoor <= heat_max. Defaults from ADR-0023/RoomMind; configurable per zone.
@@ -190,8 +196,11 @@ DEFAULT_ABSENCE_AFTER_MIN: Final = 30.0
 
 # Heat-day cooling raise (ADR-0051): raise the cool setpoint toward outdoor-ΔT,
 # capped at the ASR office ceiling (raising the cap is an employer opt-in).
-# Defaults live in comfort/thermal_shock.py. With the default 26 °C cap the
-# raise is a no-op until the cap is raised.
+# Defaults live in comfort/thermal_shock.py. The raise lifts the cooling edge
+# from its category design value (Category II: 25 °C, ADR-0023 N2) toward
+# min(outdoor - ΔT, cap); with the default 26 °C cap and ΔT 7 K it therefore
+# acts from about 32 °C outdoor on (review 2026-10-10: the old "no-op" note was
+# wrong — the edge sat near 23.5 °C, so it acted from ~30.5 °C).
 CONF_THERMAL_SHOCK_DELTA: Final = "thermal_shock_delta_k"
 CONF_COOL_HARD_CAP: Final = "cool_hard_cap_c"
 # ADR-0023 §1: use the EN adaptive cooling edge (capped at the ASR ceiling

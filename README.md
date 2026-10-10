@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.195.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.196.0-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.10%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -20,7 +20,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 ### ✅ Active (drives control / visible today)
 
 - **Norm-based comfort** — active heating/cooling holds the configured comfort base within fixed EN 16798-1 design bands (Cat. I–III), the norm-correct choice for a conditioned room. A real running-mean `T_rm` drives the diagnostics, the seasonless heat-rate prior and optimal-start/stop timing. In the cooling season an **occupied** room uses the fixed EN category band (norm-correct for an actively-cooled space — the adaptive model applies only to free-running buildings), while an **unoccupied** room may free-run: the cool edge lifts toward the EN adaptive upper (ASR-capped) to save energy, and the comfort/efficiency slider governs how far (ADR-0061). The free-running *heating* widening stays a shadow diagnostic.
-- **Operative temperature / MRT** — controls what the room *feels* like (air + mean radiant), via a virtual-MRT estimator that a real MRT/globe sensor overrides when present.
+- **Operative temperature / MRT** — controls what the room *feels* like (air + mean radiant), via a virtual-MRT estimator that a real MRT/globe sensor overrides when present. The operative target is converted to an air setpoint in closed form against the MRT model, so the current room reading never feeds back into the setpoint (no kick after a setback, no sensor noise in the target; a measured MRT offset is clamped to ±3 K, ADR-0017).
 - **Self-learning physics** — mode-gated Extended Kalman Filter learns each room's time constant, losses and solar/heating response; confidence and identification are real sensor entities.
 - **Optimal Start & Optimal Stop** — forecast-aware pre-heating to the comfort deadline and coast-down to the lower comfort edge at window end; advisory (re-entry-free) and gated on an *identified* model.
 - **Mould & frost protection** — dose-based mould-risk model (VTT mould index, ASHRAE 160 Addendum e) and unconditional safety floors.
@@ -194,7 +194,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | Actuator (climate) | yes | — | TRV / climate entity Poise writes the setpoint to. One entry per actuator. |
 | Comfort base | yes | 21 °C | Centre of the EN 16798-1 comfort band. |
 | Comfort category | yes | II | EN 16798-1 design category (I tightest … III widest). |
-| Comfort weight | yes | 70 % | Comfort-vs-energy priority used by preheat / band widening. |
+| Comfort weight | yes | 100 % | Comfort-vs-energy priority used by preheat / band widening. At 100 % the occupied heating edge is exactly the comfort base; lower values widen the band by up to 1.5 K per side (heating edge down, cooling edge up). Zones created before 0.196.0 that never saved this field keep their former effective value of 70 %. |
 | Setback delta | yes | 3 K | Night / away setback below the comfort base. |
 | Optimal start | yes | on | Forecast-aware preheat to the comfort deadline. |
 | Comfort start / end (+ windows 2–8) | no | — | Daily comfort window(s) (enables scheduled setback when set). The options form offers one additional empty window once the previous one is filled (n+1 pattern, up to 8; clear both times to remove one). Overlapping windows merge; optimal start preheats to **every** window start (ADR-0070). Each window also has its own weekday selection — see [Weekday-specific comfort windows](#weekday-specific-comfort-windows) below. |
@@ -210,7 +210,7 @@ Poise is configured entirely through the UI (config flow) — there are no YAML 
 | External-temperature input | no | — | TRV `number` entity Poise feeds the true room temperature to (operative mode). Re-pushed at least every 10 min even when unchanged, so TRVs that time out an external input (e.g. Danfoss ~30 min, Sonoff TRVZB ~1 h) never fall back to their own mounted sensor. |
 | TRV calibration | no | off (*Options → Advanced*) | Opt-in local-offset compensation for a TRV that has only a calibration `number` (no external-temperature input, no writable valve). See [TRV offset calibration](#trv-offset-calibration-fallback) below. |
 | Operative input | no | off | Control on operative (felt) temperature instead of air. |
-| Adaptive cooling edge | no | auto | Active by default on cool-capable devices (`auto`): lifts the cooling edge to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped) instead of over-cooling toward the fixed summer band. `off` forces the fixed summer band; heat-only TRVs are unaffected either way (ADR-0023 §1). |
+| Adaptive cooling edge | no | auto | Enabled by default on cool-capable devices (`auto`), but it acts **only while the room is unoccupied** (ADR-0061): the free-running room may then drift up to the EN 16798-1 adaptive upper for the running mean (ASR 26 °C capped). An occupied, actively cooled room always uses the fixed category band, held at its design value (category upper − 1 K, e.g. 25 °C in Category II, ADR-0023 N2). `off` keeps the fixed band when empty as well; heat-only TRVs are unaffected either way. |
 | Compressor guard · min-off · mode-hold | no | auto · 300 s · 300 s | Single-AC anti-short-cycle (*Options → Advanced*): hold a cool/dry mode change that would restart the compressor within min-off, or flip cool↔dry within mode-hold — never a stop or a safety action. Blank timers use the fast-air profile default; set the guard to *off* to disable (ADR-0046 §8). |
 | Actuator dynamics | no | auto | Controller time constants per actuator class — `auto` (classify from the learned model) or force `fast_air` / `slow_hydronic` / `very_slow`; faster profiles retune the PI/MPC and throttle setpoint nudges for self-regulating climate entities (ADR-0052). |
 | Field-trace recording | no | off | Advanced/diagnostic: append one compact JSONL line per tick to `config/poise_traces/<id>.jsonl` (EKF drive inputs + model snapshot + decision + the humidity/dehumidification axis and real device mode — schema v2, versioned `v` with a v1-backward-compatible loader), rotated at ~20 MB. For offline golden-file replay analysis (ADR-0011); pure observation, never touches control. |

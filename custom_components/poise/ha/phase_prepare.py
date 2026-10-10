@@ -616,8 +616,9 @@ class PreparePhase:
         # this below.
         _actuator_online = act_state is not None and act_state.state != "unavailable"
         # ADR-0051 activation: on a hot day raise the cooling setpoint toward the
-        # EN adaptive upper (capped; the default ASR-26 cap makes it a no-op
-        # until the cap is raised), rate-limited <=0.5 K/tick. Cooling-only:
+        # EN adaptive upper (capped at the ASR 26 °C default; from the 25 °C
+        # Category II design edge that is about 32 °C outdoor and up),
+        # rate-limited <=0.5 K/tick. Cooling-only:
         # decide_mode gates "cool" on can_cool, so a heat-only TRV never sees it.
         eff_cool = decision.cool_sp
         _cool_ac = None

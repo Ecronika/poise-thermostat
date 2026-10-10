@@ -1,6 +1,6 @@
 # ADR-0017: Operativ→Luft-Transformation
 
-**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-18 · **Bezug:** E18, K4 · **Verifizierung:** Code-Review (kein echtes Feld-Vorbild — Befund)
+**Status:** Implementiert · **Wirkung:** Live-A · **Datum:** 2026-06-18, Nachtrag N1 2026-10-10 · **Bezug:** E18, K4 · **Verifizierung:** Code-Review (kein echtes Feld-Vorbild — Befund)
 
 ## Kontext
 Komfortband/Sollwert sind in Operativtemperatur formuliert; Wärmemodell und Aktor kennen nur Lufttemperatur (K4). Offen: Glättung des (MRT−Luft)-Offsets und Verhalten bei fehlendem MRT.
@@ -37,3 +37,19 @@ Bislang degradierte der Operativ→Luft-Pfad ohne MRT/Globe-Sensor auf Identitä
 - **Coordinator:** `mrt_internal` läuft immer; ein gemessener MRT-/Globe-Sensor überschreibt nur den verwendeten Wert. Geht in `operative_to_air` (Sollwert) **und** `operative_temperature` (Anzeige). Attribute `mrt`, `mrt_source` (sensor/internal), `mrt_internal`.
 - **Keine Doppelzählung (ADR-0010 Punkt 5, jetzt realisiert):** β_s = konvektiver Solareintrag in die Luftbilanz (Lufttemperatur steigt real); MRT-Solarterm = Strahlungsempfinden (getrennte Größe). Beide senken an Sonnentagen die Heizlast, aber über verschiedene physikalische Wege — kein doppelt verbuchter Joule. Invariante getestet (`test_virtual_mrt`).
 - **Risiko/Hinweis:** Ohne Fassadenorientierung kann der Solar-MRT-Term in nicht besonnten Räumen den Luftsollwert leicht zu stark senken (Unterheizen). Daher `SOLAR_MRT_GAIN_K` konservativ; in der kalten Saison live beobachten, ggf. reduzieren. Der Kaltwand-Term ist die schützende (mehr heizen) Richtung. Gate v0.11.0: 175 Tests grün.
+
+## Nachtrag N1 (2026-10-10, v0.196.0): Transformation gegen das MRT-Modell statt gegen den Raumwert
+
+**Befund (Norm-Review 2026-10-10, am Code bestätigt):** Die Entscheidung §2/§4 (geglätteter, geklemmter Offset) war nie umgesetzt. Live wurde `operative_to_air(op, t_mrt)` mit `t_mrt = virtual_mrt(room, …)` gerechnet, also das virtuelle MRT am **aktuellen Raumwert** ausgewertet. Bei a = 0,5 und k = 0,08 ergibt das `L_soll = 2·op − 0,92·Raum − 0,08·T_außen − …` — der Raumwert geht mit Faktor 0,92 in den Sollwert ein. Folgen: Nach einer Absenkung (Raum 18 °C, op 20,55, außen −5 °C) schrieb Poise ~24,9 °C auf das Thermostat statt ~21,6; Fühlerrauschen ging fast ungedämpft in den Sollwert; die Schleifenverstärkung war praktisch verdoppelt. Im Dauerzustand stimmte das Ergebnis.
+
+**Entscheidung:**
+1. **Geschlossene Lösung gegen ein MRT-Modell.** `comfort/operative.py` führt `RadiantModel(slope, intercept)` — das MRT als affine Funktion der Lufttemperatur — und `operative_to_air_model`, das `op = a·L + (1−a)·(slope·L + intercept)` nach `L` auflöst: `L = (op − (1−a)·intercept) / (a + (1−a)·slope)`. Kein Raumwert in der Formel.
+2. **Virtuelles MRT:** `virtual_mrt_model(t_out, q)` = `slope 1−k`, `intercept k·t_out + g·q`; `virtual_mrt` wertet dasselbe Modell aus (eine Quelle der Konstanten). Ergebnis bei −5 °C: 21,61 °C — identisch zum bisherigen Dauerzustand, aber auch direkt nach der Absenkung.
+3. **Gemessenes MRT (Globe):** Offset-Form aus §1 (`slope 1`, `intercept = MRT − Luft`), geklemmt auf **±3 K** (§4, `OFFSET_CLAMP_K`).
+4. **Auswahl** in `control/tick_resolve.radiant_model` (pur, testbar): Operativ-Einspeisung (ADR-0029) → kein Modell (Identität wie bisher); Sensor → Offset-Form; sonst virtuelles Modell. `decide(..., radiant=)` nutzt das Modell; ohne Modell bleibt die punktweise Transformation (Rückwärtskompatibilität der reinen Aufrufer).
+
+**Offen (bewusst):** die EWMA-Glättung des **gemessenen** Offsets (§2). Sie braucht Laufzeitzustand über Ticks; Globe-Sensoren sind selten, die Klemme fängt Ausreißer. Das virtuelle Modell braucht keine Glättung mehr, weil es den Raumwert nicht enthält.
+
+**Wirkung im Feld (erwartet):** Zonen ohne Operativ-Einspeisung bekommen nach Absenkung und Lüften keinen Sollwert-Sprung mehr; der Thermostat-Sollwert ist bei gleichem Außenwetter konstant. Die Aufheizgeschwindigkeit nach der Nacht wird damit vom Optimal-Start (ADR-0025) bestimmt, nicht von einer versteckten P-Verstärkung.
+
+**Tests:** Selbstkonsistenz (op am gelösten L = Ziel), Gleichstand mit der alten Formel im Dauerzustand, Raumwert-Unabhängigkeit über `decide` (18/20,5/22 °C → 21,6), Offset-Klemme, Auswahl in `radiant_model`.

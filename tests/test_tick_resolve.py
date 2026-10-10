@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from custom_components.poise.control.tick_resolve import (
+    radiant_model,
     resolve_write_target,
     select_mrt,
     select_q_solar,
@@ -586,3 +587,23 @@ def test_snap_to_step_passes_non_finite_through() -> None:
 
     assert math.isinf(snap_to_step(float("inf"), 0.5))
     assert math.isnan(snap_to_step(float("nan"), 0.5))
+
+
+# --- ADR-0017 N1: which radiant model the transform solves against ------------
+
+
+def test_radiant_model_identity_without_mrt() -> None:
+    """Operative feed mode (ADR-0029) passes no MRT -> identity transform."""
+    assert radiant_model(None, 20.0, "internal", -5.0, 0.0) is None
+
+
+def test_radiant_model_virtual_ignores_the_room_reading() -> None:
+    a = radiant_model(18.9, 18.0, "internal", -5.0, 0.0)
+    b = radiant_model(21.9, 21.0, "internal", -5.0, 0.0)
+    assert a == b  # envelope/solar model only
+    assert a is not None and a.slope == 0.92
+
+
+def test_radiant_model_measured_uses_the_clamped_offset() -> None:
+    m = radiant_model(19.0, 21.0, "sensor", -5.0, 0.0)
+    assert m is not None and (m.slope, m.intercept) == (1.0, -2.0)

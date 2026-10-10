@@ -697,8 +697,14 @@ def _options_schema(hass: HomeAssistant, current: Mapping[str, Any]) -> vol.Sche
                                 mode=selector.SelectSelectorMode.DROPDOWN,
                             )
                         ),
+                        # The entry's effective weight, so an untouched
+                        # first save never flips it (AR-16) — new zones store
+                        # 100, older ones fall back to 70 (review P3).
                         vol.Required(
-                            CONF_COMFORT_WEIGHT, default=DEFAULT_COMFORT_WEIGHT
+                            CONF_COMFORT_WEIGHT,
+                            default=current.get(
+                                CONF_COMFORT_WEIGHT, DEFAULT_COMFORT_WEIGHT
+                            ),
                         ): selector.NumberSelector(
                             selector.NumberSelectorConfig(
                                 min=0,

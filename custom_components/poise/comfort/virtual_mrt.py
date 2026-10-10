@@ -17,9 +17,27 @@ compensate cold walls, i.e. an effective coupling ~0.08).
 
 from __future__ import annotations
 
+from .operative import RadiantModel
+
 ENV_COUPLING: float = 0.08  # radiant coupling to the exterior envelope
 SOLAR_MRT_GAIN_K: float = 1.5  # perceived radiant bump at full normalised sun [K]
 _Q_SOLAR_MAX: float = 2.0  # cap normalised solar so the radiant bump stays bounded
+
+
+def virtual_mrt_model(
+    t_out: float,
+    q_solar: float = 0.0,
+    *,
+    env_coupling: float = ENV_COUPLING,
+    solar_gain: float = SOLAR_MRT_GAIN_K,
+) -> RadiantModel:
+    """The virtual MRT as an affine function of the air temperature
+    (ADR-0017 N1): ``slope = 1 - k``, ``intercept = k·t_out + solar_gain·q``.
+    The operative->air transform solves against this model instead of
+    evaluating it at the current room reading."""
+    k = min(max(env_coupling, 0.0), 1.0)
+    q = min(_Q_SOLAR_MAX, max(0.0, q_solar))
+    return RadiantModel(slope=1.0 - k, intercept=k * t_out + solar_gain * q)
 
 
 def virtual_mrt(
@@ -36,6 +54,7 @@ def virtual_mrt(
     exterior envelope plus a solar radiant bump. Reduces to ``t_air`` when the
     envelope coupling is zero and there is no sun.
     """
-    k = min(max(env_coupling, 0.0), 1.0)
-    q = min(_Q_SOLAR_MAX, max(0.0, q_solar))
-    return (1.0 - k) * t_air + k * t_out + solar_gain * q
+    model = virtual_mrt_model(
+        t_out, q_solar, env_coupling=env_coupling, solar_gain=solar_gain
+    )
+    return model.slope * t_air + model.intercept

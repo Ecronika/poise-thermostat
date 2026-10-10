@@ -12,16 +12,20 @@ from dataclasses import dataclass
 
 from ..control.cooling import DualSetpoint, decide_mode
 from .en16798 import (
+    COOLING_DESIGN,
     COOLING_LOWER,
     COOLING_UPPER,
     Category,
     heating_band,
 )
 from .free_running import adaptive_cool_edge
-from .operative import operative_to_air
+from .operative import RadiantModel, operative_to_air, operative_to_air_model
 
 _EFFICIENCY_WIDEN_K = 1.5  # max dead-band widening per side at full efficiency
-_NEUTRAL_DEADBAND_K = 2.0  # cooling edge sits this far above the comfort centre
+# Minimum distance of the cooling edge above the comfort base. Since ADR-0023
+# N2 the edge starts at the category cooling DESIGN value; this dead-band only
+# still binds when the comfort base itself sits within 2 K of that value.
+_NEUTRAL_DEADBAND_K = 2.0
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -93,6 +97,10 @@ def decide(
     # ADR-0023 N1: residential spaces use the residential row of the EN
     # 16798-1 heating range; the default is the office row.
     residential: bool = False,
+    # ADR-0017 N1: the MRT as a function of the air temperature. When given,
+    # the operative->air transform solves against it (no room-reading
+    # feedback); ``t_mrt`` alone keeps the plain pointwise transform.
+    radiant: RadiantModel | None = None,
 ) -> ComfortDecision:
     """Build the dual-setpoint comfort decision for one zone."""
     # The fixed design bands are anchored to the comfort centre (heat/cool
@@ -138,8 +146,14 @@ def decide(
         if cool_ceiling_override is not None
         else COOLING_UPPER[category]
     )
+    # ADR-0023 N2: the occupied cooling edge starts at the category DESIGN
+    # value (upper limit - 1 K), no longer at comfort_base + 2 K — that held a
+    # cooled room at the lower edge of the summer range (23.45 °C operative at
+    # the defaults). The old coupling survives as a floor, so the edge is never
+    # lower than before and a warm comfort base keeps its dead-band.
+    cool_anchor = max(COOLING_DESIGN[category], comfort_base + _NEUTRAL_DEADBAND_K)
     cool_op = _clamp(
-        comfort_base + _NEUTRAL_DEADBAND_K + widen + eco_widen + pmv_shift + ce_credit,
+        cool_anchor + widen + eco_widen + pmv_shift + ce_credit,
         COOLING_LOWER[category],
         cool_ceiling,
     )
@@ -161,9 +175,14 @@ def decide(
             can_cool=can_cool,
         )
 
-    # operative -> air
-    heat_sp = operative_to_air(heat_op, t_mrt, velocity)
-    cool_sp = operative_to_air(cool_op, t_mrt, velocity)
+    # operative -> air (ADR-0017 N1: solved against the radiant model when
+    # the caller provides one, so the room reading never enters the setpoint)
+    if radiant is not None:
+        heat_sp = operative_to_air_model(heat_op, radiant, velocity)
+        cool_sp = operative_to_air_model(cool_op, radiant, velocity)
+    else:
+        heat_sp = operative_to_air(heat_op, t_mrt, velocity)
+        cool_sp = operative_to_air(cool_op, t_mrt, velocity)
 
     # hard floors / caps. The two air-side floors are applied in PRECEDENCE
     # order (ADR-0071 §4.5: mould > frost > en16798 clamp > comfort_base), and

@@ -14,6 +14,8 @@ import math
 from dataclasses import dataclass
 
 from ..comfort.norm_compliance import ASR_MAX_ROOM_C
+from ..comfort.operative import RadiantModel, measured_offset_model
+from ..comfort.virtual_mrt import virtual_mrt_model
 from ..constraints import Constraint, ConstraintKind, resolve_constraints
 from ..contracts import Precedence
 from ..estimation.solar import clear_sky_normalized, normalize_irradiance
@@ -50,6 +52,29 @@ def select_mrt(sensor: float | None, internal: float) -> tuple[float, str]:
     if sensor is not None:
         return sensor, "sensor"
     return internal, "internal"
+
+
+def radiant_model(
+    t_mrt: float | None,
+    t_air: float,
+    mrt_source: str,
+    t_out: float,
+    q_solar: float,
+) -> RadiantModel | None:
+    """The MRT model the operative->air transform solves against (ADR-0017 N1).
+
+    ``None`` (identity transform) when no MRT enters the decision — the
+    operative feed mode (ADR-0029: the MRT already lives in the fed value). A
+    measured globe/MRT sensor yields the clamped offset form (ADR-0017 §4);
+    the virtual estimate yields its envelope/solar model, independent of the
+    room reading. Evaluating that model AT the room reading, as before N1, fed
+    the reading back into the setpoint with gain ~0.92.
+    """
+    if t_mrt is None:
+        return None
+    if mrt_source == "sensor":
+        return measured_offset_model(t_mrt, t_air)
+    return virtual_mrt_model(t_out, q_solar)
 
 
 @dataclass(frozen=True, slots=True)
