@@ -806,6 +806,7 @@ class ReportPhase:
             "tau_hours": round(self._runtime.learning.ekf.tau_hours, 1),
             "confidence": round(self._runtime.learning.ekf.confidence, 2),
             "identified": self._runtime.learning.ekf.identified,
+            "tau_trusted": self._runtime.learning.ekf.tau_trust.trusted,
             "learning_phase": self._runtime.learning.ekf.learning_phase,
             "identification_progress": round(self._runtime.learning.ekf.data_factor, 2),
             "schedule_state": "comfort" if sched.is_comfort else "setback",

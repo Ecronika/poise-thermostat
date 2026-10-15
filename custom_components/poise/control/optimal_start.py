@@ -9,7 +9,8 @@ time constant ``1/alpha``. Inverting the exponential gives the heat-up time
 analytically. If ``t_eq`` does not clear the target the heater cannot get there
 (reachable=False) and we fall back to "start as early as the horizon allows".
 
-Advisory only: the caller gates this on an *identified* EKF and applies the
+Advisory only: the caller gates this on an identified EKF with a trusted tau
+(``ThermalEKF.planning_ready``, ADR-0034 N1) and applies the
 result as a schedule shift; it never commands the actuator (avoids the re-entry
 bug class K5). Pure, unit-tested.
 """
@@ -27,6 +28,11 @@ from .optimal_stop import advise_stop
 
 _MIN_ALPHA = 1e-4  # guard against div-by-zero on a degenerate model
 _T_EQ_MARGIN = 0.1  # equilibrium must clear the target by this margin [K]
+# Optimal-stop may only ENGAGE once the room has actually reached the comfort
+# target (within this tolerance): coasting is "stop early, the stored heat
+# carries the rest" — a room still below target has nothing to coast on
+# (ADR-0034 N1, field finding 2026-10: Bad coasted the whole morning at 20 °C).
+COAST_READY_BAND_K = 0.3
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,7 +227,12 @@ def plan_preheat(
             # the room has coasted down to coast_lower. The coastdown lead shrinks
             # as the room cools, so without the latch the transient flip would put
             # the base back up and re-chatter the heater on/off every tick.
-            if coast_advice.stop_now or (was_coasting and room > coast_lower):
+            # Engage only from a room at the comfort target (N1); the hold is
+            # unchanged, since coasting is meant to let the room fall below it.
+            ready = room >= comfort_base - COAST_READY_BAND_K
+            if (coast_advice.stop_now and ready) or (
+                was_coasting and room > coast_lower
+            ):
                 return PreheatPlan(coast_lower, False, round(t_out_lead, 1), True)
         return PreheatPlan(comfort_base, False, None)
     base = comfort_base + setback_offset

@@ -359,7 +359,7 @@ class PreparePhase:
                 config.optimal_start and not _is_away and has_comfort_edge
             ),
             can_heat=can_heat,
-            identified=self._runtime.learning.ekf.identified,
+            identified=self._runtime.learning.ekf.planning_ready,
             model=model,
             room=room,
             t_out_lead=t_out_lead,

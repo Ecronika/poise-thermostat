@@ -24,6 +24,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from .tau_trust import TauTrust, observe_tau
+
 # ---- state indices ---------------------------------------------------------
 _T, _A, _BH, _BC, _BS, _BO = range(6)
 _N = 6
@@ -134,6 +136,9 @@ class ThermalEKF:
         # / beta_o are unobservable until these grow.
         self._n_uc: int = 0
         self._n_qocc: int = 0
+        # optimal-start/-stop trust in tau (ADR-0034 N1); dt of the last predict
+        self.tau_trust: TauTrust = TauTrust()
+        self._last_dt_h: float = 0.0
 
     # -- prediction ----------------------------------------------------------
     def predict(
@@ -146,6 +151,7 @@ class ThermalEKF:
         q_occ: float = 0.0,
     ) -> None:
         t, alpha = self.x[_T], self.x[_A]
+        self._last_dt_h = dt_h
         ex = math.exp(-alpha * dt_h)
         drive = (
             self.x[_BH] * u_h
@@ -234,7 +240,10 @@ class ThermalEKF:
             self.n_cooling += 1
         else:
             self.n_idle += 1
-        self._runtime_recovery()
+        reset = self._runtime_recovery()
+        self.tau_trust = observe_tau(
+            self.tau_trust, tau_h=self.tau_hours, dt_h=self._last_dt_h, reset=reset
+        )
 
     # -- helpers -------------------------------------------------------------
     def _clamp(self) -> None:
@@ -260,8 +269,11 @@ class ThermalEKF:
                 elif self.p[i][j] < -bound:
                     self.p[i][j] = self.p[j][i] = -bound
 
-    def _runtime_recovery(self) -> None:
-        """Reset alpha if it stays pegged at a bound (low excitation, ADR-0024)."""
+    def _runtime_recovery(self) -> bool:
+        """Reset alpha if it stays pegged at a bound (low excitation, ADR-0024).
+
+        Returns True on the update that performed the reset.
+        """
         alpha = self.x[_A]
         if alpha <= _LOWER[_A] * 1.01 or alpha >= _UPPER[_A] * 0.99:
             self._alpha_pegged_count += 1
@@ -269,8 +281,10 @@ class ThermalEKF:
                 self.x[_A] = _DEFAULTS[_A]
                 self.p[_A][_A] = _P0[_A]
                 self._alpha_pegged_count = 0
+                return True
         else:
             self._alpha_pegged_count = 0
+        return False
 
     # -- outputs -------------------------------------------------------------
     def seed_beta_h(self, value: float) -> None:
@@ -334,6 +348,17 @@ class ThermalEKF:
         )
 
     @property
+    def planning_ready(self) -> bool:
+        """Identified AND tau trusted: the gate for optimal-start/-stop.
+
+        ``identified`` counts observations; a tau pegged at its clamp, freshly
+        reset to the prior, or swinging by more than a factor 2 within 24 h
+        still passes it. Lead/coast times computed from such a tau are
+        fiction, so the planners need this stricter gate (ADR-0034 N1).
+        """
+        return self.identified and self.tau_trust.trusted
+
+    @property
     def cooling_identified(self) -> bool:
         """Whether beta_c (cooling responsivity) is trustworthy.
 
@@ -377,6 +402,7 @@ class ThermalEKF:
             "n_cooling": self.n_cooling,
             "n_uc": self._n_uc,
             "n_qocc": self._n_qocc,
+            "tau_trust": self.tau_trust.to_dict(),
         }
 
     @classmethod
@@ -424,6 +450,9 @@ class ThermalEKF:
             for i in (_A, _BH, _BC, _BS, _BO):
                 ekf.x[i] = _DEFAULTS[i]
                 ekf.p[i][i] = _P0[i]
+        else:
+            # absent (pre-0.196.2 store) -> untrusted: re-earn over 24 h
+            ekf.tau_trust = TauTrust.from_dict(data.get("tau_trust") or {})
         ekf._clamp()
         ekf._enforce_psd()
         return ekf

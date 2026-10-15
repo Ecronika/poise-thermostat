@@ -3,7 +3,7 @@
 ***Self-learning, norm-based climate control for Home Assistant — comfort kept in balance.***
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Version](https://img.shields.io/badge/version-0.196.1-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
+[![Version](https://img.shields.io/badge/version-0.196.2-blue.svg)](https://github.com/Ecronika/poise-thermostat/releases)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.10%2B-41BDF5.svg)](https://www.home-assistant.io/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -22,7 +22,7 @@ Honest separation of what runs today vs. what is staged. Poise is **Alpha**.
 - **Norm-based comfort** — active heating/cooling holds the configured comfort base within fixed EN 16798-1 design bands (Cat. I–III), the norm-correct choice for a conditioned room. A real running-mean `T_rm` drives the diagnostics, the seasonless heat-rate prior and optimal-start/stop timing. In the cooling season an **occupied** room uses the fixed EN category band (norm-correct for an actively-cooled space — the adaptive model applies only to free-running buildings), while an **unoccupied** room may free-run: the cool edge lifts toward the EN adaptive upper (ASR-capped) to save energy, and the comfort/efficiency slider governs how far (ADR-0061). The free-running *heating* widening stays a shadow diagnostic.
 - **Operative temperature / MRT** — controls what the room *feels* like (air + mean radiant), via a virtual-MRT estimator that a real MRT/globe sensor overrides when present. The operative target is converted to an air setpoint in closed form against the MRT model, so the current room reading never feeds back into the setpoint (no kick after a setback, no sensor noise in the target; a measured MRT offset is clamped to ±3 K, ADR-0017).
 - **Self-learning physics** — mode-gated Extended Kalman Filter learns each room's time constant, losses and solar/heating response; confidence and identification are real sensor entities.
-- **Optimal Start & Optimal Stop** — forecast-aware pre-heating to the comfort deadline and coast-down to the lower comfort edge at window end; advisory (re-entry-free) and gated on an *identified* model.
+- **Optimal Start & Optimal Stop** — forecast-aware pre-heating to the comfort deadline and coast-down to the lower comfort edge at window end; advisory (re-entry-free) and gated on an *identified* model whose time constant has stayed stable (within a factor 2, off its bounds) for 24 h (`tau_trusted`); coast-down only starts from a room that has reached the comfort target.
 - **Mould & frost protection** — dose-based mould-risk model (VTT mould index, ASHRAE 160 Addendum e) and unconditional safety floors.
 - **Solar accounting** — measured global irradiance as a learned disturbance feeding the MRT/comfort path — counted once.
 - **Precedence constraint solver** — every bound (frost/mould/ASR cap/device max) is composed with explicit precedence into exactly one safe command per actuator.
@@ -528,7 +528,7 @@ Everything under *Shadow / diagnostic* is computed every tick against the live l
 
 ### It has to learn first
 
-- A fresh zone starts in `learning_phase: cold` and is not `identified`. Optimal start/stop and the shadow estimators are gated on an identified model, so the first days behave like a plain setpoint thermostat.
+- A fresh zone starts in `learning_phase: cold` and is not `identified`. Optimal start/stop and the shadow estimators are gated on an identified model, so the first days behave like a plain setpoint thermostat. Optimal start/stop additionally waits for `tau_trusted`: a learned time constant that keeps swinging or runs into its 200 h cap (typical for a room kept warm by heated neighbours) keeps both off — the setback then simply ends at the window start.
 - The learned model lives per zone. Reconfiguring preserves it; deleting the entry deletes it.
 - Learning **pauses** while a window is open, while the room sensor is frozen, and during detected heating/cooling failures — deliberately, so the estimator never learns from a broken room.
 - Room sensor placement dominates the result. A sensor on or near the radiator yields an implausibly short time constant and Poise raises a repair issue about it; the model degrades regardless.
