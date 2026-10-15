@@ -42,6 +42,7 @@ from custom_components.poise.const import (
     DOMAIN,
     ENTRY_TYPE_SYSTEM,
 )
+from custom_components.poise.estimation.tau_trust import TauTrust
 
 
 def _base(**extra: Any) -> dict[str, Any]:
@@ -418,6 +419,9 @@ async def test_optimal_stop_coasts_near_window_end(
     ekf.n_heating = 1000
     ekf.p[0][0] = 0.01
     assert ekf.identified is True
+    # ADR-0034 N1: the planners also need a trusted tau (24 h stable record)
+    ekf.tau_trust = TauTrust(clean_h=48.0, window=((40.0, 40.0),) * 24)
+    assert ekf.planning_ready is True
 
     await coord.async_refresh()
     await hass.async_block_till_done()

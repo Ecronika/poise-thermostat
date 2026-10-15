@@ -70,6 +70,7 @@ _ATTRS = (
     "dewpoint",
     "mode",
     "identified",
+    "tau_trusted",  # ADR-0034 N1: optimal-start/-stop trust in tau
     "identification_progress",
     "schedule_state",
     "minutes_to_comfort",

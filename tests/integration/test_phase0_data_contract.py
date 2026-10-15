@@ -289,6 +289,7 @@ EXPECTED_AVAILABLE_KEYS: list[str] = [
     "tau_hours",
     "tau_settle_minutes",
     "tau_settled",
+    "tau_trusted",
     "tick_ms",
     "tick_ms_ewma",
     "tick_ms_max",

@@ -187,3 +187,45 @@ def test_forecast_parse_skips_non_datetime_value_and_bad_temp() -> None:
     }
     out = forecast_samples_from_response(resp, "weather.home", _BASE)
     assert out == [(120.0, 1.0)]
+
+
+# --- ADR-0034 N1: optimal-stop engages only from a room at the comfort target ---
+
+
+def _coast(**kw: object) -> PreheatPlan:
+    base: dict[str, object] = dict(
+        is_comfort=True,
+        optimal_stop_enabled=True,
+        coast_lower=20.0,
+        minutes_to_setback=30.0,  # window ends soon -> stop_now on its own
+        t_out_lead=0.0,
+    )
+    base.update(kw)
+    return _plan(comfort_base=23.0, **base)
+
+
+def test_coast_does_not_engage_from_a_room_below_the_comfort_target() -> None:
+    # Field case (Bad, 2026-10): room 20.3 near the lower edge, target 23 —
+    # coasting there only pins the setpoint at 20 for the whole window.
+    p = _coast(room=20.3)
+    assert not p.coasting
+    assert p.base == 23.0
+
+
+def test_coast_does_not_engage_just_outside_the_ready_band() -> None:
+    p = _coast(room=22.6)  # 0.4 K below target > COAST_READY_BAND_K
+    assert not p.coasting
+
+
+def test_coast_engages_from_a_room_at_the_comfort_target() -> None:
+    p = _coast(room=22.8)  # within 0.3 K of 23
+    assert p.coasting
+    assert p.base == 20.0
+
+
+def test_coast_hold_is_unchanged_below_the_target() -> None:
+    # Once engaged, the latch keeps coasting while the room falls (that is the
+    # point of coasting) — the ready band gates the ENGAGE only.
+    p = _coast(room=21.0, was_coasting=True)
+    assert p.coasting
+    assert p.base == 20.0
